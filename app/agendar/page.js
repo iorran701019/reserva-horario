@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { gerarSlots } from "@/lib/horarios";
 
@@ -10,6 +10,16 @@ const ESTADO_INICIAL = {
   data: "",
 };
 
+const DIAS_SEMANA = [
+  "domingo",
+  "segunda-feira",
+  "terça-feira",
+  "quarta-feira",
+  "quinta-feira",
+  "sexta-feira",
+  "sábado",
+];
+
 // "YYYY-MM-DD" de hoje em horário local — usado como mínimo do date picker.
 function dataDeHoje() {
   const agora = new Date();
@@ -17,6 +27,15 @@ function dataDeHoje() {
   const mes = String(agora.getMonth() + 1).padStart(2, "0");
   const dia = String(agora.getDate()).padStart(2, "0");
   return `${ano}-${mes}-${dia}`;
+}
+
+// "YYYY-MM-DD" -> "dd/mm · dia da semana". Parse manual pra evitar o
+// deslocamento de fuso que new Date("YYYY-MM-DD") sofre (vira UTC).
+function formatarData(iso) {
+  if (!iso) return "";
+  const [ano, mes, dia] = iso.split("-").map(Number);
+  const d = new Date(ano, mes - 1, dia);
+  return `${String(dia).padStart(2, "0")}/${String(mes).padStart(2, "0")} · ${DIAS_SEMANA[d.getDay()]}`;
 }
 
 export default function AgendarPage() {
@@ -30,6 +49,12 @@ export default function AgendarPage() {
   const [enviando, setEnviando] = useState(false);
   const [sucesso, setSucesso] = useState(false);
   const [erro, setErro] = useState("");
+
+  // Foca o título da confirmação ao montar — leitores de tela anunciam o status.
+  const tituloConfirmacaoRef = useRef(null);
+  useEffect(() => {
+    if (sucesso) tituloConfirmacaoRef.current?.focus();
+  }, [sucesso]);
 
   // Calculado a cada render: barato e mantém a fonte da verdade na função pura.
   const slots = gerarSlots(form.data);
@@ -125,9 +150,85 @@ export default function AgendarPage() {
       return;
     }
 
+    // Mantém form e horarioSelecionado preenchidos: a tela de confirmação
+    // os usa pra montar o resumo. O reset acontece em "novo agendamento".
     setSucesso(true);
+  }
+
+  function novoAgendamento() {
     setForm(ESTADO_INICIAL);
     setHorarioSelecionado("");
+    setSucesso(false);
+    setErro("");
+  }
+
+  if (sucesso) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 px-4 py-10">
+        <div
+          role="status"
+          className="mx-auto w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-sm ring-1 ring-zinc-100"
+        >
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-100">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              className="h-10 w-10 text-green-600"
+            >
+              <path d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+
+          <h1
+            ref={tituloConfirmacaoRef}
+            tabIndex={-1}
+            className="mt-6 text-2xl font-bold text-zinc-900 outline-none"
+          >
+            Solicitação enviada!
+          </h1>
+          <p className="mt-2 text-sm text-zinc-500">
+            Recebemos seu agendamento. Em breve a barbearia confirma seu horário.
+          </p>
+
+          <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-sm font-medium text-amber-700 ring-1 ring-amber-200">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+            Aguardando confirmação
+          </span>
+
+          <dl className="mt-6 space-y-3 rounded-xl bg-zinc-50 p-4 text-left text-sm ring-1 ring-zinc-100">
+            <div className="flex items-center justify-between gap-4">
+              <dt className="text-zinc-500">Serviço</dt>
+              <dd className="font-medium text-zinc-900">Corte simples</dd>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <dt className="text-zinc-500">Data</dt>
+              <dd className="font-medium text-zinc-900">{formatarData(form.data)}</dd>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <dt className="text-zinc-500">Horário</dt>
+              <dd className="font-medium text-zinc-900">{horarioSelecionado}</dd>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <dt className="text-zinc-500">Nome</dt>
+              <dd className="font-medium text-zinc-900">{form.nome}</dd>
+            </div>
+          </dl>
+
+          <button
+            type="button"
+            onClick={novoAgendamento}
+            className="mt-6 w-full rounded-lg bg-zinc-900 px-4 py-2.5 font-medium text-white transition hover:bg-zinc-800"
+          >
+            Fazer novo agendamento
+          </button>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -254,12 +355,6 @@ export default function AgendarPage() {
           >
             {enviando ? "Enviando..." : "Confirmar agendamento"}
           </button>
-
-          {sucesso && (
-            <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700 ring-1 ring-green-100">
-              Agendamento enviado com sucesso! Em breve confirmaremos seu horário.
-            </p>
-          )}
 
           {erro && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
