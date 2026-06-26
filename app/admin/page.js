@@ -18,6 +18,15 @@ function formatarHorario(horario) {
   return horario.slice(0, 5);
 }
 
+// Em qual aba o item se encaixa. 'confirmado' e 'cancelado' são explícitos;
+// qualquer outra coisa (inclusive null/desconhecido) cai em 'pendente', pra
+// nenhum agendamento sumir de todas as abas.
+function abaDoStatus(status) {
+  if (status === "confirmado") return "confirmado";
+  if (status === "cancelado") return "cancelado";
+  return "pendente";
+}
+
 // Cores do badge de status. Cai num cinza neutro pra status desconhecido.
 function classesStatus(status) {
   const mapa = {
@@ -43,6 +52,20 @@ function IconeWhatsApp({ className = "h-4 w-4" }) {
   );
 }
 
+// Abas por status, na ordem em que aparecem na barra.
+const ABAS = [
+  { id: "pendente", rotulo: "Pendentes" },
+  { id: "confirmado", rotulo: "Confirmados" },
+  { id: "cancelado", rotulo: "Cancelados" },
+];
+
+// Texto discreto quando a aba não tem nenhum item.
+const TEXTO_VAZIO = {
+  pendente: "Nenhum agendamento pendente.",
+  confirmado: "Nenhum agendamento confirmado.",
+  cancelado: "Nenhum agendamento cancelado.",
+};
+
 // Abre a conversa do WhatsApp do cliente em nova aba, com a mensagem pronta.
 // noopener,noreferrer replicam o rel="noopener noreferrer" de um <a target=_blank>.
 function abrirWhatsApp(telefone, mensagem) {
@@ -59,6 +82,10 @@ export default function AdminPage() {
   const [agendamentos, setAgendamentos] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
+
+  // Aba de status atualmente visível. A filtragem é derivada do status de cada
+  // item — não há lista duplicada por aba.
+  const [abaAtiva, setAbaAtiva] = useState("pendente");
 
   // Agendamento aguardando confirmação de cancelamento (controla o modal).
   // null = nenhum modal aberto.
@@ -173,7 +200,7 @@ export default function AdminPage() {
       // Lê todos os agendamentos, próximos primeiro (data e depois horário).
       const { data, error } = await supabase
         .from("agendamentos")
-        .select("id, nome_cliente, telefone, data, horario, status")
+        .select("id, nome_cliente, telefone, data, horario, status, created_at")
         .order("data", { ascending: true })
         .order("horario", { ascending: true });
 
@@ -200,6 +227,26 @@ export default function AdminPage() {
       </main>
     );
   }
+
+  // Quantos itens há em cada aba (derivado do status, recalculado a cada render).
+  const contagens = { pendente: 0, confirmado: 0, cancelado: 0 };
+  for (const item of agendamentos) {
+    contagens[abaDoStatus(item.status)] += 1;
+  }
+
+  // Itens da aba ativa, já ordenados:
+  // - pendente/confirmado: data + horário CRESCENTE (mais próximo primeiro);
+  // - cancelado: created_at DECRESCENTE (mais recente primeiro).
+  const visiveis = agendamentos
+    .filter((item) => abaDoStatus(item.status) === abaAtiva)
+    .sort((a, b) => {
+      if (abaAtiva === "cancelado") {
+        return (b.created_at ?? "").localeCompare(a.created_at ?? "");
+      }
+      const chaveA = `${a.data ?? ""} ${a.horario ?? ""}`;
+      const chaveB = `${b.data ?? ""} ${b.horario ?? ""}`;
+      return chaveA.localeCompare(chaveB);
+    });
 
   return (
     <main className="min-h-screen bg-zinc-50 px-4 py-10 sm:py-16">
@@ -233,15 +280,50 @@ export default function AdminPage() {
           </p>
         )}
 
-        {!carregando && !erro && agendamentos.length === 0 && (
-          <p className="rounded-lg bg-white px-4 py-8 text-center text-sm text-zinc-500 shadow-sm ring-1 ring-zinc-100">
-            Nenhum agendamento ainda.
-          </p>
+        {!carregando && !erro && (
+          <>
+            {/* Barra de abas por status. A aba ativa ganha fundo branco +
+                anel; as demais ficam neutras. O contador vem das contagens. */}
+            <div className="mb-4 flex gap-1 rounded-xl bg-zinc-100 p-1">
+              {ABAS.map((aba) => {
+                const ativa = abaAtiva === aba.id;
+                return (
+                  <button
+                    key={aba.id}
+                    type="button"
+                    onClick={() => setAbaAtiva(aba.id)}
+                    className={`flex-1 rounded-lg px-2 py-2 text-sm font-medium transition ${
+                      ativa
+                        ? "bg-white text-zinc-900 shadow-sm ring-1 ring-zinc-200"
+                        : "text-zinc-500 hover:text-zinc-700"
+                    }`}
+                  >
+                    {aba.rotulo}
+                    <span
+                      className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs font-semibold ${
+                        ativa
+                          ? "bg-zinc-100 text-zinc-600"
+                          : "bg-zinc-200 text-zinc-500"
+                      }`}
+                    >
+                      {contagens[aba.id]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {visiveis.length === 0 && (
+              <p className="rounded-lg bg-white px-4 py-8 text-center text-sm text-zinc-500 shadow-sm ring-1 ring-zinc-100">
+                {TEXTO_VAZIO[abaAtiva]}
+              </p>
+            )}
+          </>
         )}
 
-        {!carregando && !erro && agendamentos.length > 0 && (
+        {!carregando && !erro && visiveis.length > 0 && (
           <ul className="space-y-3">
-            {agendamentos.map((item) => (
+            {visiveis.map((item) => (
               <li
                 key={item.id}
                 className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-zinc-100"
