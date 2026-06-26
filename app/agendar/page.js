@@ -38,6 +38,16 @@ function dataDeHoje() {
   return `${ano}-${mes}-${dia}`;
 }
 
+// "HH:MM" da hora atual em horário local — usado pra esconder, na data de
+// hoje, os slots que já passaram. Zero-padded de tamanho fixo, igual aos
+// slots gerados, pra que a comparação de string ("HH:MM" <= "HH:MM") bata.
+function horaDeAgora() {
+  const agora = new Date();
+  const hora = String(agora.getHours()).padStart(2, "0");
+  const min = String(agora.getMinutes()).padStart(2, "0");
+  return `${hora}:${min}`;
+}
+
 // "YYYY-MM-DD" -> "dd/mm · dia da semana". Parse manual pra evitar o
 // deslocamento de fuso que new Date("YYYY-MM-DD") sofre (vira UTC).
 function formatarData(iso) {
@@ -139,6 +149,15 @@ export default function AgendarPage() {
   const ocupadosSet = new Set(ocupados);
 
   const [hoje] = useState(dataDeHoje);
+
+  // Slots que vão pra tela. gerarSlots continua devolvendo a grade COMPLETA do
+  // dia; aqui só removemos o que já passou — e SÓ quando a data escolhida é hoje
+  // (recalcula a cada render, então troca de data já reflete a hora atual).
+  // Data futura: nada é filtrado. Comparação puramente por string "HH:MM".
+  const slotsDisponiveis =
+    form.data === hoje
+      ? slots.filter((slot) => slot > horaDeAgora())
+      : slots;
 
   // Mantém `ocupados` sincronizado com a data/serviço selecionados.
   // Busca async declarada DENTRO do efeito (padrão idiomático): os setState
@@ -557,9 +576,21 @@ export default function AgendarPage() {
                     </p>
                   )}
 
-                  {!carregandoSlots && !erroSlots && slots.length > 0 && (
+                  {/* Dia aberto (slots.length > 0) mas tudo já passou: só pode
+                      acontecer quando a data é hoje e a hora atual ultrapassou o
+                      último horário. Mostra um aviso discreto no lugar da grade. */}
+                  {!carregandoSlots &&
+                    !erroSlots &&
+                    slots.length > 0 &&
+                    slotsDisponiveis.length === 0 && (
+                      <p className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-500">
+                        Não há mais horários disponíveis para hoje.
+                      </p>
+                    )}
+
+                  {!carregandoSlots && !erroSlots && slotsDisponiveis.length > 0 && (
                     <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                      {slots.map((slot) => {
+                      {slotsDisponiveis.map((slot) => {
                         const ocupado = ocupadosSet.has(slot);
                         const selecionado = horarioSelecionado === slot;
 

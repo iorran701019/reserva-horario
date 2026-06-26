@@ -72,6 +72,19 @@ function abrirWhatsApp(telefone, mensagem) {
   window.open(linkWhatsApp(telefone, mensagem), "_blank", "noopener,noreferrer");
 }
 
+// Helper PURO (sem setState): lê todos os agendamentos, próximos primeiro
+// (data e depois horário). Devolve sempre { dados, error } pra quem chama
+// decidir o que fazer com o estado. Fonte única da query no arquivo.
+async function buscarAgendamentos() {
+  const { data, error } = await supabase
+    .from("agendamentos")
+    .select("id, nome_cliente, telefone, data, horario, status, created_at")
+    .order("data", { ascending: true })
+    .order("horario", { ascending: true });
+
+  return { dados: data ?? [], error };
+}
+
 export default function AdminPage() {
   const router = useRouter();
 
@@ -92,7 +105,8 @@ export default function AdminPage() {
   const [agendamentoParaCancelar, setAgendamentoParaCancelar] = useState(null);
 
   // Reflete o novo status no estado local, atualizando só o item alterado
-  // (evita refazer o fetch inteiro). O badge muda de cor automaticamente.
+  // (evita refazer o fetch inteiro). O badge e o destaque âmbar mudam
+  // automaticamente quando o status deixa de ser 'pendente'.
   function atualizarStatusLocal(id, status) {
     setAgendamentos((atuais) =>
       atuais.map((item) => (item.id === id ? { ...item, status } : item))
@@ -189,33 +203,51 @@ export default function AdminPage() {
     router.replace("/admin/login");
   }
 
+  // Carga inicial (com indicador) + refresh automático a cada 60s. A função
+  // async fica DENTRO do efeito (padrão idiomático): os setState vivem aqui,
+  // ao redor do helper puro buscarAgendamentos, e a flag `ativo` evita setState
+  // após desmontar.
+  //   silencioso=false (carga inicial): mostra o "Carregando..." e estoura erro
+  //     na tela se falhar.
+  //   silencioso=true (refresh de fundo): não toca em `carregando` nem em `erro`,
+  //     pra não desmontar a lista nem atrapalhar o dono no meio de uma ação;
+  //     uma falha de rede só é ignorada até o próximo ciclo.
   useEffect(() => {
     // Só busca os agendamentos depois de confirmar que há sessão ativa.
     if (autenticado !== true) return;
+    let ativo = true;
 
-    async function carregar() {
-      setErro("");
-      setCarregando(true);
+    async function carregar(silencioso) {
+      const { dados, error } = await buscarAgendamentos();
 
-      // Lê todos os agendamentos, próximos primeiro (data e depois horário).
-      const { data, error } = await supabase
-        .from("agendamentos")
-        .select("id, nome_cliente, telefone, data, horario, status, created_at")
-        .order("data", { ascending: true })
-        .order("horario", { ascending: true });
+      if (!ativo) return;
 
-      setCarregando(false);
+      if (!silencioso) setCarregando(false);
 
       if (error) {
         // Mostra a mensagem real do Supabase para facilitar o diagnóstico.
-        setErro(error.message);
+        // Num refresh de fundo, não estoura erro pra não cobrir a lista.
+        if (!silencioso) setErro(error.message);
         return;
       }
 
-      setAgendamentos(data ?? []);
+      if (!silencioso) setErro("");
+      setAgendamentos(dados);
     }
 
-    carregar();
+    // `carregando` já começa true, então a carga inicial mostra o indicador.
+    carregar(false);
+
+    // Intervalo do refresh configurável por env (em produção/piloto 60000; na
+    // apresentação 5000). Fallback pra 60000 se ausente ou inválido.
+    const intervaloMs = Number(process.env.NEXT_PUBLIC_REFRESH_MS) || 60000;
+    const intervalo = setInterval(() => carregar(true), intervaloMs);
+
+    // Limpa o timer ao desmontar (ou ao perder a sessão) — sem timer vazado.
+    return () => {
+      ativo = false;
+      clearInterval(intervalo);
+    };
   }, [autenticado]);
 
   // Enquanto verifica a sessão (ou já sabemos que não há), não renderiza a
@@ -323,10 +355,19 @@ export default function AdminPage() {
 
         {!carregando && !erro && visiveis.length > 0 && (
           <ul className="space-y-3">
-            {visiveis.map((item) => (
+            {visiveis.map((item) => {
+              // Destaque âmbar de nível único: todo 'pendente' (precisa de ação)
+              // ganha um ring âmbar visível + fundo suave. Confirmado/cancelado
+              // ficam neutros — o âmbar sai sozinho quando o status muda.
+              const pendente = abaDoStatus(item.status) === "pendente";
+              return (
               <li
                 key={item.id}
-                className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-zinc-100"
+                className={`rounded-2xl bg-white p-4 shadow-sm ring-1 transition ${
+                  pendente
+                    ? "bg-amber-50/60 ring-amber-300"
+                    : "ring-zinc-100"
+                }`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -388,7 +429,8 @@ export default function AdminPage() {
                   );
                 })()}
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>
