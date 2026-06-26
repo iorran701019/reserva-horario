@@ -11,6 +11,14 @@ const ESTADO_INICIAL = {
   data: "",
 };
 
+// Ordem das etapas do wizard. Usada pelo indicador de progresso e pela
+// navegação "Voltar" (cada etapa volta para a anterior nesta sequência).
+const ETAPAS = [
+  { id: "servico", rotulo: "Serviço" },
+  { id: "data", rotulo: "Data" },
+  { id: "dados", rotulo: "Dados" },
+];
+
 const DIAS_SEMANA = [
   "domingo",
   "segunda-feira",
@@ -74,6 +82,10 @@ async function buscarOcupados(data, duracaoMin) {
 export default function AgendarPage() {
   const [form, setForm] = useState(ESTADO_INICIAL);
   const [horarioSelecionado, setHorarioSelecionado] = useState("");
+
+  // Etapa atual do wizard. Controla só a RENDERIZAÇÃO — a lógica de dados
+  // (form, ocupados, validações) permanece a mesma de quando era página única.
+  const [etapa, setEtapa] = useState("servico");
 
   const [servicos, setServicos] = useState([]);
   const [servicoSelecionado, setServicoSelecionado] = useState(null);
@@ -180,6 +192,15 @@ export default function AgendarPage() {
   function selecionarServico(servico) {
     setServicoSelecionado(servico);
     setHorarioSelecionado("");
+    // Avanço automático: concluir a etapa de serviço leva à de data.
+    setEtapa("data");
+  }
+
+  // Volta para a etapa anterior preservando o que já foi escolhido —
+  // não limpa serviço, data nem horário.
+  function voltarEtapa() {
+    const indice = ETAPAS.findIndex((e) => e.id === etapa);
+    if (indice > 0) setEtapa(ETAPAS[indice - 1].id);
   }
 
   async function handleSubmit(e) {
@@ -254,6 +275,7 @@ export default function AgendarPage() {
     setHorarioSelecionado("");
     setSucesso(false);
     setErro("");
+    setEtapa("servico");
   }
 
   if (sucesso) {
@@ -357,177 +379,126 @@ export default function AgendarPage() {
           </p>
         </header>
 
+        {/* Indicador de progresso do wizard. Etapa atual destacada, etapas
+            concluídas marcadas com check, etapas futuras neutras. */}
+        <ol className="mb-6 flex items-center gap-2">
+          {ETAPAS.map((passo, i) => {
+            const indiceAtual = ETAPAS.findIndex((p) => p.id === etapa);
+            const concluida = i < indiceAtual;
+            const atual = i === indiceAtual;
+
+            return (
+              <li
+                key={passo.id}
+                className="flex flex-1 flex-col items-center gap-1.5"
+              >
+                <span
+                  className={[
+                    "flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold ring-1 transition",
+                    atual
+                      ? "bg-zinc-900 text-white ring-zinc-900"
+                      : concluida
+                      ? "bg-green-100 text-green-700 ring-green-200"
+                      : "bg-white text-zinc-400 ring-zinc-200",
+                  ].join(" ")}
+                  aria-current={atual ? "step" : undefined}
+                >
+                  {concluida ? (
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                      className="h-4 w-4"
+                    >
+                      <path d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    i + 1
+                  )}
+                </span>
+                <span
+                  className={[
+                    "text-xs font-medium",
+                    atual
+                      ? "text-zinc-900"
+                      : concluida
+                      ? "text-green-700"
+                      : "text-zinc-400",
+                  ].join(" ")}
+                >
+                  {passo.rotulo}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+
         <form
           onSubmit={handleSubmit}
           className="space-y-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-100"
         >
-          <div>
-            <label htmlFor="nome" className="mb-1 block text-sm font-medium text-zinc-700">
-              Nome
-            </label>
-            <input
-              id="nome"
-              name="nome"
-              type="text"
-              value={form.nome}
-              onChange={handleChange}
-              required
-              placeholder="Seu nome"
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none transition focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="telefone" className="mb-1 block text-sm font-medium text-zinc-700">
-              WhatsApp
-            </label>
-            <input
-              id="telefone"
-              name="telefone"
-              type="tel"
-              inputMode="tel"
-              value={form.telefone}
-              onChange={handleChange}
-              required
-              placeholder="(24) 99999-9999"
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none transition focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
-            />
-          </div>
-
-          {/* Seletor de serviço: alimenta a duração usada na geração de slots. */}
-          <div>
-            <span className="mb-1 block text-sm font-medium text-zinc-700">
-              Serviço
-            </span>
-
-            {carregandoServicos && (
-              <p className="text-sm text-zinc-500">Carregando serviços...</p>
-            )}
-
-            {!carregandoServicos && erroServicos && (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-                {erroServicos}
-              </p>
-            )}
-
-            {!carregandoServicos && !erroServicos && servicos.length === 0 && (
-              <p className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-500">
-                Nenhum serviço disponível no momento.
-              </p>
-            )}
-
-            {!carregandoServicos && !erroServicos && servicos.length > 0 && (
-              <div className="space-y-2">
-                {servicos.map((servico) => {
-                  const selecionado = servicoSelecionado?.id === servico.id;
-
-                  return (
-                    <button
-                      key={servico.id}
-                      type="button"
-                      onClick={() => selecionarServico(servico)}
-                      aria-pressed={selecionado}
-                      className={[
-                        "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 transition",
-                        selecionado
-                          ? "bg-zinc-900 text-white ring-zinc-900"
-                          : "bg-white text-zinc-700 ring-zinc-300 hover:border-zinc-900 hover:ring-zinc-400",
-                      ].join(" ")}
-                    >
-                      <span className="min-w-0">
-                        <span className="block font-medium">{servico.nome}</span>
-                        <span
-                          className={[
-                            "block text-sm",
-                            selecionado ? "text-zinc-300" : "text-zinc-500",
-                          ].join(" ")}
-                        >
-                          {servico.duracao_min} min
-                        </span>
-                      </span>
-
-                      {servico.preco_centavos != null && (
-                        <span className="shrink-0 font-medium">
-                          {formatarPreco(servico.preco_centavos)}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label htmlFor="data" className="mb-1 block text-sm font-medium text-zinc-700">
-              Data
-            </label>
-            <input
-              id="data"
-              name="data"
-              type="date"
-              value={form.data}
-              onChange={handleChange}
-              min={hoje}
-              required
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none transition focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
-            />
-          </div>
-
-          {/* Seletor de horários: precisa de um serviço escolhido (define a
-              duração dos slots) e de uma data preenchida. */}
-          {!servicoSelecionado && (
-            <p className="text-sm text-zinc-500">
-              Selecione um serviço para ver os horários.
-            </p>
-          )}
-
-          {servicoSelecionado && form.data && (
+          {/* Etapa 1 — Serviço: alimenta a duração usada na geração de slots. */}
+          {etapa === "servico" && (
             <div>
               <span className="mb-1 block text-sm font-medium text-zinc-700">
-                Horário
+                Serviço
               </span>
 
-              {carregandoSlots && (
-                <p className="text-sm text-zinc-500">Carregando horários...</p>
+              {carregandoServicos && (
+                <p className="text-sm text-zinc-500">Carregando serviços...</p>
               )}
 
-              {!carregandoSlots && erroSlots && (
+              {!carregandoServicos && erroServicos && (
                 <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-                  {erroSlots}
+                  {erroServicos}
                 </p>
               )}
 
-              {!carregandoSlots && !erroSlots && slots.length === 0 && (
+              {!carregandoServicos && !erroServicos && servicos.length === 0 && (
                 <p className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-500">
-                  Fechado neste dia.
+                  Nenhum serviço disponível no momento.
                 </p>
               )}
 
-              {!carregandoSlots && !erroSlots && slots.length > 0 && (
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                  {slots.map((slot) => {
-                    const ocupado = ocupadosSet.has(slot);
-                    const selecionado = horarioSelecionado === slot;
+              {!carregandoServicos && !erroServicos && servicos.length > 0 && (
+                <div className="space-y-2">
+                  {servicos.map((servico) => {
+                    const selecionado = servicoSelecionado?.id === servico.id;
 
                     return (
                       <button
-                        key={slot}
+                        key={servico.id}
                         type="button"
-                        disabled={ocupado}
-                        aria-disabled={ocupado}
-                        onClick={() => setHorarioSelecionado(slot)}
+                        onClick={() => selecionarServico(servico)}
                         aria-pressed={selecionado}
                         className={[
-                          "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition",
-                          ocupado
-                            ? "cursor-not-allowed bg-zinc-100 text-zinc-300 line-through ring-zinc-200"
-                            : selecionado
+                          "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 transition",
+                          selecionado
                             ? "bg-zinc-900 text-white ring-zinc-900"
                             : "bg-white text-zinc-700 ring-zinc-300 hover:border-zinc-900 hover:ring-zinc-400",
                         ].join(" ")}
                       >
-                        {slot}
+                        <span className="min-w-0">
+                          <span className="block font-medium">{servico.nome}</span>
+                          <span
+                            className={[
+                              "block text-sm",
+                              selecionado ? "text-zinc-300" : "text-zinc-500",
+                            ].join(" ")}
+                          >
+                            {servico.duracao_min} min
+                          </span>
+                        </span>
+
+                        {servico.preco_centavos != null && (
+                          <span className="shrink-0 font-medium">
+                            {formatarPreco(servico.preco_centavos)}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -536,18 +507,161 @@ export default function AgendarPage() {
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={enviando}
-            className="w-full rounded-lg bg-zinc-900 px-4 py-2.5 font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {enviando ? "Enviando..." : "Confirmar agendamento"}
-          </button>
+          {/* Etapa 2 — Data: campo de data e, depois de escolhida, a grade de
+              horários (a grade só aparece após a data, como antes). */}
+          {etapa === "data" && (
+            <>
+              <div>
+                <label htmlFor="data" className="mb-1 block text-sm font-medium text-zinc-700">
+                  Data
+                </label>
+                <input
+                  id="data"
+                  name="data"
+                  type="date"
+                  value={form.data}
+                  onChange={handleChange}
+                  min={hoje}
+                  required
+                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none transition focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
+                />
+              </div>
 
-          {erro && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-              {erro}
-            </p>
+              {/* Seletor de horários: precisa de um serviço escolhido (define a
+                  duração dos slots) e de uma data preenchida. */}
+              {!servicoSelecionado && (
+                <p className="text-sm text-zinc-500">
+                  Selecione um serviço para ver os horários.
+                </p>
+              )}
+
+              {servicoSelecionado && form.data && (
+                <div>
+                  <span className="mb-1 block text-sm font-medium text-zinc-700">
+                    Horário
+                  </span>
+
+                  {carregandoSlots && (
+                    <p className="text-sm text-zinc-500">Carregando horários...</p>
+                  )}
+
+                  {!carregandoSlots && erroSlots && (
+                    <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                      {erroSlots}
+                    </p>
+                  )}
+
+                  {!carregandoSlots && !erroSlots && slots.length === 0 && (
+                    <p className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-500">
+                      Fechado neste dia.
+                    </p>
+                  )}
+
+                  {!carregandoSlots && !erroSlots && slots.length > 0 && (
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                      {slots.map((slot) => {
+                        const ocupado = ocupadosSet.has(slot);
+                        const selecionado = horarioSelecionado === slot;
+
+                        return (
+                          <button
+                            key={slot}
+                            type="button"
+                            disabled={ocupado}
+                            aria-disabled={ocupado}
+                            onClick={() => {
+                              setHorarioSelecionado(slot);
+                              // Avanço automático: escolher o horário conclui
+                              // a etapa de data e leva à de dados.
+                              setEtapa("dados");
+                            }}
+                            aria-pressed={selecionado}
+                            className={[
+                              "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition",
+                              ocupado
+                                ? "cursor-not-allowed bg-zinc-100 text-zinc-300 line-through ring-zinc-200"
+                                : selecionado
+                                ? "bg-zinc-900 text-white ring-zinc-900"
+                                : "bg-white text-zinc-700 ring-zinc-300 hover:border-zinc-900 hover:ring-zinc-400",
+                            ].join(" ")}
+                          >
+                            {slot}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={voltarEtapa}
+                className="w-full rounded-lg bg-white px-4 py-2.5 font-medium text-zinc-700 ring-1 ring-zinc-300 transition hover:bg-zinc-50"
+              >
+                Voltar
+              </button>
+            </>
+          )}
+
+          {/* Etapa 3 — Dados: nome, WhatsApp e confirmação. */}
+          {etapa === "dados" && (
+            <>
+              <div>
+                <label htmlFor="nome" className="mb-1 block text-sm font-medium text-zinc-700">
+                  Nome
+                </label>
+                <input
+                  id="nome"
+                  name="nome"
+                  type="text"
+                  value={form.nome}
+                  onChange={handleChange}
+                  required
+                  placeholder="Seu nome"
+                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none transition focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="telefone" className="mb-1 block text-sm font-medium text-zinc-700">
+                  WhatsApp
+                </label>
+                <input
+                  id="telefone"
+                  name="telefone"
+                  type="tel"
+                  inputMode="tel"
+                  value={form.telefone}
+                  onChange={handleChange}
+                  required
+                  placeholder="(24) 99999-9999"
+                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none transition focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={enviando}
+                className="w-full rounded-lg bg-zinc-900 px-4 py-2.5 font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {enviando ? "Enviando..." : "Confirmar agendamento"}
+              </button>
+
+              <button
+                type="button"
+                onClick={voltarEtapa}
+                className="w-full rounded-lg bg-white px-4 py-2.5 font-medium text-zinc-700 ring-1 ring-zinc-300 transition hover:bg-zinc-50"
+              >
+                Voltar
+              </button>
+
+              {erro && (
+                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                  {erro}
+                </p>
+              )}
+            </>
           )}
         </form>
       </div>
