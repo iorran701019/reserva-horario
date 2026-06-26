@@ -47,6 +47,30 @@ function formatarPreco(centavos) {
   });
 }
 
+// Helper PURO (sem setState): busca no banco os horários já ocupados na data.
+// A regra de status (ignorar cancelados) vive só aqui. Devolve sempre
+// { ocupados, error } pra quem chama decidir o que fazer com o estado.
+async function buscarOcupados(data, duracaoMin) {
+  // Sem data ou dia fechado (gerarSlots vazio): nada a consultar.
+  if (!data || gerarSlots(data, duracaoMin).length === 0) {
+    return { ocupados: [], error: null };
+  }
+
+  const { data: linhas, error } = await supabase
+    .from("slots_ocupados")
+    .select("horario")
+    .eq("data", data);
+
+  if (error) return { ocupados: [], error };
+
+  // O Postgres devolve horario como "HH:MM:SS"; normalizamos pra "HH:MM"
+  // senão a comparação com os slots gerados não bate.
+  return {
+    ocupados: (linhas ?? []).map((l) => l.horario.slice(0, 5)),
+    error: null,
+  };
+}
+
 export default function AgendarPage() {
   const [form, setForm] = useState(ESTADO_INICIAL);
   const [horarioSelecionado, setHorarioSelecionado] = useState("");
@@ -104,46 +128,50 @@ export default function AgendarPage() {
 
   const [hoje] = useState(dataDeHoje);
 
-  // Busca, no banco, SOMENTE os horários já ocupados naquela data.
-  // Disparada por evento (troca de data / erro de duplicidade), não por effect:
-  // é o que o React 19 recomenda pra reações a interações do usuário.
-  async function carregarOcupados(data) {
-    setErroSlots("");
+  // Mantém `ocupados` sincronizado com a data/serviço selecionados.
+  // Busca async declarada DENTRO do efeito (padrão idiomático): os setState
+  // ficam aqui, ao redor do helper puro buscarOcupados, e a flag `ativo`
+  // cancela corridas entre datas / setState após desmontar.
+  useEffect(() => {
+    if (!form.data) return;
+    let ativo = true;
 
-    // Sem data ou dia fechado (domingo): nada a consultar.
-    if (!data || gerarSlots(data, servicoSelecionado?.duracao_min).length === 0) {
-      setOcupados([]);
-      return;
+    async function sincronizar() {
+      setErroSlots("");
+      setCarregandoSlots(true);
+
+      const { ocupados, error } = await buscarOcupados(
+        form.data,
+        servicoSelecionado?.duracao_min
+      );
+
+      if (!ativo) return;
+
+      setCarregandoSlots(false);
+
+      if (error) {
+        setErroSlots(error.message);
+        setOcupados([]);
+        return;
+      }
+
+      setOcupados(ocupados);
     }
 
-    setCarregandoSlots(true);
-
-    const { data: linhas, error } = await supabase
-      .from("agendamentos")
-      .select("horario")
-      .eq("data", data);
-
-    setCarregandoSlots(false);
-
-    if (error) {
-      setErroSlots(error.message);
-      setOcupados([]);
-      return;
-    }
-
-    // O Postgres devolve horario como "HH:MM:SS"; normalizamos pra "HH:MM"
-    // senão a comparação com os slots gerados não bate.
-    setOcupados((linhas ?? []).map((linha) => linha.horario.slice(0, 5)));
-  }
+    sincronizar();
+    return () => {
+      ativo = false;
+    };
+  }, [form.data, servicoSelecionado]);
 
   function handleChange(e) {
     const { name, value } = e.target;
     setForm((anterior) => ({ ...anterior, [name]: value }));
 
-    // Trocar a data invalida o horário escolhido e recarrega os ocupados do dia.
+    // Trocar a data invalida o horário escolhido; o useEffect [form.data]
+    // cuida de recarregar os ocupados do novo dia.
     if (name === "data") {
       setHorarioSelecionado("");
-      carregarOcupados(value);
     }
   }
 
@@ -202,7 +230,11 @@ export default function AgendarPage() {
         setErro("Esse horário acabou de ser reservado. Escolha outro.");
         setHorarioSelecionado("");
         // Recarrega os ocupados pra esse horário passar a aparecer travado.
-        await carregarOcupados(form.data);
+        const recarregado = await buscarOcupados(
+          form.data,
+          servicoSelecionado?.duracao_min
+        );
+        if (!recarregado.error) setOcupados(recarregado.ocupados);
         return;
       }
 
@@ -483,6 +515,7 @@ export default function AgendarPage() {
                         key={slot}
                         type="button"
                         disabled={ocupado}
+                        aria-disabled={ocupado}
                         onClick={() => setHorarioSelecionado(slot)}
                         aria-pressed={selecionado}
                         className={[
