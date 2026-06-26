@@ -39,9 +39,22 @@ function formatarData(iso) {
   return `${String(dia).padStart(2, "0")}/${String(mes).padStart(2, "0")} · ${DIAS_SEMANA[d.getDay()]}`;
 }
 
+// preco_centavos (ex.: 3500) -> "R$ 35,00".
+function formatarPreco(centavos) {
+  return (centavos / 100).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
 export default function AgendarPage() {
   const [form, setForm] = useState(ESTADO_INICIAL);
   const [horarioSelecionado, setHorarioSelecionado] = useState("");
+
+  const [servicos, setServicos] = useState([]);
+  const [servicoSelecionado, setServicoSelecionado] = useState(null);
+  const [carregandoServicos, setCarregandoServicos] = useState(true);
+  const [erroServicos, setErroServicos] = useState("");
 
   const [ocupados, setOcupados] = useState([]);
   const [carregandoSlots, setCarregandoSlots] = useState(false);
@@ -57,8 +70,36 @@ export default function AgendarPage() {
     if (sucesso) tituloConfirmacaoRef.current?.focus();
   }, [sucesso]);
 
+  // Busca os serviços ativos ao montar a página (ordenados por nome).
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregarServicos() {
+      const { data, error } = await supabase
+        .from("servicos")
+        .select("id, nome, duracao_min, preco_centavos")
+        .eq("ativo", true)
+        .order("nome");
+
+      if (!ativo) return;
+
+      if (error) {
+        setErroServicos(error.message);
+      } else {
+        setServicos(data ?? []);
+      }
+      setCarregandoServicos(false);
+    }
+
+    carregarServicos();
+    return () => {
+      ativo = false;
+    };
+  }, []);
+
   // Calculado a cada render: barato e mantém a fonte da verdade na função pura.
-  const slots = gerarSlots(form.data);
+  // A duração do serviço escolhido define o passo entre os horários.
+  const slots = gerarSlots(form.data, servicoSelecionado?.duracao_min);
   const ocupadosSet = new Set(ocupados);
 
   const [hoje] = useState(dataDeHoje);
@@ -70,7 +111,7 @@ export default function AgendarPage() {
     setErroSlots("");
 
     // Sem data ou dia fechado (domingo): nada a consultar.
-    if (!data || gerarSlots(data).length === 0) {
+    if (!data || gerarSlots(data, servicoSelecionado?.duracao_min).length === 0) {
       setOcupados([]);
       return;
     }
@@ -106,6 +147,13 @@ export default function AgendarPage() {
     }
   }
 
+  // Trocar de serviço muda a duração e, portanto, os slots gerados:
+  // o horário escolhido pode não existir mais, então o limpamos.
+  function selecionarServico(servico) {
+    setServicoSelecionado(servico);
+    setHorarioSelecionado("");
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setErro("");
@@ -122,6 +170,11 @@ export default function AgendarPage() {
       return;
     }
 
+    if (!servicoSelecionado) {
+      setErro("Selecione um serviço.");
+      return;
+    }
+
     if (!horarioSelecionado) {
       setErro("Selecione um horário disponível.");
       return;
@@ -134,6 +187,7 @@ export default function AgendarPage() {
       telefone: form.telefone,
       data: form.data,
       horario: horarioSelecionado,
+      servico_id: servicoSelecionado.id,
     });
 
     setEnviando(false);
@@ -164,6 +218,7 @@ export default function AgendarPage() {
 
   function novoAgendamento() {
     setForm(ESTADO_INICIAL);
+    setServicoSelecionado(null);
     setHorarioSelecionado("");
     setSucesso(false);
     setErro("");
@@ -210,7 +265,9 @@ export default function AgendarPage() {
           <dl className="mt-6 space-y-3 rounded-xl bg-zinc-50 p-4 text-left text-sm ring-1 ring-zinc-100">
             <div className="flex items-center justify-between gap-4">
               <dt className="text-zinc-500">Serviço</dt>
-              <dd className="font-medium text-zinc-900">Corte simples</dd>
+              <dd className="font-medium text-zinc-900">
+                {servicoSelecionado?.nome}
+              </dd>
             </div>
             <div className="flex items-center justify-between gap-4">
               <dt className="text-zinc-500">Data</dt>
@@ -237,7 +294,7 @@ export default function AgendarPage() {
           <a
             href={linkWhatsApp(
               WHATSAPP_LOJA,
-              `Olá! Acabei de solicitar um agendamento de Corte simples para ${formatarData(form.data)} às ${horarioSelecionado}. Meu nome é ${form.nome}.`
+              `Olá! Acabei de solicitar um agendamento de ${servicoSelecionado?.nome} para ${formatarData(form.data)} às ${horarioSelecionado}. Meu nome é ${form.nome}.`
             )}
             target="_blank"
             rel="noopener noreferrer"
@@ -305,6 +362,70 @@ export default function AgendarPage() {
             />
           </div>
 
+          {/* Seletor de serviço: alimenta a duração usada na geração de slots. */}
+          <div>
+            <span className="mb-1 block text-sm font-medium text-zinc-700">
+              Serviço
+            </span>
+
+            {carregandoServicos && (
+              <p className="text-sm text-zinc-500">Carregando serviços...</p>
+            )}
+
+            {!carregandoServicos && erroServicos && (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                {erroServicos}
+              </p>
+            )}
+
+            {!carregandoServicos && !erroServicos && servicos.length === 0 && (
+              <p className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-500">
+                Nenhum serviço disponível no momento.
+              </p>
+            )}
+
+            {!carregandoServicos && !erroServicos && servicos.length > 0 && (
+              <div className="space-y-2">
+                {servicos.map((servico) => {
+                  const selecionado = servicoSelecionado?.id === servico.id;
+
+                  return (
+                    <button
+                      key={servico.id}
+                      type="button"
+                      onClick={() => selecionarServico(servico)}
+                      aria-pressed={selecionado}
+                      className={[
+                        "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 transition",
+                        selecionado
+                          ? "bg-zinc-900 text-white ring-zinc-900"
+                          : "bg-white text-zinc-700 ring-zinc-300 hover:border-zinc-900 hover:ring-zinc-400",
+                      ].join(" ")}
+                    >
+                      <span className="min-w-0">
+                        <span className="block font-medium">{servico.nome}</span>
+                        <span
+                          className={[
+                            "block text-sm",
+                            selecionado ? "text-zinc-300" : "text-zinc-500",
+                          ].join(" ")}
+                        >
+                          {servico.duracao_min} min
+                        </span>
+                      </span>
+
+                      {servico.preco_centavos != null && (
+                        <span className="shrink-0 font-medium">
+                          {formatarPreco(servico.preco_centavos)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           <div>
             <label htmlFor="data" className="mb-1 block text-sm font-medium text-zinc-700">
               Data
@@ -321,8 +442,15 @@ export default function AgendarPage() {
             />
           </div>
 
-          {/* Seletor de horários: só aparece depois que uma data é escolhida. */}
-          {form.data && (
+          {/* Seletor de horários: precisa de um serviço escolhido (define a
+              duração dos slots) e de uma data preenchida. */}
+          {!servicoSelecionado && (
+            <p className="text-sm text-zinc-500">
+              Selecione um serviço para ver os horários.
+            </p>
+          )}
+
+          {servicoSelecionado && form.data && (
             <div>
               <span className="mb-1 block text-sm font-medium text-zinc-700">
                 Horário
