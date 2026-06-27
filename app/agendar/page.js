@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { gerarSlots, WHATSAPP_LOJA } from "@/lib/horarios";
 import { linkWhatsApp } from "@/lib/whatsapp";
+import Hero from "@/components/Hero";
 
 const ESTADO_INICIAL = {
   nome: "",
@@ -299,10 +300,12 @@ export default function AgendarPage() {
 
   if (sucesso) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 px-4 py-10">
+      <main className="flex min-h-screen flex-col bg-surface">
+        <Hero compacto />
+        <div className="flex flex-1 flex-col items-center justify-center px-4 py-10">
         <div
           role="status"
-          className="mx-auto w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-sm ring-1 ring-zinc-100"
+          className="mx-auto w-full max-w-md rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border"
         >
           <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-100">
             <svg
@@ -322,11 +325,11 @@ export default function AgendarPage() {
           <h1
             ref={tituloConfirmacaoRef}
             tabIndex={-1}
-            className="mt-6 text-2xl font-bold text-zinc-900 outline-none"
+            className="mt-6 text-2xl font-bold text-heading outline-none"
           >
             Solicitação enviada!
           </h1>
-          <p className="mt-2 text-sm text-zinc-500">
+          <p className="mt-2 text-sm text-body">
             Recebemos seu agendamento. Em breve o estabelecimento confirma seu horário.
           </p>
 
@@ -335,24 +338,24 @@ export default function AgendarPage() {
             Aguardando confirmação
           </span>
 
-          <dl className="mt-6 space-y-3 rounded-xl bg-zinc-50 p-4 text-left text-sm ring-1 ring-zinc-100">
+          <dl className="mt-6 space-y-3 rounded-xl bg-surface p-4 text-left text-sm ring-1 ring-border">
             <div className="flex items-center justify-between gap-4">
-              <dt className="text-zinc-500">Serviço</dt>
-              <dd className="font-medium text-zinc-900">
+              <dt className="text-body">Serviço</dt>
+              <dd className="font-medium text-heading">
                 {servicoSelecionado?.nome}
               </dd>
             </div>
             <div className="flex items-center justify-between gap-4">
-              <dt className="text-zinc-500">Data</dt>
-              <dd className="font-medium text-zinc-900">{formatarData(form.data)}</dd>
+              <dt className="text-body">Data</dt>
+              <dd className="font-medium text-heading">{formatarData(form.data)}</dd>
             </div>
             <div className="flex items-center justify-between gap-4">
-              <dt className="text-zinc-500">Horário</dt>
-              <dd className="font-medium text-zinc-900">{horarioSelecionado}</dd>
+              <dt className="text-body">Horário</dt>
+              <dd className="font-medium text-heading">{horarioSelecionado}</dd>
             </div>
             <div className="flex items-center justify-between gap-4">
-              <dt className="text-zinc-500">Nome</dt>
-              <dd className="font-medium text-zinc-900">{form.nome}</dd>
+              <dt className="text-body">Nome</dt>
+              <dd className="font-medium text-heading">{form.nome}</dd>
             </div>
           </dl>
 
@@ -371,7 +374,7 @@ export default function AgendarPage() {
             )}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 font-medium text-green-700 ring-1 ring-green-600 transition hover:bg-green-50"
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-card px-4 py-2.5 font-medium text-green-700 ring-1 ring-green-600 transition hover:bg-green-50"
           >
             <svg
               viewBox="0 0 24 24"
@@ -384,17 +387,19 @@ export default function AgendarPage() {
             Falar no WhatsApp
           </a>
         </div>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-zinc-50 px-4 py-10 sm:py-16">
-      <div className="mx-auto w-full max-w-md">
+    <main className="min-h-screen bg-surface">
+      <Hero />
+      <div className="mx-auto w-full max-w-md px-4 py-10 sm:py-16">
         <header className="mb-6 text-center">
-          <h1 className="text-2xl font-bold text-zinc-900">Agende seu horário</h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            Escolha a data e o horário disponível.
+          <h1 className="text-2xl font-bold text-heading">Agende seu horário</h1>
+          <p className="mt-1 text-sm text-body">
+            Em poucos passos.
           </p>
         </header>
 
@@ -418,7 +423,7 @@ export default function AgendarPage() {
                       ? "bg-primary text-white ring-primary"
                       : concluida
                       ? "bg-green-100 text-green-700 ring-green-200"
-                      : "bg-white text-zinc-400 ring-zinc-200",
+                      : "bg-card text-body ring-border",
                   ].join(" ")}
                   aria-current={atual ? "step" : undefined}
                 >
@@ -443,10 +448,10 @@ export default function AgendarPage() {
                   className={[
                     "text-xs font-medium",
                     atual
-                      ? "text-zinc-900"
+                      ? "text-heading"
                       : concluida
                       ? "text-green-700"
-                      : "text-zinc-400",
+                      : "text-body",
                   ].join(" ")}
                 >
                   {passo.rotulo}
@@ -458,17 +463,17 @@ export default function AgendarPage() {
 
         <form
           onSubmit={handleSubmit}
-          className="space-y-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-100"
+          className="space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border"
         >
           {/* Etapa 1 — Serviço: alimenta a duração usada na geração de slots. */}
           {etapa === "servico" && (
             <div>
-              <span className="mb-1 block text-sm font-medium text-zinc-700">
+              <span className="mb-1 block text-sm font-medium text-body">
                 Serviço
               </span>
 
               {carregandoServicos && (
-                <p className="text-sm text-zinc-500">Carregando serviços...</p>
+                <p className="text-sm text-body">Carregando serviços...</p>
               )}
 
               {!carregandoServicos && erroServicos && (
@@ -478,7 +483,7 @@ export default function AgendarPage() {
               )}
 
               {!carregandoServicos && !erroServicos && servicos.length === 0 && (
-                <p className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-500">
+                <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
                   Nenhum serviço disponível no momento.
                 </p>
               )}
@@ -498,7 +503,7 @@ export default function AgendarPage() {
                           "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 transition",
                           selecionado
                             ? "bg-primary text-white ring-primary"
-                            : "bg-white text-zinc-700 ring-zinc-300 hover:border-zinc-900 hover:ring-zinc-400",
+                            : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
                         ].join(" ")}
                       >
                         <span className="min-w-0">
@@ -506,7 +511,7 @@ export default function AgendarPage() {
                           <span
                             className={[
                               "block text-sm",
-                              selecionado ? "text-zinc-300" : "text-zinc-500",
+                              selecionado ? "text-on-primary/90" : "text-body",
                             ].join(" ")}
                           >
                             {servico.duracao_min} min
@@ -531,7 +536,7 @@ export default function AgendarPage() {
           {etapa === "data" && (
             <>
               <div>
-                <label htmlFor="data" className="mb-1 block text-sm font-medium text-zinc-700">
+                <label htmlFor="data" className="mb-1 block text-sm font-medium text-body">
                   Data
                 </label>
                 <input
@@ -542,26 +547,26 @@ export default function AgendarPage() {
                   onChange={handleChange}
                   min={hoje}
                   required
-                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
                 />
               </div>
 
               {/* Seletor de horários: precisa de um serviço escolhido (define a
                   duração dos slots) e de uma data preenchida. */}
               {!servicoSelecionado && (
-                <p className="text-sm text-zinc-500">
+                <p className="text-sm text-body">
                   Selecione um serviço para ver os horários.
                 </p>
               )}
 
               {servicoSelecionado && form.data && (
                 <div>
-                  <span className="mb-1 block text-sm font-medium text-zinc-700">
+                  <span className="mb-1 block text-sm font-medium text-body">
                     Horário
                   </span>
 
                   {carregandoSlots && (
-                    <p className="text-sm text-zinc-500">Carregando horários...</p>
+                    <p className="text-sm text-body">Carregando horários...</p>
                   )}
 
                   {!carregandoSlots && erroSlots && (
@@ -571,7 +576,7 @@ export default function AgendarPage() {
                   )}
 
                   {!carregandoSlots && !erroSlots && slots.length === 0 && (
-                    <p className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-500">
+                    <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
                       Fechado neste dia.
                     </p>
                   )}
@@ -583,7 +588,7 @@ export default function AgendarPage() {
                     !erroSlots &&
                     slots.length > 0 &&
                     slotsDisponiveis.length === 0 && (
-                      <p className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-500">
+                      <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
                         Não há mais horários disponíveis para hoje.
                       </p>
                     )}
@@ -610,10 +615,10 @@ export default function AgendarPage() {
                             className={[
                               "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition",
                               ocupado
-                                ? "cursor-not-allowed bg-zinc-100 text-zinc-300 line-through ring-zinc-200"
+                                ? "cursor-not-allowed bg-surface text-muted line-through ring-border"
                                 : selecionado
                                 ? "bg-primary text-white ring-primary"
-                                : "bg-white text-zinc-700 ring-zinc-300 hover:border-zinc-900 hover:ring-zinc-400",
+                                : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
                             ].join(" ")}
                           >
                             {slot}
@@ -628,7 +633,7 @@ export default function AgendarPage() {
               <button
                 type="button"
                 onClick={voltarEtapa}
-                className="w-full rounded-lg bg-white px-4 py-2.5 font-medium text-zinc-700 ring-1 ring-zinc-300 transition hover:bg-zinc-50"
+                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar
               </button>
@@ -639,7 +644,7 @@ export default function AgendarPage() {
           {etapa === "dados" && (
             <>
               <div>
-                <label htmlFor="nome" className="mb-1 block text-sm font-medium text-zinc-700">
+                <label htmlFor="nome" className="mb-1 block text-sm font-medium text-body">
                   Nome
                 </label>
                 <input
@@ -650,12 +655,12 @@ export default function AgendarPage() {
                   onChange={handleChange}
                   required
                   placeholder="Seu nome"
-                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
                 />
               </div>
 
               <div>
-                <label htmlFor="telefone" className="mb-1 block text-sm font-medium text-zinc-700">
+                <label htmlFor="telefone" className="mb-1 block text-sm font-medium text-body">
                   WhatsApp
                 </label>
                 <input
@@ -667,7 +672,7 @@ export default function AgendarPage() {
                   onChange={handleChange}
                   required
                   placeholder="(24) 99999-9999"
-                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
                 />
               </div>
 
@@ -682,7 +687,7 @@ export default function AgendarPage() {
               <button
                 type="button"
                 onClick={voltarEtapa}
-                className="w-full rounded-lg bg-white px-4 py-2.5 font-medium text-zinc-700 ring-1 ring-zinc-300 transition hover:bg-zinc-50"
+                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar
               </button>

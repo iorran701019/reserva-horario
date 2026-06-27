@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { linkWhatsApp } from "@/lib/whatsapp";
+import Hero from "@/components/Hero";
 
 // Formata "2026-06-25" como "25/06". Mantém simples; sem libs de data.
 function formatarData(data) {
@@ -34,7 +35,7 @@ function classesStatus(status) {
     pendente: "bg-amber-50 text-amber-700 ring-amber-100",
     cancelado: "bg-red-50 text-red-700 ring-red-100",
   };
-  return mapa[status] ?? "bg-zinc-100 text-zinc-600 ring-zinc-200";
+  return mapa[status] ?? "bg-surface text-body ring-border";
 }
 
 // Ícone do WhatsApp. Herda a cor do texto (fill="currentColor") e o tamanho
@@ -258,8 +259,8 @@ export default function AdminPage() {
   // lista — o redirect pro login cuida do resto.
   if (autenticado !== true) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-zinc-50 px-4">
-        <p className="text-sm text-zinc-500">Carregando...</p>
+      <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+        <p className="text-sm text-body">Carregando...</p>
       </main>
     );
   }
@@ -285,12 +286,13 @@ export default function AdminPage() {
     });
 
   return (
-    <main className="min-h-screen bg-zinc-50 px-4 py-10 sm:py-16">
-      <div className="mx-auto w-full max-w-2xl">
+    <main className="min-h-screen bg-surface">
+      <Hero compacto />
+      <div className="mx-auto w-full max-w-2xl px-4 py-10 sm:py-16">
         <header className="mb-6 flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-zinc-900">Agendamentos</h1>
-            <p className="mt-1 text-sm text-zinc-500">
+            <h1 className="text-2xl font-bold text-heading">Agendamentos</h1>
+            <p className="mt-1 text-sm text-body">
               Próximos horários primeiro.
             </p>
           </div>
@@ -298,14 +300,14 @@ export default function AdminPage() {
           <button
             type="button"
             onClick={handleSair}
-            className="shrink-0 rounded-lg bg-white px-3 py-2 text-sm font-medium text-zinc-700 ring-1 ring-zinc-300 transition hover:bg-zinc-50"
+            className="shrink-0 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
           >
             Sair
           </button>
         </header>
 
         {carregando && (
-          <p className="rounded-lg bg-white px-4 py-3 text-sm text-zinc-500 shadow-sm ring-1 ring-zinc-100">
+          <p className="rounded-lg bg-card px-4 py-3 text-sm text-body shadow-sm ring-1 ring-border">
             Carregando agendamentos...
           </p>
         )}
@@ -320,7 +322,7 @@ export default function AdminPage() {
           <>
             {/* Barra de abas por status. A aba ativa ganha fundo branco +
                 anel; as demais ficam neutras. O contador vem das contagens. */}
-            <div className="mb-4 flex gap-1 rounded-xl bg-zinc-100 p-1">
+            <div className="mb-4 flex gap-1 rounded-xl bg-surface p-1">
               {ABAS.map((aba) => {
                 const ativa = abaAtiva === aba.id;
                 return (
@@ -330,16 +332,16 @@ export default function AdminPage() {
                     onClick={() => setAbaAtiva(aba.id)}
                     className={`flex-1 rounded-lg px-2 py-2 text-sm font-medium transition ${
                       ativa
-                        ? "bg-white text-zinc-900 shadow-sm ring-1 ring-zinc-200"
-                        : "text-zinc-500 hover:text-zinc-700"
+                        ? "bg-card text-heading shadow-sm ring-1 ring-border"
+                        : "text-body hover:text-heading"
                     }`}
                   >
                     {aba.rotulo}
                     <span
                       className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs font-semibold ${
                         ativa
-                          ? "bg-zinc-100 text-zinc-600"
-                          : "bg-zinc-200 text-zinc-500"
+                          ? "bg-surface text-body"
+                          : "bg-border text-body"
                       }`}
                     >
                       {contagens[aba.id]}
@@ -350,7 +352,7 @@ export default function AdminPage() {
             </div>
 
             {visiveis.length === 0 && (
-              <p className="rounded-lg bg-white px-4 py-8 text-center text-sm text-zinc-500 shadow-sm ring-1 ring-zinc-100">
+              <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
                 {TEXTO_VAZIO[abaAtiva]}
               </p>
             )}
@@ -367,18 +369,18 @@ export default function AdminPage() {
               return (
               <li
                 key={item.id}
-                className={`rounded-2xl bg-white p-4 shadow-sm ring-1 transition ${
+                className={`rounded-2xl bg-card p-4 shadow-sm ring-1 transition ${
                   pendente
                     ? "bg-amber-50/60 ring-amber-300"
-                    : "ring-zinc-100"
+                    : "ring-border"
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate font-medium text-zinc-900">
+                    <p className="truncate font-medium text-heading">
                       {item.nome_cliente}
                     </p>
-                    <p className="mt-0.5 text-sm text-zinc-500">{item.telefone}</p>
+                    <p className="mt-0.5 text-sm text-body">{item.telefone}</p>
                   </div>
 
                   <span
@@ -390,19 +392,19 @@ export default function AdminPage() {
                   </span>
                 </div>
 
-                <div className="mt-3 flex items-center gap-4 text-sm text-zinc-700">
+                <div className="mt-3 flex items-center gap-4 text-sm text-body">
                   <span className="inline-flex items-center gap-1.5">
-                    <span className="text-zinc-400">Data</span>
+                    <span className="text-body">Data</span>
                     <span className="font-medium">{formatarData(item.data)}</span>
                   </span>
                   <span className="inline-flex items-center gap-1.5">
-                    <span className="text-zinc-400">Horário</span>
+                    <span className="text-body">Horário</span>
                     <span className="font-medium">
                       {formatarHorario(item.horario)}
                     </span>
                   </span>
                   <span className="inline-flex items-center gap-1.5">
-                    <span className="text-zinc-400">Serviço</span>
+                    <span className="text-body">Serviço</span>
                     <span className="font-medium">
                       {item.servicos?.nome ?? "—"}
                     </span>
@@ -420,7 +422,7 @@ export default function AdminPage() {
                         type="button"
                         onClick={() => handleConfirmar(item)}
                         disabled={cancelado || confirmado}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400 disabled:ring-zinc-200 disabled:hover:bg-zinc-100"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:bg-surface disabled:text-muted disabled:ring-border disabled:hover:bg-surface"
                       >
                         <IconeWhatsApp />
                         Confirmar agendamento
@@ -430,7 +432,7 @@ export default function AdminPage() {
                         type="button"
                         onClick={() => setAgendamentoParaCancelar(item)}
                         disabled={cancelado}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400 disabled:ring-zinc-200 disabled:hover:bg-zinc-100"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-surface disabled:text-muted disabled:ring-border disabled:hover:bg-surface"
                       >
                         <IconeWhatsApp />
                         Cancelar agendamento
@@ -456,18 +458,18 @@ export default function AdminPage() {
           onClick={() => setAgendamentoParaCancelar(null)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-lg ring-1 ring-zinc-100"
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
             onClick={(e) => e.stopPropagation()}
           >
             <h2
               id="titulo-cancelar"
-              className="text-lg font-semibold text-zinc-900"
+              className="text-lg font-semibold text-heading"
             >
               Cancelar agendamento
             </h2>
-            <p className="mt-2 text-sm text-zinc-600">
+            <p className="mt-2 text-sm text-body">
               Tem certeza que deseja cancelar o agendamento de{" "}
-              <span className="font-medium text-zinc-900">
+              <span className="font-medium text-heading">
                 {agendamentoParaCancelar.nome_cliente}
               </span>
               ?
@@ -485,7 +487,7 @@ export default function AdminPage() {
               <button
                 type="button"
                 onClick={() => setAgendamentoParaCancelar(null)}
-                className="flex-1 rounded-lg bg-white px-3 py-2 text-sm font-medium text-zinc-700 ring-1 ring-zinc-300 transition hover:bg-zinc-50"
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar
               </button>

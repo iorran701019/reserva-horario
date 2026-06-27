@@ -35,21 +35,21 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 px-4 py-10">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-surface px-4 py-10">
       <div className="mx-auto w-full max-w-sm">
         <header className="mb-6 text-center">
-          <h1 className="text-2xl font-bold text-zinc-900">Entrar</h1>
-          <p className="mt-1 text-sm text-zinc-500">
+          <h1 className="text-2xl font-bold text-heading">Entrar</h1>
+          <p className="mt-1 text-sm text-body">
             Acesso restrito.
           </p>
         </header>
 
         <form
           onSubmit={handleSubmit}
-          className="space-y-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-zinc-100"
+          className="space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border"
         >
           <div>
-            <label htmlFor="email" className="mb-1 block text-sm font-medium text-zinc-700">
+            <label htmlFor="email" className="mb-1 block text-sm font-medium text-body">
               E-mail
             </label>
             <input
@@ -61,12 +61,12 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               placeholder="voce@exemplo.com"
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
             />
           </div>
 
           <div>
-            <label htmlFor="senha" className="mb-1 block text-sm font-medium text-zinc-700">
+            <label htmlFor="senha" className="mb-1 block text-sm font-medium text-body">
               Senha
             </label>
             <input
@@ -78,7 +78,7 @@ export default function LoginPage() {
               onChange={(e) => setSenha(e.target.value)}
               required
               placeholder="Sua senha"
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
             />
           </div>
 
