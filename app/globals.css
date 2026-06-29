@@ -80,11 +80,12 @@ a:focus-visible, button:focus-visible {
 .fc-timegrid-event .fc-event-main-frame {
   display: flex;
   flex-direction: column;
-  justify-content: safe center;   /* centraliza se couber; topo se apertar */
+  justify-content: flex-start;   /* título fixo no topo; horário abaixo */
   align-items: center;
   text-align: center;
   gap: 1px;
   height: 100%;
+  overflow: hidden;
 }
 .fc-timegrid-event .fc-event-title-container { order: 1; flex-grow: 0; }
 .fc-timegrid-event .fc-event-time {
