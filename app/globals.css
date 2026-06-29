@@ -72,25 +72,18 @@ a:focus-visible, button:focus-visible {
   .fc-theme-standard .fc-list-day-cushion { padding: 0.5rem 0.6rem; }
 }
 
-/* Eventos só nas views de grade de horário (timeGrid — Dia/Semana): título
-   (nome·serviço) primeiro, horário depois, centralizado na horizontal e na
-   vertical só quando há sobra (senão encosta no topo via `safe center`).
-   Específico de evento timeGrid — vale em qualquer tela. */
-.fc-timegrid-event .fc-event-main { padding: 2px 4px; }
-.fc-timegrid-event .fc-event-main-frame {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;   /* título fixo no topo; horário abaixo */
-  align-items: center;
+/* Eventos das views de grade de horário (timeGrid — Dia/Semana). O markup é
+   nosso (via eventContent em PainelCalendario.js): título (nome·serviço) fixo
+   no topo e sempre visível; a hora vem abaixo e é o que corta no bloco curto. */
+.fc-timegrid-event .fc-event-main { padding: 0; }
+.ag-evento {
+  display: block;
   text-align: center;
-  gap: 1px;
   height: 100%;
   overflow: hidden;
+  padding: 2px 4px;
+  box-sizing: border-box;
+  line-height: 1.18;
 }
-.fc-timegrid-event .fc-event-title-container { order: 1; flex-grow: 0; }
-.fc-timegrid-event .fc-event-time {
-  order: 2; font-weight: 400; font-size: 0.7rem; opacity: 0.85;
-}
-.fc-timegrid-event .fc-event-title {
-  font-weight: 600; white-space: normal; line-height: 1.15;
-}
+.ag-evento-titulo { font-weight: 600; }
+.ag-evento-hora { font-weight: 400; font-size: 0.85em; opacity: 0.85; white-space: nowrap; }

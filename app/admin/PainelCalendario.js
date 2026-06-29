@@ -31,6 +31,27 @@ function minParaHora(total) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`;
 }
 
+// Abreviação de nome/serviço usada só no rótulo dos eventos timeGrid (espaço
+// apertado). Partículas ("de", "da"...) não viram sobrenome.
+const PARTICULAS = new Set(["da", "de", "do", "das", "dos", "di", "du", "e"]);
+function abreviarNome(nome) {
+  const partes = (nome || "").trim().split(/\s+/).filter(Boolean);
+  if (partes.length <= 1) return partes[0] || "";
+  const primeiro = partes[0];
+  let sobrenome = null;
+  for (let i = partes.length - 1; i >= 1; i--) {
+    if (!PARTICULAS.has(partes[i].toLowerCase())) { sobrenome = partes[i]; break; }
+  }
+  return sobrenome ? `${primeiro} ${sobrenome[0].toUpperCase()}.` : primeiro;
+}
+function abreviarServico(servico) {
+  return (servico || "").trim().split(/\s+/).filter(Boolean).map((p, i) => {
+    const cap = p[0].toUpperCase() + p.slice(1).toLowerCase();
+    return i === 0 ? cap : (cap.length > 4 ? cap.slice(0, 4) + "." : cap);
+  }).join(" ");
+}
+const hhmm = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+
 // Calendário do Painel. Recebe `agendamentos` já carregado pela página (sem
 // fetch novo) e deriva os eventos pendentes/confirmados. View inicial e
 // toolbars são responsivas (mobile-first); o `key` reinicia o calendário ao
@@ -74,7 +95,12 @@ export default function PainelCalendario({ agendamentos }) {
         backgroundColor: cor.fundo,
         borderColor: cor.borda,
         textColor: cor.texto,
-        extendedProps: { agendamento: a },
+        extendedProps: {
+          agendamento: a,
+          // Valores crus do mesmo par usado no `title`, p/ abreviar no rótulo.
+          nome_cliente: a.nome_cliente,
+          servico: a.servicos?.nome ?? "serviço",
+        },
       };
     });
 
@@ -114,6 +140,21 @@ export default function PainelCalendario({ agendamentos }) {
       eventTimeFormat={FORMATO_24H}
       slotLabelFormat={FORMATO_24H}
       events={eventos}
+      eventContent={(arg) => {
+        // Só assumimos o markup nas views de grade de horário (Dia/Semana);
+        // nas demais (Mês/Lista) devolvemos undefined pro padrão do FullCalendar
+        // (título completo).
+        if (!arg.view.type.startsWith("timeGrid")) return undefined;
+        const nome = abreviarNome(arg.event.extendedProps.nome_cliente);
+        const servico = abreviarServico(arg.event.extendedProps.servico);
+        const hora = `${hhmm(arg.event.start)} - ${hhmm(arg.event.end)}`;
+        return (
+          <div className="ag-evento">
+            <span className="ag-evento-titulo">{nome} - {servico}</span>{" "}
+            <span className="ag-evento-hora">- {hora}</span>
+          </div>
+        );
+      }}
       eventClick={(info) => {
         // Inerte por enquanto — as ações vêm na leva B.
         console.log(info.event.extendedProps.agendamento);
