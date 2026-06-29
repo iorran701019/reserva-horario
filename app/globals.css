@@ -49,3 +49,25 @@ a:focus-visible, button:focus-visible {
     scroll-behavior: auto !important;
   }
 }
+
+/* FullCalendar (Painel do /admin). CSS é auto-injetado pela lib v6; aqui só
+   ajustamos tokens e o layout mobile pra não estourar em telas estreitas. */
+.fc {
+  --fc-border-color: #e7e5e4;
+  --fc-page-bg-color: transparent;
+  --fc-today-bg-color: rgba(16, 185, 129, 0.06);
+  --fc-now-indicator-color: #ef4444;
+  --fc-small-font-size: 0.8rem;
+}
+
+@media (max-width: 767px) {
+  .fc .fc-toolbar.fc-header-toolbar { flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem; }
+  .fc .fc-footer-toolbar { margin-top: 0.6rem; }
+  .fc .fc-toolbar-title { font-size: 1rem; }
+  .fc .fc-button { padding: 0.4rem 0.65rem; font-size: 0.8rem; min-height: 40px; }
+  .fc .fc-col-header-cell-cushion,
+  .fc .fc-daygrid-day-number { font-size: 0.72rem; padding: 2px 4px; }
+  .fc .fc-daygrid-event { font-size: 0.72rem; padding: 1px 3px; white-space: normal; }
+  .fc .fc-list-event td { padding: 0.6rem 0.5rem; }
+  .fc-theme-standard .fc-list-day-cushion { padding: 0.5rem 0.6rem; }
+}

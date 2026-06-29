@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { linkWhatsApp } from "@/lib/whatsapp";
 import Hero from "@/components/Hero";
+import PainelCalendario from "./PainelCalendario";
 
 // Formata "2026-06-25" como "25/06". Mantém simples; sem libs de data.
 function formatarData(data) {
@@ -41,6 +42,16 @@ function formatarDiaCabecalho(iso) {
   return `${DIAS_ABREV[d.getDay()]}, ${formatarData(iso)}`;
 }
 
+// timestamptz do Postgres (lembrete_enviado_em) -> "DD/MM HH:MM" em horário
+// LOCAL. Reaproveita dataLocalISO + formatarData (DD/MM) e formatarHorario.
+function formatarEnviadoEm(timestamp) {
+  if (!timestamp) return "—";
+  const d = new Date(timestamp);
+  const hora = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${formatarData(dataLocalISO(d))} ${formatarHorario(`${hora}:${min}`)}`;
+}
+
 // Em qual aba o item se encaixa. 'confirmado' e 'cancelado' são explícitos;
 // qualquer outra coisa (inclusive null/desconhecido) cai em 'pendente', pra
 // nenhum agendamento sumir de todas as abas.
@@ -75,8 +86,15 @@ function IconeWhatsApp({ className = "h-4 w-4" }) {
   );
 }
 
-// Abas na ordem em que aparecem na barra. As três primeiras filtram por
-// status; "agenda" é uma visão à parte (próximos dias agrupados).
+// Abas-pai do topo. "Agendamentos" reúne as sub-abas de status + a Agenda;
+// "Painel" mostra o calendário (FullCalendar).
+const ABAS_PAI = [
+  { id: "agendamentos", rotulo: "Agendamentos" },
+  { id: "painel", rotulo: "Painel" },
+];
+
+// Sub-abas dentro de "Agendamentos". As três primeiras filtram por status;
+// "agenda" é uma visão à parte (próximos dias agrupados).
 const ABAS = [
   { id: "pendente", rotulo: "Pendentes" },
   { id: "confirmado", rotulo: "Confirmados" },
@@ -92,6 +110,11 @@ const TEXTO_VAZIO = {
   agenda: "Nenhum horário agendado a partir de hoje.",
 };
 
+// Mensagem do botão "Lembrete" da Agenda. Edite o texto à vontade — recebe
+// nome do cliente, data (DD/MM), horário (HH:MM) e nome do serviço.
+const MENSAGEM_LEMBRETE = ({ nome, data, hora, servico }) =>
+  `Olá ${nome}! Passando para lembrar do seu horário no dia ${data} às ${hora} para ${servico}. Qualquer dúvida, é só responder por aqui.`;
+
 // Abre a conversa do WhatsApp do cliente em nova aba, com a mensagem pronta.
 // noopener,noreferrer replicam o rel="noopener noreferrer" de um <a target=_blank>.
 function abrirWhatsApp(telefone, mensagem) {
@@ -104,7 +127,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos() {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, created_at, servicos(nome, duracao_min)")
+    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, servicos(nome, duracao_min)")
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
 
@@ -122,21 +145,29 @@ export default function AdminPage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
 
-  // Aba de status atualmente visível. A filtragem é derivada do status de cada
-  // item — não há lista duplicada por aba.
+  // Aba-pai do topo: "agendamentos" (listas/Agenda) ou "painel" (calendário).
+  const [viewPai, setViewPai] = useState("agendamentos");
+
+  // Sub-aba de status/Agenda atualmente visível. A filtragem é derivada do
+  // status de cada item — não há lista duplicada por aba.
   const [abaAtiva, setAbaAtiva] = useState("pendente");
 
   // Agendamento aguardando confirmação de cancelamento (controla o modal).
   // null = nenhum modal aberto.
   const [agendamentoParaCancelar, setAgendamentoParaCancelar] = useState(null);
 
-  // Reflete o novo status no estado local, atualizando só o item alterado
-  // (evita refazer o fetch inteiro). O badge e o destaque âmbar mudam
+  // Aplica um patch a um único item no estado local (evita refazer o fetch
+  // inteiro). Caminho único de "refresh" otimista usado pelos handlers.
+  function atualizarItemLocal(id, patch) {
+    setAgendamentos((atuais) =>
+      atuais.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    );
+  }
+
+  // Reflete o novo status no estado local. O badge e o destaque âmbar mudam
   // automaticamente quando o status deixa de ser 'pendente'.
   function atualizarStatusLocal(id, status) {
-    setAgendamentos((atuais) =>
-      atuais.map((item) => (item.id === id ? { ...item, status } : item))
-    );
+    atualizarItemLocal(id, { status });
   }
 
   // Botão A: grava o status 'confirmado' no banco e, se der certo, abre o
@@ -193,6 +224,36 @@ export default function AdminPage() {
       )} às ${formatarHorario(agendamento.horario)} foi cancelado. Caso queira reagendar, acesse o link: ${process.env.NEXT_PUBLIC_URL_BASE}/agendar .`
     );
     setAgendamentoParaCancelar(null);
+  }
+
+  // Botão Lembrete/Reenviar da Agenda: abre o WhatsApp (mesmo caminho de hoje)
+  // e, em seguida, persiste o envio em lembrete_enviado_em pelo MESMO caminho
+  // de update dos handlers de status — assim o "Enviado em ..." sobrevive ao
+  // auto-refresh e ao reload (não fica só no estado do React).
+  async function handleEnviarLembrete(agendamento) {
+    abrirWhatsApp(
+      agendamento.telefone,
+      MENSAGEM_LEMBRETE({
+        nome: agendamento.nome_cliente,
+        data: formatarData(agendamento.data),
+        hora: formatarHorario(agendamento.horario),
+        servico: agendamento.servicos?.nome ?? "serviço",
+      })
+    );
+
+    const enviadoEm = new Date().toISOString();
+    const { error } = await supabase
+      .from("agendamentos")
+      .update({ lembrete_enviado_em: enviadoEm })
+      .eq("id", agendamento.id);
+
+    if (error) {
+      setErro(`Não foi possível registrar o envio do lembrete: ${error.message}`);
+      return;
+    }
+
+    setErro("");
+    atualizarItemLocal(agendamento.id, { lembrete_enviado_em: enviadoEm });
   }
 
   // Verifica a sessão ao montar e fica ouvindo mudanças (login/logout em
@@ -360,6 +421,27 @@ export default function AdminPage() {
           </button>
         </header>
 
+        {/* Abas-pai: Agendamentos (listas/Agenda) | Painel (calendário). */}
+        <div className="mb-4 flex gap-1 rounded-xl bg-surface p-1">
+          {ABAS_PAI.map((aba) => {
+            const ativa = viewPai === aba.id;
+            return (
+              <button
+                key={aba.id}
+                type="button"
+                onClick={() => setViewPai(aba.id)}
+                className={`flex-1 rounded-lg px-2 py-2 text-sm font-semibold transition ${
+                  ativa
+                    ? "bg-card text-heading shadow-sm ring-1 ring-border"
+                    : "text-body hover:text-heading"
+                }`}
+              >
+                {aba.rotulo}
+              </button>
+            );
+          })}
+        </div>
+
         {carregando && (
           <p className="rounded-lg bg-card px-4 py-3 text-sm text-body shadow-sm ring-1 ring-border">
             Carregando agendamentos...
@@ -372,9 +454,9 @@ export default function AdminPage() {
           </p>
         )}
 
-        {!carregando && !erro && (
+        {!carregando && !erro && viewPai === "agendamentos" && (
           <>
-            {/* Barra de abas por status. A aba ativa ganha fundo branco +
+            {/* Barra de sub-abas por status. A aba ativa ganha fundo branco +
                 anel; as demais ficam neutras. O contador vem das contagens. */}
             <div className="mb-4 flex gap-1 rounded-xl bg-surface p-1">
               {ABAS.map((aba) => {
@@ -471,6 +553,60 @@ export default function AdminPage() {
                                   {item.nome_cliente}
                                 </span>
                                 <span>{item.telefone}</span>
+
+                                {/* Botões contextuais ao status. Pendente:
+                                    Confirmar/Cancelar chamam os MESMOS handlers
+                                    das abas de status (incl. o modal de
+                                    cancelamento) — o refresh deles faz a linha
+                                    migrar sozinha. Confirmado: só o Lembrete. */}
+                                {item.status === "pendente" ? (
+                                  <div className="ml-auto flex shrink-0 items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleConfirmar(item)}
+                                      className="inline-flex items-center gap-1.5 rounded-lg bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
+                                    >
+                                      <IconeWhatsApp className="h-3.5 w-3.5" />
+                                      Confirmar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setAgendamentoParaCancelar(item)}
+                                      className="inline-flex items-center gap-1.5 rounded-lg bg-card px-2.5 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                                    >
+                                      <IconeWhatsApp className="h-3.5 w-3.5" />
+                                      Cancelar
+                                    </button>
+                                  </div>
+                                ) : item.lembrete_enviado_em ? (
+                                  /* Lembrete já enviado: rótulo discreto +
+                                     "Reenviar" (mesmo handler, regrava now()). */
+                                  <div className="ml-auto flex shrink-0 items-center gap-2">
+                                    <span className="text-xs text-muted">
+                                      Lembrete enviado em{" "}
+                                      {formatarEnviadoEm(item.lembrete_enviado_em)}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleEnviarLembrete(item)}
+                                      className="inline-flex items-center gap-1.5 rounded-lg bg-card px-2.5 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                                    >
+                                      <IconeWhatsApp className="h-3.5 w-3.5" />
+                                      Reenviar lembrete
+                                    </button>
+                                  </div>
+                                ) : (
+                                  /* Lembrete ainda não enviado: abre o WhatsApp
+                                     e persiste o envio (handleEnviarLembrete). */
+                                  <button
+                                    type="button"
+                                    onClick={() => handleEnviarLembrete(item)}
+                                    className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-card px-2.5 py-1 text-xs font-medium text-green-700 ring-1 ring-green-200 transition hover:bg-green-50"
+                                  >
+                                    <IconeWhatsApp className="h-3.5 w-3.5" />
+                                    Lembrete
+                                  </button>
+                                )}
                               </div>
                             </li>
                           ))}
@@ -490,7 +626,10 @@ export default function AdminPage() {
           </>
         )}
 
-        {!carregando && !erro && visiveis.length > 0 && (
+        {!carregando &&
+          !erro &&
+          viewPai === "agendamentos" &&
+          visiveis.length > 0 && (
           <ul className="space-y-3">
             {visiveis.map((item) => {
               // Destaque âmbar de nível único: todo 'pendente' (precisa de ação)
@@ -575,6 +714,12 @@ export default function AdminPage() {
               );
             })}
           </ul>
+        )}
+
+        {/* Painel: calendário FullCalendar derivado dos agendamentos já
+            carregados (pendentes/confirmados). Foco em uso mobile. */}
+        {!carregando && !erro && viewPai === "painel" && (
+          <PainelCalendario agendamentos={agendamentos} />
         )}
       </div>
 
