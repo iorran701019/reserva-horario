@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { linkWhatsApp } from "@/lib/whatsapp";
+import { linkWhatsApp, MENSAGEM_LEMBRETE, MENSAGEM_CONTATO } from "@/lib/whatsapp";
+import { classificarAgendamento, fimDoAtendimento } from "@/lib/particao";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
+import FormularioAgendamento from "@/components/FormularioAgendamento";
 
 // Formata "2026-06-25" como "25/06". Mantém simples; sem libs de data.
 function formatarData(data) {
@@ -20,45 +22,29 @@ function formatarHorario(horario) {
   return horario.slice(0, 5);
 }
 
-// Abreviações de dia da semana no padrão de Date.getDay() (0=domingo).
-const DIAS_ABREV = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-
-// Date -> "YYYY-MM-DD" em horário LOCAL. Mesma convenção do resto do código
-// (dataDeHoje no /agendar, diaDaSemana em lib/horarios): componentes locais do
-// Date, nunca new Date("YYYY-MM-DD") — que seria interpretada como UTC.
-function dataLocalISO(d = new Date()) {
-  const ano = d.getFullYear();
-  const mes = String(d.getMonth() + 1).padStart(2, "0");
-  const dia = String(d.getDate()).padStart(2, "0");
-  return `${ano}-${mes}-${dia}`;
+// Hora "HH:MM" em horário LOCAL a partir de um Date (ex.: o FIM do atendimento).
+function formatarHoraLocal(d) {
+  const hora = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${hora}:${min}`;
 }
 
-// "2026-07-16" -> "Qua, 16/07". Parse manual (componentes locais) p/ evitar o
-// fuso UTC; reaproveita formatarData no trecho dd/mm.
-function formatarDiaCabecalho(iso) {
-  if (!iso) return "—";
-  const [ano, mes, dia] = iso.split("-").map(Number);
-  const d = new Date(ano, mes - 1, dia);
-  return `${DIAS_ABREV[d.getDay()]}, ${formatarData(iso)}`;
+// preco_centavos (ex.: 3500) -> "R$ 35,00". Mesma convenção do /agendar.
+function formatarPreco(centavos) {
+  return (centavos / 100).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
 }
 
 // timestamptz do Postgres (lembrete_enviado_em) -> "DD/MM HH:MM" em horário
-// LOCAL. Reaproveita dataLocalISO + formatarData (DD/MM) e formatarHorario.
+// LOCAL (componentes do Date, nunca UTC).
 function formatarEnviadoEm(timestamp) {
   if (!timestamp) return "—";
   const d = new Date(timestamp);
-  const hora = String(d.getHours()).padStart(2, "0");
-  const min = String(d.getMinutes()).padStart(2, "0");
-  return `${formatarData(dataLocalISO(d))} ${formatarHorario(`${hora}:${min}`)}`;
-}
-
-// Em qual aba o item se encaixa. 'confirmado' e 'cancelado' são explícitos;
-// qualquer outra coisa (inclusive null/desconhecido) cai em 'pendente', pra
-// nenhum agendamento sumir de todas as abas.
-function abaDoStatus(status) {
-  if (status === "confirmado") return "confirmado";
-  if (status === "cancelado") return "cancelado";
-  return "pendente";
+  const dia = String(d.getDate()).padStart(2, "0");
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dia}/${mes} ${formatarHoraLocal(d)}`;
 }
 
 // Cores do badge de status. Cai num cinza neutro pra status desconhecido.
@@ -70,6 +56,27 @@ function classesStatus(status) {
   };
   return mapa[status] ?? "bg-surface text-body ring-border";
 }
+
+// Categoria de exibição de um item arquivado (aba Histórico). O status ORIGINAL
+// não muda no banco — isto é só rótulo derivado. Dentro do histórico, todo item
+// não-cancelado já tem o fim no passado (ver classificarAgendamento), então o
+// status basta pra escolher a categoria:
+//   confirmado -> "concluido" (atendido)
+//   cancelado  -> "cancelado"
+//   pendente (ou desconhecido) -> "caducado" (passou sem confirmar)
+function rotuloHistorico(item) {
+  if (item.status === "cancelado") return "cancelado";
+  if (item.status === "confirmado") return "concluido";
+  return "caducado";
+}
+
+// Texto + cores do badge por categoria do histórico. Concluído em verde
+// apagado, caducado neutro/cinza, cancelado em vermelho apagado.
+const HISTORICO_META = {
+  concluido: { rotulo: "Concluído", classe: "bg-green-50 text-green-600 ring-green-100" },
+  caducado: { rotulo: "Caducado", classe: "bg-surface text-body ring-border" },
+  cancelado: { rotulo: "Cancelado", classe: "bg-red-50 text-red-500 ring-red-100" },
+};
 
 // Ícone do WhatsApp. Herda a cor do texto (fill="currentColor") e o tamanho
 // via className, então serve tanto pro botão verde quanto pro vermelho.
@@ -86,34 +93,24 @@ function IconeWhatsApp({ className = "h-4 w-4" }) {
   );
 }
 
-// Abas-pai do topo. "Agendamentos" reúne as sub-abas de status + a Agenda;
-// "Painel" mostra o calendário (FullCalendar).
+// Abas-pai do topo, partição DERIVADA (lib/particao) — nenhum status novo no
+// banco. "Pendentes" é o inbox (pendentes futuros que precisam de ação);
+// "Painel" mostra o calendário; "Histórico" e "Agendar" entram em breve.
 const ABAS_PAI = [
-  { id: "agendamentos", rotulo: "Agendamentos" },
+  { id: "pendentes", rotulo: "Pendentes" },
   { id: "painel", rotulo: "Painel" },
+  { id: "historico", rotulo: "Histórico" },
+  { id: "agendar", rotulo: "Agendar" },
 ];
 
-// Sub-abas dentro de "Agendamentos". As três primeiras filtram por status;
-// "agenda" é uma visão à parte (próximos dias agrupados).
-const ABAS = [
-  { id: "pendente", rotulo: "Pendentes" },
-  { id: "confirmado", rotulo: "Confirmados" },
-  { id: "cancelado", rotulo: "Cancelados" },
-  { id: "agenda", rotulo: "Agenda" },
+// Filtros da aba Histórico (client-side, por categoria de rotuloHistorico).
+// "todos" não filtra. Os ids batem com as categorias de HISTORICO_META.
+const FILTROS_HISTORICO = [
+  { id: "concluido", rotulo: "Concluído" },
+  { id: "caducado", rotulo: "Caducado" },
+  { id: "cancelado", rotulo: "Cancelado" },
+  { id: "todos", rotulo: "Todos" },
 ];
-
-// Texto discreto quando a aba não tem nenhum item.
-const TEXTO_VAZIO = {
-  pendente: "Nenhum agendamento pendente.",
-  confirmado: "Nenhum agendamento confirmado.",
-  cancelado: "Nenhum agendamento cancelado.",
-  agenda: "Nenhum horário agendado a partir de hoje.",
-};
-
-// Mensagem do botão "Lembrete" da Agenda. Edite o texto à vontade — recebe
-// nome do cliente, data (DD/MM), horário (HH:MM) e nome do serviço.
-const MENSAGEM_LEMBRETE = ({ nome, data, hora, servico }) =>
-  `Olá ${nome}! Passando para lembrar do seu horário no dia ${data} às ${hora} para ${servico}. Qualquer dúvida, é só responder por aqui.`;
 
 // Abre a conversa do WhatsApp do cliente em nova aba, com a mensagem pronta.
 // noopener,noreferrer replicam o rel="noopener noreferrer" de um <a target=_blank>.
@@ -127,11 +124,19 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos() {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, servicos(nome, duracao_min)")
+    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, servicos(nome, duracao_min, preco_centavos)")
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
 
-  return { dados: data ?? [], error };
+  // Eleva a duração do serviço ao topo do item (item.duracao_min), preservando
+  // o objeto servicos aninhado (usado em nome do serviço, calendário etc.).
+  // Assim classificarAgendamento (lib/particao) lê item.duracao_min direto.
+  const dados = (data ?? []).map((item) => ({
+    ...item,
+    duracao_min: item.servicos?.duracao_min ?? null,
+  }));
+
+  return { dados, error };
 }
 
 export default function AdminPage() {
@@ -145,16 +150,26 @@ export default function AdminPage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
 
-  // Aba-pai do topo: "agendamentos" (listas/Agenda) ou "painel" (calendário).
-  const [viewPai, setViewPai] = useState("agendamentos");
-
-  // Sub-aba de status/Agenda atualmente visível. A filtragem é derivada do
-  // status de cada item — não há lista duplicada por aba.
-  const [abaAtiva, setAbaAtiva] = useState("pendente");
+  // Aba-pai do topo (ver ABAS_PAI): "pendentes" (inbox), "painel" (calendário),
+  // "historico" e "agendar". A partição é derivada (lib/particao), sem status novo.
+  const [viewPai, setViewPai] = useState("pendentes");
 
   // Agendamento aguardando confirmação de cancelamento (controla o modal).
   // null = nenhum modal aberto.
   const [agendamentoParaCancelar, setAgendamentoParaCancelar] = useState(null);
+
+  // Agendamento confirmado selecionado no Painel (controla o modal de detalhe/
+  // ações). Guardamos o id; os dados vivos saem de `agendamentos` no render,
+  // pra refletir na hora o patch do lembrete. null = modal fechado.
+  const [idSelecionado, setIdSelecionado] = useState(null);
+
+  // Filtro ativo da aba Histórico (ver FILTROS_HISTORICO). "todos" = sem filtro.
+  const [filtroHistorico, setFiltroHistorico] = useState("todos");
+
+  // Aba Agendar: `agendarKey` remonta o FormularioAgendamento pra zerá-lo após
+  // criar; `avisoAgendar` mostra a confirmação inline do último cadastro.
+  const [agendarKey, setAgendarKey] = useState(0);
+  const [avisoAgendar, setAvisoAgendar] = useState("");
 
   // Aplica um patch a um único item no estado local (evita refazer o fetch
   // inteiro). Caminho único de "refresh" otimista usado pelos handlers.
@@ -168,6 +183,14 @@ export default function AdminPage() {
   // automaticamente quando o status deixa de ser 'pendente'.
   function atualizarStatusLocal(id, status) {
     atualizarItemLocal(id, { status });
+  }
+
+  // Refaz o fetch completo e substitui a lista. Usado após criar um agendamento
+  // na aba Agendar — a linha nova não existe no estado local, então um patch
+  // otimista não basta; recarregamos pelo mesmo helper único de query.
+  async function recarregarAgendamentos() {
+    const { dados, error } = await buscarAgendamentos();
+    if (!error) setAgendamentos(dados);
   }
 
   // Botão A: grava o status 'confirmado' no banco e, se der certo, abre o
@@ -226,26 +249,19 @@ export default function AdminPage() {
     setAgendamentoParaCancelar(null);
   }
 
-  // Botão Lembrete/Reenviar da Agenda: abre o WhatsApp (mesmo caminho de hoje)
-  // e, em seguida, persiste o envio em lembrete_enviado_em pelo MESMO caminho
-  // de update dos handlers de status — assim o "Enviado em ..." sobrevive ao
-  // auto-refresh e ao reload (não fica só no estado do React).
-  async function handleEnviarLembrete(agendamento) {
-    abrirWhatsApp(
-      agendamento.telefone,
-      MENSAGEM_LEMBRETE({
-        nome: agendamento.nome_cliente,
-        data: formatarData(agendamento.data),
-        hora: formatarHorario(agendamento.horario),
-        servico: agendamento.servicos?.nome ?? "serviço",
-      })
-    );
+  // Botão Lembrete/Reenviar do modal de detalhe. PRIMEIRO abre o WhatsApp de
+  // forma SÍNCRONA no clique (window.open fora do gesto do usuário é bloqueado
+  // como pop-up). SÓ DEPOIS persiste o envio em lembrete_enviado_em e patcha o
+  // estado local pelo MESMO atualizarItemLocal dos outros handlers — o modal
+  // (dados vivos) reflete na hora e o botão vira "Reenviar lembrete".
+  async function handleEnviarLembrete(item) {
+    abrirWhatsApp(item.telefone, MENSAGEM_LEMBRETE(item));
 
-    const enviadoEm = new Date().toISOString();
+    const lembrete_enviado_em = new Date().toISOString();
     const { error } = await supabase
       .from("agendamentos")
-      .update({ lembrete_enviado_em: enviadoEm })
-      .eq("id", agendamento.id);
+      .update({ lembrete_enviado_em })
+      .eq("id", item.id);
 
     if (error) {
       setErro(`Não foi possível registrar o envio do lembrete: ${error.message}`);
@@ -253,7 +269,7 @@ export default function AdminPage() {
     }
 
     setErro("");
-    atualizarItemLocal(agendamento.id, { lembrete_enviado_em: enviadoEm });
+    atualizarItemLocal(item.id, { lembrete_enviado_em });
   }
 
   // Verifica a sessão ao montar e fica ouvindo mudanças (login/logout em
@@ -351,54 +367,46 @@ export default function AdminPage() {
     );
   }
 
-  // Quantos itens há em cada aba (derivado do status, recalculado a cada render).
-  const contagens = { pendente: 0, confirmado: 0, cancelado: 0 };
-  for (const item of agendamentos) {
-    contagens[abaDoStatus(item.status)] += 1;
-  }
+  // Inbox (aba "Pendentes"): partição DERIVADA, calculada por
+  // classificarAgendamento. São os pendentes ainda no futuro — pendentes que já
+  // caducaram caem em "historico" e somem daqui. `agendamentos` já vem ordenado
+  // por data asc + horário asc da query, então o inbox sai cronológico
+  // (mais próximo primeiro). Um único `agora` para classificar tudo no render.
+  const agora = new Date();
+  const inbox = agendamentos.filter(
+    (item) => classificarAgendamento(item, agora) === "inbox"
+  );
 
-  // Itens da aba ativa, já ordenados:
-  // - pendente/confirmado: data + horário CRESCENTE (mais próximo primeiro);
-  // - cancelado: created_at DECRESCENTE (mais recente primeiro).
-  const visiveis = agendamentos
-    .filter((item) => abaDoStatus(item.status) === abaAtiva)
+  // Histórico (aba "Histórico"): tudo arquivado — cancelados, pendentes
+  // caducados e confirmados concluídos. Ordenado do mais recente pro mais
+  // antigo (data+horário desc); a query vem asc, então invertemos a chave.
+  const historico = agendamentos
+    .filter((item) => classificarAgendamento(item, agora) === "historico")
     .sort((a, b) => {
-      if (abaAtiva === "cancelado") {
-        return (b.created_at ?? "").localeCompare(a.created_at ?? "");
-      }
       const chaveA = `${a.data ?? ""} ${a.horario ?? ""}`;
       const chaveB = `${b.data ?? ""} ${b.horario ?? ""}`;
-      return chaveA.localeCompare(chaveB);
+      return chaveB.localeCompare(chaveA);
     });
 
-  // --- Visão "Agenda": próximos dias agrupados ---
-  // "Hoje"/"amanhã" na MESMA convenção local do resto do código (componentes
-  // do Date, nunca UTC). Construir amanhã com getDate()+1 normaliza fim de mês.
-  const agora = new Date();
-  const hoje = dataLocalISO(agora);
-  const amanha = dataLocalISO(
-    new Date(agora.getFullYear(), agora.getMonth(), agora.getDate() + 1)
-  );
-
-  // Do dia de hoje em diante, só pendentes/confirmados. `agendamentos` já vem
-  // ordenado por data asc + horário asc da query, então o filtro preserva a
-  // ordem cronológica e o agrupamento por dia sai contíguo.
-  const itensAgenda = agendamentos.filter(
-    (item) =>
-      (item.data ?? "") >= hoje &&
-      (item.status === "pendente" || item.status === "confirmado")
-  );
-  contagens.agenda = itensAgenda.length;
-
-  const gruposAgenda = [];
-  for (const item of itensAgenda) {
-    let grupo = gruposAgenda[gruposAgenda.length - 1];
-    if (!grupo || grupo.data !== item.data) {
-      grupo = { data: item.data, itens: [] };
-      gruposAgenda.push(grupo);
-    }
-    grupo.itens.push(item);
+  // Contagem por categoria (Concluído/Caducado/Cancelado) + "todos", pros
+  // contadores das abas de filtro.
+  const contagensHistorico = { concluido: 0, caducado: 0, cancelado: 0, todos: historico.length };
+  for (const item of historico) {
+    contagensHistorico[rotuloHistorico(item)] += 1;
   }
+
+  // Lista visível: aplica o filtro client-side (todos = sem filtro).
+  const historicoVisivel =
+    filtroHistorico === "todos"
+      ? historico
+      : historico.filter((item) => rotuloHistorico(item) === filtroHistorico);
+
+  // Item do modal de detalhe, sempre lido VIVO de `agendamentos` pelo id — assim
+  // o patch do lembrete (atualizarItemLocal) aparece sem reabrir o modal.
+  const selecionado =
+    idSelecionado != null
+      ? agendamentos.find((item) => item.id === idSelecionado) ?? null
+      : null;
 
   return (
     <main className="min-h-screen bg-surface">
@@ -421,7 +429,7 @@ export default function AdminPage() {
           </button>
         </header>
 
-        {/* Abas-pai: Agendamentos (listas/Agenda) | Painel (calendário). */}
+        {/* Abas-pai: Pendentes (inbox) · Painel (calendário) · Histórico · Agendar. */}
         <div className="mb-4 flex gap-1 rounded-xl bg-surface p-1">
           {ABAS_PAI.map((aba) => {
             const ativa = viewPai === aba.id;
@@ -454,274 +462,347 @@ export default function AdminPage() {
           </p>
         )}
 
-        {!carregando && !erro && viewPai === "agendamentos" && (
+        {/* Pendentes (inbox): só os itens classificados como "inbox" — pendentes
+            ainda no futuro. Pendentes que já passaram caem em "historico" e
+            somem daqui. Confirmar/Cancelar usam os MESMOS handlers de sempre
+            (incl. o modal); o refresh derivado faz o item sair do inbox sozinho. */}
+        {!carregando && !erro && viewPai === "pendentes" && (
+          inbox.length === 0 ? (
+            <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
+              Nenhum agendamento pendente.
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {inbox.map((item) => (
+                <li
+                  key={item.id}
+                  // Todo item do inbox precisa de ação: destaque âmbar fixo.
+                  className="rounded-2xl bg-amber-50/60 p-4 shadow-sm ring-1 ring-amber-300 transition"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-heading">
+                        {item.nome_cliente}
+                      </p>
+                      <p className="mt-0.5 text-sm text-body">{item.telefone}</p>
+                    </div>
+
+                    <span
+                      className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classesStatus(
+                        item.status
+                      )}`}
+                    >
+                      {item.status ?? "—"}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 flex items-center gap-4 text-sm text-body">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="text-body">Data</span>
+                      <span className="font-medium">{formatarData(item.data)}</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="text-body">Horário</span>
+                      <span className="font-medium">
+                        {formatarHorario(item.horario)}
+                      </span>
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="text-body">Serviço</span>
+                      <span className="font-medium">
+                        {item.servicos?.nome ?? "—"}
+                      </span>
+                    </span>
+                  </div>
+
+                  <div className="mt-4 flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmar(item)}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
+                    >
+                      <IconeWhatsApp />
+                      Confirmar agendamento
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setAgendamentoParaCancelar(item)}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                    >
+                      <IconeWhatsApp />
+                      Cancelar agendamento
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )
+        )}
+
+        {/* Painel: calendário FullCalendar derivado dos agendamentos já
+            carregados (pendentes/confirmados). Foco em uso mobile. */}
+        {!carregando && !erro && viewPai === "painel" && (
+          <PainelCalendario
+            agendamentos={agendamentos}
+            onSelecionarConfirmado={(item) => setIdSelecionado(item.id)}
+          />
+        )}
+
+        {/* Histórico: tudo arquivado (classificarAgendamento === "historico"),
+            mais recente primeiro. Filtro por categoria + ação de reativação.
+            É lista (não calendário) — clique aqui NÃO abre o modal do Painel. */}
+        {!carregando && !erro && viewPai === "historico" && (
           <>
-            {/* Barra de sub-abas por status. A aba ativa ganha fundo branco +
-                anel; as demais ficam neutras. O contador vem das contagens. */}
+            {/* Filtros por categoria, com contador. "todos" não filtra. */}
             <div className="mb-4 flex gap-1 rounded-xl bg-surface p-1">
-              {ABAS.map((aba) => {
-                const ativa = abaAtiva === aba.id;
+              {FILTROS_HISTORICO.map((filtro) => {
+                const ativa = filtroHistorico === filtro.id;
                 return (
                   <button
-                    key={aba.id}
+                    key={filtro.id}
                     type="button"
-                    onClick={() => setAbaAtiva(aba.id)}
+                    onClick={() => setFiltroHistorico(filtro.id)}
                     className={`flex-1 rounded-lg px-2 py-2 text-sm font-medium transition ${
                       ativa
                         ? "bg-card text-heading shadow-sm ring-1 ring-border"
                         : "text-body hover:text-heading"
                     }`}
                   >
-                    {aba.rotulo}
+                    {filtro.rotulo}
                     <span
                       className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs font-semibold ${
-                        ativa
-                          ? "bg-surface text-body"
-                          : "bg-border text-body"
+                        ativa ? "bg-surface text-body" : "bg-border text-body"
                       }`}
                     >
-                      {contagens[aba.id]}
+                      {contagensHistorico[filtro.id]}
                     </span>
                   </button>
                 );
               })}
             </div>
 
-            {/* Visão Agenda: próximos dias agrupados, em ordem cronológica. */}
-            {abaAtiva === "agenda" &&
-              (gruposAgenda.length === 0 ? (
-                <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
-                  {TEXTO_VAZIO.agenda}
-                </p>
-              ) : (
-                <div className="space-y-6">
-                  {gruposAgenda.map((grupo) => {
-                    const ehHoje = grupo.data === hoje;
-                    const ehAmanha = grupo.data === amanha;
-                    const prefixo = ehHoje
-                      ? "Hoje — "
-                      : ehAmanha
-                      ? "Amanhã — "
-                      : "";
-                    // Hoje/amanhã ganham destaque: cabeçalho na cor primária e
-                    // cards com anel primário suave.
-                    const destacado = ehHoje || ehAmanha;
-
-                    return (
-                      <section key={grupo.data}>
-                        <h2
-                          className={`mb-2 text-sm font-semibold ${
-                            destacado ? "text-primary" : "text-heading"
-                          }`}
-                        >
-                          {prefixo}
-                          {formatarDiaCabecalho(grupo.data)}
-                        </h2>
-
-                        <ul className="space-y-2">
-                          {grupo.itens.map((item) => (
-                            <li
-                              key={item.id}
-                              className={`rounded-2xl bg-card p-4 shadow-sm ring-1 ${
-                                destacado ? "ring-primary/30" : "ring-border"
-                              }`}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="flex min-w-0 items-baseline gap-2">
-                                  <span className="font-semibold text-heading">
-                                    {formatarHorario(item.horario)}
-                                  </span>
-                                  <span className="truncate text-sm text-body">
-                                    {item.servicos?.nome ?? "—"}
-                                    {item.servicos?.duracao_min != null && (
-                                      <> · {item.servicos.duracao_min} min</>
-                                    )}
-                                  </span>
-                                </div>
-
-                                <span
-                                  className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classesStatus(
-                                    item.status
-                                  )}`}
-                                >
-                                  {item.status ?? "—"}
-                                </span>
-                              </div>
-
-                              <div className="mt-2 flex items-center gap-4 text-sm text-body">
-                                <span className="truncate font-medium text-heading">
-                                  {item.nome_cliente}
-                                </span>
-                                <span>{item.telefone}</span>
-
-                                {/* Botões contextuais ao status. Pendente:
-                                    Confirmar/Cancelar chamam os MESMOS handlers
-                                    das abas de status (incl. o modal de
-                                    cancelamento) — o refresh deles faz a linha
-                                    migrar sozinha. Confirmado: só o Lembrete. */}
-                                {item.status === "pendente" ? (
-                                  <div className="ml-auto flex shrink-0 items-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleConfirmar(item)}
-                                      className="inline-flex items-center gap-1.5 rounded-lg bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
-                                    >
-                                      <IconeWhatsApp className="h-3.5 w-3.5" />
-                                      Confirmar
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setAgendamentoParaCancelar(item)}
-                                      className="inline-flex items-center gap-1.5 rounded-lg bg-card px-2.5 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-                                    >
-                                      <IconeWhatsApp className="h-3.5 w-3.5" />
-                                      Cancelar
-                                    </button>
-                                  </div>
-                                ) : item.lembrete_enviado_em ? (
-                                  /* Lembrete já enviado: rótulo discreto +
-                                     "Reenviar" (mesmo handler, regrava now()). */
-                                  <div className="ml-auto flex shrink-0 items-center gap-2">
-                                    <span className="text-xs text-muted">
-                                      Lembrete enviado em{" "}
-                                      {formatarEnviadoEm(item.lembrete_enviado_em)}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleEnviarLembrete(item)}
-                                      className="inline-flex items-center gap-1.5 rounded-lg bg-card px-2.5 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-200 transition hover:bg-blue-50"
-                                    >
-                                      <IconeWhatsApp className="h-3.5 w-3.5" />
-                                      Reenviar lembrete
-                                    </button>
-                                  </div>
-                                ) : (
-                                  /* Lembrete ainda não enviado: abre o WhatsApp
-                                     e persiste o envio (handleEnviarLembrete). */
-                                  <button
-                                    type="button"
-                                    onClick={() => handleEnviarLembrete(item)}
-                                    className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-card px-2.5 py-1 text-xs font-medium text-green-700 ring-1 ring-green-200 transition hover:bg-green-50"
-                                  >
-                                    <IconeWhatsApp className="h-3.5 w-3.5" />
-                                    Lembrete
-                                  </button>
-                                )}
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      </section>
-                    );
-                  })}
-                </div>
-              ))}
-
-            {/* Abas de status: texto de vazio (a lista em si fica logo abaixo). */}
-            {abaAtiva !== "agenda" && visiveis.length === 0 && (
+            {historicoVisivel.length === 0 ? (
               <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
-                {TEXTO_VAZIO[abaAtiva]}
+                Nenhum agendamento no histórico.
               </p>
+            ) : (
+              <ul className="space-y-3">
+                {historicoVisivel.map((item) => {
+                  const meta = HISTORICO_META[rotuloHistorico(item)];
+                  return (
+                    <li
+                      key={item.id}
+                      className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-heading">
+                            {item.nome_cliente}
+                          </p>
+                          <p className="mt-0.5 text-sm text-body">
+                            {item.telefone}
+                          </p>
+                        </div>
+
+                        {/* Rótulo derivado (Concluído/Caducado/Cancelado). O
+                            status cru no banco NÃO muda. */}
+                        <span
+                          className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${meta.classe}`}
+                        >
+                          {meta.rotulo}
+                        </span>
+                      </div>
+
+                      <div className="mt-3 flex items-center gap-4 text-sm text-body">
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="text-body">Data</span>
+                          <span className="font-medium">
+                            {formatarData(item.data)}
+                          </span>
+                        </span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="text-body">Horário</span>
+                          <span className="font-medium">
+                            {formatarHorario(item.horario)}
+                          </span>
+                        </span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="text-body">Serviço</span>
+                          <span className="font-medium">
+                            {item.servicos?.nome ?? "—"}
+                          </span>
+                        </span>
+                      </div>
+
+                      <div className="mt-4">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            abrirWhatsApp(item.telefone, MENSAGEM_CONTATO(item))
+                          }
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
+                        >
+                          <IconeWhatsApp />
+                          Entrar em contato
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </>
         )}
 
-        {!carregando &&
-          !erro &&
-          viewPai === "agendamentos" &&
-          visiveis.length > 0 && (
-          <ul className="space-y-3">
-            {visiveis.map((item) => {
-              // Destaque âmbar de nível único: todo 'pendente' (precisa de ação)
-              // ganha um ring âmbar visível + fundo suave. Confirmado/cancelado
-              // ficam neutros — o âmbar sai sozinho quando o status muda.
-              const pendente = abaDoStatus(item.status) === "pendente";
-              return (
-              <li
-                key={item.id}
-                className={`rounded-2xl bg-card p-4 shadow-sm ring-1 transition ${
-                  pendente
-                    ? "bg-amber-50/60 ring-amber-300"
-                    : "ring-border"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-heading">
-                      {item.nome_cliente}
-                    </p>
-                    <p className="mt-0.5 text-sm text-body">{item.telefone}</p>
-                  </div>
+        {/* Agendar: o admin cria direto como "confirmado". Reaproveita o wizard
+            do /agendar (FormularioAgendamento). Ao concluir, refaz o fetch pro
+            novo confirmado aparecer no Painel; o WhatsApp é opcional (lembrete
+            depois, pelo modal do Painel) — nada é forçado aqui. */}
+        {!carregando && !erro && viewPai === "agendar" && (
+          <div className="mx-auto w-full max-w-md">
+            {avisoAgendar && (
+              <p className="mb-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-700 ring-1 ring-green-100">
+                {avisoAgendar}
+              </p>
+            )}
 
-                  <span
-                    className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classesStatus(
-                      item.status
-                    )}`}
-                  >
-                    {item.status ?? "—"}
-                  </span>
-                </div>
-
-                <div className="mt-3 flex items-center gap-4 text-sm text-body">
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="text-body">Data</span>
-                    <span className="font-medium">{formatarData(item.data)}</span>
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="text-body">Horário</span>
-                    <span className="font-medium">
-                      {formatarHorario(item.horario)}
-                    </span>
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="text-body">Serviço</span>
-                    <span className="font-medium">
-                      {item.servicos?.nome ?? "—"}
-                    </span>
-                  </span>
-                </div>
-
-                {/* "cancelado" é estado terminal: trava os dois botões da
-                    linha (apagados, sem clique). Não volta a outro status. */}
-                {(() => {
-                  const cancelado = item.status === "cancelado";
-                  const confirmado = item.status === "confirmado";
-                  return (
-                    <div className="mt-4 flex flex-col gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleConfirmar(item)}
-                        disabled={cancelado || confirmado}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:bg-surface disabled:text-muted disabled:ring-border disabled:hover:bg-surface"
-                      >
-                        <IconeWhatsApp />
-                        Confirmar agendamento
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setAgendamentoParaCancelar(item)}
-                        disabled={cancelado}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-surface disabled:text-muted disabled:ring-border disabled:hover:bg-surface"
-                      >
-                        <IconeWhatsApp />
-                        Cancelar agendamento
-                      </button>
-                    </div>
-                  );
-                })()}
-              </li>
-              );
-            })}
-          </ul>
-        )}
-
-        {/* Painel: calendário FullCalendar derivado dos agendamentos já
-            carregados (pendentes/confirmados). Foco em uso mobile. */}
-        {!carregando && !erro && viewPai === "painel" && (
-          <PainelCalendario agendamentos={agendamentos} />
+            <FormularioAgendamento
+              key={agendarKey}
+              status="confirmado"
+              rotuloSubmit="Criar agendamento confirmado"
+              onSucesso={async ({ form, horario }) => {
+                setAvisoAgendar(
+                  `Agendamento de ${form.nome} criado para ${formatarData(
+                    form.data
+                  )} às ${horario}.`
+                );
+                // Remonta o formulário limpo pro próximo cadastro.
+                setAgendarKey((k) => k + 1);
+                await recarregarAgendamentos();
+              }}
+            />
+          </div>
         )}
       </div>
+
+      {/* Modal de detalhe do confirmado (clique no Painel). Dados + ações de
+          agenda. Lê o item VIVO (`selecionado`); some se o id sair da lista. */}
+      {selecionado && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-detalhe"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setIdSelecionado(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h2
+                id="titulo-detalhe"
+                className="text-lg font-semibold text-heading"
+              >
+                Detalhes do agendamento
+              </h2>
+              <span
+                className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classesStatus(
+                  selecionado.status
+                )}`}
+              >
+                {selecionado.status ?? "—"}
+              </span>
+            </div>
+
+            {/* Dados do cliente + serviço + horários. dl simples (rótulo/valor). */}
+            <dl className="mt-4 space-y-2 text-sm">
+              <div className="flex justify-between gap-3">
+                <dt className="text-body">Cliente</dt>
+                <dd className="text-right font-medium text-heading">
+                  {selecionado.nome_cliente}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-body">Telefone</dt>
+                <dd className="text-right font-medium text-heading">
+                  {selecionado.telefone}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-body">Serviço</dt>
+                <dd className="text-right font-medium text-heading">
+                  {selecionado.servicos?.nome ?? "—"}
+                  {selecionado.servicos?.duracao_min != null && (
+                    <> · {selecionado.servicos.duracao_min} min</>
+                  )}
+                  {selecionado.servicos?.preco_centavos != null && (
+                    <> · {formatarPreco(selecionado.servicos.preco_centavos)}</>
+                  )}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-body">Data</dt>
+                <dd className="text-right font-medium text-heading">
+                  {formatarData(selecionado.data)}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-body">Horário</dt>
+                <dd className="text-right font-medium text-heading">
+                  {formatarHorario(selecionado.horario)} –{" "}
+                  {formatarHoraLocal(fimDoAtendimento(selecionado))}
+                </dd>
+              </div>
+            </dl>
+
+            {/* Bloco de agenda: estado do lembrete + ação (enviar/reenviar). */}
+            <div className="mt-5 border-t border-border pt-4">
+              {selecionado.lembrete_enviado_em && (
+                <p className="mb-2 text-xs text-muted">
+                  Lembrete enviado em{" "}
+                  {formatarEnviadoEm(selecionado.lembrete_enviado_em)}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => handleEnviarLembrete(selecionado)}
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
+              >
+                <IconeWhatsApp />
+                {selecionado.lembrete_enviado_em
+                  ? "Reenviar lembrete"
+                  : "Enviar lembrete"}
+              </button>
+            </div>
+
+            {/* Cancelar: FECHA este modal e abre o fluxo de cancelamento
+                existente (modal de confirmação → handleCancelar). Sem empilhar
+                dois modais. */}
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIdSelecionado(null);
+                  setAgendamentoParaCancelar(selecionado);
+                }}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+              >
+                <IconeWhatsApp />
+                Cancelar agendamento
+              </button>
+              <button
+                type="button"
+                onClick={() => setIdSelecionado(null)}
+                className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de confirmação do cancelamento. Só aparece quando há um
           agendamento "armado"; "Voltar" fecha sem efeito colateral. */}

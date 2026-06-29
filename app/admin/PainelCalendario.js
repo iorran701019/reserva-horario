@@ -7,11 +7,14 @@ import timeGridPlugin from "@fullcalendar/timegrid";
 import listPlugin from "@fullcalendar/list";
 import ptBrLocale from "@fullcalendar/core/locales/pt-br";
 import { HORA_ABERTURA, HORA_FECHAMENTO } from "@/lib/horarios";
+import { classificarAgendamento } from "@/lib/particao";
 
-// Cores dos eventos por status, coerentes com classesStatus dos badges:
-// pendente em âmbar, confirmado em verde (fundo claro / texto escuro).
+// Cores dos eventos pela partição DERIVADA (não pelo status cru):
+// - "inbox" (pendente) = OCUPAÇÃO CINZA neutra: segura o horário, mas o
+//   atendimento ainda precisa ser tratado no Inbox (aba Pendentes).
+// - "confirmado" = verde (fundo claro / texto escuro).
 const CORES_EVENTO = {
-  pendente: { fundo: "#fef3c7", borda: "#fcd34d", texto: "#92400e" },
+  pendente: { fundo: "#e5e7eb", borda: "#9ca3af", texto: "#374151" },
   confirmado: { fundo: "#dcfce7", borda: "#86efac", texto: "#166534" },
 };
 
@@ -56,7 +59,7 @@ const hhmm = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinu
 // fetch novo) e deriva os eventos pendentes/confirmados. View inicial e
 // toolbars são responsivas (mobile-first); o `key` reinicia o calendário ao
 // virar o breakpoint.
-export default function PainelCalendario({ agendamentos }) {
+export default function PainelCalendario({ agendamentos, onSelecionarConfirmado }) {
   // Começa em `false` (desktop) tanto no servidor quanto no cliente para não
   // divergir na hidratação; o efeito ajusta após montar. Nunca lemos `window`
   // durante o render.
@@ -70,23 +73,26 @@ export default function PainelCalendario({ agendamentos }) {
     return () => mq.removeEventListener("change", aplicar);
   }, []);
 
-  // Eventos: só pendentes/confirmados com data e horário. start/end em ISO
-  // LOCAL (sem "Z"); end = start + duracao_min. O registro completo vai em
-  // extendedProps (usado no clique na leva B).
+  // Eventos: só itens ATIVOS pela partição derivada (classificarAgendamento !==
+  // "historico"). Cancelados e caducados NÃO aparecem aqui (vão pro Histórico);
+  // confirmados "em andamento" continuam, pois só somem quando o FIM passa.
+  // Exige data/horário antes de classificar (classificarAgendamento parseia
+  // ambos). start/end em ISO LOCAL (sem "Z"); end = start + duracao_min. O
+  // registro completo vai em extendedProps (usado no clique na leva B).
   const eventos = agendamentos
-    .filter(
-      (a) =>
-        (a.status === "pendente" || a.status === "confirmado") &&
-        a.data &&
-        a.horario
-    )
+    .filter((a) => a.data && a.horario && classificarAgendamento(a) !== "historico")
     .map((a) => {
-      const cor = CORES_EVENTO[a.status] ?? CORES_EVENTO.pendente;
+      // "inbox" = pendente segurando o horário → bloco cinza, rótulo "Pendente"
+      // (ocupação a tratar no Inbox). Caso contrário, confirmado (verde).
+      const pendente = classificarAgendamento(a) === "inbox";
+      const cor = pendente ? CORES_EVENTO.pendente : CORES_EVENTO.confirmado;
       const inicioMin = horaParaMin(a.horario);
       const duracao = a.servicos?.duracao_min;
       return {
         id: String(a.id),
-        title: `${a.nome_cliente} · ${a.servicos?.nome ?? "serviço"}`,
+        title: pendente
+          ? "Pendente"
+          : `${a.nome_cliente} · ${a.servicos?.nome ?? "serviço"}`,
         start: `${a.data}T${minParaHora(inicioMin)}`,
         end:
           duracao != null
@@ -97,6 +103,8 @@ export default function PainelCalendario({ agendamentos }) {
         textColor: cor.texto,
         extendedProps: {
           agendamento: a,
+          // Sinaliza ocupação pendente p/ o eventContent (rótulo curto cinza).
+          pendente,
           // Valores crus do mesmo par usado no `title`, p/ abreviar no rótulo.
           nome_cliente: a.nome_cliente,
           servico: a.servicos?.nome ?? "serviço",
@@ -143,21 +151,31 @@ export default function PainelCalendario({ agendamentos }) {
       eventContent={(arg) => {
         // Só assumimos o markup nas views de grade de horário (Dia/Semana);
         // nas demais (Mês/Lista) devolvemos undefined pro padrão do FullCalendar
-        // (título completo).
+        // (título completo — "Pendente" ou "Nome · Serviço").
         if (!arg.view.type.startsWith("timeGrid")) return undefined;
-        const nome = abreviarNome(arg.event.extendedProps.nome_cliente);
-        const servico = abreviarServico(arg.event.extendedProps.servico);
         const hora = `${hhmm(arg.event.start)} - ${hhmm(arg.event.end)}`;
+        // Ocupação pendente: rótulo curto "Pendente", sem expor o cliente —
+        // o atendimento é tratado no Inbox, não aqui.
+        const titulo = arg.event.extendedProps.pendente
+          ? "Pendente"
+          : `${abreviarNome(arg.event.extendedProps.nome_cliente)} - ${abreviarServico(
+              arg.event.extendedProps.servico
+            )}`;
         return (
           <div className="ag-evento">
-            <span className="ag-evento-titulo">{nome} - {servico}</span>{" "}
+            <span className="ag-evento-titulo">{titulo}</span>{" "}
             <span className="ag-evento-hora">- {hora}</span>
           </div>
         );
       }}
       eventClick={(info) => {
-        // Inerte por enquanto — as ações vêm na leva B.
-        console.log(info.event.extendedProps.agendamento);
+        // Só o bloco CONFIRMADO abre o modal de detalhe/ações (leva B.2). O
+        // pendente (cinza) é só ocupação — tratado no Inbox, não clicável aqui.
+        // O calendário apenas sinaliza a seleção; estado/handlers ficam no /admin.
+        const item = info.event.extendedProps.agendamento;
+        if (classificarAgendamento(item) === "confirmado") {
+          onSelecionarConfirmado?.(item);
+        }
       }}
     />
   );
