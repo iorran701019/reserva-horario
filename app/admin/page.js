@@ -19,6 +19,28 @@ function formatarHorario(horario) {
   return horario.slice(0, 5);
 }
 
+// Abreviações de dia da semana no padrão de Date.getDay() (0=domingo).
+const DIAS_ABREV = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
+// Date -> "YYYY-MM-DD" em horário LOCAL. Mesma convenção do resto do código
+// (dataDeHoje no /agendar, diaDaSemana em lib/horarios): componentes locais do
+// Date, nunca new Date("YYYY-MM-DD") — que seria interpretada como UTC.
+function dataLocalISO(d = new Date()) {
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
+// "2026-07-16" -> "Qua, 16/07". Parse manual (componentes locais) p/ evitar o
+// fuso UTC; reaproveita formatarData no trecho dd/mm.
+function formatarDiaCabecalho(iso) {
+  if (!iso) return "—";
+  const [ano, mes, dia] = iso.split("-").map(Number);
+  const d = new Date(ano, mes - 1, dia);
+  return `${DIAS_ABREV[d.getDay()]}, ${formatarData(iso)}`;
+}
+
 // Em qual aba o item se encaixa. 'confirmado' e 'cancelado' são explícitos;
 // qualquer outra coisa (inclusive null/desconhecido) cai em 'pendente', pra
 // nenhum agendamento sumir de todas as abas.
@@ -53,11 +75,13 @@ function IconeWhatsApp({ className = "h-4 w-4" }) {
   );
 }
 
-// Abas por status, na ordem em que aparecem na barra.
+// Abas na ordem em que aparecem na barra. As três primeiras filtram por
+// status; "agenda" é uma visão à parte (próximos dias agrupados).
 const ABAS = [
   { id: "pendente", rotulo: "Pendentes" },
   { id: "confirmado", rotulo: "Confirmados" },
   { id: "cancelado", rotulo: "Cancelados" },
+  { id: "agenda", rotulo: "Agenda" },
 ];
 
 // Texto discreto quando a aba não tem nenhum item.
@@ -65,6 +89,7 @@ const TEXTO_VAZIO = {
   pendente: "Nenhum agendamento pendente.",
   confirmado: "Nenhum agendamento confirmado.",
   cancelado: "Nenhum agendamento cancelado.",
+  agenda: "Nenhum horário agendado a partir de hoje.",
 };
 
 // Abre a conversa do WhatsApp do cliente em nova aba, com a mensagem pronta.
@@ -79,7 +104,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos() {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, created_at, servicos(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, created_at, servicos(nome, duracao_min)")
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
 
@@ -285,6 +310,35 @@ export default function AdminPage() {
       return chaveA.localeCompare(chaveB);
     });
 
+  // --- Visão "Agenda": próximos dias agrupados ---
+  // "Hoje"/"amanhã" na MESMA convenção local do resto do código (componentes
+  // do Date, nunca UTC). Construir amanhã com getDate()+1 normaliza fim de mês.
+  const agora = new Date();
+  const hoje = dataLocalISO(agora);
+  const amanha = dataLocalISO(
+    new Date(agora.getFullYear(), agora.getMonth(), agora.getDate() + 1)
+  );
+
+  // Do dia de hoje em diante, só pendentes/confirmados. `agendamentos` já vem
+  // ordenado por data asc + horário asc da query, então o filtro preserva a
+  // ordem cronológica e o agrupamento por dia sai contíguo.
+  const itensAgenda = agendamentos.filter(
+    (item) =>
+      (item.data ?? "") >= hoje &&
+      (item.status === "pendente" || item.status === "confirmado")
+  );
+  contagens.agenda = itensAgenda.length;
+
+  const gruposAgenda = [];
+  for (const item of itensAgenda) {
+    let grupo = gruposAgenda[gruposAgenda.length - 1];
+    if (!grupo || grupo.data !== item.data) {
+      grupo = { data: item.data, itens: [] };
+      gruposAgenda.push(grupo);
+    }
+    grupo.itens.push(item);
+  }
+
   return (
     <main className="min-h-screen bg-surface">
       <Hero compacto />
@@ -351,7 +405,84 @@ export default function AdminPage() {
               })}
             </div>
 
-            {visiveis.length === 0 && (
+            {/* Visão Agenda: próximos dias agrupados, em ordem cronológica. */}
+            {abaAtiva === "agenda" &&
+              (gruposAgenda.length === 0 ? (
+                <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
+                  {TEXTO_VAZIO.agenda}
+                </p>
+              ) : (
+                <div className="space-y-6">
+                  {gruposAgenda.map((grupo) => {
+                    const ehHoje = grupo.data === hoje;
+                    const ehAmanha = grupo.data === amanha;
+                    const prefixo = ehHoje
+                      ? "Hoje — "
+                      : ehAmanha
+                      ? "Amanhã — "
+                      : "";
+                    // Hoje/amanhã ganham destaque: cabeçalho na cor primária e
+                    // cards com anel primário suave.
+                    const destacado = ehHoje || ehAmanha;
+
+                    return (
+                      <section key={grupo.data}>
+                        <h2
+                          className={`mb-2 text-sm font-semibold ${
+                            destacado ? "text-primary" : "text-heading"
+                          }`}
+                        >
+                          {prefixo}
+                          {formatarDiaCabecalho(grupo.data)}
+                        </h2>
+
+                        <ul className="space-y-2">
+                          {grupo.itens.map((item) => (
+                            <li
+                              key={item.id}
+                              className={`rounded-2xl bg-card p-4 shadow-sm ring-1 ${
+                                destacado ? "ring-primary/30" : "ring-border"
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex min-w-0 items-baseline gap-2">
+                                  <span className="font-semibold text-heading">
+                                    {formatarHorario(item.horario)}
+                                  </span>
+                                  <span className="truncate text-sm text-body">
+                                    {item.servicos?.nome ?? "—"}
+                                    {item.servicos?.duracao_min != null && (
+                                      <> · {item.servicos.duracao_min} min</>
+                                    )}
+                                  </span>
+                                </div>
+
+                                <span
+                                  className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classesStatus(
+                                    item.status
+                                  )}`}
+                                >
+                                  {item.status ?? "—"}
+                                </span>
+                              </div>
+
+                              <div className="mt-2 flex items-center gap-4 text-sm text-body">
+                                <span className="truncate font-medium text-heading">
+                                  {item.nome_cliente}
+                                </span>
+                                <span>{item.telefone}</span>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    );
+                  })}
+                </div>
+              ))}
+
+            {/* Abas de status: texto de vazio (a lista em si fica logo abaixo). */}
+            {abaAtiva !== "agenda" && visiveis.length === 0 && (
               <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
                 {TEXTO_VAZIO[abaAtiva]}
               </p>
