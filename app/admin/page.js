@@ -3,11 +3,20 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { lerSlug, buscarEstabelecimento } from "@/lib/estabelecimento";
 import { linkWhatsApp, MENSAGEM_LEMBRETE, MENSAGEM_CONTATO } from "@/lib/whatsapp";
 import { classificarAgendamento, fimDoAtendimento } from "@/lib/particao";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
 import FormularioAgendamento from "@/components/FormularioAgendamento";
+
+// URL do login carregando o destino pretendido em ?next=, pra preservar o
+// ?salon= (e qualquer query) através do fluxo de autenticação. Ex.:
+// /admin?salon=barbearia → /admin/login?next=%2Fadmin%3Fsalon%3Dbarbearia.
+function urlLogin() {
+  const destino = "/admin" + (typeof window !== "undefined" ? window.location.search : "");
+  return `/admin/login?next=${encodeURIComponent(destino)}`;
+}
 
 // Formata "2026-06-25" como "25/06". Mantém simples; sem libs de data.
 function formatarData(data) {
@@ -118,13 +127,17 @@ function abrirWhatsApp(telefone, mensagem) {
   window.open(linkWhatsApp(telefone, mensagem), "_blank", "noopener,noreferrer");
 }
 
-// Helper PURO (sem setState): lê todos os agendamentos, próximos primeiro
-// (data e depois horário). Devolve sempre { dados, error } pra quem chama
-// decidir o que fazer com o estado. Fonte única da query no arquivo.
-async function buscarAgendamentos() {
+// Helper PURO (sem setState): lê todos os agendamentos do estabelecimento,
+// próximos primeiro (data e depois horário). Devolve sempre { dados, error }
+// pra quem chama decidir o que fazer com o estado. Fonte única da query no
+// arquivo. `estabelecimentoId` particiona por salão (?salon=); o resto do
+// pipeline (classificarAgendamento, inbox, histórico, Painel) só recebe os
+// dados já filtrados.
+async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
     .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, servicos(nome, duracao_min, preco_centavos)")
+    .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
 
@@ -145,6 +158,12 @@ export default function AdminPage() {
   // Estado da sessão: null = ainda verificando; false = sem login; true = logado.
   // Enquanto for null não renderizamos a lista (evita "piscar" o conteúdo).
   const [autenticado, setAutenticado] = useState(null);
+
+  // Estabelecimento resolvido por ?salon= (seletor de teste, não isolamento de
+  // segurança nesta fase — Iorran é o único admin). undefined = resolvendo;
+  // null = slug inexistente/inativo; objeto = encontrado. Particiona o fetch de
+  // agendamentos e o insert da aba Agendar por estabelecimento_id.
+  const [estabelecimento, setEstabelecimento] = useState(undefined);
 
   const [agendamentos, setAgendamentos] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -189,7 +208,7 @@ export default function AdminPage() {
   // na aba Agendar — a linha nova não existe no estado local, então um patch
   // otimista não basta; recarregamos pelo mesmo helper único de query.
   async function recarregarAgendamentos() {
-    const { dados, error } = await buscarAgendamentos();
+    const { dados, error } = await buscarAgendamentos(estabelecimento.id);
     if (!error) setAgendamentos(dados);
   }
 
@@ -281,7 +300,7 @@ export default function AdminPage() {
       if (!ativo) return;
       if (!session) {
         setAutenticado(false);
-        router.replace("/admin/login");
+        router.replace(urlLogin());
         return;
       }
       setAutenticado(true);
@@ -293,7 +312,7 @@ export default function AdminPage() {
       if (!ativo) return;
       if (!session) {
         setAutenticado(false);
-        router.replace("/admin/login");
+        router.replace(urlLogin());
         return;
       }
       setAutenticado(true);
@@ -305,9 +324,23 @@ export default function AdminPage() {
     };
   }, [router]);
 
+  // Resolve o estabelecimento por ?salon= ao montar (lerSlug só roda no
+  // browser, dentro do efeito). Independe da sessão; o fetch abaixo é que
+  // espera ambos (autenticado + estabelecimento) antes de buscar.
+  useEffect(() => {
+    let ativo = true;
+    buscarEstabelecimento(lerSlug()).then((estab) => {
+      if (ativo) setEstabelecimento(estab);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, []);
+
   async function handleSair() {
     await supabase.auth.signOut();
-    router.replace("/admin/login");
+    // Preserva o ?salon= atual no next= pra reentrar no mesmo salão após relogar.
+    router.replace(urlLogin());
   }
 
   // Carga inicial (com indicador) + refresh automático a cada 60s. A função
@@ -320,12 +353,13 @@ export default function AdminPage() {
   //     pra não desmontar a lista nem atrapalhar o dono no meio de uma ação;
   //     uma falha de rede só é ignorada até o próximo ciclo.
   useEffect(() => {
-    // Só busca os agendamentos depois de confirmar que há sessão ativa.
-    if (autenticado !== true) return;
+    // Só busca depois de ter sessão ativa E o estabelecimento resolvido —
+    // ambos alimentam a query (estabelecimento.id particiona por salão).
+    if (autenticado !== true || !estabelecimento) return;
     let ativo = true;
 
     async function carregar(silencioso) {
-      const { dados, error } = await buscarAgendamentos();
+      const { dados, error } = await buscarAgendamentos(estabelecimento.id);
 
       if (!ativo) return;
 
@@ -355,14 +389,32 @@ export default function AdminPage() {
       ativo = false;
       clearInterval(intervalo);
     };
-  }, [autenticado]);
+  }, [autenticado, estabelecimento]);
 
-  // Enquanto verifica a sessão (ou já sabemos que não há), não renderiza a
-  // lista — o redirect pro login cuida do resto.
-  if (autenticado !== true) {
+  // Enquanto verifica a sessão (ou já sabemos que não há), ou enquanto o
+  // estabelecimento ainda está resolvendo, não renderiza a lista — o redirect
+  // pro login cuida do resto. (estabelecimento === undefined = resolvendo; o
+  // render principal abaixo lê estabelecimento.nome, então precisa do objeto.)
+  if (autenticado !== true || estabelecimento === undefined) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-surface px-4">
         <p className="text-sm text-body">Carregando...</p>
+      </main>
+    );
+  }
+
+  // ?salon= inexistente ou salão inativo: sem estabelecimento não há o que
+  // listar nem onde gravar. (undefined = ainda resolvendo cai no fluxo normal,
+  // com o "Carregando agendamentos..." enquanto o fetch espera.)
+  if (estabelecimento === null) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+        <div className="mx-auto w-full max-w-md rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
+          <h1 className="text-2xl font-bold text-heading">Salão não encontrado</h1>
+          <p className="mt-2 text-sm text-body">
+            Verifique o link com ?salon= e tente novamente.
+          </p>
+        </div>
       </main>
     );
   }
@@ -410,7 +462,7 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-surface">
-      <Hero compacto />
+      <Hero compacto nome={estabelecimento.nome} />
       <div className="mx-auto w-full max-w-2xl px-4 py-10 sm:py-16">
         <header className="mb-6 flex items-start justify-between gap-3">
           <div>
@@ -669,6 +721,7 @@ export default function AdminPage() {
 
             <FormularioAgendamento
               key={agendarKey}
+              estabelecimento={estabelecimento}
               status="confirmado"
               rotuloSubmit="Criar agendamento confirmado"
               onSucesso={async ({ form, horario }) => {

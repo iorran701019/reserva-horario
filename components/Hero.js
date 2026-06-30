@@ -16,7 +16,9 @@ const NOME_LOJA = process.env.NEXT_PUBLIC_NOME_LOJA || "Agendamento";
 // Caminho da foto de fundo (arquivo em /public). null => placeholder claro.
 export const HERO_IMAGE = null;
 
-export default function Hero({ subtitulo, compacto = false }) {
+// `nome` sobrescreve o nome exibido (estab.nome resolvido por ?salon=). Sem ele,
+// cai no NEXT_PUBLIC_NOME_LOJA / "Agendamento" — comportamento original.
+export default function Hero({ subtitulo, compacto = false, nome }) {
   // Fundo do hero, sempre CLARO e leve:
   //  - sem foto: degradê suave creme → bege, todo via tokens da paleta;
   //  - com foto: scrim branco translúcido (mantém o texto escuro legível). É
@@ -49,7 +51,7 @@ export default function Hero({ subtitulo, compacto = false }) {
           compacto ? "text-2xl sm:text-3xl" : "text-4xl sm:text-5xl",
         ].join(" ")}
       >
-        {NOME_LOJA}
+        {nome || NOME_LOJA}
       </h1>
 
       {subtitulo && (

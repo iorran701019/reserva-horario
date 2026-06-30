@@ -82,8 +82,9 @@ function horaParaMin(hora) {
 // Helper PURO (sem setState): busca no banco as reservas ativas da data e as
 // devolve como INTERVALOS ocupados em minutos. A regra de status (ignorar
 // cancelados) vive só aqui. Devolve sempre { ocupados, error } pra quem chama
-// decidir o que fazer com o estado.
-async function buscarOcupados(data, duracaoMin) {
+// decidir o que fazer com o estado. `estabelecimentoId` particiona a consulta
+// por salão (a view slots_ocupados já expõe a coluna estabelecimento_id).
+async function buscarOcupados(data, duracaoMin, estabelecimentoId) {
   // Sem data ou dia fechado (gerarSlots vazio): nada a consultar.
   if (!data || gerarSlots(data, duracaoMin).length === 0) {
     return { ocupados: [], error: null };
@@ -94,6 +95,7 @@ async function buscarOcupados(data, duracaoMin) {
   const { data: linhas, error } = await supabase
     .from("slots_ocupados")
     .select("horario, duracao_min")
+    .eq("estabelecimento_id", estabelecimentoId)
     .eq("data", data);
 
   if (error) return { ocupados: [], error };
@@ -110,6 +112,10 @@ async function buscarOcupados(data, duracaoMin) {
 }
 
 // Props:
+//   estabelecimento – salão resolvido por ?salon= ({ id, nome, whatsapp }). O
+//                   consumidor só monta o formulário DEPOIS de resolvê-lo, então
+//                   aqui ele é sempre não-nulo. Particiona serviços, ocupados e
+//                   o insert por estabelecimento_id.
 //   status        – status gravado no insert. Omitido (undefined) => mantém o
 //                   default do banco ("pendente"), comportamento do público.
 //                   O /admin passa "confirmado".
@@ -118,6 +124,7 @@ async function buscarOcupados(data, duracaoMin) {
 //                   O consumidor decide o que mostrar/recarregar; remontar este
 //                   componente (via prop key) zera o formulário pro próximo.
 export default function FormularioAgendamento({
+  estabelecimento,
   status,
   rotuloSubmit = "Confirmar agendamento",
   onSucesso,
@@ -149,6 +156,7 @@ export default function FormularioAgendamento({
       const { data, error } = await supabase
         .from("servicos")
         .select("id, nome, duracao_min, preco_centavos")
+        .eq("estabelecimento_id", estabelecimento.id)
         .eq("ativo", true)
         .order("nome");
 
@@ -166,7 +174,7 @@ export default function FormularioAgendamento({
     return () => {
       ativo = false;
     };
-  }, []);
+  }, [estabelecimento.id]);
 
   // Calculado a cada render: barato e mantém a fonte da verdade na função pura.
   // A duração do serviço escolhido define o passo entre os horários.
@@ -197,7 +205,8 @@ export default function FormularioAgendamento({
 
       const { ocupados, error } = await buscarOcupados(
         form.data,
-        servicoSelecionado?.duracao_min
+        servicoSelecionado?.duracao_min,
+        estabelecimento.id
       );
 
       if (!ativo) return;
@@ -217,7 +226,7 @@ export default function FormularioAgendamento({
     return () => {
       ativo = false;
     };
-  }, [form.data, servicoSelecionado]);
+  }, [form.data, servicoSelecionado, estabelecimento.id]);
 
   function handleChange(e) {
     const { name, value } = e.target;
@@ -282,6 +291,7 @@ export default function FormularioAgendamento({
       data: form.data,
       horario: horarioSelecionado,
       servico_id: servicoSelecionado.id,
+      estabelecimento_id: estabelecimento.id,
     };
     if (status) payload.status = status;
 
@@ -304,7 +314,8 @@ export default function FormularioAgendamento({
         // Recarrega os ocupados pra esse horário passar a aparecer travado.
         const recarregado = await buscarOcupados(
           form.data,
-          servicoSelecionado?.duracao_min
+          servicoSelecionado?.duracao_min,
+          estabelecimento.id
         );
         if (!recarregado.error) setOcupados(recarregado.ocupados);
         return;

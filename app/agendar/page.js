@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { WHATSAPP_LOJA } from "@/lib/horarios";
 import { linkWhatsApp } from "@/lib/whatsapp";
+import { lerSlug, buscarEstabelecimento } from "@/lib/estabelecimento";
 import Hero from "@/components/Hero";
 import FormularioAgendamento, {
   formatarData,
@@ -12,10 +12,29 @@ import FormularioAgendamento, {
 // validação, insert) mora em FormularioAgendamento; aqui ficam só o layout e a
 // tela de confirmação. O insert NÃO passa `status`, então o banco aplica o
 // default "pendente" — comportamento histórico do fluxo público.
+//
+// Multi-tenant por ?salon=<slug>: resolvemos o estabelecimento ANTES de montar
+// o wizard. Sem ?salon=, cai no salão padrão (ver lib/estabelecimento). O nome
+// e o WhatsApp da tela saem de estab.nome / estab.whatsapp.
 export default function AgendarPage() {
+  // Estabelecimento resolvido por ?salon=: undefined = ainda resolvendo;
+  // null = slug inexistente/inativo; objeto = encontrado.
+  const [estabelecimento, setEstabelecimento] = useState(undefined);
+
   // Resumo do agendamento concluído (null = ainda no formulário). Os dados vêm
   // do callback onSucesso; ao desmontar/remontar o formulário, ele zera sozinho.
   const [resumo, setResumo] = useState(null);
+
+  // Lê ?salon= (dentro do efeito, só no browser) e resolve o estabelecimento.
+  useEffect(() => {
+    let ativo = true;
+    buscarEstabelecimento(lerSlug()).then((estab) => {
+      if (ativo) setEstabelecimento(estab);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, []);
 
   // Foca o título da confirmação ao montar — leitores de tela anunciam o status.
   const tituloConfirmacaoRef = useRef(null);
@@ -23,11 +42,34 @@ export default function AgendarPage() {
     if (resumo) tituloConfirmacaoRef.current?.focus();
   }, [resumo]);
 
+  // Enquanto resolve o estabelecimento, segura a tela (evita piscar o wizard).
+  if (estabelecimento === undefined) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+        <p className="text-sm text-body">Carregando...</p>
+      </main>
+    );
+  }
+
+  // Slug inexistente ou salão inativo: mensagem clara, sem wizard.
+  if (estabelecimento === null) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+        <div className="mx-auto w-full max-w-md rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
+          <h1 className="text-2xl font-bold text-heading">Salão não encontrado</h1>
+          <p className="mt-2 text-sm text-body">
+            Verifique o link de agendamento e tente novamente.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   if (resumo) {
     const { form, servico, horario } = resumo;
     return (
       <main className="flex min-h-screen flex-col bg-surface">
-        <Hero compacto />
+        <Hero compacto nome={estabelecimento.nome} />
         <div className="flex flex-1 flex-col items-center justify-center px-4 py-10">
         <div
           role="status"
@@ -95,7 +137,7 @@ export default function AgendarPage() {
 
           <a
             href={linkWhatsApp(
-              WHATSAPP_LOJA,
+              estabelecimento.whatsapp,
               `Olá! Acabei de solicitar um agendamento de ${servico?.nome} para ${formatarData(form.data)} às ${horario}. Meu nome é ${form.nome}.`
             )}
             target="_blank"
@@ -120,7 +162,7 @@ export default function AgendarPage() {
 
   return (
     <main className="min-h-screen bg-surface">
-      <Hero />
+      <Hero nome={estabelecimento.nome} />
       <div className="mx-auto w-full max-w-md px-4 py-10 sm:py-16">
         <header className="mb-6 text-center">
           <h1 className="text-2xl font-bold text-heading">Agende seu horário</h1>
@@ -130,7 +172,10 @@ export default function AgendarPage() {
         </header>
 
         {/* Sem prop `status`: o insert mantém o default "pendente" do banco. */}
-        <FormularioAgendamento onSucesso={(dados) => setResumo(dados)} />
+        <FormularioAgendamento
+          estabelecimento={estabelecimento}
+          onSucesso={(dados) => setResumo(dados)}
+        />
       </div>
     </main>
   );

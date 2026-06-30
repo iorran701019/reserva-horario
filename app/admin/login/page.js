@@ -4,6 +4,16 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
+// Lê o ?next= da URL e o valida como destino interno seguro. Só roda no browser
+// (usa window.location, igual ao lerSlug) — chamada dentro do handler de submit.
+// Aceita apenas caminhos que começam com "/" e NÃO com "//" (evita open-redirect
+// pra //dominio-externo.com). Ausente ou inválido => "/admin", o destino de hoje.
+function destinoPosLogin() {
+  const next = new URLSearchParams(window.location.search).get("next");
+  if (next && next.startsWith("/") && !next.startsWith("//")) return next;
+  return "/admin";
+}
+
 export default function LoginPage() {
   const router = useRouter();
 
@@ -31,7 +41,7 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/admin");
+    router.push(destinoPosLogin());
   }
 
   return (
