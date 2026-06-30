@@ -112,7 +112,7 @@ async function buscarOcupados(data, duracaoMin, estabelecimentoId) {
 }
 
 // Props:
-//   estabelecimento – salão resolvido por ?salon= ({ id, nome, whatsapp }). O
+//   estabelecimento – salão resolvido pelo slug do path ({ id, nome, whatsapp }). O
 //                   consumidor só monta o formulário DEPOIS de resolvê-lo, então
 //                   aqui ele é sempre não-nulo. Particiona serviços, ocupados e
 //                   o insert por estabelecimento_id.

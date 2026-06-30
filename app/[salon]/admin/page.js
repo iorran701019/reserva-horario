@@ -1,21 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { lerSlug, buscarEstabelecimento } from "@/lib/estabelecimento";
-import { linkWhatsApp, MENSAGEM_LEMBRETE, MENSAGEM_CONTATO } from "@/lib/whatsapp";
+import { buscarEstabelecimento } from "@/lib/estabelecimento";
+import {
+  linkWhatsApp,
+  MENSAGEM_LEMBRETE,
+  MENSAGEM_CONTATO,
+  MENSAGEM_CANCELAMENTO,
+} from "@/lib/whatsapp";
 import { classificarAgendamento, fimDoAtendimento } from "@/lib/particao";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
 import FormularioAgendamento from "@/components/FormularioAgendamento";
 
-// URL do login carregando o destino pretendido em ?next=, pra preservar o
-// ?salon= (e qualquer query) através do fluxo de autenticação. Ex.:
-// /admin?salon=barbearia → /admin/login?next=%2Fadmin%3Fsalon%3Dbarbearia.
-function urlLogin() {
-  const destino = "/admin" + (typeof window !== "undefined" ? window.location.search : "");
-  return `/admin/login?next=${encodeURIComponent(destino)}`;
+// URL do login do salão, carregando o destino pretendido em ?next= pra reentrar
+// no MESMO salão após autenticar. Com o slug agora no PATH, tanto o login quanto
+// o destino ficam sob /[salon]/admin. Ex.: salon="barbearia" →
+// /barbearia/admin/login?next=%2Fbarbearia%2Fadmin.
+function urlLogin(salon) {
+  const destino = `/${salon}/admin`;
+  return `/${salon}/admin/login?next=${encodeURIComponent(destino)}`;
 }
 
 // Formata "2026-06-25" como "25/06". Mantém simples; sem libs de data.
@@ -132,7 +138,7 @@ function abrirWhatsApp(telefone, mensagem) {
 // Helper PURO (sem setState): lê todos os agendamentos do estabelecimento,
 // próximos primeiro (data e depois horário). Devolve sempre { dados, error }
 // pra quem chama decidir o que fazer com o estado. Fonte única da query no
-// arquivo. `estabelecimentoId` particiona por salão (?salon=); o resto do
+// arquivo. `estabelecimentoId` particiona por salão (slug do path); o resto do
 // pipeline (classificarAgendamento, inbox, histórico, Painel) só recebe os
 // dados já filtrados.
 async function buscarAgendamentos(estabelecimentoId) {
@@ -157,14 +163,18 @@ async function buscarAgendamentos(estabelecimentoId) {
 export default function AdminPage() {
   const router = useRouter();
 
+  // Slug do salão no path (/[salon]/admin). Fonte única do tenant: alimenta a
+  // resolução do estabelecimento e a montagem das URLs de login/redirect.
+  const { salon } = useParams();
+
   // Estado da sessão: null = ainda verificando; false = sem login; true = logado.
   // Enquanto for null não renderizamos a lista (evita "piscar" o conteúdo).
   const [autenticado, setAutenticado] = useState(null);
 
-  // Estabelecimento resolvido por ?salon= (seletor de teste, não isolamento de
-  // segurança nesta fase — Iorran é o único admin). undefined = resolvendo;
-  // null = slug inexistente/inativo; objeto = encontrado. Particiona o fetch de
-  // agendamentos e o insert da aba Agendar por estabelecimento_id.
+  // Estabelecimento resolvido pelo slug do path (seletor de teste, não
+  // isolamento de segurança nesta fase — Iorran é o único admin). undefined =
+  // resolvendo; null = slug inexistente/inativo; objeto = encontrado. Particiona
+  // o fetch de agendamentos e o insert da aba Agendar por estabelecimento_id.
   const [estabelecimento, setEstabelecimento] = useState(undefined);
 
   const [agendamentos, setAgendamentos] = useState([]);
@@ -259,13 +269,13 @@ export default function AdminPage() {
     setErro("");
     atualizarStatusLocal(agendamento.id, "cancelado");
 
+    // Base da URL: a env pública (inlinada no build) quando definida; senão a
+    // origem real do navegador — nunca "undefined" e sem domínio hardcoded.
+    // O link de reagendamento é <base>/<slug>, a rota do cliente pós-migração.
+    const base = process.env.NEXT_PUBLIC_URL_BASE || window.location.origin;
     abrirWhatsApp(
       agendamento.telefone,
-      `Olá ${agendamento.nome_cliente}. Infelizmente seu agendamento de ${
-        agendamento.servicos?.nome ?? "serviço"
-      } no dia ${formatarData(
-        agendamento.data
-      )} às ${formatarHorario(agendamento.horario)} foi cancelado. Caso queira reagendar, acesse o link: ${process.env.NEXT_PUBLIC_URL_BASE}/agendar .`
+      MENSAGEM_CANCELAMENTO(agendamento, base, salon)
     );
     setAgendamentoParaCancelar(null);
   }
@@ -294,7 +304,8 @@ export default function AdminPage() {
   }
 
   // Verifica a sessão ao montar e fica ouvindo mudanças (login/logout em
-  // outra aba também caem aqui). Sem sessão → manda pro login.
+  // outra aba também caem aqui). Sem sessão → manda pro login do MESMO salão
+  // (slug no path, via urlLogin(salon)).
   useEffect(() => {
     let ativo = true;
 
@@ -302,7 +313,7 @@ export default function AdminPage() {
       if (!ativo) return;
       if (!session) {
         setAutenticado(false);
-        router.replace(urlLogin());
+        router.replace(urlLogin(salon));
         return;
       }
       setAutenticado(true);
@@ -314,7 +325,7 @@ export default function AdminPage() {
       if (!ativo) return;
       if (!session) {
         setAutenticado(false);
-        router.replace(urlLogin());
+        router.replace(urlLogin(salon));
         return;
       }
       setAutenticado(true);
@@ -324,25 +335,26 @@ export default function AdminPage() {
       ativo = false;
       subscription.unsubscribe();
     };
-  }, [router]);
+  }, [router, salon]);
 
-  // Resolve o estabelecimento por ?salon= ao montar (lerSlug só roda no
-  // browser, dentro do efeito). Independe da sessão; o fetch abaixo é que
-  // espera ambos (autenticado + estabelecimento) antes de buscar.
+  // Resolve o estabelecimento pelo slug do path ao montar (ou se o slug mudar).
+  // Independe da sessão; o fetch abaixo é que espera ambos (autenticado +
+  // estabelecimento) antes de buscar.
   useEffect(() => {
     let ativo = true;
-    buscarEstabelecimento(lerSlug()).then((estab) => {
+    buscarEstabelecimento(salon).then((estab) => {
       if (ativo) setEstabelecimento(estab);
     });
     return () => {
       ativo = false;
     };
-  }, []);
+  }, [salon]);
 
   async function handleSair() {
     await supabase.auth.signOut();
-    // Preserva o ?salon= atual no next= pra reentrar no mesmo salão após relogar.
-    router.replace(urlLogin());
+    // Preserva o salão atual (slug no path) no next= pra reentrar no mesmo
+    // salão após relogar.
+    router.replace(urlLogin(salon));
   }
 
   // Carga inicial (com indicador) + refresh automático a cada 60s. A função
@@ -405,7 +417,7 @@ export default function AdminPage() {
     );
   }
 
-  // ?salon= inexistente ou salão inativo: sem estabelecimento não há o que
+  // Slug do path inexistente ou salão inativo: sem estabelecimento não há o que
   // listar nem onde gravar. (undefined = ainda resolvendo cai no fluxo normal,
   // com o "Carregando agendamentos..." enquanto o fetch espera.)
   if (estabelecimento === null) {
@@ -414,7 +426,7 @@ export default function AdminPage() {
         <div className="mx-auto w-full max-w-md rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
           <h1 className="text-2xl font-bold text-heading">Salão não encontrado</h1>
           <p className="mt-2 text-sm text-body">
-            Verifique o link com ?salon= e tente novamente.
+            Verifique o link e tente novamente.
           </p>
         </div>
       </main>

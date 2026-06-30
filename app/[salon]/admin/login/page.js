@@ -1,21 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 // Lê o ?next= da URL e o valida como destino interno seguro. Só roda no browser
-// (usa window.location, igual ao lerSlug) — chamada dentro do handler de submit.
-// Aceita apenas caminhos que começam com "/" e NÃO com "//" (evita open-redirect
-// pra //dominio-externo.com). Ausente ou inválido => "/admin", o destino de hoje.
-function destinoPosLogin() {
+// (usa window.location) — chamada dentro do handler de submit. Aceita apenas
+// caminhos que começam com "/" e NÃO com "//" (evita open-redirect pra
+// //dominio-externo.com). Ausente ou inválido => /[salon]/admin (o admin do
+// salão atual, derivado do slug do path).
+function destinoPosLogin(salon) {
   const next = new URLSearchParams(window.location.search).get("next");
   if (next && next.startsWith("/") && !next.startsWith("//")) return next;
-  return "/admin";
+  return `/${salon}/admin`;
 }
 
 export default function LoginPage() {
   const router = useRouter();
+
+  // Slug do salão no path (/[salon]/admin/login): fallback de destino quando o
+  // ?next= está ausente/inválido.
+  const { salon } = useParams();
 
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
@@ -41,7 +46,7 @@ export default function LoginPage() {
       return;
     }
 
-    router.push(destinoPosLogin());
+    router.push(destinoPosLogin(salon));
   }
 
   return (

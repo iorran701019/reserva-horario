@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import { linkWhatsApp } from "@/lib/whatsapp";
-import { lerSlug, buscarEstabelecimento } from "@/lib/estabelecimento";
+import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import Hero from "@/components/Hero";
 import FormularioAgendamento, {
   formatarData,
@@ -13,11 +14,15 @@ import FormularioAgendamento, {
 // tela de confirmação. O insert NÃO passa `status`, então o banco aplica o
 // default "pendente" — comportamento histórico do fluxo público.
 //
-// Multi-tenant por ?salon=<slug>: resolvemos o estabelecimento ANTES de montar
-// o wizard. Sem ?salon=, cai no salão padrão (ver lib/estabelecimento). O nome
-// e o WhatsApp da tela saem de estab.nome / estab.whatsapp.
+// Multi-tenant pela rota dinâmica /[salon]: o slug vem do PATH (useParams) e
+// resolvemos o estabelecimento ANTES de montar o wizard. Slug inexistente cai
+// em "Salão não encontrado". O nome e o WhatsApp da tela saem de estab.nome /
+// estab.whatsapp.
 export default function AgendarPage() {
-  // Estabelecimento resolvido por ?salon=: undefined = ainda resolvendo;
+  // Slug do salão no path (/[salon]). Fonte única do tenant nesta página.
+  const { salon } = useParams();
+
+  // Estabelecimento resolvido pelo slug do path: undefined = ainda resolvendo;
   // null = slug inexistente/inativo; objeto = encontrado.
   const [estabelecimento, setEstabelecimento] = useState(undefined);
 
@@ -25,16 +30,16 @@ export default function AgendarPage() {
   // do callback onSucesso; ao desmontar/remontar o formulário, ele zera sozinho.
   const [resumo, setResumo] = useState(null);
 
-  // Lê ?salon= (dentro do efeito, só no browser) e resolve o estabelecimento.
+  // Resolve o estabelecimento pelo slug do path ao montar (ou se o slug mudar).
   useEffect(() => {
     let ativo = true;
-    buscarEstabelecimento(lerSlug()).then((estab) => {
+    buscarEstabelecimento(salon).then((estab) => {
       if (ativo) setEstabelecimento(estab);
     });
     return () => {
       ativo = false;
     };
-  }, []);
+  }, [salon]);
 
   // Foca o título da confirmação ao montar — leitores de tela anunciam o status.
   const tituloConfirmacaoRef = useRef(null);

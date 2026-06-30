@@ -16,7 +16,7 @@ const NOME_LOJA = process.env.NEXT_PUBLIC_NOME_LOJA || "Agendamento";
 // Caminho da foto de fundo (arquivo em /public). null => placeholder claro.
 export const HERO_IMAGE = null;
 
-// `nome` sobrescreve o nome exibido (estab.nome resolvido por ?salon=). Sem ele,
+// `nome` sobrescreve o nome exibido (estab.nome resolvido pelo slug do path). Sem ele,
 // cai no NEXT_PUBLIC_NOME_LOJA / "Agendamento" — comportamento original.
 export default function Hero({ subtitulo, compacto = false, nome }) {
   // Fundo do hero, sempre CLARO e leve:
