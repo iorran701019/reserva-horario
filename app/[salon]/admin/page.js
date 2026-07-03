@@ -12,6 +12,16 @@ import {
   MENSAGEM_CANCELAMENTO,
 } from "@/lib/whatsapp";
 import { classificarAgendamento, fimDoAtendimento } from "@/lib/particao";
+import {
+  Menu,
+  X,
+  Inbox,
+  Calendar,
+  History,
+  CalendarPlus,
+  Scissors,
+  LogOut,
+} from "lucide-react";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
@@ -116,11 +126,11 @@ function IconeWhatsApp({ className = "h-4 w-4" }) {
 // banco. "Pendentes" é o inbox (pendentes futuros que precisam de ação);
 // "Painel" mostra o calendário; "Histórico" e "Agendar" entram em breve.
 const ABAS_PAI = [
-  { id: "pendentes", rotulo: "Pendentes" },
-  { id: "painel", rotulo: "Painel" },
-  { id: "historico", rotulo: "Histórico" },
-  { id: "agendar", rotulo: "Agendar" },
-  { id: "servicos", rotulo: "Serviços" },
+  { id: "pendentes", rotulo: "Pendentes", Icone: Inbox },
+  { id: "painel", rotulo: "Painel", Icone: Calendar },
+  { id: "historico", rotulo: "Histórico", Icone: History },
+  { id: "agendar", rotulo: "Agendar", Icone: CalendarPlus },
+  { id: "servicos", rotulo: "Serviços", Icone: Scissors },
 ];
 
 // Filtros da aba Histórico (client-side, por categoria de rotuloHistorico).
@@ -191,6 +201,10 @@ export default function AdminPage() {
   // Aba-pai do topo (ver ABAS_PAI): "pendentes" (inbox), "painel" (calendário),
   // "historico" e "agendar". A partição é derivada (lib/particao), sem status novo.
   const [viewPai, setViewPai] = useState("pendentes");
+
+  // Drawer lateral de navegação (mobile-first): substitui a antiga barra de abas
+  // fixa. `true` = aberto. Selecionar uma aba troca `viewPai` e fecha o drawer.
+  const [drawerAberto, setDrawerAberto] = useState(false);
 
   // Agendamento aguardando confirmação de cancelamento (controla o modal).
   // null = nenhum modal aberto.
@@ -411,6 +425,17 @@ export default function AdminPage() {
     };
   }, [autenticado, salon]);
 
+  // Fecha o drawer com Esc (só enquanto aberto). Complementa o backdrop e o
+  // botão X — teclado e mouse fecham do mesmo jeito.
+  useEffect(() => {
+    if (!drawerAberto) return;
+    const aoTeclar = (e) => {
+      if (e.key === "Escape") setDrawerAberto(false);
+    };
+    window.addEventListener("keydown", aoTeclar);
+    return () => window.removeEventListener("keydown", aoTeclar);
+  }, [drawerAberto]);
+
   async function handleSair() {
     await supabase.auth.signOut();
     // Preserva o salão RESOLVIDO (slug do estabelecimento em uso; fallback pro
@@ -552,40 +577,40 @@ export default function AdminPage() {
       ? agendamentos.find((item) => item.id === idSelecionado) ?? null
       : null;
 
+  // Aba ativa (ABAS_PAI) pro título do header. Fallback pra primeira aba se o
+  // id sair de sincronia por algum motivo.
+  const abaAtiva = ABAS_PAI.find((aba) => aba.id === viewPai) ?? ABAS_PAI[0];
+
   return (
     <main className="min-h-screen bg-surface">
-      {/* Wrapper relativo SÓ aqui no /admin pra ancorar o botão "Sair" no canto
-          do header. O Hero é compartilhado com as páginas públicas e não muda. */}
-      <div className="relative">
-        <Hero compacto nome={estabelecimento.nome} />
-        <button
-          type="button"
-          onClick={handleSair}
-          className="absolute right-3 top-3 z-10 rounded-lg border border-border bg-card/80 px-3 py-1.5 text-xs font-medium text-heading shadow-sm backdrop-blur-sm transition hover:bg-card sm:right-4 sm:top-4"
-        >
-          Sair
-        </button>
-      </div>
-      <div className="mx-auto w-full max-w-2xl px-4 py-10 sm:py-16">
-        {/* Abas-pai: Pendentes (inbox) · Painel (calendário) · Histórico · Agendar. */}
-        <div className="mb-4 flex gap-1 rounded-xl bg-surface p-1">
-          {ABAS_PAI.map((aba) => {
-            const ativa = viewPai === aba.id;
-            return (
-              <button
-                key={aba.id}
-                type="button"
-                onClick={() => setViewPai(aba.id)}
-                className={`flex-1 rounded-lg px-2 py-2 text-sm font-semibold transition ${
-                  ativa
-                    ? "bg-card text-heading shadow-sm ring-1 ring-border"
-                    : "text-body hover:text-heading"
-                }`}
-              >
-                {aba.rotulo}
-              </button>
-            );
-          })}
+      {/* Hero banner no topo do admin, maior por absorver a navegação. Nome do
+          salão centralizado; a foto de fundo é condicional por slug
+          (valeria/junior usam foto; barbearia mantém o degradê) — ver Hero.js.
+          O hambúrguer NÃO fica no Hero: é um botão fixo (abaixo), pra descolar
+          do banner e seguir visível durante o scroll. */}
+      <Hero nome={estabelecimento.nome} slug={estabelecimento.slug} />
+
+      {/* Hambúrguer FIXO no canto superior direito. Em scroll=0 cai sobre o
+          canto do Hero (mesma posição visual de antes); ao rolar, "descola" do
+          banner e continua na tela. O fundo escuro translúcido + blur garante
+          contraste tanto sobre a foto quanto sobre o conteúdo claro depois do
+          scroll. z-40: acima do conteúdo, abaixo do drawer/modais (z-50). */}
+      <button
+        type="button"
+        onClick={() => setDrawerAberto(true)}
+        aria-label="Abrir menu"
+        aria-expanded={drawerAberto}
+        className="fixed right-3 top-3 z-40 rounded-lg bg-black/40 p-2 text-white ring-1 ring-white/20 backdrop-blur-sm transition hover:bg-black/55 sm:right-4 sm:top-4"
+      >
+        <Menu className="h-7 w-7" />
+      </button>
+
+      <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:py-10">
+        {/* Título da seção ativa (a barra de abas virou drawer). O ícone espelha
+            o da aba correspondente no drawer. */}
+        <div className="mb-4 flex items-center gap-2 text-heading">
+          <abaAtiva.Icone className="h-5 w-5 shrink-0 text-body" />
+          <h2 className="text-base font-semibold">{abaAtiva.rotulo}</h2>
         </div>
 
         {carregando && (
@@ -833,6 +858,84 @@ export default function AdminPage() {
         {!carregando && !erro && viewPai === "servicos" && (
           <GerenciarServicos estabelecimento={estabelecimento} />
         )}
+      </div>
+
+      {/* Drawer lateral de navegação. Sempre montado pra permitir a transição
+          suave: quando fechado, o painel desliza pra fora (translate-x-full) e o
+          overlay fica invisível + pointer-events-none (não bloqueia cliques).
+          O backdrop usa blur no conteúdo por trás e fecha ao toque; o botão X e
+          a tecla Esc também fecham. Selecionar uma aba troca a view e fecha. */}
+      <div
+        className={`fixed inset-0 z-50 transition-opacity duration-300 ${
+          drawerAberto ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        aria-hidden={!drawerAberto}
+      >
+        <div
+          className="absolute inset-0 bg-primary/30 backdrop-blur-sm"
+          onClick={() => setDrawerAberto(false)}
+        />
+
+        <aside
+          role="dialog"
+          aria-modal="true"
+          aria-label="Menu de navegação"
+          className={`absolute inset-y-0 right-0 flex w-72 max-w-[80%] transform flex-col bg-card shadow-xl ring-1 ring-border transition-transform duration-300 ${
+            drawerAberto ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
+          <div className="flex items-center justify-between border-b border-border px-4 py-4">
+            <span className="font-display text-lg font-semibold text-heading">
+              Menu
+            </span>
+            <button
+              type="button"
+              onClick={() => setDrawerAberto(false)}
+              aria-label="Fechar menu"
+              className="rounded-lg p-2 text-heading transition hover:bg-surface"
+            >
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+
+          <nav className="flex-1 overflow-y-auto p-2">
+            {ABAS_PAI.map((aba) => {
+              const ativa = viewPai === aba.id;
+              const Icone = aba.Icone;
+              return (
+                <button
+                  key={aba.id}
+                  type="button"
+                  onClick={() => {
+                    setViewPai(aba.id);
+                    setDrawerAberto(false);
+                  }}
+                  aria-current={ativa ? "page" : undefined}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition ${
+                    ativa
+                      ? "bg-surface text-heading ring-1 ring-border"
+                      : "text-body hover:bg-surface hover:text-heading"
+                  }`}
+                >
+                  <Icone className="h-5 w-5 shrink-0" />
+                  {aba.rotulo}
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* "Sair" mora no drawer (saiu do header). */}
+          <div className="border-t border-border p-2">
+            <button
+              type="button"
+              onClick={handleSair}
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50"
+            >
+              <LogOut className="h-5 w-5 shrink-0" />
+              Sair
+            </button>
+          </div>
+        </aside>
       </div>
 
       {/* Modal de detalhe do confirmado (clique no Painel). Dados + ações de

@@ -2,30 +2,37 @@
 //
 // IDENTIDADE 100% via tema — nada hardcoded aqui:
 //   • cores  → tokens do globals.css (surface, card, border, heading, body, ...)
-//   • foto   → constante HERO_IMAGE abaixo (ÚNICO lugar pra trocar a imagem)
+//   • foto   → condicional por slug (ver SLUGS_COM_FOTO abaixo)
 //   • fonte  → font-display (Fraunces) via tema
 //
-// >>> PARA TROCAR A FOTO DO HERO:
-//   1. Coloque o arquivo em /public (ex.: public/hero-salao.jpg).
-//   2. Aponte HERO_IMAGE para ele (ex.: "/hero-salao.jpg").
-//   Use uma foto SEM marca d'água. Enquanto HERO_IMAGE for null, o hero usa um
-//   degradê CLARO da paleta (creme → bege) como PLACEHOLDER leve.
+// >>> FOTO DE FUNDO POR SALÃO:
+//   A foto (/images/hero-salao.jpg) só entra para os slugs em SLUGS_COM_FOTO;
+//   os demais salões mantêm o degradê CLARO da paleta (creme → bege) como
+//   PLACEHOLDER leve. Para ativar a foto em outro salão, adicione o slug ao
+//   conjunto. Use uma foto SEM marca d'água. Sobre a foto, um overlay escuro +
+//   text-shadow garantem o contraste do título em qualquer imagem.
 
 const NOME_LOJA = process.env.NEXT_PUBLIC_NOME_LOJA || "Agendamento";
 
-// Caminho da foto de fundo (arquivo em /public). null => placeholder claro.
-export const HERO_IMAGE = null;
+// Slugs que usam a foto de fundo do hero. Fonte única — comparação em minúsculas.
+const SLUGS_COM_FOTO = new Set(["valeria", "junior"]);
+
+// Caminho da foto de fundo (arquivo em /public).
+const HERO_FOTO = "/images/hero-salao.jpg";
 
 // `nome` sobrescreve o nome exibido (estab.nome resolvido pelo slug do path). Sem ele,
 // cai no NEXT_PUBLIC_NOME_LOJA / "Agendamento" — comportamento original.
-export default function Hero({ subtitulo, compacto = false, nome }) {
-  // Fundo do hero, sempre CLARO e leve:
-  //  - sem foto: degradê suave creme → bege, todo via tokens da paleta;
-  //  - com foto: scrim branco translúcido (mantém o texto escuro legível). É
-  //    camada neutra de leitura, não identidade.
-  const estiloFundo = HERO_IMAGE
+// `slug` decide o fundo: slugs em SLUGS_COM_FOTO usam a foto; os demais, o degradê.
+export default function Hero({ subtitulo, compacto = false, nome, slug }) {
+  const usaFoto = slug != null && SLUGS_COM_FOTO.has(String(slug).toLowerCase());
+
+  // Fundo do hero:
+  //  - com foto (valeria/junior): a imagem cobrindo o hero; o contraste do texto
+  //    vem do overlay escuro + text-shadow, não de scrim claro;
+  //  - sem foto (ex.: barbearia): degradê suave creme → bege, via tokens da paleta.
+  const estiloFundo = usaFoto
     ? {
-        backgroundImage: `linear-gradient(rgba(255,255,255,0.6), rgba(255,255,255,0.6)), url(${HERO_IMAGE})`,
+        backgroundImage: `url(${HERO_FOTO})`,
         backgroundSize: "cover",
         backgroundPosition: "center",
       }
@@ -38,16 +45,30 @@ export default function Hero({ subtitulo, compacto = false, nome }) {
     <header
       className={[
         // Corte limpo entre hero e corpo: borda definida, sem fade esfumaçado.
-        "flex flex-col items-center justify-center border-b border-border px-4 text-center",
+        // `relative` ancora o overlay escuro da foto.
+        "relative flex flex-col items-center justify-center border-b border-border px-4 text-center",
         compacto
           ? "min-h-[110px] py-8 sm:min-h-[130px]"
           : "min-h-[180px] py-12 sm:min-h-[220px]",
       ].join(" ")}
       style={estiloFundo}
     >
+      {/* Overlay escuro só quando há foto: garante contraste do texto claro
+          sobre QUALQUER imagem. Sem foto, nada é renderizado (degradê claro). */}
+      {usaFoto && (
+        <div
+          className="pointer-events-none absolute inset-0 bg-black/40"
+          aria-hidden="true"
+        />
+      )}
+
       <h1
         className={[
-          "font-display font-semibold tracking-tight text-heading",
+          // `relative` mantém o título acima do overlay.
+          "relative font-display font-semibold tracking-tight",
+          usaFoto
+            ? "text-white [text-shadow:0_2px_8px_rgba(0,0,0,0.6)]"
+            : "text-heading",
           compacto ? "text-2xl sm:text-3xl" : "text-4xl sm:text-5xl",
         ].join(" ")}
       >
@@ -55,7 +76,16 @@ export default function Hero({ subtitulo, compacto = false, nome }) {
       </h1>
 
       {subtitulo && (
-        <p className="mt-2 max-w-md text-sm text-body sm:text-base">{subtitulo}</p>
+        <p
+          className={[
+            "relative mt-2 max-w-md text-sm sm:text-base",
+            usaFoto
+              ? "text-white/90 [text-shadow:0_1px_4px_rgba(0,0,0,0.6)]"
+              : "text-body",
+          ].join(" ")}
+        >
+          {subtitulo}
+        </p>
       )}
     </header>
   );
