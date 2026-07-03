@@ -14,6 +14,7 @@ import {
 import { classificarAgendamento, fimDoAtendimento } from "@/lib/particao";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
+import GerenciarServicos from "./GerenciarServicos";
 import FormularioAgendamento from "@/components/FormularioAgendamento";
 
 // URL do login do salão, carregando o destino pretendido em ?next= pra reentrar
@@ -119,6 +120,7 @@ const ABAS_PAI = [
   { id: "painel", rotulo: "Painel" },
   { id: "historico", rotulo: "Histórico" },
   { id: "agendar", rotulo: "Agendar" },
+  { id: "servicos", rotulo: "Serviços" },
 ];
 
 // Filtros da aba Histórico (client-side, por categoria de rotuloHistorico).
@@ -823,6 +825,13 @@ export default function AdminPage() {
               }}
             />
           </div>
+        )}
+
+        {/* Serviços: CRUD dos serviços do salão (tabela `servicos`), sempre
+            particionado pelo estabelecimento resolvido. "Excluir" é soft delete
+            (ativo=false) pra preservar o histórico de agendamentos antigos. */}
+        {!carregando && !erro && viewPai === "servicos" && (
+          <GerenciarServicos estabelecimento={estabelecimento} />
         )}
       </div>
 
