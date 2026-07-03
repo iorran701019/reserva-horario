@@ -144,7 +144,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, servicos(nome, duracao_min, preco_centavos)")
+    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, observacao, servicos(nome, duracao_min, preco_centavos)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -193,6 +193,13 @@ export default function AdminPage() {
   // ações). Guardamos o id; os dados vivos saem de `agendamentos` no render,
   // pra refletir na hora o patch do lembrete. null = modal fechado.
   const [idSelecionado, setIdSelecionado] = useState(null);
+
+  // Edição da observação no modal de detalhe. `idEditandoObservacao` guarda o id
+  // cujo textarea está aberto — atrelar ao id (e não a um booleano) faz o
+  // textarea recolher sozinho ao fechar o modal ou trocar de agendamento.
+  // `rascunhoObservacao` é o texto sendo digitado.
+  const [idEditandoObservacao, setIdEditandoObservacao] = useState(null);
+  const [rascunhoObservacao, setRascunhoObservacao] = useState("");
 
   // Filtro ativo da aba Histórico (ver FILTROS_HISTORICO). "todos" = sem filtro.
   const [filtroHistorico, setFiltroHistorico] = useState("todos");
@@ -301,6 +308,25 @@ export default function AdminPage() {
 
     setErro("");
     atualizarItemLocal(item.id, { lembrete_enviado_em });
+  }
+
+  // Salva a observação do agendamento. Mesma mecânica do lembrete: grava no
+  // banco e patcha o estado local pelo MESMO atualizarItemLocal — o modal (dados
+  // vivos) reflete o texto na hora. Texto vazio vira null (limpa a observação).
+  async function handleSalvarObservacao(id, texto) {
+    const observacao = texto || null;
+    const { error } = await supabase
+      .from("agendamentos")
+      .update({ observacao })
+      .eq("id", id);
+
+    if (error) {
+      setErro(`Não foi possível salvar a observação: ${error.message}`);
+      return;
+    }
+
+    setErro("");
+    atualizarItemLocal(id, { observacao });
   }
 
   // Verifica a sessão ao montar e fica ouvindo mudanças (login/logout em
@@ -839,6 +865,69 @@ export default function AdminPage() {
                   ? "Reenviar lembrete"
                   : "Enviar lembrete"}
               </button>
+            </div>
+
+            {/* Observação: texto livre persistido em `observacao`. Sem edição:
+                mostra o texto (ou o botão de adicionar); editando: textarea com
+                contador travado em 280 + Salvar. Salvar vazio limpa (vira null). */}
+            <div className="mt-4 border-t border-border pt-4">
+              {idEditandoObservacao === selecionado.id ? (
+                <div className="flex flex-col gap-2">
+                  <textarea
+                    value={rascunhoObservacao}
+                    onChange={(e) => setRascunhoObservacao(e.target.value)}
+                    maxLength={280}
+                    rows={3}
+                    placeholder="Observação sobre o agendamento…"
+                    className="w-full resize-none break-words rounded-lg bg-card px-3 py-2 text-sm text-heading ring-1 ring-border transition focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-muted">
+                      {rascunhoObservacao.length}/280
+                    </span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await handleSalvarObservacao(
+                          selecionado.id,
+                          rascunhoObservacao.trim()
+                        );
+                        setIdEditandoObservacao(null);
+                      }}
+                      className="inline-flex items-center justify-center rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
+                    >
+                      Salvar
+                    </button>
+                  </div>
+                </div>
+              ) : selecionado.observacao ? (
+                <div className="flex flex-col gap-2">
+                  <p className="whitespace-pre-wrap break-words text-sm text-body">
+                    {selecionado.observacao}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRascunhoObservacao(selecionado.observacao);
+                      setIdEditandoObservacao(selecionado.id);
+                    }}
+                    className="inline-flex w-full items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                  >
+                    Editar observação
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRascunhoObservacao("");
+                    setIdEditandoObservacao(selecionado.id);
+                  }}
+                  className="inline-flex w-full items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                >
+                  Adicionar observação
+                </button>
+              )}
             </div>
 
             {/* Cancelar: FECHA este modal e abre o fluxo de cancelamento
