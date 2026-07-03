@@ -1,31 +1,31 @@
 "use client";
 
 import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { buscarPerfil } from "@/lib/perfil";
 
 // Lê o ?next= da URL e o valida como destino interno seguro. Só roda no browser
 // (usa window.location) — chamada dentro do handler de submit. Aceita apenas
 // caminhos que começam com "/" e NÃO com "//" (evita open-redirect pra
-// //dominio-externo.com). Ausente ou inválido => /[salon]/admin (o admin do
-// salão atual, derivado do slug do path).
-function destinoPosLogin(salon) {
+// //dominio-externo.com). Ausente ou inválido => null (aí o destino vem do
+// perfil do usuário).
+function nextSeguro() {
   const next = new URLSearchParams(window.location.search).get("next");
   if (next && next.startsWith("/") && !next.startsWith("//")) return next;
-  return `/${salon}/admin`;
+  return null;
 }
 
 export default function LoginPage() {
   const router = useRouter();
 
-  // Slug do salão no path (/[salon]/admin/login): fallback de destino quando o
-  // ?next= está ausente/inválido.
-  const { salon } = useParams();
-
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [entrando, setEntrando] = useState(false);
   const [erro, setErro] = useState("");
+  // Autenticou, mas não há linha em perfis pra esse usuário: sem salão-casa não
+  // há pra onde redirecionar. Troca o formulário pela tela de erro.
+  const [semPerfil, setSemPerfil] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -37,16 +37,48 @@ export default function LoginPage() {
       password: senha,
     });
 
-    setEntrando(false);
-
     if (error) {
+      setEntrando(false);
       // Não vaza o detalhe técnico do Supabase — qualquer falha de login
       // vira a mesma mensagem genérica.
       setErro("E-mail ou senha incorretos.");
       return;
     }
 
-    router.push(destinoPosLogin(salon));
+    // Autenticado. Se veio um ?next= interno e seguro, respeita-o (reentra no
+    // destino pretendido); o /admin de destino revalida o perfil por conta
+    // própria, então não duplicamos a checagem aqui.
+    const next = nextSeguro();
+    if (next) {
+      router.push(next);
+      return;
+    }
+
+    // Sem ?next=: o destino padrão é o admin do salão-casa do PERFIL do usuário
+    // (join com estabelecimentos pra pegar o slug). Sem perfil vinculado não há
+    // pra onde ir — mostra a tela de erro.
+    const perfil = await buscarPerfil();
+
+    if (!perfil || !perfil.estabelecimento) {
+      setEntrando(false);
+      setSemPerfil(true);
+      return;
+    }
+
+    router.push(`/${perfil.estabelecimento.slug}/admin`);
+  }
+
+  if (semPerfil) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+        <div className="mx-auto w-full max-w-md rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
+          <h1 className="text-2xl font-bold text-heading">
+            Conta sem salão vinculado
+          </h1>
+          <p className="mt-2 text-sm text-body">Contate o suporte.</p>
+        </div>
+      </main>
+    );
   }
 
   return (

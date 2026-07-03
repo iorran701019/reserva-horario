@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
+import { buscarPerfil } from "@/lib/perfil";
 import {
   linkWhatsApp,
   MENSAGEM_LEMBRETE,
@@ -177,6 +178,10 @@ export default function AdminPage() {
   // o fetch de agendamentos e o insert da aba Agendar por estabelecimento_id.
   const [estabelecimento, setEstabelecimento] = useState(undefined);
 
+  // Autenticado, mas sem linha em perfis (conta órfã): não há salão a resolver.
+  // Troca todo o conteúdo pela tela "Conta sem salão vinculado".
+  const [semPerfil, setSemPerfil] = useState(false);
+
   const [agendamentos, setAgendamentos] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -279,10 +284,12 @@ export default function AdminPage() {
     // Base da URL: a env pública (inlinada no build) quando definida; senão a
     // origem real do navegador — nunca "undefined" e sem domínio hardcoded.
     // O link de reagendamento é <base>/<slug>, a rota do cliente pós-migração.
+    // Usa o slug do salão RESOLVIDO (não o do path): pro 'dono' o salão real vem
+    // do perfil e pode diferir do slug da URL, e é ele que dono/cliente devem ver.
     const base = process.env.NEXT_PUBLIC_URL_BASE || window.location.origin;
     abrirWhatsApp(
       agendamento.telefone,
-      MENSAGEM_CANCELAMENTO(agendamento, base, salon)
+      MENSAGEM_CANCELAMENTO(agendamento, base, estabelecimento.slug)
     );
     setAgendamentoParaCancelar(null);
   }
@@ -363,24 +370,51 @@ export default function AdminPage() {
     };
   }, [router, salon]);
 
-  // Resolve o estabelecimento pelo slug do path ao montar (ou se o slug mudar).
-  // Independe da sessão; o fetch abaixo é que espera ambos (autenticado +
-  // estabelecimento) antes de buscar.
+  // Resolve o estabelecimento a partir do PERFIL do usuário autenticado (não
+  // mais direto pelo slug do path). Espera a sessão confirmada porque a query
+  // de perfis filtra por auth.uid(). Conforme o papel:
+  //   - sem perfil → conta órfã: marca semPerfil (tela de erro).
+  //   - 'dono'     → preso ao próprio salão: usa o estabelecimento do perfil e
+  //                  IGNORA o slug do path.
+  //   - 'global' (ou outro papel admin) → mantém o comportamento atual: resolve
+  //                  pelo slug do path, permitindo navegar entre salões. (No path
+  //                  routing sempre há um slug, então não existe mais o default
+  //                  'valeria' da época do ?salon=.)
   useEffect(() => {
+    if (autenticado !== true) return;
     let ativo = true;
-    buscarEstabelecimento(salon).then((estab) => {
+
+    (async () => {
+      const perfil = await buscarPerfil();
+      if (!ativo) return;
+
+      if (!perfil) {
+        setSemPerfil(true);
+        return;
+      }
+
+      setSemPerfil(false);
+
+      if (perfil.papel === "dono") {
+        setEstabelecimento(perfil.estabelecimento ?? null);
+        return;
+      }
+
+      const estab = await buscarEstabelecimento(salon);
       if (ativo) setEstabelecimento(estab);
-    });
+    })();
+
     return () => {
       ativo = false;
     };
-  }, [salon]);
+  }, [autenticado, salon]);
 
   async function handleSair() {
     await supabase.auth.signOut();
-    // Preserva o salão atual (slug no path) no next= pra reentrar no mesmo
-    // salão após relogar.
-    router.replace(urlLogin(salon));
+    // Preserva o salão RESOLVIDO (slug do estabelecimento em uso; fallback pro
+    // slug do path enquanto não resolveu) no next= pra reentrar no mesmo salão
+    // após relogar.
+    router.replace(urlLogin(estabelecimento?.slug ?? salon));
   }
 
   // Carga inicial (com indicador) + refresh automático a cada 60s. A função
@@ -430,6 +464,22 @@ export default function AdminPage() {
       clearInterval(intervalo);
     };
   }, [autenticado, estabelecimento]);
+
+  // Autenticado, mas sem perfil vinculado (conta órfã): não há salão a resolver.
+  // Vem ANTES do guard de carregamento — nesse caso `estabelecimento` continua
+  // undefined, então checar aqui evita ficar preso no "Carregando...".
+  if (semPerfil) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+        <div className="mx-auto w-full max-w-md rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
+          <h1 className="text-2xl font-bold text-heading">
+            Conta sem salão vinculado
+          </h1>
+          <p className="mt-2 text-sm text-body">Contate o suporte.</p>
+        </div>
+      </main>
+    );
+  }
 
   // Enquanto verifica a sessão (ou já sabemos que não há), ou enquanto o
   // estabelecimento ainda está resolvendo, não renderiza a lista — o redirect
