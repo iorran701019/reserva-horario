@@ -27,6 +27,7 @@ import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
 import GerenciarProfissionais from "./GerenciarProfissionais";
+import ConfiguracoesSalao from "./ConfiguracoesSalao";
 import FormularioAgendamento from "@/components/FormularioAgendamento";
 
 // URL do login do salão, carregando o destino pretendido em ?next= pra reentrar
@@ -862,11 +863,15 @@ export default function AdminPage() {
           <GerenciarServicos estabelecimento={estabelecimento} />
         )}
 
-        {/* Profissionais: CRUD dos profissionais do salão (tabela `profissionais`)
-            + grade de horários (tabela `horarios_trabalho`), particionado pelo
-            estabelecimento resolvido. "Desativar" é soft delete (ativo=false). */}
+        {/* Profissionais: config do salão (escolha_profissional) no topo, depois
+            o CRUD dos profissionais (tabela `profissionais`) + grade de horários
+            (tabela `horarios_trabalho`), particionado pelo estabelecimento
+            resolvido. "Desativar" é soft delete (ativo=false). */}
         {!carregando && !erro && viewPai === "profissionais" && (
-          <GerenciarProfissionais estabelecimento={estabelecimento} />
+          <>
+            <ConfiguracoesSalao estabelecimento={estabelecimento} />
+            <GerenciarProfissionais estabelecimento={estabelecimento} />
+          </>
         )}
       </div>
 
