@@ -20,11 +20,13 @@ import {
   History,
   CalendarPlus,
   Scissors,
+  Users,
   LogOut,
 } from "lucide-react";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
+import GerenciarProfissionais from "./GerenciarProfissionais";
 import FormularioAgendamento from "@/components/FormularioAgendamento";
 
 // URL do login do salão, carregando o destino pretendido em ?next= pra reentrar
@@ -131,6 +133,7 @@ const ABAS_PAI = [
   { id: "historico", rotulo: "Histórico", Icone: History },
   { id: "agendar", rotulo: "Agendar", Icone: CalendarPlus },
   { id: "servicos", rotulo: "Serviços", Icone: Scissors },
+  { id: "profissionais", rotulo: "Profissionais", Icone: Users },
 ];
 
 // Filtros da aba Histórico (client-side, por categoria de rotuloHistorico).
@@ -857,6 +860,13 @@ export default function AdminPage() {
             (ativo=false) pra preservar o histórico de agendamentos antigos. */}
         {!carregando && !erro && viewPai === "servicos" && (
           <GerenciarServicos estabelecimento={estabelecimento} />
+        )}
+
+        {/* Profissionais: CRUD dos profissionais do salão (tabela `profissionais`)
+            + grade de horários (tabela `horarios_trabalho`), particionado pelo
+            estabelecimento resolvido. "Desativar" é soft delete (ativo=false). */}
+        {!carregando && !erro && viewPai === "profissionais" && (
+          <GerenciarProfissionais estabelecimento={estabelecimento} />
         )}
       </div>
 
