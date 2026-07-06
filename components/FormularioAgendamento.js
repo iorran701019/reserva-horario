@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { gerarSlots } from "@/lib/horarios";
+import { calcularVagasPorHorario } from "@/lib/disponibilidade";
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
 // "pendente") e a aba Agendar do /admin (cria "confirmado"). Toda a lógica de
@@ -54,6 +54,20 @@ function horaDeAgora() {
   return `${hora}:${min}`;
 }
 
+// Date -> "YYYY-MM-DD" em horário LOCAL (a mesma chave usada nas queries e na
+// comparação com `hoje`). Montado componente-a-componente pra não sofrer o
+// deslocamento de fuso de toISOString() (que converte pra UTC).
+function formatarISO(date) {
+  const ano = date.getFullYear();
+  const mes = String(date.getMonth() + 1).padStart(2, "0");
+  const dia = String(date.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
+// Cabeçalho do calendário: iniciais dos dias no padrão Date.getDay()
+// (0=domingo … 6=sábado).
+const DIAS_SEMANA_CURTO = ["D", "S", "T", "Q", "Q", "S", "S"];
+
 // "YYYY-MM-DD" -> "dd/mm · dia da semana". Parse manual pra evitar o
 // deslocamento de fuso que new Date("YYYY-MM-DD") sofre (vira UTC). Exportado
 // pra tela de confirmação do consumidor reaproveitar a mesma formatação.
@@ -72,43 +86,172 @@ export function formatarPreco(centavos) {
   });
 }
 
-// "HH:MM" ou "HH:MM:SS" -> minutos desde a meia-noite. Base para tratar cada
-// reserva e cada slot candidato como intervalos e detectar sobreposição.
-function horaParaMin(hora) {
-  const [h, m] = hora.split(":").map(Number);
-  return h * 60 + m;
+// Iniciais do nome para o avatar do card de profissional (ex.: "João Silva" ->
+// "JS"). Usa só a primeira e a última palavra, em maiúsculas.
+function iniciais(nome) {
+  const partes = (nome ?? "").trim().split(/\s+/).filter(Boolean);
+  if (partes.length === 0) return "?";
+  const primeira = partes[0][0];
+  const ultima = partes.length > 1 ? partes[partes.length - 1][0] : "";
+  return (primeira + ultima).toUpperCase();
 }
 
-// Helper PURO (sem setState): busca no banco as reservas ativas da data e as
-// devolve como INTERVALOS ocupados em minutos. A regra de status (ignorar
-// cancelados) vive só aqui. Devolve sempre { ocupados, error } pra quem chama
-// decidir o que fazer com o estado. `estabelecimentoId` particiona a consulta
-// por salão (a view slots_ocupados já expõe a coluna estabelecimento_id).
-async function buscarOcupados(data, duracaoMin, estabelecimentoId) {
-  // Sem data ou dia fechado (gerarSlots vazio): nada a consultar.
-  if (!data || gerarSlots(data, duracaoMin).length === 0) {
-    return { ocupados: [], error: null };
+// Encaixe automático (toggle DESLIGADO): entre os profissionais livres no
+// horário, escolhe o MENOS ocupado no dia. Conta os agendamentos ativos (status
+// <> 'cancelado') de cada candidato na data; empate resolve pelo menor id, pra
+// ser determinístico. Se a consulta falhar, cai no primeiro candidato — a
+// exclusion constraint do banco ainda protege contra sobreposição real.
+async function escolherMenosOcupado(estabelecimentoId, data, candidatos) {
+  const contagem = new Map(candidatos.map((id) => [id, 0]));
+
+  const { data: reservas, error } = await supabase
+    .from("agendamentos")
+    .select("profissional_id")
+    .eq("estabelecimento_id", estabelecimentoId)
+    .eq("data", data)
+    .neq("status", "cancelado");
+
+  if (!error) {
+    for (const r of reservas ?? []) {
+      if (contagem.has(r.profissional_id)) {
+        contagem.set(r.profissional_id, contagem.get(r.profissional_id) + 1);
+      }
+    }
   }
 
-  // A view slots_ocupados já expõe só reservas ativas (status <> 'cancelado')
-  // sem vazar dados pessoais; agora também traz a duração de cada reserva.
-  const { data: linhas, error } = await supabase
-    .from("slots_ocupados")
-    .select("horario, duracao_min")
-    .eq("estabelecimento_id", estabelecimentoId)
-    .eq("data", data);
+  return [...contagem.entries()].sort((a, b) => a[1] - b[1] || a[0] - b[0])[0][0];
+}
 
-  if (error) return { ocupados: [], error };
+// Calendário mensal próprio para a etapa Data. O <input type="date"> nativo não
+// permite cinzar dias específicos por dia da semana, então montamos a grade à
+// mão. Um dia nasce DESABILITADO (cinza, não clicável) quando é passado (< min)
+// ou quando o seu dia da semana não está em `diasSemanaAtivos` — o conjunto de
+// dias em que há profissional elegível trabalhando (calculado por quem chama).
+//
+// Props:
+//   mes              – Date no primeiro dia do mês exibido.
+//   min              – "YYYY-MM-DD" mínimo (hoje); datas anteriores ficam cinza.
+//   diasSemanaAtivos – Set<number> de dias da semana (0–6) com atendimento.
+//   selecionado      – "YYYY-MM-DD" atualmente escolhido (destaca a célula).
+//   onSelecionar     – recebe o "YYYY-MM-DD" do dia clicado (só dias válidos).
+//   onPrev/onNext    – navegação de mês. podeVoltar trava o passado.
+function CalendarioDias({
+  mes,
+  min,
+  diasSemanaAtivos,
+  selecionado,
+  onSelecionar,
+  onPrev,
+  onNext,
+  podeVoltar,
+}) {
+  const ano = mes.getFullYear();
+  const mesIdx = mes.getMonth();
+  const primeiroDiaSemana = new Date(ano, mesIdx, 1).getDay();
+  const diasNoMes = new Date(ano, mesIdx + 1, 0).getDate();
 
-  // Cada reserva vira um intervalo [inicio, inicio + duracao_min) em minutos:
-  // é a sobreposição (não a igualdade de horário) que trava um slot.
-  return {
-    ocupados: (linhas ?? []).map((l) => {
-      const inicio = horaParaMin(l.horario);
-      return { inicio, fim: inicio + l.duracao_min };
-    }),
-    error: null,
-  };
+  // Células: brancos para alinhar o dia 1 ao seu dia da semana, depois 1..N.
+  const celulas = [];
+  for (let i = 0; i < primeiroDiaSemana; i++) celulas.push(null);
+  for (let d = 1; d <= diasNoMes; d++) celulas.push(d);
+
+  const rotuloMes = mes.toLocaleDateString("pt-BR", {
+    month: "long",
+    year: "numeric",
+  });
+
+  return (
+    <div className="rounded-xl bg-card p-3 ring-1 ring-border">
+      <div className="mb-2 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onPrev}
+          disabled={!podeVoltar}
+          aria-label="Mês anterior"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="h-4 w-4"
+          >
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+
+        <span className="text-sm font-semibold capitalize text-heading">
+          {rotuloMes}
+        </span>
+
+        <button
+          type="button"
+          onClick={onNext}
+          aria-label="Próximo mês"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-body ring-1 ring-border transition hover:bg-surface"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="h-4 w-4"
+          >
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-muted">
+        {DIAS_SEMANA_CURTO.map((n, i) => (
+          <span key={i} className="py-1">
+            {n}
+          </span>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7 gap-1">
+        {celulas.map((d, i) => {
+          if (d === null) return <span key={`vazio-${i}`} />;
+
+          const date = new Date(ano, mesIdx, d);
+          const iso = formatarISO(date);
+          const passado = iso < min;
+          const fechado = !diasSemanaAtivos.has(date.getDay());
+          const desabilitado = passado || fechado;
+          const sel = iso === selecionado;
+
+          return (
+            <button
+              key={iso}
+              type="button"
+              disabled={desabilitado}
+              aria-disabled={desabilitado}
+              aria-pressed={sel}
+              onClick={() => onSelecionar(iso)}
+              className={[
+                "flex h-9 items-center justify-center rounded-lg text-sm transition",
+                desabilitado
+                  ? "cursor-not-allowed text-muted/40"
+                  : sel
+                  ? "bg-primary font-semibold text-white ring-1 ring-primary"
+                  : "text-body ring-1 ring-border hover:border-primary hover:ring-primary",
+              ].join(" ")}
+            >
+              {d}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // Props:
@@ -141,85 +284,200 @@ export default function FormularioAgendamento({
   const [carregandoServicos, setCarregandoServicos] = useState(true);
   const [erroServicos, setErroServicos] = useState("");
 
-  const [ocupados, setOcupados] = useState([]);
+  // Mapa horário -> [profissional_id livres], vindo de calcularVagasPorHorario.
+  const [vagas, setVagas] = useState({});
   const [carregandoSlots, setCarregandoSlots] = useState(false);
   const [erroSlots, setErroSlots] = useState("");
+
+  // Preferência do salão: cliente escolhe o profissional (true) ou o sistema
+  // encaixa automaticamente (false). Lida do banco junto com os serviços.
+  const [escolhaProfissional, setEscolhaProfissional] = useState(false);
+
+  // Profissionais ATIVOS que atendem o serviço escolhido, cada um já com seus
+  // dias de trabalho (horarios_trabalho.dia_semana) embutidos — carregados nos
+  // dois modos: no "cliente escolhe" alimentam os cards, e sempre alimentam os
+  // dias disponíveis do calendário. `profissionalSelecionado` só é usado no
+  // fluxo "cliente escolhe".
+  const [profissionaisDoServico, setProfissionaisDoServico] = useState([]);
+  const [profissionalSelecionado, setProfissionalSelecionado] = useState(null);
+  const [carregandoProfissionais, setCarregandoProfissionais] = useState(false);
+
+  // Mês exibido no calendário da etapa Data (sempre no dia 1 do mês).
+  const [mesVisivel, setMesVisivel] = useState(() => {
+    const agora = new Date();
+    return new Date(agora.getFullYear(), agora.getMonth(), 1);
+  });
 
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
 
-  // Busca os serviços ativos ao montar (ordenados por nome).
+  // Ao montar, busca em paralelo os serviços ativos (ordenados por nome) e a
+  // preferência escolha_profissional do salão. Resolver os dois JUNTOS garante
+  // que o modo (cliente escolhe x encaixe automático) já é conhecido antes de o
+  // cliente conseguir tocar num serviço. Se a config falhar, mantém o default
+  // false (encaixe automático).
   useEffect(() => {
     let ativo = true;
 
-    async function carregarServicos() {
-      const { data, error } = await supabase
-        .from("servicos")
-        .select("id, nome, duracao_min, preco_centavos")
-        .eq("estabelecimento_id", estabelecimento.id)
-        .eq("ativo", true)
-        .order("nome");
+    async function carregar() {
+      const [resServicos, resConfig] = await Promise.all([
+        supabase
+          .from("servicos")
+          .select("id, nome, duracao_min, preco_centavos")
+          .eq("estabelecimento_id", estabelecimento.id)
+          .eq("ativo", true)
+          .order("nome"),
+        supabase
+          .from("estabelecimentos")
+          .select("escolha_profissional")
+          .eq("id", estabelecimento.id)
+          .single(),
+      ]);
 
       if (!ativo) return;
 
-      if (error) {
-        setErroServicos(error.message);
+      if (resServicos.error) {
+        setErroServicos(resServicos.error.message);
       } else {
-        setServicos(data ?? []);
+        setServicos(resServicos.data ?? []);
       }
+      setEscolhaProfissional(Boolean(resConfig.data?.escolha_profissional));
       setCarregandoServicos(false);
     }
 
-    carregarServicos();
+    carregar();
     return () => {
       ativo = false;
     };
   }, [estabelecimento.id]);
 
-  // Calculado a cada render: barato e mantém a fonte da verdade na função pura.
-  // A duração do serviço escolhido define o passo entre os horários.
-  const slots = gerarSlots(form.data, servicoSelecionado?.duracao_min);
+  // Ao escolher um serviço, carrega os profissionais ATIVOS que o atendem, cada
+  // um com seus dias de trabalho embutidos (horarios_trabalho.dia_semana). Roda
+  // nos DOIS modos: alimenta os cards (quando o cliente escolhe) e sempre os
+  // dias disponíveis do calendário. Sem serviço, zera a lista.
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregarProfissionais() {
+      if (!servicoSelecionado) {
+        setProfissionaisDoServico([]);
+        return;
+      }
+
+      setCarregandoProfissionais(true);
+
+      const { data, error } = await supabase
+        .from("servico_profissional")
+        .select(
+          "profissionais!inner(id, nome, ativo, estabelecimento_id, horarios_trabalho(dia_semana))"
+        )
+        .eq("servico_id", servicoSelecionado.id)
+        .eq("profissionais.ativo", true)
+        .eq("profissionais.estabelecimento_id", estabelecimento.id);
+
+      if (!ativo) return;
+
+      const lista = error
+        ? []
+        : (data ?? [])
+            .map((v) => v.profissionais)
+            .filter(Boolean)
+            .sort((a, b) => a.nome.localeCompare(b.nome));
+      setProfissionaisDoServico(lista);
+      setCarregandoProfissionais(false);
+    }
+
+    carregarProfissionais();
+    return () => {
+      ativo = false;
+    };
+  }, [servicoSelecionado, estabelecimento.id]);
 
   const [hoje] = useState(dataDeHoje);
 
-  // Slots que vão pra tela. gerarSlots continua devolvendo a grade COMPLETA do
-  // dia; aqui só removemos o que já passou — e SÓ quando a data escolhida é hoje
-  // (recalcula a cada render, então troca de data já reflete a hora atual).
-  // Data futura: nada é filtrado. Comparação puramente por string "HH:MM".
-  const slotsDisponiveis =
-    form.data === hoje
-      ? slots.filter((slot) => slot > horaDeAgora())
-      : slots;
+  // Dias da semana (0–6) com atendimento para o serviço escolhido. No fluxo
+  // "cliente escolhe", só conta o profissional selecionado; no encaixe
+  // automático, a UNIÃO dos dias de todos os profissionais elegíveis. Alimenta
+  // o calendário: dia da semana fora desse conjunto nasce cinza/desabilitado.
+  const diasSemanaAtivos = (() => {
+    const fonte = escolhaProfissional
+      ? profissionaisDoServico.filter((p) => p.id === profissionalSelecionado?.id)
+      : profissionaisDoServico;
 
-  // Mantém `ocupados` sincronizado com a data/serviço selecionados.
-  // Busca async declarada DENTRO do efeito (padrão idiomático): os setState
-  // ficam aqui, ao redor do helper puro buscarOcupados, e a flag `ativo`
-  // cancela corridas entre datas / setState após desmontar.
+    const set = new Set();
+    fonte.forEach((p) =>
+      (p.horarios_trabalho ?? []).forEach((h) => set.add(h.dia_semana))
+    );
+    return set;
+  })();
+
+  // Navegação do calendário: não deixa recuar antes do mês atual.
+  const agoraMes = new Date();
+  const podeVoltarMes =
+    mesVisivel.getFullYear() > agoraMes.getFullYear() ||
+    (mesVisivel.getFullYear() === agoraMes.getFullYear() &&
+      mesVisivel.getMonth() > agoraMes.getMonth());
+
+  function mesAnterior() {
+    setMesVisivel((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1));
+  }
+  function proximoMes() {
+    setMesVisivel((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1));
+  }
+
+  // Seleção de dia no calendário: grava a data e invalida o horário anterior
+  // (o efeito de vagas recarrega a grade do novo dia).
+  function selecionarData(iso) {
+    setForm((anterior) => ({ ...anterior, data: iso }));
+    setHorarioSelecionado("");
+  }
+
+  // Horários oferecidos = chaves do mapa de vagas. No fluxo "cliente escolhe",
+  // filtra só os horários em que o profissional selecionado está livre; no
+  // encaixe automático basta existir >=1 profissional livre (a chave existe).
+  const horariosBase = Object.keys(vagas)
+    .filter((h) =>
+      escolhaProfissional
+        ? profissionalSelecionado != null &&
+          vagas[h].includes(profissionalSelecionado.id)
+        : true
+    )
+    .sort();
+
+  // Na data de hoje, esconde o que já passou (comparação por string "HH:MM").
+  // Data futura: nada é filtrado.
+  const horariosVisiveis =
+    form.data === hoje
+      ? horariosBase.filter((h) => h > horaDeAgora())
+      : horariosBase;
+
+  // Mantém `vagas` (mapa horário -> profissionais livres) sincronizado com a
+  // data/serviço selecionados. A flag `ativo` cancela corridas entre datas e
+  // evita setState após desmontar. Precisa de serviço escolhido (a duração dele
+  // define a grade), o que ambos os fluxos já garantem antes da etapa de data.
   useEffect(() => {
-    if (!form.data) return;
+    if (!form.data || !servicoSelecionado) return;
     let ativo = true;
 
     async function sincronizar() {
       setErroSlots("");
       setCarregandoSlots(true);
 
-      const { ocupados, error } = await buscarOcupados(
-        form.data,
-        servicoSelecionado?.duracao_min,
-        estabelecimento.id
-      );
-
-      if (!ativo) return;
-
-      setCarregandoSlots(false);
-
-      if (error) {
-        setErroSlots(error.message);
-        setOcupados([]);
-        return;
+      try {
+        const mapa = await calcularVagasPorHorario({
+          estabelecimentoId: estabelecimento.id,
+          servicoId: servicoSelecionado.id,
+          data: form.data,
+        });
+        if (!ativo) return;
+        setVagas(mapa);
+      } catch (e) {
+        if (!ativo) return;
+        setErroSlots(e.message ?? String(e));
+        setVagas({});
+      } finally {
+        if (ativo) setCarregandoSlots(false);
       }
-
-      setOcupados(ocupados);
     }
 
     sincronizar();
@@ -228,23 +486,35 @@ export default function FormularioAgendamento({
     };
   }, [form.data, servicoSelecionado, estabelecimento.id]);
 
+  // Só os campos de texto (nome, WhatsApp) usam este handler agora — a data é
+  // escolhida pelo calendário (selecionarData).
   function handleChange(e) {
     const { name, value } = e.target;
     setForm((anterior) => ({ ...anterior, [name]: value }));
-
-    // Trocar a data invalida o horário escolhido; o useEffect [form.data]
-    // cuida de recarregar os ocupados do novo dia.
-    if (name === "data") {
-      setHorarioSelecionado("");
-    }
   }
 
-  // Trocar de serviço muda a duração e, portanto, os slots gerados:
-  // o horário escolhido pode não existir mais, então o limpamos.
+  // Trocar de serviço muda a duração/grade e a lista de profissionais: o
+  // horário e o profissional escolhidos podem não valer mais, então limpamos.
+  // No encaixe automático (toggle off), avança direto para a data. No fluxo
+  // "cliente escolhe", fica na etapa de serviço pra o cliente escolher o
+  // profissional (os cards aparecem logo abaixo).
   function selecionarServico(servico) {
     setServicoSelecionado(servico);
     setHorarioSelecionado("");
-    // Avanço automático: concluir a etapa de serviço leva à de data.
+    setProfissionalSelecionado(null);
+    // A troca muda os dias/horários válidos: zera a data pra não ficar uma
+    // seleção antiga num dia que virou indisponível.
+    setForm((anterior) => ({ ...anterior, data: "" }));
+    if (!escolhaProfissional) setEtapa("data");
+  }
+
+  // Fluxo "cliente escolhe": escolher o profissional conclui a etapa de serviço
+  // e leva à de data, onde o calendário e a grade já refletem só a agenda dele.
+  function selecionarProfissional(profissional) {
+    setProfissionalSelecionado(profissional);
+    setHorarioSelecionado("");
+    // Cada profissional trabalha em dias diferentes: zera a data ao trocar.
+    setForm((anterior) => ({ ...anterior, data: "" }));
     setEtapa("data");
   }
 
@@ -280,21 +550,48 @@ export default function FormularioAgendamento({
       return;
     }
 
+    // No fluxo "cliente escolhe", o profissional é obrigatório.
+    if (escolhaProfissional && !profissionalSelecionado) {
+      setErro("Selecione um profissional.");
+      return;
+    }
+
     setEnviando(true);
+
+    // Quem fica com a reserva: o escolhido pelo cliente, ou — no encaixe
+    // automático — o menos ocupado entre os livres neste horário.
+    let profissionalId;
+    if (escolhaProfissional) {
+      profissionalId = profissionalSelecionado.id;
+    } else {
+      const livres = vagas[horarioSelecionado] ?? [];
+      if (livres.length === 0) {
+        setEnviando(false);
+        setErro("Esse horário acabou de ser reservado. Escolha outro.");
+        setHorarioSelecionado("");
+        return;
+      }
+      profissionalId = await escolherMenosOcupado(
+        estabelecimento.id,
+        form.data,
+        livres
+      );
+    }
 
     // Payload base idêntico ao do público. `status` só entra quando o
     // consumidor o fornece (admin => "confirmado"); omitido, o banco aplica o
     // default "pendente" — comportamento do /agendar público inalterado.
     const payload = {
-  nome_cliente: form.nome,
-  telefone: form.telefone,
-  data: form.data,
-  horario: horarioSelecionado,
-  servico_id: servicoSelecionado.id,
-  duracao_min: servicoSelecionado.duracao_min,
-  estabelecimento_id: estabelecimento.id,
-};
-if (status) payload.status = status;
+      nome_cliente: form.nome,
+      telefone: form.telefone,
+      data: form.data,
+      horario: horarioSelecionado,
+      servico_id: servicoSelecionado.id,
+      duracao_min: servicoSelecionado.duracao_min,
+      estabelecimento_id: estabelecimento.id,
+      profissional_id: profissionalId,
+    };
+    if (status) payload.status = status;
     const { error } = await supabase.from("agendamentos").insert(payload);
 
     setEnviando(false);
@@ -311,13 +608,17 @@ if (status) payload.status = status;
       if (ehHorarioOcupado) {
         setErro("Esse horário acabou de ser reservado. Escolha outro.");
         setHorarioSelecionado("");
-        // Recarrega os ocupados pra esse horário passar a aparecer travado.
-        const recarregado = await buscarOcupados(
-          form.data,
-          servicoSelecionado?.duracao_min,
-          estabelecimento.id
-        );
-        if (!recarregado.error) setOcupados(recarregado.ocupados);
+        // Recarrega as vagas pra refletir quem ainda está livre neste dia.
+        try {
+          const mapa = await calcularVagasPorHorario({
+            estabelecimentoId: estabelecimento.id,
+            servicoId: servicoSelecionado.id,
+            data: form.data,
+          });
+          setVagas(mapa);
+        } catch {
+          setVagas({});
+        }
         return;
       }
 
@@ -332,6 +633,9 @@ if (status) payload.status = status;
       form,
       servico: servicoSelecionado,
       horario: horarioSelecionado,
+      // Só faz sentido expor quando foi o cliente quem escolheu; no encaixe
+      // automático o profissional é decidido nos bastidores.
+      profissional: escolhaProfissional ? profissionalSelecionado : null,
     });
   }
 
@@ -462,41 +766,133 @@ if (status) payload.status = status;
                 })}
               </div>
             )}
+
+            {/* Fluxo "cliente escolhe": depois de um serviço, mostra os cards
+                de profissional (mais elaborados que os quadrados do admin).
+                Escolher um leva à etapa de data. */}
+            {escolhaProfissional && servicoSelecionado && (
+              <div className="mt-6">
+                <span className="mb-1 block text-sm font-medium text-body">
+                  Profissional
+                </span>
+
+                {profissionaisDoServico.length === 0 ? (
+                  <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
+                    Nenhum profissional disponível para este serviço.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {profissionaisDoServico.map((prof) => {
+                      const selecionado =
+                        profissionalSelecionado?.id === prof.id;
+
+                      return (
+                        <button
+                          key={prof.id}
+                          type="button"
+                          onClick={() => selecionarProfissional(prof)}
+                          aria-pressed={selecionado}
+                          className={[
+                            "flex items-center gap-3 rounded-xl px-4 py-3 text-left ring-1 transition",
+                            selecionado
+                              ? "bg-primary text-white ring-primary shadow-sm"
+                              : "bg-card text-body ring-border hover:border-primary hover:ring-primary hover:shadow-sm",
+                          ].join(" ")}
+                        >
+                          <span
+                            className={[
+                              "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
+                              selecionado
+                                ? "bg-white/20 text-white"
+                                : "bg-surface text-heading ring-1 ring-border",
+                            ].join(" ")}
+                            aria-hidden="true"
+                          >
+                            {iniciais(prof.nome)}
+                          </span>
+
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-semibold">
+                              {prof.nome}
+                            </span>
+                            <span
+                              className={[
+                                "block text-xs",
+                                selecionado ? "text-on-primary/80" : "text-muted",
+                              ].join(" ")}
+                            >
+                              Toque para escolher
+                            </span>
+                          </span>
+
+                          {selecionado && (
+                            <svg
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="3"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                              className="h-5 w-5 shrink-0"
+                            >
+                              <path d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
-        {/* Etapa 2 — Data: campo de data e, depois de escolhida, a grade de
-            horários (a grade só aparece após a data, como antes). */}
+        {/* Etapa 2 — Data: calendário próprio (dias sem atendimento nascem
+            cinza/não clicáveis) e, depois de escolhida a data, a grade de
+            horários. */}
         {etapa === "data" && (
           <>
             <div>
-              <label htmlFor="data" className="mb-1 block text-sm font-medium text-body">
+              <span className="mb-1 block text-sm font-medium text-body">
                 Data
-              </label>
-              <input
-                id="data"
-                name="data"
-                type="date"
-                value={form.data}
-                onChange={handleChange}
-                min={hoje}
-                required
-                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-              />
-            </div>
+              </span>
 
-            {/* Seletor de horários: precisa de um serviço escolhido (define a
-                duração dos slots) e de uma data preenchida. */}
-            {!servicoSelecionado && (
-              <p className="text-sm text-body">
-                Selecione um serviço para ver os horários.
-              </p>
-            )}
+              {carregandoProfissionais ? (
+                <p className="text-sm text-body">
+                  Carregando disponibilidade...
+                </p>
+              ) : diasSemanaAtivos.size === 0 ? (
+                <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
+                  {escolhaProfissional
+                    ? "Este profissional não tem dias de atendimento."
+                    : "Nenhum profissional atende este serviço no momento."}
+                </p>
+              ) : (
+                <CalendarioDias
+                  mes={mesVisivel}
+                  min={hoje}
+                  diasSemanaAtivos={diasSemanaAtivos}
+                  selecionado={form.data}
+                  onSelecionar={selecionarData}
+                  onPrev={mesAnterior}
+                  onNext={proximoMes}
+                  podeVoltar={podeVoltarMes}
+                />
+              )}
+            </div>
 
             {servicoSelecionado && form.data && (
               <div>
                 <span className="mb-1 block text-sm font-medium text-body">
                   Horário
+                  {escolhaProfissional && profissionalSelecionado && (
+                    <span className="font-normal text-muted">
+                      {" · "}
+                      {profissionalSelecionado.nome}
+                    </span>
+                  )}
                 </span>
 
                 {carregandoSlots && (
@@ -509,46 +905,37 @@ if (status) payload.status = status;
                   </p>
                 )}
 
-                {!carregandoSlots && !erroSlots && slots.length === 0 && (
+                {/* Sem nenhuma vaga no dia: ninguém trabalha, ou tudo já foi
+                    reservado (a grade só lista horários com >=1 livre). */}
+                {!carregandoSlots && !erroSlots && horariosBase.length === 0 && (
                   <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
-                    Fechado neste dia.
+                    Nenhum horário disponível neste dia.
                   </p>
                 )}
 
-                {/* Dia aberto (slots.length > 0) mas tudo já passou: só pode
-                    acontecer quando a data é hoje e a hora atual ultrapassou o
-                    último horário. Mostra um aviso discreto no lugar da grade. */}
+                {/* Havia vaga, mas tudo já passou: só ocorre quando a data é
+                    hoje e a hora atual ultrapassou o último horário. */}
                 {!carregandoSlots &&
                   !erroSlots &&
-                  slots.length > 0 &&
-                  slotsDisponiveis.length === 0 && (
+                  horariosBase.length > 0 &&
+                  horariosVisiveis.length === 0 && (
                     <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
                       Não há mais horários disponíveis para hoje.
                     </p>
                   )}
 
-                {!carregandoSlots && !erroSlots && slotsDisponiveis.length > 0 && (
+                {!carregandoSlots && !erroSlots && horariosVisiveis.length > 0 && (
                   <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                    {slotsDisponiveis.map((slot) => {
-                      // O slot candidato começa em `slot` e dura a duração do
-                      // serviço escolhido, formando [candInicio, candFim).
-                      // Travado se sobrepuser qualquer intervalo ocupado.
-                      const candInicio = horaParaMin(slot);
-                      const candFim =
-                        candInicio + servicoSelecionado.duracao_min;
-                      const ocupado = ocupados.some(
-                        (intervalo) =>
-                          candInicio < intervalo.fim &&
-                          intervalo.inicio < candFim
-                      );
+                    {horariosVisiveis.map((slot) => {
+                      // A grade só contém horários com pelo menos um
+                      // profissional livre (no fluxo "cliente escolhe", livre
+                      // para o selecionado), então nenhum botão fica travado.
                       const selecionado = horarioSelecionado === slot;
 
                       return (
                         <button
                           key={slot}
                           type="button"
-                          disabled={ocupado}
-                          aria-disabled={ocupado}
                           onClick={() => {
                             setHorarioSelecionado(slot);
                             // Avanço automático: escolher o horário conclui
@@ -558,9 +945,7 @@ if (status) payload.status = status;
                           aria-pressed={selecionado}
                           className={[
                             "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition",
-                            ocupado
-                              ? "cursor-not-allowed bg-surface text-muted line-through ring-border"
-                              : selecionado
+                            selecionado
                               ? "bg-primary text-white ring-primary"
                               : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
                           ].join(" ")}
