@@ -6,6 +6,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import listPlugin from "@fullcalendar/list";
 import ptBrLocale from "@fullcalendar/core/locales/pt-br";
+import { supabase } from "@/lib/supabaseClient";
 import { HORA_ABERTURA, HORA_FECHAMENTO } from "@/lib/horarios";
 import { classificarAgendamento } from "@/lib/particao";
 
@@ -59,11 +60,23 @@ const hhmm = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinu
 // fetch novo) e deriva os eventos pendentes/confirmados. View inicial e
 // toolbars são responsivas (mobile-first); o `key` reinicia o calendário ao
 // virar o breakpoint.
-export default function PainelCalendario({ agendamentos, onSelecionarConfirmado }) {
+export default function PainelCalendario({
+  agendamentos,
+  onSelecionarConfirmado,
+  estabelecimentoId,
+}) {
   // Começa em `false` (desktop) tanto no servidor quanto no cliente para não
   // divergir na hidratação; o efeito ajusta após montar. Nunca lemos `window`
   // durante o render.
   const [isMobile, setIsMobile] = useState(false);
+
+  // Filtro "Ver agenda de": "todos" (padrão) ou o profissional_id (como string,
+  // já que é o value do <select>). Filtra os eventos EM MEMÓRIA, sem query nova.
+  const [filtroProfissional, setFiltroProfissional] = useState("todos");
+
+  // Opções do filtro: profissionais ATIVOS do salão (tabela profissionais),
+  // ordenados por nome — inclui quem ainda não tem nenhum agendamento.
+  const [profissionaisDisponiveis, setProfissionaisDisponiveis] = useState([]);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 767px)");
@@ -73,6 +86,25 @@ export default function PainelCalendario({ agendamentos, onSelecionarConfirmado 
     return () => mq.removeEventListener("change", aplicar);
   }, []);
 
+  useEffect(() => {
+    if (!estabelecimentoId) return;
+    let ativo = true;
+
+    (async () => {
+      const { data } = await supabase
+        .from("profissionais")
+        .select("id, nome")
+        .eq("estabelecimento_id", estabelecimentoId)
+        .eq("ativo", true)
+        .order("nome");
+      if (ativo) setProfissionaisDisponiveis(data ?? []);
+    })();
+
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimentoId]);
+
   // Eventos: só itens ATIVOS pela partição derivada (classificarAgendamento !==
   // "historico"). Cancelados e caducados NÃO aparecem aqui (vão pro Histórico);
   // confirmados "em andamento" continuam, pois só somem quando o FIM passa.
@@ -80,7 +112,14 @@ export default function PainelCalendario({ agendamentos, onSelecionarConfirmado 
   // ambos). start/end em ISO LOCAL (sem "Z"); end = start + duracao_min. O
   // registro completo vai em extendedProps (usado no clique na leva B).
   const eventos = agendamentos
-    .filter((a) => a.data && a.horario && classificarAgendamento(a) !== "historico")
+    .filter(
+      (a) =>
+        a.data &&
+        a.horario &&
+        classificarAgendamento(a) !== "historico" &&
+        (filtroProfissional === "todos" ||
+          String(a.profissional_id) === filtroProfissional)
+    )
     .map((a) => {
       // "inbox" = pendente segurando o horário → bloco cinza, rótulo "Pendente"
       // (ocupação a tratar no Inbox). Caso contrário, confirmado (verde).
@@ -113,8 +152,33 @@ export default function PainelCalendario({ agendamentos, onSelecionarConfirmado 
     });
 
   return (
-    <FullCalendar
-      key={isMobile ? "m" : "d"}
+    <div>
+      {/* Filtro "Ver agenda de": Todos + cada profissional presente nos
+          agendamentos. Filtra os eventos em memória (padrão Todos). */}
+      <div className="mb-4">
+        <label
+          htmlFor="filtro-profissional"
+          className="mb-1 block text-sm font-medium text-body"
+        >
+          Ver agenda de:
+        </label>
+        <select
+          id="filtro-profissional"
+          value={filtroProfissional}
+          onChange={(e) => setFiltroProfissional(e.target.value)}
+          className="w-full rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading shadow-sm ring-1 ring-border transition focus:outline-none focus:ring-2 focus:ring-border"
+        >
+          <option value="todos">Todos</option>
+          {profissionaisDisponiveis.map((p) => (
+            <option key={p.id} value={String(p.id)}>
+              {p.nome}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <FullCalendar
+        key={isMobile ? "m" : "d"}
       plugins={[dayGridPlugin, timeGridPlugin, listPlugin]}
       locale={ptBrLocale}
       initialView={isMobile ? "timeGridDay" : "dayGridMonth"}
@@ -177,6 +241,7 @@ export default function PainelCalendario({ agendamentos, onSelecionarConfirmado 
           onSelecionarConfirmado?.(item);
         }
       }}
-    />
+      />
+    </div>
   );
 }

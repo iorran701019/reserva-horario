@@ -161,7 +161,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, observacao, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, observacao, profissional_id, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -728,6 +728,7 @@ export default function AdminPage() {
           <PainelCalendario
             agendamentos={agendamentos}
             onSelecionarConfirmado={(item) => setIdSelecionado(item.id)}
+            estabelecimentoId={estabelecimento.id}
           />
         )}
 
