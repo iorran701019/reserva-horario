@@ -12,6 +12,7 @@ import {
   MENSAGEM_CANCELAMENTO,
 } from "@/lib/whatsapp";
 import { classificarAgendamento, fimDoAtendimento } from "@/lib/particao";
+import { profissionaisLivresNoHorario } from "@/lib/disponibilidade";
 import {
   Menu,
   X,
@@ -161,7 +162,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, observacao, profissional_id, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, observacao, servico_id, profissional_id, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -236,6 +237,19 @@ export default function AdminPage() {
   // criar; `avisoAgendar` mostra a confirmação inline do último cadastro.
   const [agendarKey, setAgendarKey] = useState(0);
   const [avisoAgendar, setAvisoAgendar] = useState("");
+
+  // Preferência do salão (tabela estabelecimentos). Só quando DESLIGADA (o dono
+  // encaixa) faz sentido oferecer a troca de profissional nos cards — com ela
+  // ligada, respeita-se a escolha do cliente e a opção nem aparece.
+  const [escolhaProfissional, setEscolhaProfissional] = useState(false);
+
+  // Troca de profissional: `agendamentoParaTrocar` arma o modal; a lista de
+  // profissionais LIVRES no horário (que atendem o serviço) é carregada sob
+  // demanda por lib/disponibilidade. null = modal fechado.
+  const [agendamentoParaTrocar, setAgendamentoParaTrocar] = useState(null);
+  const [profissionaisTroca, setProfissionaisTroca] = useState([]);
+  const [carregandoTroca, setCarregandoTroca] = useState(false);
+  const [erroTroca, setErroTroca] = useState("");
 
   // Aplica um patch a um único item no estado local (evita refazer o fetch
   // inteiro). Caminho único de "refresh" otimista usado pelos handlers.
@@ -357,6 +371,39 @@ export default function AdminPage() {
 
     setErro("");
     atualizarItemLocal(id, { observacao });
+  }
+
+  // Troca o profissional do agendamento. Grava profissional_id no banco e patcha
+  // o estado local (nome incluso) pelo MESMO atualizarItemLocal — card/modal
+  // refletem na hora. Mantém o cadeado anti-sobreposição: 23P01 = outra reserva
+  // pegou o profissional nesse horário no meio do caminho.
+  async function handleTrocarProfissional(agendamento, profissional) {
+    setErroTroca("");
+
+    const { error } = await supabase
+      .from("agendamentos")
+      .update({ profissional_id: profissional.id })
+      .eq("id", agendamento.id);
+
+    if (error) {
+      const ehOcupado =
+        error.code === "23P01" ||
+        /agendamentos_sem_sobreposicao|exclusion constraint/i.test(
+          error.message ?? ""
+        );
+      setErroTroca(
+        ehOcupado
+          ? "Esse profissional acabou de ficar ocupado nesse horário. Escolha outro."
+          : error.message
+      );
+      return;
+    }
+
+    atualizarItemLocal(agendamento.id, {
+      profissional_id: profissional.id,
+      profissional_nome: profissional.nome,
+    });
+    setAgendamentoParaTrocar(null);
   }
 
   // Verifica a sessão ao montar e fica ouvindo mudanças (login/logout em
@@ -498,6 +545,60 @@ export default function AdminPage() {
       clearInterval(intervalo);
     };
   }, [autenticado, estabelecimento]);
+
+  // Lê a preferência escolha_profissional do salão (decide se a troca de
+  // profissional aparece nos cards). Uma linha, ao resolver o estabelecimento.
+  useEffect(() => {
+    if (!estabelecimento?.id) return;
+    let ativo = true;
+
+    (async () => {
+      const { data } = await supabase
+        .from("estabelecimentos")
+        .select("escolha_profissional")
+        .eq("id", estabelecimento.id)
+        .single();
+      if (ativo) setEscolhaProfissional(Boolean(data?.escolha_profissional));
+    })();
+
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento]);
+
+  // Ao armar a troca, carrega os profissionais LIVRES no horário do agendamento
+  // (que atendem o serviço), reaproveitando lib/disponibilidade. O profissional
+  // atual já sai de fora (a própria reserva o ocupa), mas filtramos por garantia.
+  useEffect(() => {
+    if (!agendamentoParaTrocar) return;
+    let ativo = true;
+
+    (async () => {
+      setCarregandoTroca(true);
+      setErroTroca("");
+      setProfissionaisTroca([]);
+      try {
+        const livres = await profissionaisLivresNoHorario({
+          estabelecimentoId: estabelecimento.id,
+          servicoId: agendamentoParaTrocar.servico_id,
+          data: agendamentoParaTrocar.data,
+          horario: agendamentoParaTrocar.horario,
+        });
+        if (!ativo) return;
+        setProfissionaisTroca(
+          livres.filter((p) => p.id !== agendamentoParaTrocar.profissional_id)
+        );
+      } catch (e) {
+        if (ativo) setErroTroca(e.message ?? String(e));
+      } finally {
+        if (ativo) setCarregandoTroca(false);
+      }
+    })();
+
+    return () => {
+      ativo = false;
+    };
+  }, [agendamentoParaTrocar, estabelecimento]);
 
   // Autenticado, mas sem perfil vinculado (conta órfã): não há salão a resolver.
   // Vem ANTES do guard de carregamento — nesse caso `estabelecimento` continua
@@ -715,6 +816,18 @@ export default function AdminPage() {
                       <IconeWhatsApp />
                       Cancelar agendamento
                     </button>
+
+                    {/* Troca de profissional só com o toggle DESLIGADO (o dono
+                        encaixa); ligado, respeita a escolha do cliente. */}
+                    {!escolhaProfissional && (
+                      <button
+                        type="button"
+                        onClick={() => setAgendamentoParaTrocar(item)}
+                        className="inline-flex items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                      >
+                        Trocar profissional
+                      </button>
+                    )}
                   </div>
                 </li>
               ))}
@@ -1142,6 +1255,20 @@ export default function AdminPage() {
                 existente (modal de confirmação → handleCancelar). Sem empilhar
                 dois modais. */}
             <div className="mt-4 flex flex-col gap-2">
+              {/* Trocar profissional só com o toggle DESLIGADO. Fecha este modal
+                  e abre o de troca (sem empilhar). */}
+              {!escolhaProfissional && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIdSelecionado(null);
+                    setAgendamentoParaTrocar(selecionado);
+                  }}
+                  className="inline-flex items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                >
+                  Trocar profissional
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -1210,6 +1337,77 @@ export default function AdminPage() {
                 Voltar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de troca de profissional. Lista só quem atende o serviço E está
+          LIVRE no horário (lib/disponibilidade). Clicar num profissional grava
+          na hora (handleTrocarProfissional) e fecha. Só é acessível com o toggle
+          escolha_profissional desligado (a abertura já é gated nos cards). */}
+      {agendamentoParaTrocar && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-trocar"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setAgendamentoParaTrocar(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="titulo-trocar" className="text-lg font-semibold text-heading">
+              Trocar profissional
+            </h2>
+            <p className="mt-1 text-sm text-body">
+              {formatarData(agendamentoParaTrocar.data)} às{" "}
+              {formatarHorario(agendamentoParaTrocar.horario)}
+              {agendamentoParaTrocar.servicos?.nome && (
+                <> · {agendamentoParaTrocar.servicos.nome}</>
+              )}
+            </p>
+            <p className="mt-1 text-xs text-muted">
+              Atual: {agendamentoParaTrocar.profissional_nome ?? "—"}
+            </p>
+
+            <div className="mt-4">
+              {carregandoTroca ? (
+                <p className="text-sm text-body">Carregando disponíveis...</p>
+              ) : erroTroca ? (
+                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                  {erroTroca}
+                </p>
+              ) : profissionaisTroca.length === 0 ? (
+                <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
+                  Nenhum outro profissional livre neste horário.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {profissionaisTroca.map((prof) => (
+                    <li key={prof.id}>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleTrocarProfissional(agendamentoParaTrocar, prof)
+                        }
+                        className="w-full rounded-lg bg-card px-3 py-2 text-left text-sm font-medium text-heading ring-1 ring-border transition hover:border-primary hover:ring-primary"
+                      >
+                        {prof.nome}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setAgendamentoParaTrocar(null)}
+              className="mt-4 w-full rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+            >
+              Voltar
+            </button>
           </div>
         </div>
       )}
