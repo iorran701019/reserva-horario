@@ -861,6 +861,9 @@ export default function AdminPage() {
               estabelecimento={estabelecimento}
               status="confirmado"
               rotuloSubmit="Criar agendamento confirmado"
+              // No admin o dono SEMPRE escolhe o profissional ao marcar,
+              // independente do toggle escolha_profissional do salão.
+              forcarEscolhaProfissional
               onSucesso={async ({ form, horario }) => {
                 setAvisoAgendar(
                   `Agendamento de ${form.nome} criado para ${formatarData(

@@ -266,11 +266,16 @@ function CalendarioDias({
 //   onSucesso     – callback após insert OK, recebe { form, servico, horario }.
 //                   O consumidor decide o que mostrar/recarregar; remontar este
 //                   componente (via prop key) zera o formulário pro próximo.
+//   forcarEscolhaProfissional – liga o seletor de profissional INDEPENDENTE do
+//                   toggle escolha_profissional do salão. Usado no /admin, onde o
+//                   dono sempre escolhe o profissional ao marcar. No público fica
+//                   false, então lá o modo continua vindo só do banco.
 export default function FormularioAgendamento({
   estabelecimento,
   status,
   rotuloSubmit = "Confirmar agendamento",
   onSucesso,
+  forcarEscolhaProfissional = false,
 }) {
   const [form, setForm] = useState(ESTADO_INICIAL);
   const [horarioSelecionado, setHorarioSelecionado] = useState("");
@@ -292,6 +297,11 @@ export default function FormularioAgendamento({
   // Preferência do salão: cliente escolhe o profissional (true) ou o sistema
   // encaixa automaticamente (false). Lida do banco junto com os serviços.
   const [escolhaProfissional, setEscolhaProfissional] = useState(false);
+
+  // Flag EFETIVO usado por toda a lógica de modo: o admin força o seletor
+  // (forcarEscolhaProfissional), senão vale o toggle do salão. O state acima
+  // guarda só o valor cru do banco; daqui pra baixo tudo lê `escolherProfissional`.
+  const escolherProfissional = forcarEscolhaProfissional || escolhaProfissional;
 
   // Profissionais ATIVOS que atendem o serviço escolhido, cada um já com seus
   // dias de trabalho (horarios_trabalho.dia_semana) embutidos — carregados nos
@@ -400,7 +410,7 @@ export default function FormularioAgendamento({
   // automático, a UNIÃO dos dias de todos os profissionais elegíveis. Alimenta
   // o calendário: dia da semana fora desse conjunto nasce cinza/desabilitado.
   const diasSemanaAtivos = (() => {
-    const fonte = escolhaProfissional
+    const fonte = escolherProfissional
       ? profissionaisDoServico.filter((p) => p.id === profissionalSelecionado?.id)
       : profissionaisDoServico;
 
@@ -437,7 +447,7 @@ export default function FormularioAgendamento({
   // encaixe automático basta existir >=1 profissional livre (a chave existe).
   const horariosBase = Object.keys(vagas)
     .filter((h) =>
-      escolhaProfissional
+      escolherProfissional
         ? profissionalSelecionado != null &&
           vagas[h].includes(profissionalSelecionado.id)
         : true
@@ -505,7 +515,7 @@ export default function FormularioAgendamento({
     // A troca muda os dias/horários válidos: zera a data pra não ficar uma
     // seleção antiga num dia que virou indisponível.
     setForm((anterior) => ({ ...anterior, data: "" }));
-    if (!escolhaProfissional) setEtapa("data");
+    if (!escolherProfissional) setEtapa("data");
   }
 
   // Fluxo "cliente escolhe": escolher o profissional conclui a etapa de serviço
@@ -551,7 +561,7 @@ export default function FormularioAgendamento({
     }
 
     // No fluxo "cliente escolhe", o profissional é obrigatório.
-    if (escolhaProfissional && !profissionalSelecionado) {
+    if (escolherProfissional && !profissionalSelecionado) {
       setErro("Selecione um profissional.");
       return;
     }
@@ -561,7 +571,7 @@ export default function FormularioAgendamento({
     // Quem fica com a reserva: o escolhido pelo cliente, ou — no encaixe
     // automático — o menos ocupado entre os livres neste horário.
     let profissionalId;
-    if (escolhaProfissional) {
+    if (escolherProfissional) {
       profissionalId = profissionalSelecionado.id;
     } else {
       const livres = vagas[horarioSelecionado] ?? [];
@@ -635,7 +645,7 @@ export default function FormularioAgendamento({
       horario: horarioSelecionado,
       // Só faz sentido expor quando foi o cliente quem escolheu; no encaixe
       // automático o profissional é decidido nos bastidores.
-      profissional: escolhaProfissional ? profissionalSelecionado : null,
+      profissional: escolherProfissional ? profissionalSelecionado : null,
     });
   }
 
@@ -770,7 +780,7 @@ export default function FormularioAgendamento({
             {/* Fluxo "cliente escolhe": depois de um serviço, mostra os cards
                 de profissional (mais elaborados que os quadrados do admin).
                 Escolher um leva à etapa de data. */}
-            {escolhaProfissional && servicoSelecionado && (
+            {escolherProfissional && servicoSelecionado && (
               <div className="mt-6">
                 <span className="mb-1 block text-sm font-medium text-body">
                   Profissional
@@ -865,7 +875,7 @@ export default function FormularioAgendamento({
                 </p>
               ) : diasSemanaAtivos.size === 0 ? (
                 <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
-                  {escolhaProfissional
+                  {escolherProfissional
                     ? "Este profissional não tem dias de atendimento."
                     : "Nenhum profissional atende este serviço no momento."}
                 </p>
@@ -887,7 +897,7 @@ export default function FormularioAgendamento({
               <div>
                 <span className="mb-1 block text-sm font-medium text-body">
                   Horário
-                  {escolhaProfissional && profissionalSelecionado && (
+                  {escolherProfissional && profissionalSelecionado && (
                     <span className="font-normal text-muted">
                       {" · "}
                       {profissionalSelecionado.nome}
