@@ -286,15 +286,15 @@ export default function FormularioAgendamento({
     // consumidor o fornece (admin => "confirmado"); omitido, o banco aplica o
     // default "pendente" — comportamento do /agendar público inalterado.
     const payload = {
-      nome_cliente: form.nome,
-      telefone: form.telefone,
-      data: form.data,
-      horario: horarioSelecionado,
-      servico_id: servicoSelecionado.id,
-      estabelecimento_id: estabelecimento.id,
-    };
-    if (status) payload.status = status;
-
+  nome_cliente: form.nome,
+  telefone: form.telefone,
+  data: form.data,
+  horario: horarioSelecionado,
+  servico_id: servicoSelecionado.id,
+  duracao_min: servicoSelecionado.duracao_min,
+  estabelecimento_id: estabelecimento.id,
+};
+if (status) payload.status = status;
     const { error } = await supabase.from("agendamentos").insert(payload);
 
     setEnviando(false);

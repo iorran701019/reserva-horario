@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { formatarPreco } from "@/components/FormularioAgendamento";
 
 // Aba "Profissionais" do /admin: CRUD dos profissionais do salão (tabela
 // `profissionais`), sempre particionado por estabelecimento_id (o consumidor já
@@ -11,7 +12,8 @@ import { supabase } from "@/lib/supabaseClient";
 //
 // A LISTA e o soft delete seguem iguais; muda só o criar/editar:
 //   - CRIAR  → wizard em 3 janelas (A: identificação+dias / B: horários /
-//              C: serviços — placeholder), navegável por "Voltar"/"Avançar".
+//              C: serviços que o profissional atende), navegável por
+//              "Voltar"/"Avançar"; o botão Salvar mora na Janela C.
 //   - EDITAR → tela de resumo com todos os dados (nome, dias, horários,
 //              serviços), tudo editável de uma vez, sem refazer o wizard.
 //
@@ -24,6 +26,10 @@ import { supabase } from "@/lib/supabaseClient";
 //                              OPCIONAL, tudo-ou-nada). Regras espelhadas na UI:
 //                              hora_fim > hora_inicio e almoço tudo-ou-nada, pra
 //                              o insert nunca bater nas checks do banco.
+//   servico_profissional     – vínculo N:N (servico_id, profissional_id): quais
+//                              serviços o profissional atende. Gravado com a mesma
+//                              estratégia "substitui tudo" dos horários (apaga os
+//                              vínculos do profissional e reinsere os marcados).
 
 // Dias da semana no padrão de Date.getDay()/dia_semana: 0=domingo … 6=sábado.
 const DIAS = [
@@ -73,6 +79,7 @@ const FORM_INICIAL = {
   temAlmoco: false,
   almocoSalvoOriginal: false,
   horarioComum: { ...BLOCO_VAZIO },
+  servicos: [], // ids dos serviços (servicos.id) que o profissional atende
 };
 
 // "HH:MM:SS" (time do Postgres) -> "HH:MM" pro <input type="time">. Aceita já
@@ -325,16 +332,67 @@ function GradeDias({ dias, onToggle, onCampo, mostrarAlmoco }) {
   );
 }
 
-// Placeholder da Janela C / seção de serviços. A lógica de vínculo é a Fatia 2;
-// aqui só deixamos a estrutura pronta pra receber.
-function ServicosPlaceholder() {
-  return (
-    <div className="rounded-xl bg-surface px-4 py-6 text-center ring-1 ring-border">
-      <p className="text-sm font-medium text-heading">
-        Serviços deste profissional
+// Janela C / seção de serviços: lista os serviços ATIVOS do salão com checkbox;
+// marcar define quais o profissional atende (grava em servico_profissional).
+// `selecionados` é o array de ids marcados; `onToggle(id)` liga/desliga um.
+// Sem serviços cadastrados, orienta a cadastrar antes (em vez de lista vazia).
+function ListaServicos({ servicos, carregando, erro, selecionados, onToggle }) {
+  if (carregando) {
+    return (
+      <p className="rounded-lg bg-surface px-3 py-3 text-sm text-body ring-1 ring-border">
+        Carregando serviços...
       </p>
-      <p className="mt-1 text-sm text-muted">Em breve.</p>
-    </div>
+    );
+  }
+
+  if (erro) {
+    return (
+      <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+        {erro}
+      </p>
+    );
+  }
+
+  if (servicos.length === 0) {
+    return (
+      <div className="rounded-xl bg-surface px-4 py-6 text-center ring-1 ring-border">
+        <p className="text-sm text-body">
+          Cadastre serviços primeiro na aba Serviços.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <ul className="space-y-2">
+      {servicos.map((servico) => {
+        const marcado = selecionados.includes(servico.id);
+        return (
+          <li key={servico.id}>
+            <label
+              className={`flex cursor-pointer items-center gap-3 rounded-xl p-3 ring-1 transition ${
+                marcado ? "bg-card ring-primary/40" : "bg-surface ring-border hover:bg-card"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={marcado}
+                onChange={() => onToggle(servico.id)}
+                className="h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-heading">
+                  {servico.nome}
+                </span>
+                <span className="block text-xs text-muted">
+                  {servico.duracao_min} min · {formatarPreco(servico.preco_centavos)}
+                </span>
+              </span>
+            </label>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -356,6 +414,12 @@ export default function GerenciarProfissionais({ estabelecimento }) {
 
   // Profissional "armado" para soft delete (controla o modal de confirmação).
   const [profissionalParaExcluir, setProfissionalParaExcluir] = useState(null);
+
+  // Serviços ATIVOS do salão, pra montar a lista de vínculos (Janela C / resumo).
+  // Carregados uma vez; a seleção por profissional vive em `form.servicos`.
+  const [servicosSalao, setServicosSalao] = useState([]);
+  const [carregandoServicos, setCarregandoServicos] = useState(true);
+  const [erroServicos, setErroServicos] = useState("");
 
   // Carga inicial. Traz ATIVOS e INATIVOS (o CRUD mostra os dois, com ação de
   // reativar). Ordena ativos primeiro e, dentro, por nome.
@@ -387,6 +451,36 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     };
   }, [estabelecimento.id]);
 
+  // Carrega os serviços ATIVOS do salão (só os que podem ser vinculados). O
+  // vínculo em si (quais o profissional atende) vem do form, não daqui.
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregar() {
+      const { data, error } = await supabase
+        .from("servicos")
+        .select("id, nome, duracao_min, preco_centavos")
+        .eq("estabelecimento_id", estabelecimento.id)
+        .eq("ativo", true)
+        .order("nome", { ascending: true });
+
+      if (!ativo) return;
+
+      if (error) {
+        setErroServicos(error.message);
+      } else {
+        setErroServicos("");
+        setServicosSalao(data ?? []);
+      }
+      setCarregandoServicos(false);
+    }
+
+    carregar();
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento.id]);
+
   // Abre o wizard de criação, sempre da Etapa A com o form zerado.
   function abrirNovo() {
     setForm({
@@ -396,6 +490,7 @@ export default function GerenciarProfissionais({ estabelecimento }) {
       temAlmoco: false,
       almocoSalvoOriginal: false,
       horarioComum: { ...BLOCO_VAZIO },
+      servicos: [],
     });
     setErroForm("");
     setEtapa("A");
@@ -415,32 +510,45 @@ export default function GerenciarProfissionais({ estabelecimento }) {
       temAlmoco: false,
       almocoSalvoOriginal: false,
       horarioComum: { ...BLOCO_VAZIO },
+      servicos: [],
     });
     setCarregandoForm(true);
 
-    const { data, error } = await supabase
-      .from("horarios_trabalho")
-      .select("dia_semana, hora_inicio, hora_fim, almoco_inicio, almoco_fim")
-      .eq("profissional_id", profissional.id);
+    // Grade + vínculos de serviço em paralelo (ambos por profissional_id).
+    const [resHorarios, resVinculos] = await Promise.all([
+      supabase
+        .from("horarios_trabalho")
+        .select("dia_semana, hora_inicio, hora_fim, almoco_inicio, almoco_fim")
+        .eq("profissional_id", profissional.id),
+      supabase
+        .from("servico_profissional")
+        .select("servico_id")
+        .eq("profissional_id", profissional.id),
+    ]);
 
     setCarregandoForm(false);
 
-    if (error) {
-      setErroForm(`Não foi possível carregar os horários: ${error.message}`);
+    if (resHorarios.error) {
+      setErroForm(`Não foi possível carregar os horários: ${resHorarios.error.message}`);
+      return;
+    }
+    if (resVinculos.error) {
+      setErroForm(`Não foi possível carregar os serviços: ${resVinculos.error.message}`);
       return;
     }
 
     // Se qualquer linha tem almoço salvo, já vem com a checkbox marcada e os
     // campos visíveis; senão vem desmarcada e ocultos. `almocoSalvoOriginal`
     // registra esse estado inicial (pra decidir o confirm de remoção no save).
-    const tinhaAlmoco = (data ?? []).some((h) => h.almoco_inicio);
+    const tinhaAlmoco = (resHorarios.data ?? []).some((h) => h.almoco_inicio);
     setForm({
       nome: profissional.nome,
-      dias: diasDeHorarios(data ?? []),
+      dias: diasDeHorarios(resHorarios.data ?? []),
       mesmoHorario: false,
       temAlmoco: tinhaAlmoco,
       almocoSalvoOriginal: tinhaAlmoco,
       horarioComum: { ...BLOCO_VAZIO },
+      servicos: (resVinculos.data ?? []).map((v) => v.servico_id),
     });
   }
 
@@ -462,6 +570,16 @@ export default function GerenciarProfissionais({ estabelecimento }) {
 
   function setTemAlmoco(valor) {
     setForm((anterior) => ({ ...anterior, temAlmoco: valor }));
+  }
+
+  // Liga/desliga o vínculo com um serviço (por id) na seleção do form.
+  function alternarServico(id) {
+    setForm((anterior) => ({
+      ...anterior,
+      servicos: anterior.servicos.includes(id)
+        ? anterior.servicos.filter((s) => s !== id)
+        : [...anterior.servicos, id],
+    }));
   }
 
   // Liga/desliga um dia. Desligar não apaga os campos (preserva se religar).
@@ -549,6 +667,28 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     return erroInsert ?? null;
   }
 
+  // Regrava os vínculos de serviço: apaga os do profissional e insere os
+  // marcados. Mesma estratégia "substitui tudo" dos horários. Devolve o erro
+  // do Supabase ou null.
+  async function salvarServicos(profissionalId, servicoIds) {
+    const { error: erroDelete } = await supabase
+      .from("servico_profissional")
+      .delete()
+      .eq("profissional_id", profissionalId);
+    if (erroDelete) return erroDelete;
+
+    if (servicoIds.length === 0) return null;
+
+    const linhas = servicoIds.map((servico_id) => ({
+      servico_id,
+      profissional_id: profissionalId,
+    }));
+    const { error: erroInsert } = await supabase
+      .from("servico_profissional")
+      .insert(linhas);
+    return erroInsert ?? null;
+  }
+
   async function handleSalvar() {
     const { erro: erroValidacao, nome, horarios } = coletarDados(form);
     if (erroValidacao) {
@@ -588,11 +728,10 @@ export default function GerenciarProfissionais({ estabelecimento }) {
       }
 
       const erroHorarios = await salvarHorarios(data.id, horarios);
-      setSalvando(false);
       if (erroHorarios) {
+        setSalvando(false);
         // Profissional criado; a grade falhou. Cai na tela de resumo (edição)
-        // já com os horários digitados, pra corrigir/reenviar. Expandimos o
-        // form pra grade por dia (o modo "mesmo horário" já virou linhas).
+        // já com os horários/serviços digitados, pra corrigir/reenviar.
         setProfissionais((atuais) => ordenar([...atuais, data]));
         // A gravação da grade falhou: nada de almoço foi persistido, então
         // almocoSalvoOriginal=false (não há almoço a "remover" no próximo save).
@@ -603,9 +742,30 @@ export default function GerenciarProfissionais({ estabelecimento }) {
           temAlmoco: horarios.some((h) => h.almoco_inicio),
           almocoSalvoOriginal: false,
           horarioComum: { ...BLOCO_VAZIO },
+          servicos: form.servicos,
         });
         setEditando(data);
         setErroForm(`Profissional criado, mas os horários falharam: ${erroHorarios.message}`);
+        return;
+      }
+
+      const erroServicos = await salvarServicos(data.id, form.servicos);
+      setSalvando(false);
+      if (erroServicos) {
+        // Profissional + grade salvos; os vínculos falharam. Cai no resumo pra
+        // reenviar (o próximo salvar regrava os vínculos inteiros).
+        setProfissionais((atuais) => ordenar([...atuais, data]));
+        setForm({
+          nome,
+          dias: diasDeHorarios(horarios),
+          mesmoHorario: false,
+          temAlmoco: horarios.some((h) => h.almoco_inicio),
+          almocoSalvoOriginal: horarios.some((h) => h.almoco_inicio),
+          horarioComum: { ...BLOCO_VAZIO },
+          servicos: form.servicos,
+        });
+        setEditando(data);
+        setErroForm(`Profissional criado, mas os serviços falharam: ${erroServicos.message}`);
         return;
       }
 
@@ -627,9 +787,16 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     }
 
     const erroHorarios = await salvarHorarios(editando.id, horarios);
-    setSalvando(false);
     if (erroHorarios) {
+      setSalvando(false);
       setErroForm(`Nome salvo, mas os horários falharam: ${erroHorarios.message}`);
+      return;
+    }
+
+    const erroServicos = await salvarServicos(editando.id, form.servicos);
+    setSalvando(false);
+    if (erroServicos) {
+      setErroForm(`Nome e horários salvos, mas os serviços falharam: ${erroServicos.message}`);
       return;
     }
 
@@ -858,8 +1025,16 @@ export default function GerenciarProfissionais({ estabelecimento }) {
             </div>
           )}
 
-          {/* JANELA C — Serviços (placeholder; Fatia 2). */}
-          {etapa === "C" && <ServicosPlaceholder />}
+          {/* JANELA C — Serviços que o profissional atende. */}
+          {etapa === "C" && (
+            <ListaServicos
+              servicos={servicosSalao}
+              carregando={carregandoServicos}
+              erro={erroServicos}
+              selecionados={form.servicos}
+              onToggle={alternarServico}
+            />
+          )}
 
           {erroForm && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
@@ -940,7 +1115,13 @@ export default function GerenciarProfissionais({ estabelecimento }) {
 
               <div>
                 <span className="mb-2 block text-sm font-medium text-body">Serviços</span>
-                <ServicosPlaceholder />
+                <ListaServicos
+                  servicos={servicosSalao}
+                  carregando={carregandoServicos}
+                  erro={erroServicos}
+                  selecionados={form.servicos}
+                  onToggle={alternarServico}
+                />
               </div>
             </>
           )}
