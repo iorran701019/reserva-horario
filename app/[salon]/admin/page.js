@@ -161,7 +161,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, observacao, servicos(nome, duracao_min, preco_centavos)")
+    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, observacao, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -169,9 +169,12 @@ async function buscarAgendamentos(estabelecimentoId) {
   // Eleva a duração do serviço ao topo do item (item.duracao_min), preservando
   // o objeto servicos aninhado (usado em nome do serviço, calendário etc.).
   // Assim classificarAgendamento (lib/particao) lê item.duracao_min direto.
+  // Também eleva o nome do profissional (join por profissional_id); null quando
+  // o agendamento não tem profissional atribuído (reservas antigas).
   const dados = (data ?? []).map((item) => ({
     ...item,
     duracao_min: item.servicos?.duracao_min ?? null,
+    profissional_nome: item.profissionais?.nome ?? null,
   }));
 
   return { dados, error };
@@ -684,6 +687,14 @@ export default function AdminPage() {
                         {item.servicos?.nome ?? "—"}
                       </span>
                     </span>
+                    {item.profissional_nome && (
+                      <span className="inline-flex min-w-0 items-center gap-1.5">
+                        <span className="text-body">Profissional</span>
+                        <span className="min-w-0 break-words font-medium">
+                          {item.profissional_nome}
+                        </span>
+                      </span>
+                    )}
                   </div>
 
                   <div className="mt-4 flex flex-col gap-2">
@@ -803,6 +814,14 @@ export default function AdminPage() {
                             {item.servicos?.nome ?? "—"}
                           </span>
                         </span>
+                        {item.profissional_nome && (
+                          <span className="inline-flex min-w-0 items-center gap-1.5">
+                            <span className="text-body">Profissional</span>
+                            <span className="min-w-0 break-words font-medium">
+                              {item.profissional_nome}
+                            </span>
+                          </span>
+                        )}
                       </div>
 
                       <div className="mt-4">
@@ -1009,6 +1028,14 @@ export default function AdminPage() {
                   )}
                 </dd>
               </div>
+              {selecionado.profissional_nome && (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-body">Profissional</dt>
+                  <dd className="text-right font-medium text-heading">
+                    {selecionado.profissional_nome}
+                  </dd>
+                </div>
+              )}
               <div className="flex justify-between gap-3">
                 <dt className="text-body">Data</dt>
                 <dd className="text-right font-medium text-heading">
