@@ -86,6 +86,43 @@ export function formatarPreco(centavos) {
   });
 }
 
+// Botão de um serviço na etapa "Serviço". Extraído porque é renderizado nos dois
+// lugares da lista agrupada (serviços sem categoria + dentro de cada acordeão);
+// o visual é o mesmo que antes.
+function BotaoServico({ servico, selecionado, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(servico)}
+      aria-pressed={selecionado}
+      className={[
+        "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 transition",
+        selecionado
+          ? "bg-primary text-white ring-primary"
+          : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+      ].join(" ")}
+    >
+      <span className="min-w-0">
+        <span className="block font-medium">{servico.nome}</span>
+        <span
+          className={[
+            "block text-sm",
+            selecionado ? "text-on-primary/90" : "text-body",
+          ].join(" ")}
+        >
+          {servico.duracao_min} min
+        </span>
+      </span>
+
+      {servico.preco_centavos != null && (
+        <span className="shrink-0 font-medium">
+          {formatarPreco(servico.preco_centavos)}
+        </span>
+      )}
+    </button>
+  );
+}
+
 // Iniciais do nome para o avatar do card de profissional (ex.: "João Silva" ->
 // "JS"). Usa só a primeira e a última palavra, em maiúsculas.
 function iniciais(nome) {
@@ -289,6 +326,12 @@ export default function FormularioAgendamento({
   const [carregandoServicos, setCarregandoServicos] = useState(true);
   const [erroServicos, setErroServicos] = useState("");
 
+  // Categorias do salão (categorias_servico), na ordem de exibição (`ordem`).
+  // Usadas só para agrupar a lista de serviços em acordeões. `categoriaAberta`
+  // guarda o id da categoria expandida (só uma por vez); null = todas fechadas.
+  const [categorias, setCategorias] = useState([]);
+  const [categoriaAberta, setCategoriaAberta] = useState(null);
+
   // Mapa horário -> [profissional_id livres], vindo de calcularVagasPorHorario.
   const [vagas, setVagas] = useState({});
   const [carregandoSlots, setCarregandoSlots] = useState(false);
@@ -344,10 +387,10 @@ export default function FormularioAgendamento({
     let ativo = true;
 
     async function carregar() {
-      const [resServicos, resConfig] = await Promise.all([
+      const [resServicos, resConfig, resCategorias] = await Promise.all([
         supabase
           .from("servicos")
-          .select("id, nome, duracao_min, preco_centavos")
+          .select("id, nome, duracao_min, preco_centavos, categoria_id")
           .eq("estabelecimento_id", estabelecimento.id)
           .eq("ativo", true)
           .order("nome"),
@@ -356,6 +399,12 @@ export default function FormularioAgendamento({
           .select("escolha_profissional")
           .eq("id", estabelecimento.id)
           .single(),
+        supabase
+          .from("categorias_servico")
+          .select("id, nome, ordem")
+          .eq("estabelecimento_id", estabelecimento.id)
+          .order("ordem", { ascending: true })
+          .order("nome", { ascending: true }),
       ]);
 
       if (!ativo) return;
@@ -365,6 +414,9 @@ export default function FormularioAgendamento({
       } else {
         setServicos(resServicos.data ?? []);
       }
+      // Categorias são só para agrupar a UI; se falharem, os serviços caem todos
+      // no bloco "sem categoria" (nenhum grupo casa), sem quebrar a etapa.
+      setCategorias(resCategorias.error ? [] : resCategorias.data ?? []);
       setEscolhaProfissional(Boolean(resConfig.data?.escolha_profissional));
       setCarregandoServicos(false);
     }
@@ -760,40 +812,63 @@ export default function FormularioAgendamento({
 
             {!carregandoServicos && !erroServicos && servicos.length > 0 && (
               <div className="space-y-2">
-                {servicos.map((servico) => {
-                  const selecionado = servicoSelecionado?.id === servico.id;
+                {/* Serviços sem categoria (ou apontando pra uma categoria que
+                    não existe mais) ficam soltos no topo, sem cabeçalho. */}
+                {servicos
+                  .filter(
+                    (servico) =>
+                      servico.categoria_id == null ||
+                      !categorias.some((c) => c.id === servico.categoria_id)
+                  )
+                  .map((servico) => (
+                    <BotaoServico
+                      key={servico.id}
+                      servico={servico}
+                      selecionado={servicoSelecionado?.id === servico.id}
+                      onSelect={selecionarServico}
+                    />
+                  ))}
+
+                {/* Uma categoria por vez em acordeão (na ordem de `ordem`).
+                    Começam fechadas; abrir uma fecha as demais. Categorias sem
+                    serviços ativos são omitidas. */}
+                {categorias.map((categoria) => {
+                  const itens = servicos.filter(
+                    (servico) => servico.categoria_id === categoria.id
+                  );
+                  if (itens.length === 0) return null;
+
+                  const aberta = categoriaAberta === categoria.id;
 
                   return (
-                    <button
-                      key={servico.id}
-                      type="button"
-                      onClick={() => selecionarServico(servico)}
-                      aria-pressed={selecionado}
-                      className={[
-                        "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 transition",
-                        selecionado
-                          ? "bg-primary text-white ring-primary"
-                          : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
-                      ].join(" ")}
-                    >
-                      <span className="min-w-0">
-                        <span className="block font-medium">{servico.nome}</span>
-                        <span
-                          className={[
-                            "block text-sm",
-                            selecionado ? "text-on-primary/90" : "text-body",
-                          ].join(" ")}
-                        >
-                          {servico.duracao_min} min
+                    <div key={categoria.id} className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCategoriaAberta(aberta ? null : categoria.id)
+                        }
+                        aria-expanded={aberta}
+                        className="flex w-full items-center justify-between gap-3 rounded-lg bg-surface px-3 py-2.5 text-left text-sm font-medium text-heading ring-1 ring-border transition hover:bg-card"
+                      >
+                        <span className="min-w-0 truncate">{categoria.nome}</span>
+                        <span className="shrink-0 text-body">
+                          {aberta ? "▲" : "▼"}
                         </span>
-                      </span>
+                      </button>
 
-                      {servico.preco_centavos != null && (
-                        <span className="shrink-0 font-medium">
-                          {formatarPreco(servico.preco_centavos)}
-                        </span>
+                      {aberta && (
+                        <div className="space-y-2">
+                          {itens.map((servico) => (
+                            <BotaoServico
+                              key={servico.id}
+                              servico={servico}
+                              selecionado={servicoSelecionado?.id === servico.id}
+                              onSelect={selecionarServico}
+                            />
+                          ))}
+                        </div>
                       )}
-                    </button>
+                    </div>
                   );
                 })}
               </div>
