@@ -40,7 +40,7 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
     ? {
         backgroundImage: `url(${FOTOS_POR_SLUG[String(slug).toLowerCase()] ?? HERO_FOTO_PADRAO})`,
         backgroundSize: "cover",
-        backgroundPosition: "center 75%",
+        backgroundPosition: "center 25%",
       }
     : {
         backgroundImage:
