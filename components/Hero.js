@@ -15,10 +15,16 @@
 const NOME_LOJA = process.env.NEXT_PUBLIC_NOME_LOJA || "Agendamento";
 
 // Slugs que usam a foto de fundo do hero. Fonte única — comparação em minúsculas.
-const SLUGS_COM_FOTO = new Set(["valeria", "junior"]);
+const SLUGS_COM_FOTO = new Set(["valeria", "junior", "flavia"]);
 
 // Caminho da foto de fundo (arquivo em /public).
-const HERO_FOTO = "/images/hero-salao.jpg";
+// Foto de fundo por slug. Slug fora do mapa usa a foto padrão.
+const FOTOS_POR_SLUG = {
+  valeria: "/images/hero-salao.jpg",
+  junior: "/images/hero-salao.jpg",
+  flavia: "/images/flavia.jpg",
+};
+const HERO_FOTO_PADRAO = "/images/hero-salao.jpg";
 
 // `nome` sobrescreve o nome exibido (estab.nome resolvido pelo slug do path). Sem ele,
 // cai no NEXT_PUBLIC_NOME_LOJA / "Agendamento" — comportamento original.
@@ -32,7 +38,7 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
   //  - sem foto (ex.: barbearia): degradê suave creme → bege, via tokens da paleta.
   const estiloFundo = usaFoto
     ? {
-        backgroundImage: `url(${HERO_FOTO})`,
+        backgroundImage: `url(${FOTOS_POR_SLUG[String(slug).toLowerCase()] ?? HERO_FOTO_PADRAO})`,
         backgroundSize: "cover",
         backgroundPosition: "center",
       }
