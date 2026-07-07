@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { calcularVagasPorHorario } from "@/lib/disponibilidade";
 
@@ -312,6 +312,20 @@ export default function FormularioAgendamento({
   const [profissionalSelecionado, setProfissionalSelecionado] = useState(null);
   const [carregandoProfissionais, setCarregandoProfissionais] = useState(false);
 
+  // Refs para rolar suavemente até o bloco que surge após cada escolha, pra ele
+  // não passar despercebido abaixo da dobra (salões com muitos serviços). Vale
+  // no público e no /admin, já que o componente é compartilhado.
+  const profissionalRef = useRef(null);
+  const dataRef = useRef(null);
+
+  // scrollIntoView só depois do render que monta o bloco alvo: rAF garante que
+  // o elemento (e a ref) já existem no DOM.
+  function rolarPara(ref) {
+    requestAnimationFrame(() => {
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+
   // Mês exibido no calendário da etapa Data (sempre no dia 1 do mês).
   const [mesVisivel, setMesVisivel] = useState(() => {
     const agora = new Date();
@@ -515,7 +529,13 @@ export default function FormularioAgendamento({
     // A troca muda os dias/horários válidos: zera a data pra não ficar uma
     // seleção antiga num dia que virou indisponível.
     setForm((anterior) => ({ ...anterior, data: "" }));
-    if (!escolherProfissional) setEtapa("data");
+    if (!escolherProfissional) {
+      setEtapa("data");
+      rolarPara(dataRef);
+    } else {
+      // O seletor de profissional aparece logo abaixo dos serviços: rola até ele.
+      rolarPara(profissionalRef);
+    }
   }
 
   // Fluxo "cliente escolhe": escolher o profissional conclui a etapa de serviço
@@ -526,6 +546,8 @@ export default function FormularioAgendamento({
     // Cada profissional trabalha em dias diferentes: zera a data ao trocar.
     setForm((anterior) => ({ ...anterior, data: "" }));
     setEtapa("data");
+    // Escolher o profissional revela a etapa de data (calendário) abaixo: rola até ela.
+    rolarPara(dataRef);
   }
 
   // Volta para a etapa anterior preservando o que já foi escolhido —
@@ -781,7 +803,7 @@ export default function FormularioAgendamento({
                 de profissional (mais elaborados que os quadrados do admin).
                 Escolher um leva à etapa de data. */}
             {escolherProfissional && servicoSelecionado && (
-              <div className="mt-6">
+              <div ref={profissionalRef} className="mt-6">
                 <span className="mb-1 block text-sm font-medium text-body">
                   Profissional
                 </span>
@@ -864,7 +886,7 @@ export default function FormularioAgendamento({
             horários. */}
         {etapa === "data" && (
           <>
-            <div>
+            <div ref={dataRef}>
               <span className="mb-1 block text-sm font-medium text-body">
                 Data
               </span>
