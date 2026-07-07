@@ -74,7 +74,7 @@ export default function AgendarPage() {
     const { form, servico, horario } = resumo;
     return (
       <main className="flex min-h-screen flex-col bg-surface">
-        <Hero compacto nome={estabelecimento.nome} />
+        <Hero compacto nome={estabelecimento.nome} slug={estabelecimento.slug} />
         <div className="flex flex-1 flex-col items-center justify-center px-4 py-10">
         <div
           role="status"
@@ -167,7 +167,7 @@ export default function AgendarPage() {
 
   return (
     <main className="min-h-screen bg-surface">
-      <Hero nome={estabelecimento.nome} />
+     <Hero nome={estabelecimento.nome} slug={estabelecimento.slug} />
       <div className="mx-auto w-full max-w-md px-4 py-10 sm:py-16">
         <header className="mb-6 text-center">
           <h1 className="text-2xl font-bold text-heading">Agende seu horário</h1>
