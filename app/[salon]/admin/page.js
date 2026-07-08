@@ -162,7 +162,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, observacao, servico_id, profissional_id, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -1136,7 +1136,7 @@ export default function AdminPage() {
               <div className="flex justify-between gap-3">
                 <dt className="text-body">Serviço</dt>
                 <dd className="text-right font-medium text-heading">
-                  {selecionado.servicos?.nome ?? "—"}
+                  {selecionado.servicos?.nome ?? selecionado.servico_livre ?? "—"}
                   {selecionado.servicos?.duracao_min != null && (
                     <> · {selecionado.servicos.duracao_min} min</>
                   )}
