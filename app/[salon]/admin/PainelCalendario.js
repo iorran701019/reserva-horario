@@ -54,7 +54,8 @@ function abreviarServico(servico) {
     return i === 0 ? cap : (cap.length > 4 ? cap.slice(0, 4) + "." : cap);
   }).join(" ");
 }
-const hhmm = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+const hhmm = (d) =>
+  d ? `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` : "";
 
 // Calendário do Painel. Recebe `agendamentos` já carregado pela página (sem
 // fetch novo) e deriva os eventos pendentes/confirmados. View inicial e
@@ -126,12 +127,12 @@ export default function PainelCalendario({
       const pendente = classificarAgendamento(a) === "inbox";
       const cor = pendente ? CORES_EVENTO.pendente : CORES_EVENTO.confirmado;
       const inicioMin = horaParaMin(a.horario);
-      const duracao = a.servicos?.duracao_min;
+      const duracao = a.duracao_min ?? a.servicos?.duracao_min;
       return {
         id: String(a.id),
         title: pendente
           ? "Pendente"
-          : `${a.nome_cliente} · ${a.servicos?.nome ?? "serviço"}`,
+          : `${a.nome_cliente} · ${a.servicos?.nome ?? a.servico_livre ?? "serviço"}`,
         start: `${a.data}T${minParaHora(inicioMin)}`,
         end:
           duracao != null
@@ -146,7 +147,7 @@ export default function PainelCalendario({
           pendente,
           // Valores crus do mesmo par usado no `title`, p/ abreviar no rótulo.
           nome_cliente: a.nome_cliente,
-          servico: a.servicos?.nome ?? "serviço",
+          servico: a.servicos?.nome ?? a.servico_livre ?? "serviço",
         },
       };
     });
