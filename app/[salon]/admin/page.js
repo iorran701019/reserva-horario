@@ -230,6 +230,12 @@ export default function AdminPage() {
   const [idEditandoObservacao, setIdEditandoObservacao] = useState(null);
   const [rascunhoObservacao, setRascunhoObservacao] = useState("");
 
+  // Feedback do salvamento da anotação: `salvandoObservacao` mostra "Salvando..."
+  // e trava o botão enquanto grava; `observacaoOk` exibe a confirmação curta
+  // após sucesso. Ambos são reiniciados ao abrir/fechar/trocar o modal.
+  const [salvandoObservacao, setSalvandoObservacao] = useState(false);
+  const [observacaoOk, setObservacaoOk] = useState(false);
+
   // Filtro ativo da aba Histórico (ver FILTROS_HISTORICO). "todos" = sem filtro.
   const [filtroHistorico, setFiltroHistorico] = useState("todos");
 
@@ -359,18 +365,23 @@ export default function AdminPage() {
   // vivos) reflete o texto na hora. Texto vazio vira null (limpa a observação).
   async function handleSalvarObservacao(id, texto) {
     const observacao = texto || null;
+    setSalvandoObservacao(true);
+    setObservacaoOk(false);
     const { error } = await supabase
       .from("agendamentos")
       .update({ observacao })
       .eq("id", id);
+    setSalvandoObservacao(false);
 
     if (error) {
       setErro(`Não foi possível salvar a observação: ${error.message}`);
-      return;
+      return false;
     }
 
     setErro("");
     atualizarItemLocal(id, { observacao });
+    setObservacaoOk(true);
+    return true;
   }
 
   // Troca o profissional do agendamento. Grava profissional_id no banco e patcha
@@ -478,6 +489,13 @@ export default function AdminPage() {
       ativo = false;
     };
   }, [autenticado, salon]);
+
+  // Zera a confirmação da anotação ao abrir/fechar/trocar o modal de detalhe
+  // (o textarea já recolhe sozinho por `idEditandoObservacao` estar atrelado ao
+  // id) — a mensagem "Anotação salva." não vaza entre agendamentos.
+  useEffect(() => {
+    setObservacaoOk(false);
+  }, [idSelecionado]);
 
   // Fecha o drawer com Esc (só enquanto aberto). Complementa o backdrop e o
   // botão X — teclado e mouse fecham do mesmo jeito.
@@ -1188,10 +1206,19 @@ export default function AdminPage() {
               </button>
             </div>
 
-            {/* Observação: texto livre persistido em `observacao`. Sem edição:
-                mostra o texto (ou o botão de adicionar); editando: textarea com
-                contador travado em 280 + Salvar. Salvar vazio limpa (vira null). */}
+            {/* Anotação: texto livre persistido em `observacao` (só do lado
+                admin). Sem edição: mostra o texto (ou o botão de adicionar);
+                editando: textarea com contador travado em 280 + Salvar. Salvar
+                vazio limpa (vira null). */}
             <div className="mt-4 border-t border-border pt-4">
+              <p className="mb-2 text-sm font-medium text-heading">Anotação</p>
+
+              {observacaoOk && (
+                <p className="mb-2 text-xs font-medium text-green-700">
+                  Anotação salva.
+                </p>
+              )}
+
               {idEditandoObservacao === selecionado.id ? (
                 <div className="flex flex-col gap-2">
                   <textarea
@@ -1199,7 +1226,7 @@ export default function AdminPage() {
                     onChange={(e) => setRascunhoObservacao(e.target.value)}
                     maxLength={280}
                     rows={3}
-                    placeholder="Observação sobre o agendamento…"
+                    placeholder="Ex: tintura usada, preferências do cliente..."
                     className="w-full resize-none break-words rounded-lg bg-card px-3 py-2 text-sm text-heading ring-1 ring-border transition focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                   <div className="flex items-center justify-between gap-3">
@@ -1208,16 +1235,17 @@ export default function AdminPage() {
                     </span>
                     <button
                       type="button"
+                      disabled={salvandoObservacao}
                       onClick={async () => {
-                        await handleSalvarObservacao(
+                        const ok = await handleSalvarObservacao(
                           selecionado.id,
                           rascunhoObservacao.trim()
                         );
-                        setIdEditandoObservacao(null);
+                        if (ok) setIdEditandoObservacao(null);
                       }}
-                      className="inline-flex items-center justify-center rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
+                      className="inline-flex items-center justify-center rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100 disabled:opacity-60"
                     >
-                      Salvar
+                      {salvandoObservacao ? "Salvando..." : "Salvar anotação"}
                     </button>
                   </div>
                 </div>
@@ -1229,24 +1257,26 @@ export default function AdminPage() {
                   <button
                     type="button"
                     onClick={() => {
+                      setObservacaoOk(false);
                       setRascunhoObservacao(selecionado.observacao);
                       setIdEditandoObservacao(selecionado.id);
                     }}
                     className="inline-flex w-full items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
                   >
-                    Editar observação
+                    Editar anotação
                   </button>
                 </div>
               ) : (
                 <button
                   type="button"
                   onClick={() => {
+                    setObservacaoOk(false);
                     setRascunhoObservacao("");
                     setIdEditandoObservacao(selecionado.id);
                   }}
                   className="inline-flex w-full items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
                 >
-                  Adicionar observação
+                  Adicionar anotação
                 </button>
               )}
             </div>
