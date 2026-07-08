@@ -49,6 +49,14 @@ const ETAPAS = [
   { id: "C", rotulo: "Serviços" },
 ];
 
+// Abas da tela de edição (switcher local). A criação segue no wizard; só a
+// edição é dividida nestas três seções.
+const ABAS_EDICAO = [
+  { id: "horarios", rotulo: "Horários" },
+  { id: "servicos", rotulo: "Serviços" },
+  { id: "ausencias", rotulo: "Ausências" },
+];
+
 // Bloco de horário vazio (campos "HH:MM" do <input type="time">; "" = vazio).
 const BLOCO_VAZIO = {
   hora_inicio: "",
@@ -396,6 +404,573 @@ function ListaServicos({ servicos, carregando, erro, selecionados, onToggle }) {
   );
 }
 
+// "YYYY-MM-DD" (date do Postgres) -> "DD/MM/AAAA". Monta o Date por partes
+// (new Date(ano, mes-1, dia)) e NUNCA new Date("YYYY-MM-DD"): o construtor de
+// string interpreta como UTC e, em GMT-3, joga a data pro dia anterior.
+function formatarDataBR(iso) {
+  if (!iso) return "";
+  const [ano, mes, dia] = String(iso).slice(0, 10).split("-").map(Number);
+  return new Date(ano, mes - 1, dia).toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+// "HH:MM:SS"/"HH:MM" -> "HH:MM – HH:MM" pra rótulo de faixa de horário.
+function faixaHora(inicio, fim) {
+  return `${paraHHMM(inicio)} – ${paraHHMM(fim)}`;
+}
+
+// Agrupa as ausências recorrentes por faixa de horário (hora_inicio|hora_fim):
+// dias com a MESMA faixa entram no mesmo grupo (ordenados por dia da semana).
+// Cada dia continua sendo uma linha própria (id próprio) — o delete é por id.
+function agruparRecorrentes(linhas) {
+  const mapa = new Map();
+  for (const l of linhas) {
+    const chave = `${l.hora_inicio ?? ""}|${l.hora_fim ?? ""}`;
+    if (!mapa.has(chave)) mapa.set(chave, []);
+    mapa.get(chave).push(l);
+  }
+  return [...mapa.values()].map((itens) => ({
+    inicio: itens[0].hora_inicio,
+    fim: itens[0].hora_fim,
+    itens: [...itens].sort((a, b) => a.dia_semana - b.dia_semana),
+  }));
+}
+
+// Seção "Ausências" da tela de edição do profissional: CRUD da tabela
+// `ausencias` (só cadastro/listagem/exclusão — o motor de disponibilidade NÃO
+// é tocado aqui). Duas naturezas na mesma tabela:
+//   recorrente – repete toda semana num dia (dia_semana 0..6) numa faixa
+//                hora_inicio/hora_fim. Salvar insere UMA LINHA POR DIA marcado,
+//                todas com a mesma faixa (dia_inteiro sempre false).
+//   periodo    – intervalo data_inicio..data_fim (início=fim = um único dia).
+//                dia_inteiro=true bloqueia o dia todo (horas null); senão usa a
+//                faixa hora_inicio/hora_fim (obrigatória).
+// Auto-contida: carrega, insere e exclui direto no Supabase por profissional_id.
+//
+// Uma única lista suspensa escolhe o formato de cadastro:
+//   recorrente – "Ausência fixa": dias da semana + faixa, uma linha por dia.
+//   umdia      – "Um dia específico": uma data (data_inicio=data_fim), com
+//                toggle "dia inteiro" (liga = horas null; desliga = faixa).
+//   varios     – "Vários dias": intervalo data_inicio..data_fim, sempre dia
+//                inteiro (viagem/férias), horas null.
+const OPCOES_AUSENCIA = [
+  {
+    valor: "recorrente",
+    rotulo: "Ausência fixa",
+    exemplo: "horário diário da academia",
+  },
+  {
+    valor: "umdia",
+    rotulo: "Um dia específico",
+    exemplo: "consulta médica ou folga",
+  },
+  { valor: "varios", rotulo: "Vários dias", exemplo: "viagem ou férias" },
+];
+
+function SecaoAusencias({ profissionalId, estabelecimentoId }) {
+  const [lista, setLista] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState("");
+
+  // Formato de cadastro escolhido na lista suspensa.
+  const [modo, setModo] = useState("recorrente");
+  const [formErro, setFormErro] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  // Campos "Ausência fixa" (recorrente).
+  const [recDias, setRecDias] = useState([]); // dia_semana 0..6 marcados
+  const [recInicio, setRecInicio] = useState("");
+  const [recFim, setRecFim] = useState("");
+  const [recMotivo, setRecMotivo] = useState("");
+
+  // Campos "Um dia específico" (periodo, data única). dia_inteiro começa ligado.
+  const [diaData, setDiaData] = useState("");
+  const [diaInteiro, setDiaInteiro] = useState(true);
+  const [diaHoraInicio, setDiaHoraInicio] = useState("");
+  const [diaHoraFim, setDiaHoraFim] = useState("");
+  const [diaMotivo, setDiaMotivo] = useState("");
+
+  // Campos "Vários dias" (periodo, intervalo). Sempre dia inteiro.
+  const [varInicio, setVarInicio] = useState("");
+  const [varFim, setVarFim] = useState("");
+  const [varMotivo, setVarMotivo] = useState("");
+
+  // Carga inicial: todas as ausências do profissional.
+  useEffect(() => {
+    let vivo = true;
+
+    async function carregar() {
+      setCarregando(true);
+      const { data, error } = await supabase
+        .from("ausencias")
+        .select(
+          "id, tipo, dia_semana, data_inicio, data_fim, dia_inteiro, hora_inicio, hora_fim, motivo"
+        )
+        .eq("profissional_id", profissionalId);
+
+      if (!vivo) return;
+
+      if (error) {
+        setErro(error.message);
+      } else {
+        setErro("");
+        setLista(data ?? []);
+      }
+      setCarregando(false);
+    }
+
+    carregar();
+    return () => {
+      vivo = false;
+    };
+  }, [profissionalId]);
+
+  function alternarRecDia(n) {
+    setRecDias((atual) =>
+      atual.includes(n) ? atual.filter((d) => d !== n) : [...atual, n]
+    );
+  }
+
+  // Zera os campos de todos os formatos (chamado após salvar com sucesso).
+  function limparCampos() {
+    setRecDias([]);
+    setRecInicio("");
+    setRecFim("");
+    setRecMotivo("");
+    setDiaData("");
+    setDiaInteiro(true);
+    setDiaHoraInicio("");
+    setDiaHoraFim("");
+    setDiaMotivo("");
+    setVarInicio("");
+    setVarFim("");
+    setVarMotivo("");
+  }
+
+  // Valida conforme o `modo` e monta as linhas a inserir. Devolve { erro } ou
+  // { linhas }. As comparações de data usam ISO "YYYY-MM-DD" (lexicográfica,
+  // sem criar Date — evita o desvio de fuso do construtor de string).
+  function coletarLinhas() {
+    if (modo === "recorrente") {
+      if (recDias.length === 0) return { erro: "Selecione ao menos um dia." };
+      if (!recInicio || !recFim) {
+        return { erro: "Informe início e fim do horário." };
+      }
+      if (minutos(recFim) <= minutos(recInicio)) {
+        return { erro: "O fim deve ser maior que o início." };
+      }
+      const linhas = [...recDias]
+        .sort((a, b) => a - b)
+        .map((dia_semana) => ({
+          profissional_id: profissionalId,
+          estabelecimento_id: estabelecimentoId,
+          tipo: "recorrente",
+          dia_semana,
+          dia_inteiro: false,
+          hora_inicio: recInicio,
+          hora_fim: recFim,
+          motivo: recMotivo.trim() || null,
+        }));
+      return { linhas };
+    }
+
+    if (modo === "umdia") {
+      if (!diaData) return { erro: "Informe a data." };
+      if (!diaInteiro) {
+        if (!diaHoraInicio || !diaHoraFim) {
+          return { erro: "Informe início e fim do horário." };
+        }
+        if (minutos(diaHoraFim) <= minutos(diaHoraInicio)) {
+          return { erro: "O fim deve ser maior que o início." };
+        }
+      }
+      return {
+        linhas: [
+          {
+            profissional_id: profissionalId,
+            estabelecimento_id: estabelecimentoId,
+            tipo: "periodo",
+            data_inicio: diaData,
+            data_fim: diaData,
+            dia_inteiro: diaInteiro,
+            hora_inicio: diaInteiro ? null : diaHoraInicio,
+            hora_fim: diaInteiro ? null : diaHoraFim,
+            motivo: diaMotivo.trim() || null,
+          },
+        ],
+      };
+    }
+
+    // modo === "varios": intervalo sempre em dia inteiro.
+    if (!varInicio || !varFim) {
+      return { erro: "Informe as datas de início e fim." };
+    }
+    if (varFim < varInicio) {
+      return { erro: "A data de fim deve ser igual ou depois do início." };
+    }
+    return {
+      linhas: [
+        {
+          profissional_id: profissionalId,
+          estabelecimento_id: estabelecimentoId,
+          tipo: "periodo",
+          data_inicio: varInicio,
+          data_fim: varFim,
+          dia_inteiro: true,
+          hora_inicio: null,
+          hora_fim: null,
+          motivo: varMotivo.trim() || null,
+        },
+      ],
+    };
+  }
+
+  async function salvar() {
+    setFormErro("");
+    const { erro, linhas } = coletarLinhas();
+    if (erro) {
+      setFormErro(erro);
+      return;
+    }
+
+    setSalvando(true);
+    const { data, error } = await supabase
+      .from("ausencias")
+      .insert(linhas)
+      .select();
+
+    setSalvando(false);
+    if (error) {
+      setFormErro(error.message);
+      return;
+    }
+
+    setLista((atual) => [...atual, ...(data ?? [])]);
+    limparCampos();
+  }
+
+  async function excluir(id) {
+    setErro("");
+    const { error } = await supabase.from("ausencias").delete().eq("id", id);
+    if (error) {
+      setErro(`Não foi possível excluir a ausência: ${error.message}`);
+      return;
+    }
+    setLista((atual) => atual.filter((a) => a.id !== id));
+  }
+
+  const classeCampo =
+    "rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10";
+
+  const gruposRec = agruparRecorrentes(
+    lista.filter((a) => a.tipo === "recorrente")
+  );
+  const periodos = lista
+    .filter((a) => a.tipo === "periodo")
+    .sort((a, b) =>
+      a.data_inicio < b.data_inicio ? -1 : a.data_inicio > b.data_inicio ? 1 : 0
+    );
+  const vazio = gruposRec.length === 0 && periodos.length === 0;
+
+  return (
+    <div className="space-y-4">
+      {/* FORM único: a lista suspensa escolhe o formato; os campos seguem. */}
+      <div className="rounded-xl bg-surface p-3 ring-1 ring-border">
+        <label className="block text-xs font-medium text-body">
+          Tipo de ausência
+          <select
+            value={modo}
+            onChange={(e) => {
+              setModo(e.target.value);
+              setFormErro("");
+            }}
+            className={`mt-1 block w-full ${classeCampo}`}
+          >
+            {OPCOES_AUSENCIA.map((o) => (
+              <option key={o.valor} value={o.valor}>
+                {o.rotulo} — ex.: {o.exemplo}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {/* OPÇÃO 1 — Ausência fixa (recorrente). */}
+        {modo === "recorrente" && (
+          <>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {DIAS.map((info) => {
+                const ativo = recDias.includes(info.n);
+                return (
+                  <button
+                    key={info.n}
+                    type="button"
+                    role="checkbox"
+                    aria-checked={ativo}
+                    onClick={() => alternarRecDia(info.n)}
+                    className={`rounded-lg px-2.5 py-1.5 text-sm font-medium ring-1 transition ${
+                      ativo
+                        ? "bg-primary text-white ring-primary"
+                        : "bg-card text-body ring-border hover:bg-surface"
+                    }`}
+                  >
+                    {info.curto}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="text-xs font-medium text-body">
+                Início
+                <input
+                  type="time"
+                  aria-label="Início da ausência fixa"
+                  value={recInicio}
+                  onChange={(e) => setRecInicio(e.target.value)}
+                  className={`mt-1 block w-28 ${classeCampo}`}
+                />
+              </label>
+              <label className="text-xs font-medium text-body">
+                Fim
+                <input
+                  type="time"
+                  aria-label="Fim da ausência fixa"
+                  value={recFim}
+                  onChange={(e) => setRecFim(e.target.value)}
+                  className={`mt-1 block w-28 ${classeCampo}`}
+                />
+              </label>
+              <label className="min-w-[8rem] flex-1 text-xs font-medium text-body">
+                Motivo (opcional)
+                <input
+                  type="text"
+                  value={recMotivo}
+                  onChange={(e) => setRecMotivo(e.target.value)}
+                  placeholder="Ex.: academia, aula…"
+                  className={`mt-1 block w-full ${classeCampo}`}
+                />
+              </label>
+            </div>
+          </>
+        )}
+
+        {/* OPÇÃO 2 — Um dia específico (periodo, data única). */}
+        {modo === "umdia" && (
+          <>
+            <label className="mt-3 block text-xs font-medium text-body">
+              Data
+              <input
+                type="date"
+                aria-label="Data da ausência"
+                value={diaData}
+                onChange={(e) => setDiaData(e.target.value)}
+                className={`mt-1 block ${classeCampo}`}
+              />
+            </label>
+
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={diaInteiro}
+                onClick={() => setDiaInteiro((v) => !v)}
+                className="flex items-center gap-2"
+              >
+                <span className="text-sm font-medium text-heading">
+                  Dia inteiro
+                </span>
+                <Interruptor ativo={diaInteiro} />
+              </button>
+            </div>
+
+            {!diaInteiro && (
+              <div className="mt-3 flex flex-wrap items-end gap-2">
+                <label className="text-xs font-medium text-body">
+                  Início
+                  <input
+                    type="time"
+                    aria-label="Início do horário no dia"
+                    value={diaHoraInicio}
+                    onChange={(e) => setDiaHoraInicio(e.target.value)}
+                    className={`mt-1 block w-28 ${classeCampo}`}
+                  />
+                </label>
+                <label className="text-xs font-medium text-body">
+                  Fim
+                  <input
+                    type="time"
+                    aria-label="Fim do horário no dia"
+                    value={diaHoraFim}
+                    onChange={(e) => setDiaHoraFim(e.target.value)}
+                    className={`mt-1 block w-28 ${classeCampo}`}
+                  />
+                </label>
+              </div>
+            )}
+
+            <label className="mt-3 block text-xs font-medium text-body">
+              Motivo (opcional)
+              <input
+                type="text"
+                value={diaMotivo}
+                onChange={(e) => setDiaMotivo(e.target.value)}
+                placeholder="Ex.: consulta médica, folga…"
+                className={`mt-1 block w-full ${classeCampo}`}
+              />
+            </label>
+          </>
+        )}
+
+        {/* OPÇÃO 3 — Vários dias (periodo, intervalo, sempre dia inteiro). */}
+        {modo === "varios" && (
+          <>
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="text-xs font-medium text-body">
+                De
+                <input
+                  type="date"
+                  aria-label="Data de início"
+                  value={varInicio}
+                  onChange={(e) => setVarInicio(e.target.value)}
+                  className={`mt-1 block ${classeCampo}`}
+                />
+              </label>
+              <label className="text-xs font-medium text-body">
+                Até
+                <input
+                  type="date"
+                  aria-label="Data de fim"
+                  value={varFim}
+                  onChange={(e) => setVarFim(e.target.value)}
+                  className={`mt-1 block ${classeCampo}`}
+                />
+              </label>
+            </div>
+            <p className="mt-2 text-xs text-muted">
+              O intervalo inteiro fica bloqueado (dias completos).
+            </p>
+            <label className="mt-3 block text-xs font-medium text-body">
+              Motivo (opcional)
+              <input
+                type="text"
+                value={varMotivo}
+                onChange={(e) => setVarMotivo(e.target.value)}
+                placeholder="Ex.: férias, viagem…"
+                className={`mt-1 block w-full ${classeCampo}`}
+              />
+            </label>
+          </>
+        )}
+
+        {formErro && (
+          <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 ring-1 ring-red-100">
+            {formErro}
+          </p>
+        )}
+
+        <button
+          type="button"
+          onClick={salvar}
+          disabled={salvando}
+          className="mt-3 inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {salvando ? "Adicionando..." : "Adicionar ausência"}
+        </button>
+      </div>
+
+      {/* LISTA das ausências já cadastradas. */}
+      {erro && (
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+          {erro}
+        </p>
+      )}
+
+      {carregando ? (
+        <p className="rounded-lg bg-surface px-3 py-3 text-sm text-body ring-1 ring-border">
+          Carregando ausências...
+        </p>
+      ) : vazio ? (
+        <p className="rounded-lg bg-surface px-3 py-4 text-center text-sm text-body ring-1 ring-border">
+          Nenhuma ausência cadastrada.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {/* Recorrentes agrupadas por faixa de horário. */}
+          {gruposRec.map((grupo) => (
+            <div
+              key={`${grupo.inicio}|${grupo.fim}`}
+              className="rounded-xl bg-card p-3 ring-1 ring-border"
+            >
+              <p className="text-xs font-medium text-muted">
+                Toda semana · {faixaHora(grupo.inicio, grupo.fim)}
+              </p>
+              <ul className="mt-2 space-y-1.5">
+                {grupo.itens.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex items-center justify-between gap-3"
+                  >
+                    <span className="min-w-0 text-sm text-heading">
+                      {DIAS.find((d) => d.n === a.dia_semana)?.rotulo}
+                      {a.motivo && (
+                        <span className="text-muted"> · {a.motivo}</span>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => excluir(a.id)}
+                      className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                    >
+                      Excluir
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+
+          {/* Períodos / férias, um card por linha. */}
+          {periodos.map((a) => {
+            const umDia = a.data_inicio === a.data_fim;
+            return (
+              <div
+                key={a.id}
+                className="flex items-center justify-between gap-3 rounded-xl bg-card p-3 ring-1 ring-border"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-heading">
+                    {umDia
+                      ? formatarDataBR(a.data_inicio)
+                      : `${formatarDataBR(a.data_inicio)} até ${formatarDataBR(
+                          a.data_fim
+                        )}`}
+                  </p>
+                  <p className="text-xs text-muted">
+                    {a.dia_inteiro
+                      ? "Dia inteiro"
+                      : faixaHora(a.hora_inicio, a.hora_fim)}
+                    {a.motivo && <> · {a.motivo}</>}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => excluir(a.id)}
+                  className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                >
+                  Excluir
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function GerenciarProfissionais({ estabelecimento }) {
   const [profissionais, setProfissionais] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -411,6 +986,7 @@ export default function GerenciarProfissionais({ estabelecimento }) {
   const [erroForm, setErroForm] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [carregandoForm, setCarregandoForm] = useState(false);
+  const [abaEdicao, setAbaEdicao] = useState("horarios"); // aba ativa na edição
 
   // Profissional "armado" para soft delete (controla o modal de confirmação).
   const [profissionalParaExcluir, setProfissionalParaExcluir] = useState(null);
@@ -502,6 +1078,7 @@ export default function GerenciarProfissionais({ estabelecimento }) {
   // grade real do banco pode diferir entre dias).
   async function abrirEdicao(profissional) {
     setEditando(profissional);
+    setAbaEdicao("horarios");
     setErroForm("");
     setForm({
       nome: profissional.nome,
@@ -580,6 +1157,25 @@ export default function GerenciarProfissionais({ estabelecimento }) {
         ? anterior.servicos.filter((s) => s !== id)
         : [...anterior.servicos, id],
     }));
+  }
+
+  // "Selecionar todos": marca/desmarca de uma vez todos os serviços MOSTRADOS
+  // (os ativos do salão). Se todos já estão marcados, desmarca só esses (união/
+  // diferença preserva algum vínculo oculto de serviço inativo, se houver).
+  function alternarTodosServicos() {
+    setForm((anterior) => {
+      const idsMostrados = servicosSalao.map((s) => s.id);
+      const todosMarcados =
+        idsMostrados.length > 0 &&
+        idsMostrados.every((id) => anterior.servicos.includes(id));
+      if (todosMarcados) {
+        return {
+          ...anterior,
+          servicos: anterior.servicos.filter((id) => !idsMostrados.includes(id)),
+        };
+      }
+      return { ...anterior, servicos: [...new Set([...anterior.servicos, ...idsMostrados])] };
+    });
   }
 
   // Liga/desliga um dia. Desligar não apaga os campos (preserva se religar).
@@ -1098,31 +1694,79 @@ export default function GerenciarProfissionais({ estabelecimento }) {
                 />
               </div>
 
-              <div>
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium text-body">
-                    Dias e horários
-                  </span>
-                  <CheckAlmoco checked={form.temAlmoco} onChange={setTemAlmoco} />
-                </div>
-                <GradeDias
-                  dias={form.dias}
-                  onToggle={alternarDia}
-                  onCampo={handleCampoDia}
-                  mostrarAlmoco={form.temAlmoco}
-                />
+              {/* Switcher de abas (estado local `abaEdicao`). */}
+              <div className="flex gap-1 rounded-lg bg-surface p-1 ring-1 ring-border">
+                {ABAS_EDICAO.map((aba) => (
+                  <button
+                    key={aba.id}
+                    type="button"
+                    onClick={() => setAbaEdicao(aba.id)}
+                    aria-pressed={abaEdicao === aba.id}
+                    className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition ${
+                      abaEdicao === aba.id
+                        ? "bg-card text-heading shadow-sm ring-1 ring-border"
+                        : "text-body hover:text-heading"
+                    }`}
+                  >
+                    {aba.rotulo}
+                  </button>
+                ))}
               </div>
 
-              <div>
-                <span className="mb-2 block text-sm font-medium text-body">Serviços</span>
-                <ListaServicos
-                  servicos={servicosSalao}
-                  carregando={carregandoServicos}
-                  erro={erroServicos}
-                  selecionados={form.servicos}
-                  onToggle={alternarServico}
+              {/* ABA Horários — grade de dias + almoço. */}
+              {abaEdicao === "horarios" && (
+                <div>
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-body">
+                      Dias e horários
+                    </span>
+                    <CheckAlmoco checked={form.temAlmoco} onChange={setTemAlmoco} />
+                  </div>
+                  <GradeDias
+                    dias={form.dias}
+                    onToggle={alternarDia}
+                    onCampo={handleCampoDia}
+                    mostrarAlmoco={form.temAlmoco}
+                  />
+                </div>
+              )}
+
+              {/* ABA Serviços — seleção + "Selecionar todos". */}
+              {abaEdicao === "servicos" && (
+                <div>
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-body">Serviços</span>
+                    {servicosSalao.length > 0 && (
+                      <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium text-body">
+                        <input
+                          type="checkbox"
+                          checked={servicosSalao.every((s) =>
+                            form.servicos.includes(s.id)
+                          )}
+                          onChange={alternarTodosServicos}
+                          className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+                        />
+                        Selecionar todos
+                      </label>
+                    )}
+                  </div>
+                  <ListaServicos
+                    servicos={servicosSalao}
+                    carregando={carregandoServicos}
+                    erro={erroServicos}
+                    selecionados={form.servicos}
+                    onToggle={alternarServico}
+                  />
+                </div>
+              )}
+
+              {/* ABA Ausências. */}
+              {abaEdicao === "ausencias" && (
+                <SecaoAusencias
+                  profissionalId={editando.id}
+                  estabelecimentoId={estabelecimento.id}
                 />
-              </div>
+              )}
             </>
           )}
 
