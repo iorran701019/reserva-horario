@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { linkWhatsApp } from "@/lib/whatsapp";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
+import { precisaAnamnese } from "@/lib/anamnese";
 import Hero from "@/components/Hero";
 import IdentificacaoCliente from "@/components/IdentificacaoCliente";
+import FormularioAnamnese from "@/components/FormularioAnamnese";
 import FormularioAgendamento, {
   formatarData,
 } from "@/components/FormularioAgendamento";
@@ -35,6 +37,25 @@ export default function AgendarPage() {
   // ela). Persiste entre agendamentos da mesma visita, então um novo
   // agendamento (após "Fazer novo agendamento") não pede o WhatsApp de novo.
   const [clienteIdentificado, setClienteIdentificado] = useState(null);
+
+  // null = ainda checando (ou cliente ainda não identificado); true = precisa
+  // preencher a anamnese antes do wizard; false = anamnese em dia, segue
+  // direto pro FormularioAgendamento. Verificado assim que o cliente é
+  // identificado (novo cadastro OU já existente com anamnese vencida).
+  const [anamneseNecessaria, setAnamneseNecessaria] = useState(null);
+
+  useEffect(() => {
+    if (!clienteIdentificado) return;
+    let ativo = true;
+    precisaAnamnese(clienteIdentificado.id, estabelecimento?.id).then(
+      (necessaria) => {
+        if (ativo) setAnamneseNecessaria(necessaria);
+      }
+    );
+    return () => {
+      ativo = false;
+    };
+  }, [clienteIdentificado, estabelecimento?.id]);
 
   // Resolve o estabelecimento pelo slug do path ao montar (ou se o slug mudar).
   useEffect(() => {
@@ -182,13 +203,23 @@ export default function AgendarPage() {
           </p>
         </header>
 
-        {/* Antes do wizard, identifica o cliente pelo WhatsApp. Só então monta
-            o FormularioAgendamento, já com clienteInicial preenchido — a etapa
-            "dados" dele vira um resumo em vez de pedir nome/WhatsApp de novo. */}
+        {/* Antes do wizard: identifica o cliente pelo WhatsApp e, se a
+            anamnese estiver vencida (ou nunca ter sido preenchida), cobra ela
+            também. Só então monta o FormularioAgendamento, já com
+            clienteInicial preenchido — a etapa "dados" dele vira um resumo em
+            vez de pedir nome/WhatsApp de novo. */}
         {!clienteIdentificado ? (
           <IdentificacaoCliente
             estabelecimentoId={estabelecimento.id}
             onIdentificado={setClienteIdentificado}
+          />
+        ) : anamneseNecessaria === null ? (
+          <p className="text-sm text-body">Carregando...</p>
+        ) : anamneseNecessaria ? (
+          <FormularioAnamnese
+            estabelecimentoId={estabelecimento.id}
+            clienteId={clienteIdentificado.id}
+            onConcluido={() => setAnamneseNecessaria(false)}
           />
         ) : (
           // Sem prop `status`: o insert mantém o default "pendente" do banco.

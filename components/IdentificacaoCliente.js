@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import CadastroCliente from "@/components/CadastroCliente";
 
 // Tela exibida ANTES do FormularioAgendamento no fluxo público: pede só o
 // WhatsApp, busca o cliente em `clientes` (por estabelecimento_id + telefone
@@ -11,9 +12,8 @@ import { supabase } from "@/lib/supabaseClient";
 //
 // A coluna em `clientes` chama-se `whatsapp` (confirmado direto no banco) e é
 // tratada aqui como dígitos apenas — por isso a busca compara dígitos, não a
-// string digitada. Cadastro completo (criar a linha quando não encontrado) é
-// da PRÓXIMA fase: por ora, o não encontrado só colhe o nome aqui mesmo e
-// segue com id null.
+// string digitada. Não encontrado, quem assume o cadastro completo (endereço,
+// CEP, nascimento etc.) é o CadastroCliente — ver lá o insert em `clientes`.
 //
 // Props:
 //   estabelecimentoId – particiona a busca por salão.
@@ -21,10 +21,9 @@ import { supabase } from "@/lib/supabaseClient";
 //                       clienteInicial do FormularioAgendamento.
 export default function IdentificacaoCliente({ estabelecimentoId, onIdentificado }) {
   // "telefone" (pede WhatsApp) -> "confirmar" (achou, confirma o nome) ou
-  // "nome" (não achou, colhe o nome direto).
+  // "cadastro" (não achou, cadastro completo via CadastroCliente).
   const [etapa, setEtapa] = useState("telefone");
   const [telefone, setTelefone] = useState("");
-  const [nome, setNome] = useState("");
   const [clienteEncontrado, setClienteEncontrado] = useState(null);
   const [buscando, setBuscando] = useState(false);
   const [erro, setErro] = useState("");
@@ -52,7 +51,7 @@ export default function IdentificacaoCliente({ estabelecimentoId, onIdentificado
       setClienteEncontrado(data[0]);
       setEtapa("confirmar");
     } else {
-      setEtapa("nome");
+      setEtapa("cadastro");
     }
   }
 
@@ -69,15 +68,6 @@ export default function IdentificacaoCliente({ estabelecimentoId, onIdentificado
   function handleConfirmarNao() {
     setClienteEncontrado(null);
     setEtapa("telefone");
-  }
-
-  function handleSubmitNome(e) {
-    e.preventDefault();
-    if (!nome.trim()) {
-      setErro("Informe seu nome.");
-      return;
-    }
-    onIdentificado({ id: null, nome: nome.trim(), telefone });
   }
 
   return (
@@ -148,43 +138,12 @@ export default function IdentificacaoCliente({ estabelecimentoId, onIdentificado
         </div>
       )}
 
-      {etapa === "nome" && (
-        <form onSubmit={handleSubmitNome} className="space-y-4">
-          <p className="text-sm text-body">
-            Não encontramos esse número. Como você se chama?
-          </p>
-
-          <div>
-            <label
-              htmlFor="nome-identificacao"
-              className="mb-1 block text-sm font-medium text-body"
-            >
-              Nome
-            </label>
-            <input
-              id="nome-identificacao"
-              type="text"
-              value={nome}
-              onChange={(e) => setNome(e.target.value)}
-              required
-              placeholder="Seu nome"
-              className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-            />
-          </div>
-
-          <button
-            type="submit"
-            className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
-          >
-            Continuar
-          </button>
-
-          {erro && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-              {erro}
-            </p>
-          )}
-        </form>
+      {etapa === "cadastro" && (
+        <CadastroCliente
+          estabelecimentoId={estabelecimentoId}
+          telefoneInicial={telefone}
+          onCadastrado={onIdentificado}
+        />
       )}
     </div>
   );
