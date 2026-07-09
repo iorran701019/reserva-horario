@@ -276,6 +276,14 @@ function CalendarioDias({
 //                   os inputs por um resumo de confirmação — o insert continua
 //                   lendo form.nome/form.telefone normalmente. Omitido (o /admin
 //                   não passa), a etapa pede nome/WhatsApp como sempre.
+//   clienteEhNovo – true quando o cliente identificado acabou de se cadastrar
+//                   agora (veio do CadastroCliente, não de um número já
+//                   conhecido). Alimenta precisaSinal (sinal_regra === 'novos').
+//                   Default false — o /admin não passa.
+//   nomeProfissionalContato – mesmo nome exibido no botão fixo ContatoDono
+//                   (menor id ativo, ou "a equipe"). Usado só no texto do
+//                   bloco do sinal; buscado uma vez em app/[salon]/page.js e
+//                   repassado aqui pra não duplicar a query.
 export default function FormularioAgendamento({
   estabelecimento,
   status,
@@ -283,6 +291,8 @@ export default function FormularioAgendamento({
   onSucesso,
   forcarEscolhaProfissional = false,
   clienteInicial = null,
+  clienteEhNovo = false,
+  nomeProfissionalContato = "a equipe",
 }) {
   const [form, setForm] = useState(() => ({
     ...ESTADO_INICIAL,
@@ -290,6 +300,13 @@ export default function FormularioAgendamento({
     telefone: clienteInicial?.telefone ?? ESTADO_INICIAL.telefone,
   }));
   const [horarioSelecionado, setHorarioSelecionado] = useState("");
+
+  // Id da reserva criada ANTECIPADAMENTE (fluxo público, sem `status`): assim
+  // que a cliente toca num horário, já inserimos a linha em "aguardando_sinal"
+  // ou "pendente" pra travar a vaga enquanto ela preenche nome/WhatsApp. O
+  // submit final vira um UPDATE dessa linha em vez de um novo insert. Fluxo
+  // /admin (com `status`) nunca usa isso — segue com o insert único de sempre.
+  const [agendamentoId, setAgendamentoId] = useState(null);
 
   // Etapa atual do wizard. Controla só a RENDERIZAÇÃO — a lógica de dados
   // (form, ocupados, validações) permanece a mesma de quando era página única.
@@ -331,6 +348,26 @@ export default function FormularioAgendamento({
 
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
+
+  // Sinal de reserva: regra do salão decide se é exigido (todos, só novos
+  // clientes, ou nunca). O cliente declara (não comprovante) que já pagou via
+  // Pix antes de liberar o botão de confirmar.
+  const precisaSinal =
+    estabelecimento.sinal_regra === "todos" ||
+    (estabelecimento.sinal_regra === "novos" && clienteEhNovo);
+  const [sinalDeclarado, setSinalDeclarado] = useState(false);
+  const [chavePixCopiada, setChavePixCopiada] = useState(false);
+
+  async function copiarChavePix() {
+    try {
+      await navigator.clipboard.writeText(estabelecimento.sinal_chave_pix ?? "");
+      setChavePixCopiada(true);
+      setTimeout(() => setChavePixCopiada(false), 2000);
+    } catch {
+      // Clipboard indisponível (permissão negada, contexto não seguro etc.):
+      // a chave já está visível na tela pra copiar manualmente.
+    }
+  }
 
   // Ao montar, busca em paralelo os serviços ativos (ordenados por nome) e a
   // preferência escolha_profissional do salão. Resolver os dois JUNTOS garante
@@ -446,9 +483,23 @@ export default function FormularioAgendamento({
     setMesVisivel((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1));
   }
 
+  // Cancela a reserva antecipada do fluxo público (ver `agendamentoId` acima):
+  // marca a linha como "cancelado" pra não bloquear o horário e zera o id. Não
+  // faz nada se não houver reserva antecipada em aberto.
+  async function cancelarReservaProvisoria() {
+    if (!agendamentoId) return;
+    await supabase
+      .from("agendamentos")
+      .update({ status: "cancelado" })
+      .eq("id", agendamentoId);
+    setAgendamentoId(null);
+  }
+
   // Seleção de dia no calendário: grava a data e invalida o horário anterior
-  // (o efeito de vagas recarrega a grade do novo dia).
-  function selecionarData(iso) {
+  // (o efeito de vagas recarrega a grade do novo dia). Se já havia uma reserva
+  // antecipada pro horário anterior, cancela antes de trocar de data.
+  async function selecionarData(iso) {
+    await cancelarReservaProvisoria();
     setForm((anterior) => ({ ...anterior, data: iso }));
     setHorarioSelecionado("");
   }
@@ -540,10 +591,93 @@ export default function FormularioAgendamento({
   }
 
   // Volta para a etapa anterior preservando o que já foi escolhido —
-  // não limpa serviço, data nem horário.
-  function voltarEtapa() {
+  // não limpa serviço, data nem horário. Se havia uma reserva antecipada
+  // (fluxo público) pro horário atual, cancela antes de voltar.
+  async function voltarEtapa() {
+    await cancelarReservaProvisoria();
     const indice = ETAPAS.findIndex((e) => e.id === etapa);
     if (indice > 0) setEtapa(ETAPAS[indice - 1].id);
+  }
+
+  // Clique num horário na etapa "data". Fluxo /admin (`status` fornecido):
+  // só marca o horário e avança, o insert único acontece no submit — igual
+  // sempre foi. Fluxo público (`status` omitido): já insere a reserva agora
+  // ("aguardando_sinal" ou "pendente") pra travar a vaga enquanto a cliente
+  // preenche a etapa de dados; o submit final vira um UPDATE dessa linha.
+  async function selecionarHorario(slot) {
+    setHorarioSelecionado(slot);
+
+    if (status) {
+      setEtapa("dados");
+      return;
+    }
+
+    setErro("");
+
+    let profissionalId;
+    if (escolherProfissional) {
+      profissionalId = profissionalSelecionado.id;
+    } else {
+      const livres = vagas[slot] ?? [];
+      if (livres.length === 0) {
+        setErro("Esse horário acabou de ser reservado. Escolha outro.");
+        setHorarioSelecionado("");
+        return;
+      }
+      profissionalId = await escolherMenosOcupado(
+        estabelecimento.id,
+        form.data,
+        livres
+      );
+    }
+
+    const { data, error } = await supabase
+      .from("agendamentos")
+      .insert({
+        nome_cliente: form.nome,
+        telefone: form.telefone,
+        data: form.data,
+        horario: slot,
+        servico_id: servicoSelecionado.id,
+        duracao_min: servicoSelecionado.duracao_min,
+        estabelecimento_id: estabelecimento.id,
+        profissional_id: profissionalId,
+        status: precisaSinal ? "aguardando_sinal" : "pendente",
+      })
+      .select()
+      .single();
+
+    if (error) {
+      // 23P01 = violação da exclusion constraint agendamentos_sem_sobreposicao:
+      // outra reserva sobrepõe esse intervalo — alguém ocupou primeiro.
+      const ehHorarioOcupado =
+        error.code === "23P01" ||
+        /agendamentos_sem_sobreposicao|exclusion constraint/i.test(
+          error.message ?? ""
+        );
+
+      if (ehHorarioOcupado) {
+        setErro("Esse horário acabou de ser reservado. Escolha outro.");
+        setHorarioSelecionado("");
+        try {
+          const mapa = await calcularVagasPorHorario({
+            estabelecimentoId: estabelecimento.id,
+            servicoId: servicoSelecionado.id,
+            data: form.data,
+          });
+          setVagas(mapa);
+        } catch {
+          setVagas({});
+        }
+        return;
+      }
+
+      setErro(error.message);
+      return;
+    }
+
+    setAgendamentoId(data.id);
+    setEtapa("dados");
   }
 
   async function handleSubmit(e) {
@@ -577,43 +711,65 @@ export default function FormularioAgendamento({
       return;
     }
 
-    setEnviando(true);
-
-    // Quem fica com a reserva: o escolhido pelo cliente, ou — no encaixe
-    // automático — o menos ocupado entre os livres neste horário.
-    let profissionalId;
-    if (escolherProfissional) {
-      profissionalId = profissionalSelecionado.id;
-    } else {
-      const livres = vagas[horarioSelecionado] ?? [];
-      if (livres.length === 0) {
-        setEnviando(false);
-        setErro("Esse horário acabou de ser reservado. Escolha outro.");
-        setHorarioSelecionado("");
-        return;
-      }
-      profissionalId = await escolherMenosOcupado(
-        estabelecimento.id,
-        form.data,
-        livres
-      );
+    if (precisaSinal && !sinalDeclarado) {
+      setErro("Confirme o pagamento do sinal para continuar.");
+      return;
     }
 
-    // Payload base idêntico ao do público. `status` só entra quando o
-    // consumidor o fornece (admin => "confirmado"); omitido, o banco aplica o
-    // default "pendente" — comportamento do /agendar público inalterado.
-    const payload = {
-      nome_cliente: form.nome,
-      telefone: form.telefone,
-      data: form.data,
-      horario: horarioSelecionado,
-      servico_id: servicoSelecionado.id,
-      duracao_min: servicoSelecionado.duracao_min,
-      estabelecimento_id: estabelecimento.id,
-      profissional_id: profissionalId,
-    };
-    if (status) payload.status = status;
-    const { error } = await supabase.from("agendamentos").insert(payload);
+    setEnviando(true);
+
+    // Fluxo público (`status` omitido) com reserva já criada em
+    // selecionarHorario: o profissional já foi decidido lá, então o submit
+    // vira um UPDATE dessa linha em vez de um novo insert.
+    const usaReservaExistente = !status && agendamentoId;
+
+    let error;
+    if (usaReservaExistente) {
+      ({ error } = await supabase
+        .from("agendamentos")
+        .update({
+          sinal_declarado_pago: precisaSinal ? sinalDeclarado : false,
+          status: "pendente",
+        })
+        .eq("id", agendamentoId));
+    } else {
+      // Quem fica com a reserva: o escolhido pelo cliente, ou — no encaixe
+      // automático — o menos ocupado entre os livres neste horário.
+      let profissionalId;
+      if (escolherProfissional) {
+        profissionalId = profissionalSelecionado.id;
+      } else {
+        const livres = vagas[horarioSelecionado] ?? [];
+        if (livres.length === 0) {
+          setEnviando(false);
+          setErro("Esse horário acabou de ser reservado. Escolha outro.");
+          setHorarioSelecionado("");
+          return;
+        }
+        profissionalId = await escolherMenosOcupado(
+          estabelecimento.id,
+          form.data,
+          livres
+        );
+      }
+
+      // Payload base idêntico ao do público. `status` só entra quando o
+      // consumidor o fornece (admin => "confirmado"); omitido, o banco aplica
+      // o default "pendente" — comportamento do /agendar público inalterado.
+      const payload = {
+        nome_cliente: form.nome,
+        telefone: form.telefone,
+        data: form.data,
+        horario: horarioSelecionado,
+        servico_id: servicoSelecionado.id,
+        duracao_min: servicoSelecionado.duracao_min,
+        estabelecimento_id: estabelecimento.id,
+        profissional_id: profissionalId,
+        sinal_declarado_pago: precisaSinal ? sinalDeclarado : false,
+      };
+      if (status) payload.status = status;
+      ({ error } = await supabase.from("agendamentos").insert(payload));
+    }
 
     setEnviando(false);
 
@@ -957,12 +1113,7 @@ export default function FormularioAgendamento({
                         <button
                           key={slot}
                           type="button"
-                          onClick={() => {
-                            setHorarioSelecionado(slot);
-                            // Avanço automático: escolher o horário conclui
-                            // a etapa de data e leva à de dados.
-                            setEtapa("dados");
-                          }}
+                          onClick={() => selecionarHorario(slot)}
                           aria-pressed={selecionado}
                           className={[
                             "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition",
@@ -998,9 +1149,7 @@ export default function FormularioAgendamento({
             {clienteInicial ? (
               <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
                 Agendando para{" "}
-                <span className="font-medium text-heading">{form.nome}</span>,
-                WhatsApp{" "}
-                <span className="font-medium text-heading">{form.telefone}</span>.
+                <span className="font-medium text-heading">{form.nome}</span>.
               </p>
             ) : (
               <>
@@ -1039,9 +1188,48 @@ export default function FormularioAgendamento({
               </>
             )}
 
+            {precisaSinal && (
+              <div className="space-y-3 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
+                <div>
+                  <p className="text-base font-medium text-amber-800">
+                    {`Este agendamento exige um sinal de ${formatarPreco(estabelecimento.sinal_valor_centavos)} via Pix para confirmar a reserva.`}
+                  </p>
+                  <p className="mt-1 text-base font-medium text-amber-800">
+                    {`Aperte o botão verde "Falar com ${nomeProfissionalContato}" e envie o comprovante do Pix.`}
+                  </p>
+                  <p className="mt-1 text-base font-medium text-amber-800">
+                    O profissional irá confirmar seu agendamento.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 rounded-lg bg-card px-3 py-2 ring-1 ring-border">
+                  <span className="min-w-0 flex-1 truncate text-sm text-heading">
+                    {estabelecimento.sinal_chave_pix}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={copiarChavePix}
+                    className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover"
+                  >
+                    {chavePixCopiada ? "Copiado!" : "Copiar chave"}
+                  </button>
+                </div>
+
+                <label className="flex items-start gap-2 text-sm text-amber-900">
+                  <input
+                    type="checkbox"
+                    checked={sinalDeclarado}
+                    onChange={(e) => setSinalDeclarado(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-primary/30"
+                  />
+                  Já realizei o pagamento do sinal via Pix
+                </label>
+              </div>
+            )}
+
             <button
               type="submit"
-              disabled={enviando}
+              disabled={enviando || (precisaSinal && !sinalDeclarado)}
               className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {enviando ? "Enviando..." : rotuloSubmit}

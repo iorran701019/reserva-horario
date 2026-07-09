@@ -144,6 +144,7 @@ export default function CadastroCliente({
       id: data.id,
       nome: data.nome,
       telefone: numeroConfirmado,
+      clienteNovo: true,
     });
   }
 

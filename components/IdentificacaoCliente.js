@@ -60,6 +60,7 @@ export default function IdentificacaoCliente({ estabelecimentoId, onIdentificado
       id: clienteEncontrado.id,
       nome: clienteEncontrado.nome,
       telefone,
+      clienteNovo: false,
     });
   }
 

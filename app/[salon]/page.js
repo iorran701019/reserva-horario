@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 import { linkWhatsApp } from "@/lib/whatsapp";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import { precisaAnamnese } from "@/lib/anamnese";
 import { buscarAgendamentosAtivos } from "@/lib/agendamentosCliente";
 import Hero from "@/components/Hero";
+import ContatoDono from "@/components/ContatoDono";
 import IdentificacaoCliente from "@/components/IdentificacaoCliente";
 import FormularioAnamnese from "@/components/FormularioAnamnese";
 import PainelCliente from "@/components/PainelCliente";
@@ -57,6 +59,13 @@ export default function AgendarPage() {
   // rebuscar mesmo com clienteIdentificado/estabelecimento.id inalterados.
   const [agendamentosVersao, setAgendamentosVersao] = useState(0);
 
+  // Profissional ativo de menor id, usado como "responsável" tanto no botão
+  // fixo ContatoDono quanto no texto do bloco de sinal do
+  // FormularioAgendamento — buscado uma única vez aqui pra não duplicar a
+  // query nos dois lugares. null = carregando ou nenhum ativo (cai em "a
+  // equipe").
+  const [nomeProfissionalContato, setNomeProfissionalContato] = useState(null);
+
   useEffect(() => {
     if (!clienteIdentificado) return;
     let ativo = true;
@@ -94,6 +103,28 @@ export default function AgendarPage() {
       ativo = false;
     };
   }, [salon]);
+
+  // Busca o profissional ativo de menor id assim que o estabelecimento
+  // resolve, pra alimentar ContatoDono e o texto do bloco de sinal.
+  useEffect(() => {
+    if (!estabelecimento?.id) return;
+    let ativo = true;
+    supabase
+      .from("profissionais")
+      .select("nome")
+      .eq("estabelecimento_id", estabelecimento.id)
+      .eq("ativo", true)
+      .order("id", { ascending: true })
+      .limit(1)
+      .then(({ data }) => {
+        if (ativo) setNomeProfissionalContato(data?.[0]?.nome ?? null);
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento?.id]);
+
+  const nomeContatoExibido = nomeProfissionalContato ?? "a equipe";
 
   // Foca o título da confirmação ao montar — leitores de tela anunciam o status.
   const tituloConfirmacaoRef = useRef(null);
@@ -220,6 +251,7 @@ export default function AgendarPage() {
           </a>
         </div>
         </div>
+        <ContatoDono estabelecimento={estabelecimento} nome={nomeContatoExibido} />
       </main>
     );
   }
@@ -252,6 +284,7 @@ export default function AgendarPage() {
             estabelecimento={estabelecimento}
             cliente={clienteIdentificado}
             onNovoAgendamento={() => setModoNovoAgendamento(true)}
+            nomeProfissionalContato={nomeContatoExibido}
           />
         ) : anamneseNecessaria === null ? (
           <p className="text-sm text-body">Carregando...</p>
@@ -266,10 +299,13 @@ export default function AgendarPage() {
           <FormularioAgendamento
             estabelecimento={estabelecimento}
             clienteInicial={clienteIdentificado}
+            clienteEhNovo={clienteIdentificado?.clienteNovo ?? false}
+            nomeProfissionalContato={nomeContatoExibido}
             onSucesso={(dados) => setResumo(dados)}
           />
         )}
       </div>
+      <ContatoDono estabelecimento={estabelecimento} nome={nomeContatoExibido} />
     </main>
   );
 }
