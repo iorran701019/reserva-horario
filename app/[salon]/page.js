@@ -5,9 +5,11 @@ import { useParams } from "next/navigation";
 import { linkWhatsApp } from "@/lib/whatsapp";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import { precisaAnamnese } from "@/lib/anamnese";
+import { buscarAgendamentosAtivos } from "@/lib/agendamentosCliente";
 import Hero from "@/components/Hero";
 import IdentificacaoCliente from "@/components/IdentificacaoCliente";
 import FormularioAnamnese from "@/components/FormularioAnamnese";
+import PainelCliente from "@/components/PainelCliente";
 import FormularioAgendamento, {
   formatarData,
 } from "@/components/FormularioAgendamento";
@@ -44,6 +46,17 @@ export default function AgendarPage() {
   // identificado (novo cadastro OU já existente com anamnese vencida).
   const [anamneseNecessaria, setAnamneseNecessaria] = useState(null);
 
+  // Agendamentos ativos do cliente identificado (null = ainda não checado;
+  // array = carregado). Se houver algum, o PainelCliente aparece antes do
+  // wizard. modoNovoAgendamento força o fluxo normal mesmo com agendamentos
+  // ativos, quando o cliente escolhe "Novo agendamento" no painel.
+  const [agendamentosAtivos, setAgendamentosAtivos] = useState(null);
+  const [modoNovoAgendamento, setModoNovoAgendamento] = useState(false);
+
+  // Incrementado ao "Fazer novo agendamento" pra forçar o useEffect abaixo a
+  // rebuscar mesmo com clienteIdentificado/estabelecimento.id inalterados.
+  const [agendamentosVersao, setAgendamentosVersao] = useState(0);
+
   useEffect(() => {
     if (!clienteIdentificado) return;
     let ativo = true;
@@ -56,6 +69,20 @@ export default function AgendarPage() {
       ativo = false;
     };
   }, [clienteIdentificado, estabelecimento?.id]);
+
+  useEffect(() => {
+    if (!clienteIdentificado || !estabelecimento?.id) return;
+    let ativo = true;
+    buscarAgendamentosAtivos(
+      estabelecimento.id,
+      clienteIdentificado.telefone.replace(/\D/g, "")
+    ).then((lista) => {
+      if (ativo) setAgendamentosAtivos(lista);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [clienteIdentificado, estabelecimento?.id, agendamentosVersao]);
 
   // Resolve o estabelecimento pelo slug do path ao montar (ou se o slug mudar).
   useEffect(() => {
@@ -161,7 +188,12 @@ export default function AgendarPage() {
 
           <button
             type="button"
-            onClick={() => setResumo(null)}
+            onClick={() => {
+              setResumo(null);
+              setModoNovoAgendamento(false);
+              setAgendamentosAtivos(null);
+              setAgendamentosVersao((v) => v + 1);
+            }}
             className="mt-6 w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
           >
             Fazer novo agendamento
@@ -212,6 +244,14 @@ export default function AgendarPage() {
           <IdentificacaoCliente
             estabelecimentoId={estabelecimento.id}
             onIdentificado={setClienteIdentificado}
+          />
+        ) : agendamentosAtivos === null ? (
+          <p className="text-sm text-body">Carregando...</p>
+        ) : agendamentosAtivos.length > 0 && !modoNovoAgendamento ? (
+          <PainelCliente
+            estabelecimento={estabelecimento}
+            cliente={clienteIdentificado}
+            onNovoAgendamento={() => setModoNovoAgendamento(true)}
           />
         ) : anamneseNecessaria === null ? (
           <p className="text-sm text-body">Carregando...</p>
