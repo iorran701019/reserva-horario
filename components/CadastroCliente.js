@@ -26,6 +26,7 @@ export default function CadastroCliente({
   const [form, setForm] = useState({
     nome: "",
     whatsapp: telefoneInicial ?? "",
+    whatsappConfirmacao: "",
     cep: "",
     endereco: "",
     bairro: "",
@@ -37,6 +38,8 @@ export default function CadastroCliente({
   const [buscandoCep, setBuscandoCep] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
+  const [mostrarReconfirmacao, setMostrarReconfirmacao] = useState(false);
+  const [whatsappReconfirmacao, setWhatsappReconfirmacao] = useState("");
 
   function handleChange(e) {
     const { name, value } = e.target;
@@ -93,6 +96,24 @@ export default function CadastroCliente({
       return;
     }
 
+    const digitosBase = mostrarReconfirmacao
+      ? form.whatsappConfirmacao.replace(/\D/g, "")
+      : digitosWhatsapp;
+
+    const digitosParaComparar = mostrarReconfirmacao
+      ? whatsappReconfirmacao.replace(/\D/g, "")
+      : form.whatsappConfirmacao.replace(/\D/g, "");
+
+    if (digitosBase !== digitosParaComparar) {
+      setMostrarReconfirmacao(true);
+      setErro("Os números não coincidem. Confirme novamente abaixo.");
+      return;
+    }
+
+    const numeroConfirmado = mostrarReconfirmacao
+      ? whatsappReconfirmacao
+      : form.whatsappConfirmacao;
+
     setEnviando(true);
 
     const { data, error } = await supabase
@@ -100,7 +121,7 @@ export default function CadastroCliente({
       .insert({
         estabelecimento_id: estabelecimentoId,
         nome: form.nome.trim(),
-        whatsapp: digitosWhatsapp,
+        whatsapp: numeroConfirmado.replace(/\D/g, ""),
         cep: form.cep || null,
         endereco: form.endereco || null,
         bairro: form.bairro || null,
@@ -122,7 +143,7 @@ export default function CadastroCliente({
     onCadastrado({
       id: data.id,
       nome: data.nome,
-      telefone: form.whatsapp,
+      telefone: numeroConfirmado,
     });
   }
 
@@ -253,9 +274,46 @@ export default function CadastroCliente({
           type="date"
           value={form.nascimento}
           onChange={handleChange}
+          required
           className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
         />
       </div>
+
+      <div>
+        <label htmlFor="cad-whatsapp-confirmacao" className="mb-1 block text-sm font-medium text-body">
+          Confirme seu WhatsApp
+        </label>
+        <input
+          id="cad-whatsapp-confirmacao"
+          name="whatsappConfirmacao"
+          type="tel"
+          inputMode="tel"
+          value={form.whatsappConfirmacao}
+          onChange={handleChange}
+          required
+          placeholder="(24) 99999-9999"
+          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+        />
+      </div>
+
+      {mostrarReconfirmacao && (
+        <div>
+          <label htmlFor="cad-whatsapp-reconfirmacao" className="mb-1 block text-sm font-medium text-body">
+            Confirme seu WhatsApp novamente
+          </label>
+          <input
+            id="cad-whatsapp-reconfirmacao"
+            name="whatsappReconfirmacao"
+            type="tel"
+            inputMode="tel"
+            value={whatsappReconfirmacao}
+            onChange={(e) => setWhatsappReconfirmacao(e.target.value)}
+            required
+            placeholder="(24) 99999-9999"
+            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+          />
+        </div>
+      )}
 
       <div>
         <label htmlFor="cad-instagram" className="mb-1 block text-sm font-medium text-body">
