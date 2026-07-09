@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { linkWhatsApp } from "@/lib/whatsapp";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import Hero from "@/components/Hero";
+import IdentificacaoCliente from "@/components/IdentificacaoCliente";
 import FormularioAgendamento, {
   formatarData,
 } from "@/components/FormularioAgendamento";
@@ -29,6 +30,11 @@ export default function AgendarPage() {
   // Resumo do agendamento concluído (null = ainda no formulário). Os dados vêm
   // do callback onSucesso; ao desmontar/remontar o formulário, ele zera sozinho.
   const [resumo, setResumo] = useState(null);
+
+  // Cliente identificado pela IdentificacaoCliente (null = ainda não passou por
+  // ela). Persiste entre agendamentos da mesma visita, então um novo
+  // agendamento (após "Fazer novo agendamento") não pede o WhatsApp de novo.
+  const [clienteIdentificado, setClienteIdentificado] = useState(null);
 
   // Resolve o estabelecimento pelo slug do path ao montar (ou se o slug mudar).
   useEffect(() => {
@@ -176,11 +182,22 @@ export default function AgendarPage() {
           </p>
         </header>
 
-        {/* Sem prop `status`: o insert mantém o default "pendente" do banco. */}
-        <FormularioAgendamento
-          estabelecimento={estabelecimento}
-          onSucesso={(dados) => setResumo(dados)}
-        />
+        {/* Antes do wizard, identifica o cliente pelo WhatsApp. Só então monta
+            o FormularioAgendamento, já com clienteInicial preenchido — a etapa
+            "dados" dele vira um resumo em vez de pedir nome/WhatsApp de novo. */}
+        {!clienteIdentificado ? (
+          <IdentificacaoCliente
+            estabelecimentoId={estabelecimento.id}
+            onIdentificado={setClienteIdentificado}
+          />
+        ) : (
+          // Sem prop `status`: o insert mantém o default "pendente" do banco.
+          <FormularioAgendamento
+            estabelecimento={estabelecimento}
+            clienteInicial={clienteIdentificado}
+            onSucesso={(dados) => setResumo(dados)}
+          />
+        )}
       </div>
     </main>
   );

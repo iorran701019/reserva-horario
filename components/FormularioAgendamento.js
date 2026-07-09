@@ -270,14 +270,25 @@ function CalendarioDias({
 //                   toggle escolha_profissional do salão. Usado no /admin, onde o
 //                   dono sempre escolhe o profissional ao marcar. No público fica
 //                   false, então lá o modo continua vindo só do banco.
+//   clienteInicial – { id, nome, telefone } de um cliente já identificado antes
+//                   do formulário (ex.: IdentificacaoCliente no público). Quando
+//                   presente, pré-preenche nome/telefone e a etapa "dados" troca
+//                   os inputs por um resumo de confirmação — o insert continua
+//                   lendo form.nome/form.telefone normalmente. Omitido (o /admin
+//                   não passa), a etapa pede nome/WhatsApp como sempre.
 export default function FormularioAgendamento({
   estabelecimento,
   status,
   rotuloSubmit = "Confirmar agendamento",
   onSucesso,
   forcarEscolhaProfissional = false,
+  clienteInicial = null,
 }) {
-  const [form, setForm] = useState(ESTADO_INICIAL);
+  const [form, setForm] = useState(() => ({
+    ...ESTADO_INICIAL,
+    nome: clienteInicial?.nome ?? ESTADO_INICIAL.nome,
+    telefone: clienteInicial?.telefone ?? ESTADO_INICIAL.telefone,
+  }));
   const [horarioSelecionado, setHorarioSelecionado] = useState("");
 
   // Etapa atual do wizard. Controla só a RENDERIZAÇÃO — a lógica de dados
@@ -979,41 +990,54 @@ export default function FormularioAgendamento({
           </>
         )}
 
-        {/* Etapa 3 — Dados: nome, WhatsApp e confirmação. */}
+        {/* Etapa 3 — Dados: nome, WhatsApp e confirmação. Com clienteInicial
+            (já identificado antes do wizard), os inputs somem e viram um
+            resumo — os valores já estão em form.nome/form.telefone. */}
         {etapa === "dados" && (
           <>
-            <div>
-              <label htmlFor="nome" className="mb-1 block text-sm font-medium text-body">
-                Nome
-              </label>
-              <input
-                id="nome"
-                name="nome"
-                type="text"
-                value={form.nome}
-                onChange={handleChange}
-                required
-                placeholder="Seu nome"
-                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-              />
-            </div>
+            {clienteInicial ? (
+              <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
+                Agendando para{" "}
+                <span className="font-medium text-heading">{form.nome}</span>,
+                WhatsApp{" "}
+                <span className="font-medium text-heading">{form.telefone}</span>.
+              </p>
+            ) : (
+              <>
+                <div>
+                  <label htmlFor="nome" className="mb-1 block text-sm font-medium text-body">
+                    Nome
+                  </label>
+                  <input
+                    id="nome"
+                    name="nome"
+                    type="text"
+                    value={form.nome}
+                    onChange={handleChange}
+                    required
+                    placeholder="Seu nome"
+                    className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  />
+                </div>
 
-            <div>
-              <label htmlFor="telefone" className="mb-1 block text-sm font-medium text-body">
-                WhatsApp
-              </label>
-              <input
-                id="telefone"
-                name="telefone"
-                type="tel"
-                inputMode="tel"
-                value={form.telefone}
-                onChange={handleChange}
-                required
-                placeholder="(24) 99999-9999"
-                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-              />
-            </div>
+                <div>
+                  <label htmlFor="telefone" className="mb-1 block text-sm font-medium text-body">
+                    WhatsApp
+                  </label>
+                  <input
+                    id="telefone"
+                    name="telefone"
+                    type="tel"
+                    inputMode="tel"
+                    value={form.telefone}
+                    onChange={handleChange}
+                    required
+                    placeholder="(24) 99999-9999"
+                    className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  />
+                </div>
+              </>
+            )}
 
             <button
               type="submit"
