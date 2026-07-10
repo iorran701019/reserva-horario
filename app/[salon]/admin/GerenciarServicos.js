@@ -24,7 +24,7 @@ import { formatarPreco } from "@/components/FormularioAgendamento";
 // Estado inicial do formulário. `preco` fica em REAIS (string do input); só é
 // convertido pra centavos na hora de gravar. `profissionais` é a lista de ids
 // (profissionais.id) vinculados ao serviço.
-const FORM_INICIAL = { nome: "", preco: "", duracao: "", profissionais: [] };
+const FORM_INICIAL = { nome: "", preco: "", duracao: "", profissionais: [], categoria_id: "" };
 
 // Reais digitado (aceita "35", "35,50" ou "35.50") -> centavos inteiros.
 // Devolve NaN quando não dá pra interpretar, pra validação barrar.
@@ -123,6 +123,12 @@ export default function GerenciarServicos({ estabelecimento }) {
   const [carregandoProfissionais, setCarregandoProfissionais] = useState(true);
   const [erroProfissionais, setErroProfissionais] = useState("");
 
+  // Categorias do salão (tabela categorias_servico). Alimentam tanto o seletor
+  // do form quanto a seção de gerenciamento. Ordenadas por `ordem`.
+  const [categorias, setCategorias] = useState([]);
+  const [carregandoCategorias, setCarregandoCategorias] = useState(true);
+  const [erroCategorias, setErroCategorias] = useState("");
+
   // Carga inicial. Traz ATIVOS e INATIVOS (o CRUD precisa mostrar os dois, com
   // ação de reativar). Ordena ativos primeiro e, dentro, por nome.
   useEffect(() => {
@@ -131,7 +137,7 @@ export default function GerenciarServicos({ estabelecimento }) {
     async function carregar() {
       const { data, error } = await supabase
         .from("servicos")
-        .select("id, nome, duracao_min, preco_centavos, ativo")
+        .select("id, nome, duracao_min, preco_centavos, ativo, categoria_id")
         .eq("estabelecimento_id", estabelecimento.id)
         .order("ativo", { ascending: false })
         .order("nome", { ascending: true });
@@ -183,6 +189,36 @@ export default function GerenciarServicos({ estabelecimento }) {
     };
   }, [estabelecimento.id]);
 
+  // Carrega as categorias do salão (para o seletor e a seção de gerenciamento),
+  // na ordem de exibição definida por `ordem`.
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregar() {
+      const { data, error } = await supabase
+        .from("categorias_servico")
+        .select("id, nome, ordem")
+        .eq("estabelecimento_id", estabelecimento.id)
+        .order("ordem", { ascending: true })
+        .order("nome", { ascending: true });
+
+      if (!ativo) return;
+
+      if (error) {
+        setErroCategorias(error.message);
+      } else {
+        setErroCategorias("");
+        setCategorias(data ?? []);
+      }
+      setCarregandoCategorias(false);
+    }
+
+    carregar();
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento.id]);
+
   function handleChange(e) {
     const { name, value } = e.target;
     setForm((anterior) => ({ ...anterior, [name]: value }));
@@ -200,6 +236,7 @@ export default function GerenciarServicos({ estabelecimento }) {
       preco: centavosParaReais(servico.preco_centavos),
       duracao: String(servico.duracao_min),
       profissionais: [],
+      categoria_id: servico.categoria_id != null ? String(servico.categoria_id) : "",
     });
     setErroForm("");
     setEditando(servico);
@@ -262,6 +299,8 @@ export default function GerenciarServicos({ estabelecimento }) {
         nome,
         preco_centavos: centavos,
         duracao_min: duracao,
+        // "" (Sem categoria) -> null; senão o id numérico da categoria.
+        categoria_id: form.categoria_id === "" ? null : Number(form.categoria_id),
       },
     };
   }
@@ -309,7 +348,7 @@ export default function GerenciarServicos({ estabelecimento }) {
           ativo: true,
           estabelecimento_id: estabelecimento.id,
         })
-        .select("id, nome, duracao_min, preco_centavos, ativo")
+        .select("id, nome, duracao_min, preco_centavos, ativo, categoria_id")
         .single();
 
       if (error) {
@@ -456,6 +495,27 @@ export default function GerenciarServicos({ estabelecimento }) {
             />
           </div>
 
+          {/* Categoria (opcional). "Sem categoria" grava categoria_id null. */}
+          <div>
+            <label htmlFor="categoria_id" className="mb-1 block text-sm font-medium text-body">
+              Categoria
+            </label>
+            <select
+              id="categoria_id"
+              name="categoria_id"
+              value={form.categoria_id}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+            >
+              <option value="">Sem categoria</option>
+              {categorias.map((categoria) => (
+                <option key={categoria.id} value={String(categoria.id)}>
+                  {categoria.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="flex gap-3">
             <div className="flex-1">
               <label htmlFor="preco" className="mb-1 block text-sm font-medium text-body">
@@ -536,7 +596,20 @@ export default function GerenciarServicos({ estabelecimento }) {
       {/* Lista de serviços. Some enquanto o formulário está aberto pra manter o
           foco numa coisa só (mobile). */}
       {!editando && (
-        servicos.length === 0 ? (
+        <>
+        <GerenciarCategorias
+          estabelecimento={estabelecimento}
+          categorias={categorias}
+          setCategorias={setCategorias}
+          carregando={carregandoCategorias}
+          erro={erroCategorias}
+          aoApagarCategoria={(id) =>
+            setServicos((atuais) =>
+              atuais.map((s) => (s.categoria_id === id ? { ...s, categoria_id: null } : s))
+            )
+          }
+        />
+        {servicos.length === 0 ? (
           <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
             Nenhum serviço cadastrado.
           </p>
@@ -559,6 +632,12 @@ export default function GerenciarServicos({ estabelecimento }) {
                     <p className="mt-0.5 text-sm text-body">
                       {formatarPreco(servico.preco_centavos)} · {servico.duracao_min} min
                     </p>
+                    {(() => {
+                      const categoria = categorias.find((c) => c.id === servico.categoria_id);
+                      return categoria ? (
+                        <p className="mt-0.5 truncate text-xs text-body">{categoria.nome}</p>
+                      ) : null;
+                    })()}
                   </div>
 
                   <span
@@ -603,7 +682,8 @@ export default function GerenciarServicos({ estabelecimento }) {
               </li>
             ))}
           </ul>
-        )
+        )}
+        </>
       )}
 
       {/* Modal de confirmação do soft delete. Deixa claro que o histórico é
@@ -670,4 +750,322 @@ function ordenar(lista) {
 // Patch imutável do campo `ativo` de um serviço na lista.
 function atualizarAtivo(lista, id, ativo) {
   return lista.map((s) => (s.id === id ? { ...s, ativo } : s));
+}
+
+// Seção de gerenciamento das categorias do salão (criar, renomear, reordenar,
+// apagar). Fica recolhida por padrão pra não competir com a lista de serviços;
+// expande sob demanda. Reordenar troca `ordem` entre vizinhos. Apagar só
+// desagrupa os serviços (FK on delete set null); avisamos o pai por
+// `aoApagarCategoria` pra zerar o categoria_id na lista em memória.
+function GerenciarCategorias({
+  estabelecimento,
+  categorias,
+  setCategorias,
+  carregando,
+  erro,
+  aoApagarCategoria,
+}) {
+  const [aberto, setAberto] = useState(false);
+  const [novoNome, setNovoNome] = useState("");
+  const [criando, setCriando] = useState(false);
+  const [editandoId, setEditandoId] = useState(null);
+  const [nomeEdicao, setNomeEdicao] = useState("");
+  const [categoriaParaExcluir, setCategoriaParaExcluir] = useState(null);
+  const [erroAcao, setErroAcao] = useState("");
+  // Trava as ações de linha (renomear/mover/apagar) enquanto uma grava, pra não
+  // disparar swaps concorrentes de `ordem`.
+  const [ocupado, setOcupado] = useState(false);
+
+  const ordenadas = ordenarCategorias(categorias);
+
+  async function criar(e) {
+    e.preventDefault();
+    const nome = novoNome.trim();
+    if (!nome) return;
+
+    setCriando(true);
+    setErroAcao("");
+    // Nova categoria vai pro fim da ordem (maior `ordem` atual + 1).
+    const proximaOrdem = categorias.reduce((max, c) => Math.max(max, c.ordem), -1) + 1;
+    const { data, error } = await supabase
+      .from("categorias_servico")
+      .insert({ estabelecimento_id: estabelecimento.id, nome, ordem: proximaOrdem })
+      .select("id, nome, ordem")
+      .single();
+
+    setCriando(false);
+    if (error) {
+      setErroAcao(error.message);
+      return;
+    }
+    setCategorias((atuais) => ordenarCategorias([...atuais, data]));
+    setNovoNome("");
+  }
+
+  function abrirRenomear(categoria) {
+    setEditandoId(categoria.id);
+    setNomeEdicao(categoria.nome);
+    setErroAcao("");
+  }
+
+  async function salvarRenome(categoria) {
+    const nome = nomeEdicao.trim();
+    if (!nome) return;
+    if (nome === categoria.nome) {
+      setEditandoId(null);
+      return;
+    }
+
+    setOcupado(true);
+    setErroAcao("");
+    const { error } = await supabase
+      .from("categorias_servico")
+      .update({ nome })
+      .eq("id", categoria.id);
+
+    setOcupado(false);
+    if (error) {
+      setErroAcao(error.message);
+      return;
+    }
+    setCategorias((atuais) =>
+      ordenarCategorias(atuais.map((c) => (c.id === categoria.id ? { ...c, nome } : c)))
+    );
+    setEditandoId(null);
+  }
+
+  // Move a categoria uma posição pra cima (-1) ou baixo (+1) trocando o valor de
+  // `ordem` com a vizinha. Dois updates sequenciais; `ocupado` evita corrida.
+  async function mover(categoria, direcao) {
+    const i = ordenadas.findIndex((c) => c.id === categoria.id);
+    const j = i + direcao;
+    if (j < 0 || j >= ordenadas.length) return;
+    const vizinha = ordenadas[j];
+
+    setOcupado(true);
+    setErroAcao("");
+    const { error: erro1 } = await supabase
+      .from("categorias_servico")
+      .update({ ordem: vizinha.ordem })
+      .eq("id", categoria.id);
+    const { error: erro2 } = await supabase
+      .from("categorias_servico")
+      .update({ ordem: categoria.ordem })
+      .eq("id", vizinha.id);
+
+    setOcupado(false);
+    if (erro1 || erro2) {
+      setErroAcao((erro1 || erro2).message);
+      return;
+    }
+    setCategorias((atuais) =>
+      ordenarCategorias(
+        atuais.map((c) => {
+          if (c.id === categoria.id) return { ...c, ordem: vizinha.ordem };
+          if (c.id === vizinha.id) return { ...c, ordem: categoria.ordem };
+          return c;
+        })
+      )
+    );
+  }
+
+  async function apagar(categoria) {
+    setOcupado(true);
+    setErroAcao("");
+    const { error } = await supabase
+      .from("categorias_servico")
+      .delete()
+      .eq("id", categoria.id);
+
+    setOcupado(false);
+    if (error) {
+      setErroAcao(error.message);
+      setCategoriaParaExcluir(null);
+      return;
+    }
+    setCategorias((atuais) => atuais.filter((c) => c.id !== categoria.id));
+    aoApagarCategoria(categoria.id);
+    setCategoriaParaExcluir(null);
+  }
+
+  return (
+    <div className="mb-4 rounded-2xl bg-card shadow-sm ring-1 ring-border">
+      <button
+        type="button"
+        onClick={() => setAberto((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 px-6 py-4 text-left"
+      >
+        <span className="text-base font-semibold text-heading">Categorias</span>
+        <span className="text-sm text-body">
+          {carregando ? "..." : `${categorias.length} · ${aberto ? "ocultar" : "gerenciar"}`}
+        </span>
+      </button>
+
+      {aberto && (
+        <div className="space-y-4 border-t border-border px-6 py-4">
+          {/* Criar categoria. */}
+          <form onSubmit={criar} className="flex gap-2">
+            <input
+              type="text"
+              value={novoNome}
+              onChange={(e) => setNovoNome(e.target.value)}
+              placeholder="Nova categoria (ex.: Cabelo)"
+              className="min-w-0 flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+            />
+            <button
+              type="submit"
+              disabled={criando || !novoNome.trim()}
+              className="shrink-0 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {criando ? "..." : "Adicionar"}
+            </button>
+          </form>
+
+          {(erro || erroAcao) && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+              {erro || erroAcao}
+            </p>
+          )}
+
+          {carregando ? (
+            <p className="rounded-lg bg-surface px-3 py-3 text-sm text-body ring-1 ring-border">
+              Carregando categorias...
+            </p>
+          ) : ordenadas.length === 0 ? (
+            <p className="rounded-lg bg-surface px-3 py-3 text-sm text-body ring-1 ring-border">
+              Nenhuma categoria ainda. Crie a primeira acima.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {ordenadas.map((categoria, indice) => (
+                <li
+                  key={categoria.id}
+                  className="flex items-center gap-2 rounded-xl bg-surface p-2 ring-1 ring-border"
+                >
+                  {editandoId === categoria.id ? (
+                    <>
+                      <input
+                        type="text"
+                        value={nomeEdicao}
+                        onChange={(e) => setNomeEdicao(e.target.value)}
+                        className="min-w-0 flex-1 rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => salvarRenome(categoria)}
+                        disabled={ocupado || !nomeEdicao.trim()}
+                        className="shrink-0 rounded-lg bg-green-50 px-2.5 py-1.5 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Salvar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditandoId(null)}
+                        className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                      >
+                        Cancelar
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex shrink-0 flex-col">
+                        <button
+                          type="button"
+                          onClick={() => mover(categoria, -1)}
+                          disabled={ocupado || indice === 0}
+                          aria-label="Mover para cima"
+                          className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => mover(categoria, 1)}
+                          disabled={ocupado || indice === ordenadas.length - 1}
+                          aria-label="Mover para baixo"
+                          className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                          ▼
+                        </button>
+                      </div>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-heading">
+                        {categoria.nome}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => abrirRenomear(categoria)}
+                        className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                      >
+                        Renomear
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCategoriaParaExcluir(categoria)}
+                        className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                      >
+                        Apagar
+                      </button>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Confirmação de exclusão. Deixa claro que os serviços só ficam sem
+          categoria (não são apagados). */}
+      {categoriaParaExcluir && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-excluir-categoria"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setCategoriaParaExcluir(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="titulo-excluir-categoria" className="text-lg font-semibold text-heading">
+              Apagar categoria
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Tem certeza que deseja apagar{" "}
+              <span className="font-medium text-heading">{categoriaParaExcluir.nome}</span>? Os
+              serviços dela apenas ficam sem categoria.
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={() => apagar(categoriaParaExcluir)}
+                disabled={ocupado}
+                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Apagar categoria
+              </button>
+              <button
+                type="button"
+                onClick={() => setCategoriaParaExcluir(null)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Ordena as categorias pela sequência de exibição (ordem asc, depois nome).
+// Usado após inserts/updates locais pra manter a ordem consistente sem refetch.
+function ordenarCategorias(lista) {
+  return [...lista].sort((a, b) => {
+    if (a.ordem !== b.ordem) return a.ordem - b.ordem;
+    return a.nome.localeCompare(b.nome);
+  });
 }

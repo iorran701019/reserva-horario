@@ -1,0 +1,42 @@
+[1mdiff --git a/app/[salon]/admin/page.js b/app/[salon]/admin/page.js[m
+[1mindex 3bc852c..232cc01 100644[m
+[1m--- a/app/[salon]/admin/page.js[m
+[1m+++ b/app/[salon]/admin/page.js[m
+[36m@@ -22,6 +22,7 @@[m [mimport {[m
+   CalendarPlus,[m
+   Scissors,[m
+   Users,[m
+[32m+[m[32m  UserRound,[m
+   LogOut,[m
+   NotebookPen,[m
+ } from "lucide-react";[m
+[36m@@ -29,6 +30,7 @@[m [mimport Hero from "@/components/Hero";[m
+ import PainelCalendario from "./PainelCalendario";[m
+ import GerenciarServicos from "./GerenciarServicos";[m
+ import GerenciarProfissionais from "./GerenciarProfissionais";[m
+[32m+[m[32mimport GerenciarClientes from "@/components/GerenciarClientes";[m
+ import ConfiguracoesSalao from "./ConfiguracoesSalao";[m
+ import FormularioAgendamento from "@/components/FormularioAgendamento";[m
+ [m
+[36m@@ -137,6 +139,7 @@[m [mconst ABAS_PAI = [[m
+   { id: "agendar", rotulo: "Agendar", Icone: CalendarPlus },[m
+   { id: "servicos", rotulo: "Serviços", Icone: Scissors },[m
+   { id: "profissionais", rotulo: "Profissionais", Icone: Users },[m
+[32m+[m[32m  { id: "clientes", rotulo: "Clientes", Icone: UserRound },[m
+ ];[m
+ [m
+ // Filtros da aba Histórico (client-side, por categoria de rotuloHistorico).[m
+[36m@@ -1116,6 +1119,13 @@[m [mexport default function AdminPage() {[m
+             <GerenciarProfissionais estabelecimento={estabelecimento} />[m
+           </>[m
+         )}[m
+[32m+[m
+[32m+[m[32m        {/* Clientes: consulta somente-leitura da tabela `clientes`, com busca[m
+[32m+[m[32m            por nome e detalhe do relacionamento (próximo agendamento, último[m
+[32m+[m[32m            atendimento, anamnese), particionado pelo estabelecimento resolvido. */}[m
+[32m+[m[32m        {!carregando && !erro && viewPai === "clientes" && ([m
+[32m+[m[32m          <GerenciarClientes estabelecimento={estabelecimento} />[m
+[32m+[m[32m        )}[m
+       </div>[m
+ [m
+       {/* Drawer lateral de navegação. Sempre montado pra permitir a transição[m

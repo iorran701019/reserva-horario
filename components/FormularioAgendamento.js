@@ -317,6 +317,12 @@ export default function FormularioAgendamento({
   const [carregandoServicos, setCarregandoServicos] = useState(true);
   const [erroServicos, setErroServicos] = useState("");
 
+  // Categorias de serviço do salão, pra agrupar a lista da etapa "servico" em
+  // acordeão. `categoriaAberta` guarda o id da única categoria expandida por
+  // vez (null = todas fechadas).
+  const [categorias, setCategorias] = useState([]);
+  const [categoriaAberta, setCategoriaAberta] = useState(null);
+
   // Mapa horário -> [profissional_id livres], vindo de calcularVagasPorHorario.
   const [vagas, setVagas] = useState({});
   const [carregandoSlots, setCarregandoSlots] = useState(false);
@@ -378,10 +384,10 @@ export default function FormularioAgendamento({
     let ativo = true;
 
     async function carregar() {
-      const [resServicos, resConfig] = await Promise.all([
+      const [resServicos, resConfig, resCategorias] = await Promise.all([
         supabase
           .from("servicos")
-          .select("id, nome, duracao_min, preco_centavos")
+          .select("id, nome, duracao_min, preco_centavos, categoria_id")
           .eq("estabelecimento_id", estabelecimento.id)
           .eq("ativo", true)
           .order("nome"),
@@ -390,6 +396,12 @@ export default function FormularioAgendamento({
           .select("escolha_profissional")
           .eq("id", estabelecimento.id)
           .single(),
+        supabase
+          .from("categorias_servico")
+          .select("id, nome, ordem")
+          .eq("estabelecimento_id", estabelecimento.id)
+          .order("ordem", { ascending: true })
+          .order("nome", { ascending: true }),
       ]);
 
       if (!ativo) return;
@@ -400,6 +412,9 @@ export default function FormularioAgendamento({
         setServicos(resServicos.data ?? []);
       }
       setEscolhaProfissional(Boolean(resConfig.data?.escolha_profissional));
+      // Sem categorias cadastradas (ou erro na consulta), a lista de serviços
+      // simplesmente não agrupa — não impede a etapa de funcionar.
+      setCategorias(resCategorias.error ? [] : resCategorias.data ?? []);
       setCarregandoServicos(false);
     }
 
@@ -452,6 +467,65 @@ export default function FormularioAgendamento({
   }, [servicoSelecionado, estabelecimento.id]);
 
   const [hoje] = useState(dataDeHoje);
+
+  // Agrupamento da lista de serviços da etapa "servico": soltos no topo os
+  // sem categoria (ou apontando pra uma categoria que não existe mais), depois
+  // uma seção por categoria (na ordem vinda do banco) só com quem tem >=1
+  // serviço ativo.
+  const idsCategorias = new Set(categorias.map((c) => c.id));
+  const servicosSemCategoria = servicos.filter(
+    (s) => s.categoria_id == null || !idsCategorias.has(s.categoria_id)
+  );
+  const categoriasComServicos = categorias
+    .map((c) => ({
+      ...c,
+      servicos: servicos.filter((s) => s.categoria_id === c.id),
+    }))
+    .filter((c) => c.servicos.length > 0);
+
+  // Abre/fecha uma categoria no acordeão — só uma aberta por vez.
+  function alternarCategoria(id) {
+    setCategoriaAberta((atual) => (atual === id ? null : id));
+  }
+
+  // Botão de serviço reaproveitado tanto pelos soltos (sem categoria) quanto
+  // pelos agrupados dentro de cada categoria aberta.
+  function renderBotaoServico(servico) {
+    const selecionado = servicoSelecionado?.id === servico.id;
+
+    return (
+      <button
+        key={servico.id}
+        type="button"
+        onClick={() => selecionarServico(servico)}
+        aria-pressed={selecionado}
+        className={[
+          "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 transition",
+          selecionado
+            ? "bg-primary text-white ring-primary"
+            : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+        ].join(" ")}
+      >
+        <span className="min-w-0">
+          <span className="block font-medium">{servico.nome}</span>
+          <span
+            className={[
+              "block text-sm",
+              selecionado ? "text-on-primary/90" : "text-body",
+            ].join(" ")}
+          >
+            {servico.duracao_min} min
+          </span>
+        </span>
+
+        {servico.preco_centavos != null && (
+          <span className="shrink-0 font-medium">
+            {formatarPreco(servico.preco_centavos)}
+          </span>
+        )}
+      </button>
+    );
+  }
 
   // Dias da semana (0–6) com atendimento para o serviço escolhido. No fluxo
   // "cliente escolhe", só conta o profissional selecionado; no encaixe
@@ -903,46 +977,45 @@ export default function FormularioAgendamento({
               </p>
             )}
 
-            {!carregandoServicos && !erroServicos && servicos.length > 0 && (
-              <div className="space-y-2">
-                {servicos.map((servico) => {
-                  const selecionado = servicoSelecionado?.id === servico.id;
+            {!carregandoServicos &&
+              !erroServicos &&
+              (servicosSemCategoria.length > 0 ||
+                categoriasComServicos.length > 0) && (
+                <div className="space-y-2">
+                  {servicosSemCategoria.map((servico) =>
+                    renderBotaoServico(servico)
+                  )}
 
-                  return (
-                    <button
-                      key={servico.id}
-                      type="button"
-                      onClick={() => selecionarServico(servico)}
-                      aria-pressed={selecionado}
-                      className={[
-                        "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 transition",
-                        selecionado
-                          ? "bg-primary text-white ring-primary"
-                          : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
-                      ].join(" ")}
-                    >
-                      <span className="min-w-0">
-                        <span className="block font-medium">{servico.nome}</span>
-                        <span
-                          className={[
-                            "block text-sm",
-                            selecionado ? "text-on-primary/90" : "text-body",
-                          ].join(" ")}
+                  {categoriasComServicos.map((categoria) => {
+                    const aberta = categoriaAberta === categoria.id;
+
+                    return (
+                      <div
+                        key={categoria.id}
+                        className="rounded-lg ring-1 ring-border"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => alternarCategoria(categoria.id)}
+                          aria-expanded={aberta}
+                          className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left font-medium text-heading transition hover:bg-surface"
                         >
-                          {servico.duracao_min} min
-                        </span>
-                      </span>
+                          {categoria.nome}
+                          <span aria-hidden="true">{aberta ? "▲" : "▼"}</span>
+                        </button>
 
-                      {servico.preco_centavos != null && (
-                        <span className="shrink-0 font-medium">
-                          {formatarPreco(servico.preco_centavos)}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+                        {aberta && (
+                          <div className="space-y-2 border-t border-border p-2">
+                            {categoria.servicos.map((servico) =>
+                              renderBotaoServico(servico)
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
             {/* Fluxo "cliente escolhe": depois de um serviço, mostra os cards
                 de profissional (mais elaborados que os quadrados do admin).

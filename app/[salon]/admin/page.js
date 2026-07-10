@@ -22,6 +22,7 @@ import {
   CalendarPlus,
   Scissors,
   Users,
+  UserRound,
   LogOut,
   NotebookPen,
 } from "lucide-react";
@@ -29,6 +30,7 @@ import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
 import GerenciarProfissionais from "./GerenciarProfissionais";
+import GerenciarClientes from "@/components/GerenciarClientes";
 import ConfiguracoesSalao from "./ConfiguracoesSalao";
 import FormularioAgendamento from "@/components/FormularioAgendamento";
 
@@ -137,6 +139,7 @@ const ABAS_PAI = [
   { id: "agendar", rotulo: "Agendar", Icone: CalendarPlus },
   { id: "servicos", rotulo: "Serviços", Icone: Scissors },
   { id: "profissionais", rotulo: "Profissionais", Icone: Users },
+  { id: "clientes", rotulo: "Clientes", Icone: UserRound },
 ];
 
 // Filtros da aba Histórico (client-side, por categoria de rotuloHistorico).
@@ -236,6 +239,12 @@ export default function AdminPage() {
   // após sucesso. Ambos são reiniciados ao abrir/fechar/trocar o modal.
   const [salvandoObservacao, setSalvandoObservacao] = useState(false);
   const [observacaoOk, setObservacaoOk] = useState(false);
+
+  // Mesma lógica acima, espelhada para a anotação do Histórico.
+  const [idAnotHistorico, setIdAnotHistorico] = useState(null);
+  const [rascunhoAnotHistorico, setRascunhoAnotHistorico] = useState("");
+  const [salvandoAnotHistorico, setSalvandoAnotHistorico] = useState(false);
+  const [okAnotHistorico, setOkAnotHistorico] = useState(null);
 
   // Filtro ativo da aba Histórico (ver FILTROS_HISTORICO). "todos" = sem filtro.
   const [filtroHistorico, setFiltroHistorico] = useState("todos");
@@ -1115,6 +1124,13 @@ export default function AdminPage() {
             <ConfiguracoesSalao estabelecimento={estabelecimento} />
             <GerenciarProfissionais estabelecimento={estabelecimento} />
           </>
+        )}
+
+        {/* Clientes: consulta somente-leitura da tabela `clientes`, com busca
+            por nome e detalhe do relacionamento (próximo agendamento, último
+            atendimento, anamnese), particionado pelo estabelecimento resolvido. */}
+        {!carregando && !erro && viewPai === "clientes" && (
+          <GerenciarClientes estabelecimento={estabelecimento} />
         )}
       </div>
 
