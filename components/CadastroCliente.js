@@ -29,6 +29,8 @@ export default function CadastroCliente({
     whatsappConfirmacao: "",
     cep: "",
     endereco: "",
+    numero: "",
+    complemento: "",
     bairro: "",
     cidade: "",
     estado: "",
@@ -90,6 +92,11 @@ export default function CadastroCliente({
       return;
     }
 
+    if (!form.numero.trim()) {
+      setErro("Informe o número.");
+      return;
+    }
+
     const digitosWhatsapp = form.whatsapp.replace(/\D/g, "");
     if (digitosWhatsapp.length < 10) {
       setErro("Informe um WhatsApp válido com DDD.");
@@ -124,6 +131,8 @@ export default function CadastroCliente({
         whatsapp: numeroConfirmado.replace(/\D/g, ""),
         cep: form.cep || null,
         endereco: form.endereco || null,
+        numero: form.numero.trim(),
+        complemento: form.complemento || null,
         bairro: form.bairro || null,
         cidade: form.cidade || null,
         estado: form.estado || null,
@@ -217,6 +226,37 @@ export default function CadastroCliente({
           placeholder="Rua, número"
           className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
         />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label htmlFor="cad-numero" className="mb-1 block text-sm font-medium text-body">
+            Número
+          </label>
+          <input
+            id="cad-numero"
+            name="numero"
+            type="text"
+            value={form.numero}
+            onChange={handleChange}
+            required
+            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="cad-complemento" className="mb-1 block text-sm font-medium text-body">
+            Complemento <span className="font-normal text-muted">(opcional)</span>
+          </label>
+          <input
+            id="cad-complemento"
+            name="complemento"
+            type="text"
+            value={form.complemento}
+            onChange={handleChange}
+            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
