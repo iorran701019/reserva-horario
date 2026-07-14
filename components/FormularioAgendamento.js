@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { calcularVagasPorHorario } from "@/lib/disponibilidade";
+import { buscarTema } from "@/lib/temas";
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
 // "pendente") e a aba Agendar do /admin (cria "confirmado"). Toda a lógica de
@@ -502,6 +503,12 @@ export default function FormularioAgendamento({
   // pelos agrupados dentro de cada categoria aberta.
   function renderBotaoServico(servico) {
     const selecionado = servicoSelecionado?.id === servico.id;
+    // Tema (laysla) selecionado: fundo é um TOM CLARO derivado de
+    // var(--color-primary) (não mais preenchimento sólido) — texto continua
+    // escuro (var(--color-heading)), não branco. A cor em si já vem do
+    // wrapper raiz (app/[salon]/page.js); aqui só decidimos SE aplica o tom
+    // claro (`tema` presente) em vez do preenchimento sólido padrão.
+    const temaSelecionado = tema && selecionado;
 
     return (
       <button
@@ -512,9 +519,20 @@ export default function FormularioAgendamento({
         className={[
           "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 transition",
           selecionado
-            ? "bg-primary text-white ring-primary"
+            ? tema
+              ? ""
+              : "bg-primary text-white ring-primary"
             : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
         ].join(" ")}
+        style={
+          temaSelecionado
+            ? {
+                backgroundColor: "color-mix(in srgb, var(--color-primary) 12%, white)",
+                color: "var(--color-heading)",
+                "--tw-ring-color": "var(--color-primary)",
+              }
+            : undefined
+        }
       >
         <span className="min-w-0">
           <span className="block font-medium">{servico.nome}</span>
@@ -522,7 +540,7 @@ export default function FormularioAgendamento({
             <span
               className={[
                 "block text-sm",
-                selecionado ? "text-on-primary/90" : "text-body",
+                temaSelecionado ? "" : selecionado ? "text-on-primary/90" : "text-body",
               ].join(" ")}
             >
               {servico.duracao_min} min
@@ -932,6 +950,16 @@ export default function FormularioAgendamento({
     });
   }
 
+  // Tema por salão (lib/temas.js) — mesmo gate do Hero (tema.marca presente).
+  // As cores comuns (botão, bordas, indicador de passo, calendário) NÃO são
+  // lidas daqui: elas vêm de --color-primary/--color-heading/--color-border/
+  // --color-body/--color-muted, sobrescritas UMA VEZ no wrapper raiz de
+  // app/[salon]/page.js — este componente só usa `tema` para os dois
+  // tratamentos que não são um simples swap de cor (fundo CLARO do
+  // serviço/categoria selecionada, ver renderBotaoServico e o acordeão).
+  const temaBruto = buscarTema(estabelecimento?.slug);
+  const tema = temaBruto?.marca ? temaBruto : null;
+
   return (
     <>
       {/* Indicador de progresso do wizard. Etapa atual destacada, etapas
@@ -1041,6 +1069,15 @@ export default function FormularioAgendamento({
                           onClick={() => alternarCategoria(categoria.id)}
                           aria-expanded={aberta}
                           className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left font-medium text-heading transition hover:bg-surface"
+                          style={
+                            tema && aberta
+                              ? {
+                                  backgroundColor:
+                                    "color-mix(in srgb, var(--color-primary) 12%, white)",
+                                  color: "var(--color-heading)",
+                                }
+                              : undefined
+                          }
                         >
                           {categoria.nome}
                           <span aria-hidden="true">{aberta ? "▲" : "▼"}</span>

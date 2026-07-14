@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { linkWhatsApp } from "@/lib/whatsapp";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
+import { buscarTema } from "@/lib/temas";
 import { precisaAnamnese } from "@/lib/anamnese";
 import { buscarAgendamentosAtivos } from "@/lib/agendamentosCliente";
 import Hero from "@/components/Hero";
@@ -155,11 +156,37 @@ export default function AgendarPage() {
     );
   }
 
+  // Tema por salão (lib/temas.js), gate único pra árvore INTEIRA da página:
+  // sobrescrevemos aqui as CSS custom properties que os componentes já leem
+  // via classe Tailwind (bg-primary, hover:bg-primary-hover, text-heading,
+  // ring-border/border-border) + as duas usadas pro texto/borda secundários
+  // (text-body, text-muted — calendário, "Voltar", histórico). Qualquer
+  // componente descendente que já usa esses tokens herda a cor certa
+  // automaticamente — não precisa (nem deve) ler `tema` sozinho pra isso.
+  // Sem tema.marca (todo o resto, incl. um 3º tenant sem identidade própria),
+  // nada é sobrescrito e a paleta marrom global segue intacta.
+  const tema = buscarTema(estabelecimento.slug);
+  const temaAtivo = tema?.marca ? tema : null;
+  const estiloTemaRaiz = temaAtivo
+    ? {
+        ...(temaAtivo.bgBody ? { backgroundColor: temaAtivo.bgBody } : {}),
+        "--color-primary": temaAtivo.botao,
+        "--color-primary-hover": temaAtivo.botaoHover,
+        "--color-heading": temaAtivo.textoPrincipal,
+        "--color-border": temaAtivo.bordaHeader,
+        "--color-body": temaAtivo.textoSecundario,
+        "--color-muted": temaAtivo.textoSecundario,
+      }
+    : undefined;
+
   if (resumo) {
     const { form, servico, horario } = resumo;
     return (
-      <main className="flex min-h-screen flex-col bg-surface">
-        <Hero compacto nome={estabelecimento.nome} />
+      <main
+        className="flex min-h-screen flex-col bg-surface"
+        style={estiloTemaRaiz}
+      >
+        <Hero compacto nome={estabelecimento.nome} slug={estabelecimento.slug} />
         <div className="flex flex-1 flex-col items-center justify-center px-4 py-10">
         <div
           role="status"
@@ -257,8 +284,11 @@ export default function AgendarPage() {
   }
 
   return (
-    <main className="min-h-screen bg-surface">
-      <Hero nome={estabelecimento.nome} />
+    <main
+      className="min-h-screen bg-surface"
+      style={estiloTemaRaiz}
+    >
+      <Hero nome={estabelecimento.nome} slug={estabelecimento.slug} />
       <div className="mx-auto w-full max-w-md px-4 py-10 sm:py-16">
         <header className="mb-6 text-center">
           <h1 className="text-2xl font-bold text-heading">Agende seu horário</h1>

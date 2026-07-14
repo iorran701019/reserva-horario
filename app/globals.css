@@ -24,6 +24,7 @@
   --color-muted: #b2967d;
   --font-sans: var(--font-hanken);
   --font-display: var(--font-fraunces);
+  --font-cormorant: var(--font-cormorant-garamond);
 }
 
 body {

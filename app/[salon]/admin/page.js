@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import { buscarPerfil } from "@/lib/perfil";
+import { buscarTema } from "@/lib/temas";
 import {
   linkWhatsApp,
   MENSAGEM_LEMBRETE,
@@ -730,8 +731,27 @@ export default function AdminPage() {
   // id sair de sincronia por algum motivo.
   const abaAtiva = ABAS_PAI.find((aba) => aba.id === viewPai) ?? ABAS_PAI[0];
 
+  // Tema por salão (lib/temas.js) — MESMO mecanismo do fluxo público (ver
+  // app/[salon]/page.js): sobrescreve as custom properties que todo botão/
+  // borda/texto secundário do admin já lê via classe Tailwind. A aba ativa do
+  // drawer (mais abaixo) usa text-heading/ring-border, então herda o tema
+  // automaticamente — nenhuma classe precisa mudar. Sem tema.marca, nada é
+  // sobrescrito e o admin de qualquer outro salão continua idêntico.
+  const tema = buscarTema(estabelecimento.slug);
+  const temaAtivo = tema?.marca ? tema : null;
+  const estiloTemaRaiz = temaAtivo
+    ? {
+        "--color-primary": temaAtivo.botao,
+        "--color-primary-hover": temaAtivo.botaoHover,
+        "--color-heading": temaAtivo.textoPrincipal,
+        "--color-border": temaAtivo.bordaHeader,
+        "--color-body": temaAtivo.textoSecundario,
+        "--color-muted": temaAtivo.textoSecundario,
+      }
+    : undefined;
+
   return (
-    <main className="min-h-screen bg-surface">
+    <main className="min-h-screen bg-surface" style={estiloTemaRaiz}>
       {/* Hero banner no topo do admin, maior por absorver a navegação. Nome do
           salão centralizado; a foto de fundo é condicional por slug
           (valeria/junior usam foto; barbearia mantém o degradê) — ver Hero.js.
