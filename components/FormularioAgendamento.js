@@ -433,9 +433,11 @@ export default function FormularioAgendamento({
   }, [estabelecimento.id]);
 
   // Ao escolher um serviço, carrega os profissionais ATIVOS que o atendem, cada
-  // um com seus dias de trabalho embutidos (horarios_trabalho.dia_semana). Roda
-  // nos DOIS modos: alimenta os cards (quando o cliente escolhe) e sempre os
-  // dias disponíveis do calendário. Sem serviço, zera a lista.
+  // um com seus dias de trabalho embutidos — horarios_trabalho.dia_semana (modo
+  // 'janela') OU horarios_fixos.dia_semana (modo 'fixo'; ver diasSemanaAtivos,
+  // que escolhe a fonte certa por profissional). Roda nos DOIS modos: alimenta
+  // os cards (quando o cliente escolhe) e sempre os dias disponíveis do
+  // calendário. Sem serviço, zera a lista.
   useEffect(() => {
     let ativo = true;
 
@@ -450,7 +452,7 @@ export default function FormularioAgendamento({
       const { data, error } = await supabase
         .from("servico_profissional")
         .select(
-          "profissionais!inner(id, nome, ativo, estabelecimento_id, horarios_trabalho(dia_semana))"
+          "profissionais!inner(id, nome, ativo, estabelecimento_id, modo_horario, horarios_trabalho(dia_semana), horarios_fixos(dia_semana))"
         )
         .eq("servico_id", servicoSelecionado.id)
         .eq("profissionais.ativo", true)
@@ -539,17 +541,23 @@ export default function FormularioAgendamento({
 
   // Dias da semana (0–6) com atendimento para o serviço escolhido. No fluxo
   // "cliente escolhe", só conta o profissional selecionado; no encaixe
-  // automático, a UNIÃO dos dias de todos os profissionais elegíveis. Alimenta
-  // o calendário: dia da semana fora desse conjunto nasce cinza/desabilitado.
+  // automático, a UNIÃO dos dias de todos os profissionais elegíveis. Cada
+  // profissional contribui pela fonte do SEU modo — horarios_trabalho (janela)
+  // ou horarios_fixos (fixo) — senão um profissional 'fixo' (sem linha em
+  // horarios_trabalho, que só existe pro modo janela) some do calendário
+  // inteiro antes mesmo de uma data ser escolhida. Alimenta o calendário: dia
+  // da semana fora desse conjunto nasce cinza/desabilitado.
   const diasSemanaAtivos = (() => {
     const fonte = escolherProfissional
       ? profissionaisDoServico.filter((p) => p.id === profissionalSelecionado?.id)
       : profissionaisDoServico;
 
     const set = new Set();
-    fonte.forEach((p) =>
-      (p.horarios_trabalho ?? []).forEach((h) => set.add(h.dia_semana))
-    );
+    fonte.forEach((p) => {
+      const linhasDia =
+        p.modo_horario === "fixo" ? p.horarios_fixos : p.horarios_trabalho;
+      (linhasDia ?? []).forEach((h) => set.add(h.dia_semana));
+    });
     return set;
   })();
 

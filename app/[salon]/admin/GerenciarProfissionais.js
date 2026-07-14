@@ -54,7 +54,7 @@ const ETAPAS = [
 const ABAS_EDICAO = [
   { id: "horarios", rotulo: "Horários" },
   { id: "servicos", rotulo: "Serviços" },
-  { id: "ausencias", rotulo: "Ausências" },
+  { id: "ausencias", rotulo: "Exceções de Horário" },
 ];
 
 // Bloco de horário vazio (campos "HH:MM" do <input type="time">; "" = vazio).
@@ -70,8 +70,17 @@ function diasVazios() {
   return DIAS.map(() => ({ ativo: false, ...BLOCO_VAZIO }));
 }
 
-// Estado inicial do formulário. `mesmoHorario`:
-//   null  – ainda não respondido (Janela A)
+// Grade vazia do modo 'fixo': 7 arrays de horários "HH:MM" (tags), um por dia.
+function horariosFixosVazios() {
+  return DIAS.map(() => []);
+}
+
+// Estado inicial do formulário. `modoHorario` ('janela'|'fixo', profissionais.
+// modo_horario) decide qual grade vale: 'janela' usa `dias`/`horarioComum`
+// (horarios_trabalho); 'fixo' usa `horariosFixosPorDia` (horarios_fixos), e
+// `dias[i].ativo` continua controlando quais dias estão ligados nos dois
+// modos. `mesmoHorario`:
+//   null  – ainda não respondido (Janela A, só importa no modo 'janela')
 //   true  – um único horário aplicado a todos os dias ativos (usa horarioComum)
 //   false – horário próprio por dia (usa os campos de cada `dias[i]`)
 // `temAlmoco` controla só a VISIBILIDADE dos campos de almoço (bloco único no
@@ -83,6 +92,8 @@ function diasVazios() {
 const FORM_INICIAL = {
   nome: "",
   dias: diasVazios(),
+  modoHorario: "janela",
+  horariosFixosPorDia: horariosFixosVazios(),
   mesmoHorario: null,
   temAlmoco: false,
   almocoSalvoOriginal: false,
@@ -148,10 +159,17 @@ function linhaDia(diaSemana, bloco, temAlmoco) {
   };
 }
 
-// Valida o formulário inteiro e monta as linhas de horário prontas pra gravar.
-// Devolve { erro } ou { nome, horarios }. No modo "mesmo horário" (mesmoHorario
-// = true) valida o bloco comum uma vez e o REPLICA em cada dia ativo; senão
-// valida e usa o bloco próprio de cada dia.
+// Valida o formulário inteiro e monta os dados prontos pra gravar. Devolve
+// { erro } ou { nome, modoHorario, horarios } (modo 'janela') / { nome,
+// modoHorario, horariosFixos } (modo 'fixo').
+//
+// Modo 'janela': no "mesmo horário" (mesmoHorario = true) valida o bloco
+// comum uma vez e o REPLICA em cada dia ativo; senão valida e usa o bloco
+// próprio de cada dia.
+//
+// Modo 'fixo': cada dia ativo precisa de PELO MENOS um horário na lista de
+// tags (`horariosFixosPorDia[i]`) — um dia ligado sem horário deixaria a
+// agenda vazia nesse dia sem o dono perceber, então bloqueia aqui.
 function coletarDados(form) {
   const nome = form.nome.trim();
   if (!nome) return { erro: "Informe o nome do profissional." };
@@ -162,6 +180,21 @@ function coletarDados(form) {
   }
   if (indicesAtivos.length === 0) {
     return { erro: "Selecione ao menos um dia de trabalho." };
+  }
+
+  if (form.modoHorario === "fixo") {
+    const diaSemHorario = indicesAtivos.find(
+      (i) => form.horariosFixosPorDia[i].length === 0
+    );
+    if (diaSemHorario != null) {
+      return {
+        erro: `${DIAS[diaSemHorario].rotulo}: cadastre ao menos um horário fixo (ou desative o dia).`,
+      };
+    }
+    const horariosFixos = indicesAtivos.flatMap((i) =>
+      form.horariosFixosPorDia[i].map((horario) => ({ dia_semana: i, horario }))
+    );
+    return { nome, modoHorario: "fixo", horariosFixos };
   }
 
   const temAlmoco = form.temAlmoco;
@@ -180,7 +213,7 @@ function coletarDados(form) {
     }
   }
 
-  return { nome, horarios };
+  return { nome, modoHorario: "janela", horarios };
 }
 
 // Linhas de horarios_trabalho -> grade de 7 dias (pra reidratar o form). Usado
@@ -198,6 +231,59 @@ function diasDeHorarios(horarios) {
     };
   }
   return dias;
+}
+
+// Linhas de horarios_fixos -> grade de 7 dias {ativo, ...BLOCO_VAZIO} (só o
+// `ativo` importa no modo 'fixo'; os campos de bloco ficam vazios/sem uso).
+// Um dia aparece ativo se tiver PELO MENOS uma linha — a validação de
+// coletarDados garante que todo dia ativo salvo tem ao menos um horário.
+function diasDeHorariosFixos(linhas) {
+  const dias = diasVazios();
+  for (const l of linhas) {
+    dias[l.dia_semana] = { ...dias[l.dia_semana], ativo: true };
+  }
+  return dias;
+}
+
+// Linhas de horarios_fixos -> grade de 7 arrays de "HH:MM" (as tags de cada
+// dia), ordenadas.
+function horariosFixosPorDiaDeLinhas(linhas) {
+  const porDia = horariosFixosVazios();
+  for (const l of linhas) {
+    porDia[l.dia_semana] = [...porDia[l.dia_semana], paraHHMM(l.horario)].sort();
+  }
+  return porDia;
+}
+
+// Reconstrói o form pra tela de resumo quando a criação do profissional deu
+// certo mas a gravação da agenda/serviços falhou (cai no fallback de edição,
+// já com os dados que o dono digitou, pra corrigir/reenviar). Espelha o
+// resultado de coletarDados (janela: horarios; fixo: horariosFixos).
+function formDeFallback({ nome, modoHorario, horarios, horariosFixos, servicos, almocoSalvoOriginal }) {
+  if (modoHorario === "fixo") {
+    return {
+      nome,
+      dias: diasDeHorariosFixos(horariosFixos),
+      modoHorario: "fixo",
+      horariosFixosPorDia: horariosFixosPorDiaDeLinhas(horariosFixos),
+      mesmoHorario: false,
+      temAlmoco: false,
+      almocoSalvoOriginal: false,
+      horarioComum: { ...BLOCO_VAZIO },
+      servicos,
+    };
+  }
+  return {
+    nome,
+    dias: diasDeHorarios(horarios),
+    modoHorario: "janela",
+    horariosFixosPorDia: horariosFixosVazios(),
+    mesmoHorario: false,
+    temAlmoco: horarios.some((h) => h.almoco_inicio),
+    almocoSalvoOriginal,
+    horarioComum: { ...BLOCO_VAZIO },
+    servicos,
+  };
 }
 
 // Interruptor visual (liga/desliga) reutilizado nos toggles de dia. Só o
@@ -340,6 +426,118 @@ function GradeDias({ dias, onToggle, onCampo, mostrarAlmoco }) {
   );
 }
 
+// Chip removível de horário fixo — "HH:MM" + botão "x".
+function TagHorario({ horario, onRemover }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-xs font-medium text-heading ring-1 ring-border">
+      {horario}
+      <button
+        type="button"
+        onClick={onRemover}
+        aria-label={`Remover horário ${horario}`}
+        className="leading-none text-muted transition hover:text-red-600"
+      >
+        ×
+      </button>
+    </span>
+  );
+}
+
+// Campo "adicionar horário" de UM dia no modo 'fixo': input de horário +
+// botão "+", que insere numa lista de tags removíveis. `horarios` já vem
+// ordenado; `onAdicionar`/`onRemover` recebem o valor "HH:MM". Sem nenhuma
+// tag, mostra um aviso (o dia está ativo mas ainda não tem horário — bloqueia
+// o salvar, ver coletarDados/diaFixoSemHorario).
+function CamposHorariosFixos({ horarios, onAdicionar, onRemover, rotulo }) {
+  const [novo, setNovo] = useState("");
+
+  function adicionar() {
+    if (!novo) return;
+    onAdicionar(novo);
+    setNovo("");
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="time"
+          aria-label={`Novo horário — ${rotulo}`}
+          value={novo}
+          onChange={(e) => setNovo(e.target.value)}
+          className="w-28 rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+        />
+        <button
+          type="button"
+          onClick={adicionar}
+          disabled={!novo}
+          className="rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-primary ring-1 ring-primary/40 transition hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          + Adicionar
+        </button>
+      </div>
+      {horarios.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {horarios.map((h) => (
+            <TagHorario key={h} horario={h} onRemover={() => onRemover(h)} />
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-xs font-medium text-amber-600">
+          Nenhum horário cadastrado ainda.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Grade compacta por dia no modo 'fixo' (mesmo toggle ativa/inativa de
+// GradeDias); quando o dia está ativo, mostra a lista de tags de horário no
+// lugar dos campos de Entrada/Almoço/Saída.
+function GradeDiasFixos({ dias, onToggle, horariosFixosPorDia, onAdicionarHorario, onRemoverHorario }) {
+  return (
+    <div className="space-y-2">
+      {DIAS.map((info, i) => {
+        const dia = dias[i];
+        return (
+          <div
+            key={info.n}
+            className={`rounded-xl p-2.5 ring-1 transition ${
+              dia.ativo ? "bg-card ring-border" : "bg-surface ring-border"
+            }`}
+          >
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+              <button
+                type="button"
+                onClick={() => onToggle(i)}
+                role="switch"
+                aria-checked={dia.ativo}
+                className="flex items-center justify-between gap-3 sm:w-32 sm:shrink-0"
+              >
+                <span className="text-sm font-medium text-heading">
+                  {info.rotulo}
+                </span>
+                <Interruptor ativo={dia.ativo} />
+              </button>
+
+              {dia.ativo && (
+                <div className="sm:flex-1">
+                  <CamposHorariosFixos
+                    horarios={horariosFixosPorDia[i]}
+                    rotulo={info.rotulo}
+                    onAdicionar={(h) => onAdicionarHorario(i, h)}
+                    onRemover={(h) => onRemoverHorario(i, h)}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // Janela C / seção de serviços: lista os serviços ATIVOS do salão com checkbox;
 // marcar define quais o profissional atende (grava em servico_profissional).
 // `selecionados` é o array de ids marcados; `onToggle(id)` liga/desliga um.
@@ -422,18 +620,39 @@ function faixaHora(inicio, fim) {
   return `${paraHHMM(inicio)} – ${paraHHMM(fim)}`;
 }
 
-// Agrupa as ausências recorrentes por faixa de horário (hora_inicio|hora_fim):
-// dias com a MESMA faixa entram no mesmo grupo (ordenados por dia da semana).
-// Cada dia continua sendo uma linha própria (id próprio) — o delete é por id.
+// Selo pequeno "Bloqueio"/"Liberação" pra distinguir os dois tipos de
+// registro na lista de ausências (tipo_registro ausente = ausencia, linhas
+// antigas de antes da coluna existir).
+function SeloTipoRegistro({ tipoRegistro }) {
+  const liberacao = tipoRegistro === "liberacao";
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+        liberacao
+          ? "bg-green-50 text-green-700 ring-1 ring-green-100"
+          : "bg-red-50 text-red-700 ring-1 ring-red-100"
+      }`}
+    >
+      {liberacao ? "Liberação" : "Bloqueio"}
+    </span>
+  );
+}
+
+// Agrupa as ausências recorrentes por faixa de horário + natureza
+// (hora_inicio|hora_fim|tipo_registro): dias com a MESMA faixa E a mesma
+// natureza (bloqueio/liberação) entram no mesmo grupo (ordenados por dia da
+// semana). Cada dia continua sendo uma linha própria (id próprio) — o delete
+// é por id.
 function agruparRecorrentes(linhas) {
   const mapa = new Map();
   for (const l of linhas) {
-    const chave = `${l.hora_inicio ?? ""}|${l.hora_fim ?? ""}`;
+    const chave = `${l.hora_inicio ?? ""}|${l.hora_fim ?? ""}|${l.tipo_registro ?? "ausencia"}`;
     if (!mapa.has(chave)) mapa.set(chave, []);
     mapa.get(chave).push(l);
   }
   return [...mapa.values()].map((itens) => ({
     inicio: itens[0].hora_inicio,
+    tipoRegistro: itens[0].tipo_registro ?? "ausencia",
     fim: itens[0].hora_fim,
     itens: [...itens].sort((a, b) => a.dia_semana - b.dia_semana),
   }));
@@ -470,10 +689,90 @@ const OPCOES_AUSENCIA = [
   { valor: "varios", rotulo: "Vários dias", exemplo: "viagem ou férias" },
 ];
 
-function SecaoAusencias({ profissionalId, estabelecimentoId }) {
+// No modo Liberar, só "Um dia específico" é oferecido — liberação recorrente
+// deve ser feita editando a agenda de verdade (horarios_fixos ou a
+// janela/expediente), não como exceção aqui. Vale pra QUALQUER profissional
+// (fixo ou janela).
+const OPCAO_LIBERACAO_UNICA = [
+  {
+    valor: "umdia",
+    rotulo: "Um dia específico",
+    exemplo: "abrir horário extra numa data pontual",
+  },
+];
+
+// Marcadores de horário sugerido (grade de 07:00 a 21:00, de hora em hora)
+// pro modo Liberar + "Um dia específico".
+const MARCADORES_HORARIO = Array.from({ length: 15 }, (_, i) =>
+  `${String(i + 7).padStart(2, "0")}:00`
+);
+
+// "YYYY-MM-DD" -> dia da semana LOCAL (0=domingo…6=sábado), Date por partes
+// (mesma técnica de formatarDataBR — evita o desvio de fuso do construtor de
+// string).
+function diaSemanaDeISO(iso) {
+  if (!iso) return null;
+  const [ano, mes, dia] = iso.split("-").map(Number);
+  return new Date(ano, mes - 1, dia).getDay();
+}
+
+// Marcadores "HH:00" que já fazem parte do horário normal do profissional
+// naquele dia da semana — usado pra desabilitar no grid de liberação (só
+// clica quem é exceção de verdade):
+//   modo 'fixo'   – desabilita os horários que já existem em horarios_fixos.
+//   modo 'janela' – desabilita os que caem dentro da janela entrada–saída,
+//                   exceto o intervalo de almoço (fora do normal, clicável).
+function horariosNormaisDoDia({ modoHorario, dia, horariosFixosPorDia, dias }) {
+  if (dia == null) return new Set();
+
+  if (modoHorario === "fixo") {
+    return new Set(horariosFixosPorDia?.[dia] ?? []);
+  }
+
+  const bloco = dias?.[dia];
+  if (!bloco?.ativo || !bloco.hora_inicio || !bloco.hora_fim) return new Set();
+
+  const inicio = minutos(bloco.hora_inicio);
+  const fim = minutos(bloco.hora_fim);
+  const temAlmoco = Boolean(bloco.almoco_inicio && bloco.almoco_fim);
+  const almocoInicio = temAlmoco ? minutos(bloco.almoco_inicio) : null;
+  const almocoFim = temAlmoco ? minutos(bloco.almoco_fim) : null;
+
+  const normais = new Set();
+  for (const marcador of MARCADORES_HORARIO) {
+    const m = minutos(marcador);
+    const dentroExpediente = m >= inicio && m < fim;
+    const dentroAlmoco = temAlmoco && m >= almocoInicio && m < almocoFim;
+    if (dentroExpediente && !dentroAlmoco) normais.add(marcador);
+  }
+  return normais;
+}
+
+// hora "HH:MM" + 1h, sem estourar o dia. Usado só como hora_fim de linhas de
+// liberação — lib/disponibilidade.js só olha hora_inicio pra esse
+// tipo_registro, então este valor é só pra exibição na lista.
+function somarUmaHora(hhmm) {
+  const total = Math.min(minutos(hhmm) + 60, 23 * 60 + 59);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function SecaoAusencias({
+  profissionalId,
+  estabelecimentoId,
+  modoHorario,
+  horariosFixosPorDia,
+  dias,
+}) {
   const [lista, setLista] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
+
+  // Natureza do registro: 'ausencia' bloqueia o horário, 'liberacao' abre um
+  // horário extra (fora da janela/lista normal). Mesmo formulário pros dois —
+  // só muda o que é gravado em `tipo_registro`.
+  const [tipoRegistro, setTipoRegistro] = useState("ausencia");
 
   // Formato de cadastro escolhido na lista suspensa.
   const [modo, setModo] = useState("recorrente");
@@ -486,12 +785,18 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
   const [recFim, setRecFim] = useState("");
   const [recMotivo, setRecMotivo] = useState("");
 
-  // Campos "Um dia específico" (periodo, data única). dia_inteiro começa ligado.
+  // Campos "Um dia específico" (periodo, data única). dia_inteiro começa ligado
+  // (só se aplica a tipoRegistro="ausencia" — liberação usa os marcadores).
   const [diaData, setDiaData] = useState("");
   const [diaInteiro, setDiaInteiro] = useState(true);
   const [diaHoraInicio, setDiaHoraInicio] = useState("");
   const [diaHoraFim, setDiaHoraFim] = useState("");
   const [diaMotivo, setDiaMotivo] = useState("");
+
+  // Marcadores selecionados no grid de liberação + campo livre pra horário
+  // fora da grade (fora de 07h–21h ou fora da hora redonda).
+  const [diaHorarios, setDiaHorarios] = useState([]);
+  const [diaOutroHorario, setDiaOutroHorario] = useState("");
 
   // Campos "Vários dias" (periodo, intervalo). Sempre dia inteiro.
   const [varInicio, setVarInicio] = useState("");
@@ -507,7 +812,7 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
       const { data, error } = await supabase
         .from("ausencias")
         .select(
-          "id, tipo, dia_semana, data_inicio, data_fim, dia_inteiro, hora_inicio, hora_fim, motivo"
+          "id, tipo, tipo_registro, dia_semana, data_inicio, data_fim, dia_inteiro, hora_inicio, hora_fim, motivo"
         )
         .eq("profissional_id", profissionalId);
 
@@ -534,6 +839,12 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
     );
   }
 
+  function alternarDiaHorario(h) {
+    setDiaHorarios((atual) =>
+      atual.includes(h) ? atual.filter((x) => x !== h) : [...atual, h]
+    );
+  }
+
   // Zera os campos de todos os formatos (chamado após salvar com sucesso).
   function limparCampos() {
     setRecDias([]);
@@ -545,6 +856,8 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
     setDiaHoraInicio("");
     setDiaHoraFim("");
     setDiaMotivo("");
+    setDiaHorarios([]);
+    setDiaOutroHorario("");
     setVarInicio("");
     setVarFim("");
     setVarMotivo("");
@@ -552,7 +865,10 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
 
   // Valida conforme o `modo` e monta as linhas a inserir. Devolve { erro } ou
   // { linhas }. As comparações de data usam ISO "YYYY-MM-DD" (lexicográfica,
-  // sem criar Date — evita o desvio de fuso do construtor de string).
+  // sem criar Date — evita o desvio de fuso do construtor de string). Toda
+  // linha leva `tipo_registro` (ausencia/liberacao) conforme o botão ativo no
+  // topo do formulário. Liberação precisa de um horário específico — não faz
+  // sentido em "dia inteiro" (não haveria horário pra liberar).
   function coletarLinhas() {
     if (modo === "recorrente") {
       if (recDias.length === 0) return { erro: "Selecione ao menos um dia." };
@@ -568,6 +884,7 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
           profissional_id: profissionalId,
           estabelecimento_id: estabelecimentoId,
           tipo: "recorrente",
+          tipo_registro: tipoRegistro,
           dia_semana,
           dia_inteiro: false,
           hora_inicio: recInicio,
@@ -579,6 +896,35 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
 
     if (modo === "umdia") {
       if (!diaData) return { erro: "Informe a data." };
+
+      // Liberação: cada marcador selecionado (+ "outro horário") vira UMA
+      // linha própria, todas na mesma data/motivo — não usa dia_inteiro.
+      if (tipoRegistro === "liberacao") {
+        const horarios = [
+          ...new Set([
+            ...diaHorarios,
+            ...(diaOutroHorario ? [diaOutroHorario] : []),
+          ]),
+        ];
+        if (horarios.length === 0) {
+          return { erro: "Selecione ao menos um horário." };
+        }
+        return {
+          linhas: horarios.map((hora_inicio) => ({
+            profissional_id: profissionalId,
+            estabelecimento_id: estabelecimentoId,
+            tipo: "periodo",
+            tipo_registro: "liberacao",
+            data_inicio: diaData,
+            data_fim: diaData,
+            dia_inteiro: false,
+            hora_inicio,
+            hora_fim: somarUmaHora(hora_inicio),
+            motivo: diaMotivo.trim() || null,
+          })),
+        };
+      }
+
       if (!diaInteiro) {
         if (!diaHoraInicio || !diaHoraFim) {
           return { erro: "Informe início e fim do horário." };
@@ -593,6 +939,7 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
             profissional_id: profissionalId,
             estabelecimento_id: estabelecimentoId,
             tipo: "periodo",
+            tipo_registro: "ausencia",
             data_inicio: diaData,
             data_fim: diaData,
             dia_inteiro: diaInteiro,
@@ -604,7 +951,12 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
       };
     }
 
-    // modo === "varios": intervalo sempre em dia inteiro.
+    // modo === "varios": intervalo sempre em dia inteiro (não combina com liberação).
+    if (tipoRegistro === "liberacao") {
+      return {
+        erro: "Liberação precisa de um horário específico — use \"Ausência fixa\" ou \"Um dia específico\".",
+      };
+    }
     if (!varInicio || !varFim) {
       return { erro: "Informe as datas de início e fim." };
     }
@@ -616,6 +968,7 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
         {
           profissional_id: profissionalId,
           estabelecimento_id: estabelecimentoId,
+          tipo_registro: tipoRegistro,
           tipo: "periodo",
           data_inicio: varInicio,
           data_fim: varFim,
@@ -665,6 +1018,20 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
   const classeCampo =
     "rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10";
 
+  // No modo Liberar só "Um dia específico" é oferecido (ver OPCAO_LIBERACAO_UNICA).
+  const opcoesModo =
+    tipoRegistro === "liberacao" ? OPCAO_LIBERACAO_UNICA : OPCOES_AUSENCIA;
+
+  // Marcadores já "normais" pro dia da semana da data escolhida — desabilitados
+  // no grid de liberação.
+  const diaSemanaEscolhido = diaSemanaDeISO(diaData);
+  const horariosNormais = horariosNormaisDoDia({
+    modoHorario,
+    dia: diaSemanaEscolhido,
+    horariosFixosPorDia,
+    dias,
+  });
+
   const gruposRec = agruparRecorrentes(
     lista.filter((a) => a.tipo === "recorrente")
   );
@@ -679,8 +1046,42 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
     <div className="space-y-4">
       {/* FORM único: a lista suspensa escolhe o formato; os campos seguem. */}
       <div className="rounded-xl bg-surface p-3 ring-1 ring-border">
-        <label className="block text-xs font-medium text-body">
-          Tipo de ausência
+        {/* Natureza do registro: bloqueia ou libera um horário. Mesmo
+            formulário abaixo pros dois — só muda o que é gravado. */}
+        <div className="flex gap-2">
+          {[
+            { valor: "ausencia", rotulo: "Bloquear horário" },
+            { valor: "liberacao", rotulo: "Liberar horário" },
+          ].map((opcao) => {
+            const selecionado = tipoRegistro === opcao.valor;
+            return (
+              <button
+                key={opcao.valor}
+                type="button"
+                aria-pressed={selecionado}
+                onClick={() => {
+                  setTipoRegistro(opcao.valor);
+                  setFormErro("");
+                  // Liberar só oferece "Um dia específico" — força o modo pra
+                  // manter select e estado consistentes.
+                  if (opcao.valor === "liberacao") setModo("umdia");
+                }}
+                className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium ring-1 transition ${
+                  selecionado
+                    ? opcao.valor === "liberacao"
+                      ? "bg-green-600 text-white ring-green-600"
+                      : "bg-primary text-white ring-primary"
+                    : "bg-card text-body ring-border hover:bg-surface"
+                }`}
+              >
+                {opcao.rotulo}
+              </button>
+            );
+          })}
+        </div>
+
+        <label className="mt-3 block text-xs font-medium text-body">
+          {tipoRegistro === "liberacao" ? "Tipo de liberação" : "Tipo de ausência"}
           <select
             value={modo}
             onChange={(e) => {
@@ -689,7 +1090,7 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
             }}
             className={`mt-1 block w-full ${classeCampo}`}
           >
-            {OPCOES_AUSENCIA.map((o) => (
+            {opcoesModo.map((o) => (
               <option key={o.valor} value={o.valor}>
                 {o.rotulo} — ex.: {o.exemplo}
               </option>
@@ -766,45 +1167,102 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
                 type="date"
                 aria-label="Data da ausência"
                 value={diaData}
-                onChange={(e) => setDiaData(e.target.value)}
+                onChange={(e) => {
+                  setDiaData(e.target.value);
+                  // Muda o dia da semana → o conjunto de marcadores "normais"
+                  // muda junto; zera a seleção pra não deixar horário marcado
+                  // que pertencia à data anterior.
+                  setDiaHorarios([]);
+                  setDiaOutroHorario("");
+                }}
                 className={`mt-1 block ${classeCampo}`}
               />
             </label>
 
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                type="button"
-                role="switch"
-                aria-checked={diaInteiro}
-                onClick={() => setDiaInteiro((v) => !v)}
-                className="flex items-center gap-2"
-              >
-                <span className="text-sm font-medium text-heading">
-                  Dia inteiro
-                </span>
-                <Interruptor ativo={diaInteiro} />
-              </button>
-            </div>
+            {tipoRegistro === "ausencia" ? (
+              <>
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={diaInteiro}
+                    onClick={() => setDiaInteiro((v) => !v)}
+                    className="flex items-center gap-2"
+                  >
+                    <span className="text-sm font-medium text-heading">
+                      Dia inteiro
+                    </span>
+                    <Interruptor ativo={diaInteiro} />
+                  </button>
+                </div>
 
-            {!diaInteiro && (
-              <div className="mt-3 flex flex-wrap items-end gap-2">
-                <label className="text-xs font-medium text-body">
-                  Início
+                {!diaInteiro && (
+                  <div className="mt-3 flex flex-wrap items-end gap-2">
+                    <label className="text-xs font-medium text-body">
+                      Início
+                      <input
+                        type="time"
+                        aria-label="Início do horário no dia"
+                        value={diaHoraInicio}
+                        onChange={(e) => setDiaHoraInicio(e.target.value)}
+                        className={`mt-1 block w-28 ${classeCampo}`}
+                      />
+                    </label>
+                    <label className="text-xs font-medium text-body">
+                      Fim
+                      <input
+                        type="time"
+                        aria-label="Fim do horário no dia"
+                        value={diaHoraFim}
+                        onChange={(e) => setDiaHoraFim(e.target.value)}
+                        className={`mt-1 block w-28 ${classeCampo}`}
+                      />
+                    </label>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="mt-3">
+                <span className="block text-xs font-medium text-body">
+                  Horários disponíveis
+                </span>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {MARCADORES_HORARIO.map((h) => {
+                    const desabilitado = horariosNormais.has(h);
+                    const selecionado = diaHorarios.includes(h);
+                    return (
+                      <button
+                        key={h}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={selecionado}
+                        disabled={desabilitado}
+                        title={
+                          desabilitado
+                            ? "Já faz parte do horário normal deste dia"
+                            : undefined
+                        }
+                        onClick={() => alternarDiaHorario(h)}
+                        className={`flex h-10 w-10 items-center justify-center rounded-full text-xs font-medium ring-1 transition ${
+                          desabilitado
+                            ? "cursor-not-allowed bg-surface text-muted/60 ring-border"
+                            : selecionado
+                              ? "bg-green-600 text-white ring-green-600"
+                              : "bg-card text-body ring-border hover:bg-surface"
+                        }`}
+                      >
+                        {h}
+                      </button>
+                    );
+                  })}
+                </div>
+                <label className="mt-3 block text-xs font-medium text-body">
+                  Outro horário (opcional)
                   <input
                     type="time"
-                    aria-label="Início do horário no dia"
-                    value={diaHoraInicio}
-                    onChange={(e) => setDiaHoraInicio(e.target.value)}
-                    className={`mt-1 block w-28 ${classeCampo}`}
-                  />
-                </label>
-                <label className="text-xs font-medium text-body">
-                  Fim
-                  <input
-                    type="time"
-                    aria-label="Fim do horário no dia"
-                    value={diaHoraFim}
-                    onChange={(e) => setDiaHoraFim(e.target.value)}
+                    aria-label="Outro horário de liberação"
+                    value={diaOutroHorario}
+                    onChange={(e) => setDiaOutroHorario(e.target.value)}
                     className={`mt-1 block w-28 ${classeCampo}`}
                   />
                 </label>
@@ -817,7 +1275,11 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
                 type="text"
                 value={diaMotivo}
                 onChange={(e) => setDiaMotivo(e.target.value)}
-                placeholder="Ex.: consulta médica, folga…"
+                placeholder={
+                  tipoRegistro === "liberacao"
+                    ? "Ex.: demanda extra, cliente encaixado…"
+                    : "Ex.: consulta médica, folga…"
+                }
                 className={`mt-1 block w-full ${classeCampo}`}
               />
             </label>
@@ -875,9 +1337,17 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
           type="button"
           onClick={salvar}
           disabled={salvando}
-          className="mt-3 inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+          className={`mt-3 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
+            tipoRegistro === "liberacao"
+              ? "bg-green-600 hover:bg-green-700"
+              : "bg-primary hover:bg-primary-hover"
+          }`}
         >
-          {salvando ? "Adicionando..." : "Adicionar ausência"}
+          {salvando
+            ? "Adicionando..."
+            : tipoRegistro === "liberacao"
+              ? "Adicionar liberação"
+              : "Adicionar bloqueio"}
         </button>
       </div>
 
@@ -898,13 +1368,19 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
         </p>
       ) : (
         <div className="space-y-3">
-          {/* Recorrentes agrupadas por faixa de horário. */}
+          {/* Recorrentes agrupadas por faixa de horário. Borda + selo indicam
+              bloqueio (vermelho) ou liberação (verde). */}
           {gruposRec.map((grupo) => (
             <div
-              key={`${grupo.inicio}|${grupo.fim}`}
-              className="rounded-xl bg-card p-3 ring-1 ring-border"
+              key={`${grupo.inicio}|${grupo.fim}|${grupo.tipoRegistro}`}
+              className={`rounded-xl border-l-4 bg-card p-3 ring-1 ring-border ${
+                grupo.tipoRegistro === "liberacao"
+                  ? "border-l-green-500"
+                  : "border-l-red-400"
+              }`}
             >
-              <p className="text-xs font-medium text-muted">
+              <p className="flex items-center gap-2 text-xs font-medium text-muted">
+                <SeloTipoRegistro tipoRegistro={grupo.tipoRegistro} />
                 Toda semana · {faixaHora(grupo.inicio, grupo.fim)}
               </p>
               <ul className="mt-2 space-y-1.5">
@@ -932,16 +1408,22 @@ function SecaoAusencias({ profissionalId, estabelecimentoId }) {
             </div>
           ))}
 
-          {/* Períodos / férias, um card por linha. */}
+          {/* Períodos / férias, um card por linha. Borda + selo indicam
+              bloqueio (vermelho) ou liberação (verde). */}
           {periodos.map((a) => {
             const umDia = a.data_inicio === a.data_fim;
             return (
               <div
                 key={a.id}
-                className="flex items-center justify-between gap-3 rounded-xl bg-card p-3 ring-1 ring-border"
+                className={`flex items-center justify-between gap-3 rounded-xl border-l-4 bg-card p-3 ring-1 ring-border ${
+                  (a.tipo_registro ?? "ausencia") === "liberacao"
+                    ? "border-l-green-500"
+                    : "border-l-red-400"
+                }`}
               >
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-heading">
+                  <p className="flex items-center gap-2 text-sm font-medium text-heading">
+                    <SeloTipoRegistro tipoRegistro={a.tipo_registro} />
                     {umDia
                       ? formatarDataBR(a.data_inicio)
                       : `${formatarDataBR(a.data_inicio)} até ${formatarDataBR(
@@ -1005,7 +1487,7 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     async function carregar() {
       const { data, error } = await supabase
         .from("profissionais")
-        .select("id, nome, ativo")
+        .select("id, nome, ativo, modo_horario")
         .eq("estabelecimento_id", estabelecimento.id)
         .order("ativo", { ascending: false })
         .order("nome", { ascending: true });
@@ -1057,11 +1539,14 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     };
   }, [estabelecimento.id]);
 
-  // Abre o wizard de criação, sempre da Etapa A com o form zerado.
+  // Abre o wizard de criação, sempre da Etapa A com o form zerado. Modo
+  // 'janela' por padrão, pra não afetar o fluxo de criação de sempre.
   function abrirNovo() {
     setForm({
       nome: "",
       dias: diasVazios(),
+      modoHorario: "janela",
+      horariosFixosPorDia: horariosFixosVazios(),
       mesmoHorario: null,
       temAlmoco: false,
       almocoSalvoOriginal: false,
@@ -1073,16 +1558,22 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     setEditando("novo");
   }
 
-  // Edição: carrega o profissional e sua grade (horarios_trabalho) na tela de
-  // resumo. `mesmoHorario=false` porque a edição sempre trabalha por dia (a
-  // grade real do banco pode diferir entre dias).
+  // Edição: carrega o profissional e sua agenda (horarios_trabalho OU
+  // horarios_fixos, conforme modo_horario) na tela de resumo. `mesmoHorario=
+  // false` porque a edição sempre trabalha por dia (a grade real do banco
+  // pode diferir entre dias). Busca as duas tabelas de horário em paralelo —
+  // só a do modo atual é usada, mas evita duas idas ao banco se o dono trocar
+  // de modo na tela de edição.
   async function abrirEdicao(profissional) {
     setEditando(profissional);
     setAbaEdicao("horarios");
     setErroForm("");
+    const modoHorario = profissional.modo_horario ?? "janela";
     setForm({
       nome: profissional.nome,
       dias: diasVazios(),
+      modoHorario,
+      horariosFixosPorDia: horariosFixosVazios(),
       mesmoHorario: false,
       temAlmoco: false,
       almocoSalvoOriginal: false,
@@ -1091,11 +1582,16 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     });
     setCarregandoForm(true);
 
-    // Grade + vínculos de serviço em paralelo (ambos por profissional_id).
-    const [resHorarios, resVinculos] = await Promise.all([
+    // Grade (janela + fixo) + vínculos de serviço em paralelo (todos por
+    // profissional_id).
+    const [resHorarios, resFixos, resVinculos] = await Promise.all([
       supabase
         .from("horarios_trabalho")
         .select("dia_semana, hora_inicio, hora_fim, almoco_inicio, almoco_fim")
+        .eq("profissional_id", profissional.id),
+      supabase
+        .from("horarios_fixos")
+        .select("dia_semana, horario")
         .eq("profissional_id", profissional.id),
       supabase
         .from("servico_profissional")
@@ -1109,6 +1605,10 @@ export default function GerenciarProfissionais({ estabelecimento }) {
       setErroForm(`Não foi possível carregar os horários: ${resHorarios.error.message}`);
       return;
     }
+    if (resFixos.error) {
+      setErroForm(`Não foi possível carregar os horários fixos: ${resFixos.error.message}`);
+      return;
+    }
     if (resVinculos.error) {
       setErroForm(`Não foi possível carregar os serviços: ${resVinculos.error.message}`);
       return;
@@ -1117,10 +1617,16 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     // Se qualquer linha tem almoço salvo, já vem com a checkbox marcada e os
     // campos visíveis; senão vem desmarcada e ocultos. `almocoSalvoOriginal`
     // registra esse estado inicial (pra decidir o confirm de remoção no save).
+    // Só faz sentido no modo 'janela' (o 'fixo' não tem almoço).
     const tinhaAlmoco = (resHorarios.data ?? []).some((h) => h.almoco_inicio);
     setForm({
       nome: profissional.nome,
-      dias: diasDeHorarios(resHorarios.data ?? []),
+      dias:
+        modoHorario === "fixo"
+          ? diasDeHorariosFixos(resFixos.data ?? [])
+          : diasDeHorarios(resHorarios.data ?? []),
+      modoHorario,
+      horariosFixosPorDia: horariosFixosPorDiaDeLinhas(resFixos.data ?? []),
       mesmoHorario: false,
       temAlmoco: tinhaAlmoco,
       almocoSalvoOriginal: tinhaAlmoco,
@@ -1143,6 +1649,46 @@ export default function GerenciarProfissionais({ estabelecimento }) {
 
   function setMesmoHorario(valor) {
     setForm((anterior) => ({ ...anterior, mesmoHorario: valor }));
+  }
+
+  // Troca o modo de agenda ('janela'/'fixo'). Toda troca de fato (não clicar
+  // de novo no que já está selecionado) passa por confirm(): mudar o tipo
+  // pode deixar a agenda sem horários até o dono cadastrar/revisar do outro
+  // jeito.
+  function setModoHorario(valor) {
+    setForm((anterior) => {
+      if (anterior.modoHorario === valor) return anterior;
+      const ok = window.confirm(
+        "Mudar o tipo de agenda pode deixar a agenda sem horários até você cadastrar/revisar. Continuar?"
+      );
+      if (!ok) return anterior;
+      return { ...anterior, modoHorario: valor };
+    });
+  }
+
+  // Adiciona/remove uma tag de horário fixo de um dia (modo 'fixo'). Ignora
+  // duplicata; mantém a lista ordenada.
+  function adicionarHorarioFixo(dia, horario) {
+    setForm((anterior) => {
+      const atual = anterior.horariosFixosPorDia[dia];
+      if (atual.includes(horario)) return anterior;
+      const atualizado = [...atual, horario].sort();
+      return {
+        ...anterior,
+        horariosFixosPorDia: anterior.horariosFixosPorDia.map((lista, i) =>
+          i === dia ? atualizado : lista
+        ),
+      };
+    });
+  }
+
+  function removerHorarioFixo(dia, horario) {
+    setForm((anterior) => ({
+      ...anterior,
+      horariosFixosPorDia: anterior.horariosFixosPorDia.map((lista, i) =>
+        i === dia ? lista.filter((h) => h !== horario) : lista
+      ),
+    }));
   }
 
   function setTemAlmoco(valor) {
@@ -1207,8 +1753,8 @@ export default function GerenciarProfissionais({ estabelecimento }) {
   }
 
   // Navegação do wizard. Da Etapa A valida o essencial (nome, ≥1 dia, resposta
-  // do "mesmo horário?") antes de mostrar a Janela B. Da Etapa B valida o form
-  // inteiro (mesma checagem do salvar) antes da Janela C.
+  // do "mesmo horário?" — só no modo 'janela') antes de mostrar a Janela B. Da
+  // Etapa B valida o form inteiro (mesma checagem do salvar) antes da Janela C.
   function avancar() {
     if (etapa === "A") {
       if (!form.nome.trim()) {
@@ -1219,7 +1765,7 @@ export default function GerenciarProfissionais({ estabelecimento }) {
         setErroForm("Selecione ao menos um dia de trabalho.");
         return;
       }
-      if (form.mesmoHorario === null) {
+      if (form.modoHorario === "janela" && form.mesmoHorario === null) {
         setErroForm("Escolha se o horário é o mesmo todos os dias.");
         return;
       }
@@ -1244,14 +1790,23 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     setEtapa((atual) => (atual === "C" ? "B" : "A"));
   }
 
-  // Regrava a grade inteira: apaga as linhas atuais do profissional e insere as
-  // dos dias ativos. Substituição total mantém "uma linha por (profissional_id,
-  // dia_semana)" sem upsert manual. Validação client-side roda ANTES.
-  async function salvarHorarios(profissionalId, horarios) {
-    const { error: erroDelete } = await supabase
-      .from("horarios_trabalho")
+  // Apaga todas as linhas de uma tabela de horário pertencentes ao
+  // profissional. Usado tanto pra regravar a tabela do modo atual quanto pra
+  // limpar a do modo OPOSTO ao salvar (ver salvarAgenda).
+  async function apagarPorProfissional(tabela, profissionalId) {
+    const { error } = await supabase
+      .from(tabela)
       .delete()
       .eq("profissional_id", profissionalId);
+    return error ?? null;
+  }
+
+  // Regrava a grade inteira (horarios_trabalho, modo 'janela'): apaga as
+  // linhas atuais do profissional e insere as dos dias ativos. Substituição
+  // total mantém "uma linha por (profissional_id, dia_semana)" sem upsert
+  // manual. Validação client-side roda ANTES.
+  async function salvarHorarios(profissionalId, horarios) {
+    const erroDelete = await apagarPorProfissional("horarios_trabalho", profissionalId);
     if (erroDelete) return erroDelete;
 
     if (horarios.length === 0) return null;
@@ -1261,6 +1816,36 @@ export default function GerenciarProfissionais({ estabelecimento }) {
       .from("horarios_trabalho")
       .insert(linhas);
     return erroInsert ?? null;
+  }
+
+  // Regrava a lista inteira de horarios_fixos (modo 'fixo'): mesma estratégia
+  // "substitui tudo" de salvarHorarios, uma linha por (profissional, dia,
+  // horario).
+  async function salvarHorariosFixos(profissionalId, horariosFixos) {
+    const erroDelete = await apagarPorProfissional("horarios_fixos", profissionalId);
+    if (erroDelete) return erroDelete;
+
+    if (horariosFixos.length === 0) return null;
+
+    const linhas = horariosFixos.map((h) => ({ ...h, profissional_id: profissionalId }));
+    const { error: erroInsert } = await supabase
+      .from("horarios_fixos")
+      .insert(linhas);
+    return erroInsert ?? null;
+  }
+
+  // Regrava a agenda do profissional conforme `dados.modoHorario` (resultado
+  // de coletarDados) e limpa a tabela do modo OPOSTO — só uma fonte de
+  // horários fica ativa por vez, sem linha órfã de um modo antigo.
+  async function salvarAgenda(profissionalId, dados) {
+    if (dados.modoHorario === "fixo") {
+      const erroOutro = await apagarPorProfissional("horarios_trabalho", profissionalId);
+      if (erroOutro) return erroOutro;
+      return salvarHorariosFixos(profissionalId, dados.horariosFixos);
+    }
+    const erroOutro = await apagarPorProfissional("horarios_fixos", profissionalId);
+    if (erroOutro) return erroOutro;
+    return salvarHorarios(profissionalId, dados.horarios);
   }
 
   // Regrava os vínculos de serviço: apaga os do profissional e insere os
@@ -1286,17 +1871,25 @@ export default function GerenciarProfissionais({ estabelecimento }) {
   }
 
   async function handleSalvar() {
-    const { erro: erroValidacao, nome, horarios } = coletarDados(form);
+    const {
+      erro: erroValidacao,
+      nome,
+      modoHorario,
+      horarios,
+      horariosFixos,
+    } = coletarDados(form);
     if (erroValidacao) {
       setErroForm(erroValidacao);
       return;
     }
+    const dadosAgenda = { modoHorario, horarios, horariosFixos };
 
     // Remoção real de almoço: checkbox desmarcada E o profissional tinha almoço
     // salvo antes. Só aí `horarios` vai com almoço null nas linhas — confirma
     // antes, porque libera o intervalo pra agendamento. Cancelar mantém o almoço
     // salvo: remarca a checkbox (valores seguem em memória) e aborta o save.
-    if (!form.temAlmoco && form.almocoSalvoOriginal) {
+    // Só se aplica ao modo 'janela' (o 'fixo' não tem almoço).
+    if (modoHorario === "janela" && !form.temAlmoco && form.almocoSalvoOriginal) {
       const ok = window.confirm(
         "Remover o horário de almoço deste profissional? Os clientes poderão agendar nesse intervalo."
       );
@@ -1313,8 +1906,13 @@ export default function GerenciarProfissionais({ estabelecimento }) {
       // Cria já ativo, particionado pelo estabelecimento resolvido.
       const { data, error } = await supabase
         .from("profissionais")
-        .insert({ nome, ativo: true, estabelecimento_id: estabelecimento.id })
-        .select("id, nome, ativo")
+        .insert({
+          nome,
+          ativo: true,
+          estabelecimento_id: estabelecimento.id,
+          modo_horario: modoHorario,
+        })
+        .select("id, nome, ativo, modo_horario")
         .single();
 
       if (error) {
@@ -1323,23 +1921,24 @@ export default function GerenciarProfissionais({ estabelecimento }) {
         return;
       }
 
-      const erroHorarios = await salvarHorarios(data.id, horarios);
+      const erroHorarios = await salvarAgenda(data.id, dadosAgenda);
       if (erroHorarios) {
         setSalvando(false);
-        // Profissional criado; a grade falhou. Cai na tela de resumo (edição)
-        // já com os horários/serviços digitados, pra corrigir/reenviar.
+        // Profissional criado; a agenda falhou. Cai na tela de resumo (edição)
+        // já com os horários/serviços digitados, pra corrigir/reenviar. A
+        // gravação falhou: nada foi persistido, então almocoSalvoOriginal=false
+        // (não há almoço a "remover" no próximo save).
         setProfissionais((atuais) => ordenar([...atuais, data]));
-        // A gravação da grade falhou: nada de almoço foi persistido, então
-        // almocoSalvoOriginal=false (não há almoço a "remover" no próximo save).
-        setForm({
-          nome,
-          dias: diasDeHorarios(horarios),
-          mesmoHorario: false,
-          temAlmoco: horarios.some((h) => h.almoco_inicio),
-          almocoSalvoOriginal: false,
-          horarioComum: { ...BLOCO_VAZIO },
-          servicos: form.servicos,
-        });
+        setForm(
+          formDeFallback({
+            nome,
+            modoHorario,
+            horarios,
+            horariosFixos,
+            servicos: form.servicos,
+            almocoSalvoOriginal: false,
+          })
+        );
         setEditando(data);
         setErroForm(`Profissional criado, mas os horários falharam: ${erroHorarios.message}`);
         return;
@@ -1348,18 +1947,19 @@ export default function GerenciarProfissionais({ estabelecimento }) {
       const erroServicos = await salvarServicos(data.id, form.servicos);
       setSalvando(false);
       if (erroServicos) {
-        // Profissional + grade salvos; os vínculos falharam. Cai no resumo pra
+        // Profissional + agenda salvos; os vínculos falharam. Cai no resumo pra
         // reenviar (o próximo salvar regrava os vínculos inteiros).
         setProfissionais((atuais) => ordenar([...atuais, data]));
-        setForm({
-          nome,
-          dias: diasDeHorarios(horarios),
-          mesmoHorario: false,
-          temAlmoco: horarios.some((h) => h.almoco_inicio),
-          almocoSalvoOriginal: horarios.some((h) => h.almoco_inicio),
-          horarioComum: { ...BLOCO_VAZIO },
-          servicos: form.servicos,
-        });
+        setForm(
+          formDeFallback({
+            nome,
+            modoHorario,
+            horarios,
+            horariosFixos,
+            servicos: form.servicos,
+            almocoSalvoOriginal: (horarios ?? []).some((h) => h.almoco_inicio),
+          })
+        );
         setEditando(data);
         setErroForm(`Profissional criado, mas os serviços falharam: ${erroServicos.message}`);
         return;
@@ -1370,10 +1970,10 @@ export default function GerenciarProfissionais({ estabelecimento }) {
       return;
     }
 
-    // Edição: atualiza o nome e regrava a grade.
+    // Edição: atualiza o nome + modo de agenda e regrava a agenda.
     const { error } = await supabase
       .from("profissionais")
-      .update({ nome })
+      .update({ nome, modo_horario: modoHorario })
       .eq("id", editando.id);
 
     if (error) {
@@ -1382,7 +1982,7 @@ export default function GerenciarProfissionais({ estabelecimento }) {
       return;
     }
 
-    const erroHorarios = await salvarHorarios(editando.id, horarios);
+    const erroHorarios = await salvarAgenda(editando.id, dadosAgenda);
     if (erroHorarios) {
       setSalvando(false);
       setErroForm(`Nome salvo, mas os horários falharam: ${erroHorarios.message}`);
@@ -1397,7 +1997,11 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     }
 
     setProfissionais((atuais) =>
-      ordenar(atuais.map((p) => (p.id === editando.id ? { ...p, nome } : p)))
+      ordenar(
+        atuais.map((p) =>
+          p.id === editando.id ? { ...p, nome, modo_horario: modoHorario } : p
+        )
+      )
     );
     fecharForm();
   }
@@ -1458,6 +2062,13 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     (info) => info.curto
   );
   const indiceEtapa = ETAPAS.findIndex((e) => e.id === etapa);
+
+  // Modo 'fixo' com algum dia ativo sem nenhum horário na lista: deixaria a
+  // agenda vazia nesse dia sem o dono perceber — bloqueia o Salvar (com
+  // mensagem visível, não só disabled silencioso; ver coletarDados).
+  const diaFixoSemHorario =
+    form.modoHorario === "fixo" &&
+    form.dias.some((d, i) => d.ativo && form.horariosFixosPorDia[i].length === 0);
 
   return (
     <>
@@ -1545,20 +2156,20 @@ export default function GerenciarProfissionais({ estabelecimento }) {
 
               <div>
                 <span className="mb-2 block text-sm font-medium text-body">
-                  Mesmo horário todos os dias?
+                  Tipo de agenda
                 </span>
                 <div className="flex gap-2">
                   {[
-                    { valor: true, rotulo: "Sim" },
-                    { valor: false, rotulo: "Não" },
+                    { valor: "janela", rotulo: "Janela contínua" },
+                    { valor: "fixo", rotulo: "Horários fixos" },
                   ].map((opcao) => {
-                    const selecionado = form.mesmoHorario === opcao.valor;
+                    const selecionado = form.modoHorario === opcao.valor;
                     return (
                       <button
-                        key={opcao.rotulo}
+                        key={opcao.valor}
                         type="button"
                         aria-pressed={selecionado}
-                        onClick={() => setMesmoHorario(opcao.valor)}
+                        onClick={() => setModoHorario(opcao.valor)}
                         className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-medium ring-1 transition ${
                           selecionado
                             ? "bg-primary text-white ring-primary"
@@ -1571,13 +2182,59 @@ export default function GerenciarProfissionais({ estabelecimento }) {
                   })}
                 </div>
               </div>
+
+              {form.modoHorario === "janela" && (
+                <div>
+                  <span className="mb-2 block text-sm font-medium text-body">
+                    Mesmo horário todos os dias?
+                  </span>
+                  <div className="flex gap-2">
+                    {[
+                      { valor: true, rotulo: "Sim" },
+                      { valor: false, rotulo: "Não" },
+                    ].map((opcao) => {
+                      const selecionado = form.mesmoHorario === opcao.valor;
+                      return (
+                        <button
+                          key={opcao.rotulo}
+                          type="button"
+                          aria-pressed={selecionado}
+                          onClick={() => setMesmoHorario(opcao.valor)}
+                          className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-medium ring-1 transition ${
+                            selecionado
+                              ? "bg-primary text-white ring-primary"
+                              : "bg-card text-body ring-border hover:bg-surface"
+                          }`}
+                        >
+                          {opcao.rotulo}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {/* JANELA B — Horários. Depende do "mesmo horário?". */}
+          {/* JANELA B — Horários. Modo 'fixo' usa tags por dia; 'janela'
+              depende do "mesmo horário?". */}
           {etapa === "B" && (
             <div className="space-y-3">
-              {form.mesmoHorario ? (
+              {form.modoHorario === "fixo" ? (
+                <>
+                  <p className="text-sm text-body">
+                    Cadastre os horários fixos de cada dia ativo (ex.: 08:00,
+                    10:00, 13:00).
+                  </p>
+                  <GradeDiasFixos
+                    dias={form.dias}
+                    onToggle={alternarDia}
+                    horariosFixosPorDia={form.horariosFixosPorDia}
+                    onAdicionarHorario={adicionarHorarioFixo}
+                    onRemoverHorario={removerHorarioFixo}
+                  />
+                </>
+              ) : form.mesmoHorario ? (
                 <>
                   <p className="text-sm text-body">
                     Este horário será aplicado a todos os dias ativos
@@ -1638,13 +2295,20 @@ export default function GerenciarProfissionais({ estabelecimento }) {
             </p>
           )}
 
+          {etapa === "C" && diaFixoSemHorario && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 ring-1 ring-amber-100">
+              Cadastre ao menos um horário fixo pra cada dia ativo antes de
+              salvar (volte à Janela B).
+            </p>
+          )}
+
           {/* Navegação do wizard. */}
           <div className="flex flex-col gap-2 sm:flex-row-reverse">
             {etapa === "C" ? (
               <button
                 type="button"
                 onClick={handleSalvar}
-                disabled={salvando}
+                disabled={salvando || diaFixoSemHorario}
                 className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {salvando ? "Salvando..." : "Salvar"}
@@ -1713,21 +2377,75 @@ export default function GerenciarProfissionais({ estabelecimento }) {
                 ))}
               </div>
 
-              {/* ABA Horários — grade de dias + almoço. */}
+              {/* ABA Horários — tipo de agenda + grade de dias (janela) ou
+                  tags de horário fixo, conforme o modo. */}
               {abaEdicao === "horarios" && (
-                <div>
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <span className="text-sm font-medium text-body">
-                      Dias e horários
+                <div className="space-y-4">
+                  <div>
+                    <span className="mb-2 block text-sm font-medium text-body">
+                      Tipo de agenda
                     </span>
-                    <CheckAlmoco checked={form.temAlmoco} onChange={setTemAlmoco} />
+                    <div className="flex gap-2">
+                      {[
+                        { valor: "janela", rotulo: "Janela contínua" },
+                        { valor: "fixo", rotulo: "Horários fixos" },
+                      ].map((opcao) => {
+                        const selecionado = form.modoHorario === opcao.valor;
+                        return (
+                          <button
+                            key={opcao.valor}
+                            type="button"
+                            aria-pressed={selecionado}
+                            onClick={() => setModoHorario(opcao.valor)}
+                            className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-medium ring-1 transition ${
+                              selecionado
+                                ? "bg-primary text-white ring-primary"
+                                : "bg-card text-body ring-border hover:bg-surface"
+                            }`}
+                          >
+                            {opcao.rotulo}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <GradeDias
-                    dias={form.dias}
-                    onToggle={alternarDia}
-                    onCampo={handleCampoDia}
-                    mostrarAlmoco={form.temAlmoco}
-                  />
+
+                  {form.modoHorario === "fixo" ? (
+                    <div>
+                      <span className="mb-2 block text-sm font-medium text-body">
+                        Dias e horários fixos
+                      </span>
+                      <GradeDiasFixos
+                        dias={form.dias}
+                        onToggle={alternarDia}
+                        horariosFixosPorDia={form.horariosFixosPorDia}
+                        onAdicionarHorario={adicionarHorarioFixo}
+                        onRemoverHorario={removerHorarioFixo}
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium text-body">
+                          Dias e horários
+                        </span>
+                        <CheckAlmoco checked={form.temAlmoco} onChange={setTemAlmoco} />
+                      </div>
+                      <GradeDias
+                        dias={form.dias}
+                        onToggle={alternarDia}
+                        onCampo={handleCampoDia}
+                        mostrarAlmoco={form.temAlmoco}
+                      />
+                    </div>
+                  )}
+
+                  {diaFixoSemHorario && (
+                    <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 ring-1 ring-amber-100">
+                      Cadastre ao menos um horário fixo pra cada dia ativo
+                      antes de salvar.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -1765,6 +2483,9 @@ export default function GerenciarProfissionais({ estabelecimento }) {
                 <SecaoAusencias
                   profissionalId={editando.id}
                   estabelecimentoId={estabelecimento.id}
+                  modoHorario={form.modoHorario}
+                  horariosFixosPorDia={form.horariosFixosPorDia}
+                  dias={form.dias}
                 />
               )}
             </>
@@ -1780,7 +2501,7 @@ export default function GerenciarProfissionais({ estabelecimento }) {
             <button
               type="button"
               onClick={handleSalvar}
-              disabled={salvando || carregandoForm}
+              disabled={salvando || carregandoForm || diaFixoSemHorario}
               className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {salvando ? "Salvando..." : "Salvar"}
