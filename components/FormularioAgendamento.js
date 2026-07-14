@@ -375,11 +375,12 @@ export default function FormularioAgendamento({
     }
   }
 
-  // Ao montar, busca em paralelo os serviços ativos (ordenados por nome) e a
-  // preferência escolha_profissional do salão. Resolver os dois JUNTOS garante
-  // que o modo (cliente escolhe x encaixe automático) já é conhecido antes de o
-  // cliente conseguir tocar num serviço. Se a config falhar, mantém o default
-  // false (encaixe automático).
+  // Ao montar, busca em paralelo os serviços ativos (ordenados por
+  // categoria_id, ordem — mesmo critério configurado na aba Serviços do
+  // admin, via as setinhas de reordenação) e a preferência escolha_profissional
+  // do salão. Resolver os dois JUNTOS garante que o modo (cliente escolhe x
+  // encaixe automático) já é conhecido antes de o cliente conseguir tocar num
+  // serviço. Se a config falhar, mantém o default false (encaixe automático).
   useEffect(() => {
     let ativo = true;
 
@@ -390,7 +391,8 @@ export default function FormularioAgendamento({
           .select("id, nome, duracao_min, preco_centavos, categoria_id")
           .eq("estabelecimento_id", estabelecimento.id)
           .eq("ativo", true)
-          .order("nome"),
+          .order("categoria_id", { ascending: true, nullsFirst: true })
+          .order("ordem", { ascending: true }),
         supabase
           .from("estabelecimentos")
           .select("escolha_profissional")

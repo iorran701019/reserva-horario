@@ -117,6 +117,12 @@ export default function GerenciarServicos({ estabelecimento }) {
   // Serviço "armado" para soft delete (controla o modal de confirmação).
   const [servicoParaExcluir, setServicoParaExcluir] = useState(null);
 
+  // Trava as setinhas de reordenação enquanto um swap de `ordem` está em
+  // andamento, pra não disparar dois swaps concorrentes (mesmo padrão do
+  // `ocupado` em GerenciarCategorias).
+  const [reordenando, setReordenando] = useState(false);
+  const [erroReordenar, setErroReordenar] = useState("");
+
   // Profissionais ATIVOS do salão, pra montar os checkboxes do form. Carregados
   // uma vez; a seleção por serviço vive em `form.profissionais`.
   const [profissionaisSalao, setProfissionaisSalao] = useState([]);
@@ -130,17 +136,19 @@ export default function GerenciarServicos({ estabelecimento }) {
   const [erroCategorias, setErroCategorias] = useState("");
 
   // Carga inicial. Traz ATIVOS e INATIVOS (o CRUD precisa mostrar os dois, com
-  // ação de reativar). Ordena ativos primeiro e, dentro, por nome.
+  // ação de reativar). Ordena por categoria_id, ordem — mesmo critério do
+  // acordeão de /agendar — pra manter os grupos de categoria juntos e as
+  // setinhas de reordenação operando sobre vizinhos visíveis lado a lado.
   useEffect(() => {
     let ativo = true;
 
     async function carregar() {
       const { data, error } = await supabase
         .from("servicos")
-        .select("id, nome, duracao_min, preco_centavos, ativo, categoria_id")
+        .select("id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem")
         .eq("estabelecimento_id", estabelecimento.id)
-        .order("ativo", { ascending: false })
-        .order("nome", { ascending: true });
+        .order("categoria_id", { ascending: true, nullsFirst: true })
+        .order("ordem", { ascending: true });
 
       if (!ativo) return;
 
@@ -305,6 +313,15 @@ export default function GerenciarServicos({ estabelecimento }) {
     };
   }
 
+  // Próximo `ordem` dentro do grupo de uma categoria (null incluso — "sem
+  // categoria" também é um grupo isolado): maior ordem do grupo + 1, ou 1 se
+  // o grupo estiver vazio. Usado ao criar um serviço, ou ao mudar sua
+  // categoria na edição (o serviço vai pro fim do novo grupo).
+  function proximaOrdemNoGrupo(categoriaId) {
+    const grupo = servicos.filter((s) => s.categoria_id === categoriaId);
+    return grupo.reduce((max, s) => Math.max(max, s.ordem ?? 0), 0) + 1;
+  }
+
   // Regrava os vínculos do serviço: apaga os do servico_id e insere os marcados.
   // Mesma estratégia "substitui tudo" usada na Janela C do form de profissional.
   // Devolve o erro do Supabase ou null.
@@ -340,15 +357,18 @@ export default function GerenciarServicos({ estabelecimento }) {
     setErroForm("");
 
     if (editando === "novo") {
-      // Cria já ativo, particionado pelo estabelecimento resolvido.
+      // Cria já ativo, particionado pelo estabelecimento resolvido, e vai pro
+      // fim do grupo de ordem da categoria escolhida (ou do grupo "sem
+      // categoria").
       const { data, error } = await supabase
         .from("servicos")
         .insert({
           ...payload,
           ativo: true,
           estabelecimento_id: estabelecimento.id,
+          ordem: proximaOrdemNoGrupo(payload.categoria_id),
         })
-        .select("id, nome, duracao_min, preco_centavos, ativo, categoria_id")
+        .select("id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem")
         .single();
 
       if (error) {
@@ -368,16 +388,23 @@ export default function GerenciarServicos({ estabelecimento }) {
         return;
       }
 
-      // Insere no topo local e reordena (ativos primeiro, depois por nome).
+      // Insere local e reordena (por categoria_id, ordem).
       setServicos((atuais) => ordenar([...atuais, data]));
       fecharForm();
       return;
     }
 
-    // Edição: atualiza o serviço existente.
+    // Edição: atualiza o serviço existente. Se a categoria mudou, o serviço
+    // vai pro fim do grupo de ordem da categoria nova — ele nunca deve reter
+    // uma `ordem` que fazia sentido só no grupo antigo.
+    const categoriaMudou = payload.categoria_id !== editando.categoria_id;
+    const payloadFinal = categoriaMudou
+      ? { ...payload, ordem: proximaOrdemNoGrupo(payload.categoria_id) }
+      : payload;
+
     const { error } = await supabase
       .from("servicos")
-      .update(payload)
+      .update(payloadFinal)
       .eq("id", editando.id);
 
     if (error) {
@@ -394,7 +421,7 @@ export default function GerenciarServicos({ estabelecimento }) {
     }
 
     setServicos((atuais) => ordenar(atuais.map((s) =>
-      s.id === editando.id ? { ...s, ...payload } : s
+      s.id === editando.id ? { ...s, ...payloadFinal } : s
     )));
     fecharForm();
   }
@@ -432,6 +459,43 @@ export default function GerenciarServicos({ estabelecimento }) {
 
     setErro("");
     setServicos((atuais) => ordenar(atualizarAtivo(atuais, servico.id, true)));
+  }
+
+  // Move o serviço uma posição pra cima (-1) ou baixo (+1) trocando `ordem`
+  // com o vizinho DENTRO DO MESMO categoria_id — nunca atravessa grupos.
+  // Mesma técnica de swap usada em GerenciarCategorias.mover.
+  async function mover(servico, direcao) {
+    const grupo = grupoDaCategoria(servicos, servico);
+    const i = grupo.findIndex((s) => s.id === servico.id);
+    const j = i + direcao;
+    if (j < 0 || j >= grupo.length) return;
+    const vizinho = grupo[j];
+
+    setReordenando(true);
+    setErroReordenar("");
+    const { error: erro1 } = await supabase
+      .from("servicos")
+      .update({ ordem: vizinho.ordem })
+      .eq("id", servico.id);
+    const { error: erro2 } = await supabase
+      .from("servicos")
+      .update({ ordem: servico.ordem })
+      .eq("id", vizinho.id);
+
+    setReordenando(false);
+    if (erro1 || erro2) {
+      setErroReordenar((erro1 || erro2).message);
+      return;
+    }
+    setServicos((atuais) =>
+      ordenar(
+        atuais.map((s) => {
+          if (s.id === servico.id) return { ...s, ordem: vizinho.ordem };
+          if (s.id === vizinho.id) return { ...s, ordem: servico.ordem };
+          return s;
+        })
+      )
+    );
   }
 
   if (carregando) {
@@ -609,13 +673,21 @@ export default function GerenciarServicos({ estabelecimento }) {
             )
           }
         />
+        {erroReordenar && (
+          <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+            {erroReordenar}
+          </p>
+        )}
         {servicos.length === 0 ? (
           <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
             Nenhum serviço cadastrado.
           </p>
         ) : (
           <ul className="space-y-3">
-            {servicos.map((servico) => (
+            {servicos.map((servico) => {
+              const grupo = grupoDaCategoria(servicos, servico);
+              const indiceNoGrupo = grupo.findIndex((s) => s.id === servico.id);
+              return (
               <li
                 key={servico.id}
                 className={`rounded-2xl p-4 shadow-sm ring-1 transition ${
@@ -624,63 +696,93 @@ export default function GerenciarServicos({ estabelecimento }) {
                     : "bg-surface ring-border"
                 }`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-heading">
-                      {servico.nome}
-                    </p>
-                    <p className="mt-0.5 text-sm text-body">
-                      {formatarPreco(servico.preco_centavos)} · {servico.duracao_min} min
-                    </p>
-                    {(() => {
-                      const categoria = categorias.find((c) => c.id === servico.categoria_id);
-                      return categoria ? (
-                        <p className="mt-0.5 truncate text-xs text-body">{categoria.nome}</p>
-                      ) : null;
-                    })()}
-                  </div>
-
-                  <span
-                    className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${
-                      servico.ativo
-                        ? "bg-green-50 text-green-700 ring-green-100"
-                        : "bg-surface text-body ring-border"
-                    }`}
-                  >
-                    {servico.ativo ? "Ativo" : "Inativo"}
-                  </span>
-                </div>
-
-                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                  {servico.ativo ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => abrirEdicao(servico)}
-                        className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
-                      >
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setServicoParaExcluir(servico)}
-                        className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-                      >
-                        Excluir
-                      </button>
-                    </>
-                  ) : (
+                <div className="flex items-start gap-3">
+                  {/* Setinhas de reordenação: trocam `ordem` só com o vizinho
+                      do mesmo categoria_id (ver mover()). Desabilitadas no
+                      primeiro/último do grupo, mesmo padrão visual das
+                      categorias. */}
+                  <div className="flex shrink-0 flex-col pt-0.5">
                     <button
                       type="button"
-                      onClick={() => handleReativar(servico)}
-                      className="inline-flex flex-1 items-center justify-center rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
+                      onClick={() => mover(servico, -1)}
+                      disabled={reordenando || indiceNoGrupo === 0}
+                      aria-label="Mover para cima"
+                      className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
                     >
-                      Reativar
+                      ▲
                     </button>
-                  )}
+                    <button
+                      type="button"
+                      onClick={() => mover(servico, 1)}
+                      disabled={reordenando || indiceNoGrupo === grupo.length - 1}
+                      aria-label="Mover para baixo"
+                      className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      ▼
+                    </button>
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-heading">
+                          {servico.nome}
+                        </p>
+                        <p className="mt-0.5 text-sm text-body">
+                          {formatarPreco(servico.preco_centavos)} · {servico.duracao_min} min
+                        </p>
+                        {(() => {
+                          const categoria = categorias.find((c) => c.id === servico.categoria_id);
+                          return categoria ? (
+                            <p className="mt-0.5 truncate text-xs text-body">{categoria.nome}</p>
+                          ) : null;
+                        })()}
+                      </div>
+
+                      <span
+                        className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${
+                          servico.ativo
+                            ? "bg-green-50 text-green-700 ring-green-100"
+                            : "bg-surface text-body ring-border"
+                        }`}
+                      >
+                        {servico.ativo ? "Ativo" : "Inativo"}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                      {servico.ativo ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => abrirEdicao(servico)}
+                            className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setServicoParaExcluir(servico)}
+                            className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                          >
+                            Excluir
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleReativar(servico)}
+                          className="inline-flex flex-1 items-center justify-center rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
+                        >
+                          Reativar
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
         </>
@@ -738,13 +840,27 @@ export default function GerenciarServicos({ estabelecimento }) {
   );
 }
 
-// Reordena a lista pela mesma chave da query (ativos primeiro, depois nome).
-// Usado após inserts/updates locais pra manter a ordem consistente sem refetch.
+// Reordena a lista pela mesma chave da query (categoria_id, ordem — "sem
+// categoria" primeiro). Usado após inserts/updates locais pra manter a ordem
+// consistente sem refetch. `nome` só entra como desempate (ordem já é única
+// dentro do grupo, mas cobre o caso raro de dado legado sem ordem definida).
 function ordenar(lista) {
   return [...lista].sort((a, b) => {
-    if (a.ativo !== b.ativo) return a.ativo ? -1 : 1;
+    if (a.categoria_id !== b.categoria_id) {
+      if (a.categoria_id == null) return -1;
+      if (b.categoria_id == null) return 1;
+      return a.categoria_id - b.categoria_id;
+    }
+    if (a.ordem !== b.ordem) return (a.ordem ?? 0) - (b.ordem ?? 0);
     return a.nome.localeCompare(b.nome);
   });
+}
+
+// Serviços do mesmo grupo de categoria de `servico` (mesmo categoria_id,
+// null incluso), na ordem já vigente em `lista` — usado pra achar o vizinho
+// de cima/baixo e desenhar as setinhas.
+function grupoDaCategoria(lista, servico) {
+  return lista.filter((s) => s.categoria_id === servico.categoria_id);
 }
 
 // Patch imutável do campo `ativo` de um serviço na lista.
