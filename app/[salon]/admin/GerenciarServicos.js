@@ -615,7 +615,20 @@ export default function GerenciarServicos({ estabelecimento }) {
       {/* Lista de serviços. Some enquanto o formulário está aberto pra manter o
           foco numa coisa só (mobile). */}
       {!editando && (
-        servicos.length === 0 ? (
+        <>
+        <GerenciarCategorias
+          estabelecimento={estabelecimento}
+          categorias={categorias}
+          setCategorias={setCategorias}
+          carregando={carregandoCategorias}
+          erro={erroCategorias}
+          aoApagarCategoria={(id) =>
+            setServicos((atuais) =>
+              atuais.map((s) => (s.categoria_id === id ? { ...s, categoria_id: null } : s))
+            )
+          }
+        />
+        {servicos.length === 0 ? (
           <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
             Nenhum serviço cadastrado.
           </p>
@@ -688,7 +701,8 @@ export default function GerenciarServicos({ estabelecimento }) {
               </li>
             ))}
           </ul>
-        )
+        )}
+        </>
       )}
 
       {/* Modal de confirmação do soft delete. Deixa claro que o histórico é
@@ -1074,3 +1088,4 @@ function ordenar(lista) {
 function atualizarAtivo(lista, id, ativo) {
   return lista.map((s) => (s.id === id ? { ...s, ativo } : s));
 }
+

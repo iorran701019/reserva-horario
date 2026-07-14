@@ -22,12 +22,15 @@ import {
   CalendarPlus,
   Scissors,
   Users,
+  UserRound,
   LogOut,
+  NotebookPen,
 } from "lucide-react";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
 import GerenciarProfissionais from "./GerenciarProfissionais";
+import GerenciarClientes from "@/components/GerenciarClientes";
 import ConfiguracoesSalao from "./ConfiguracoesSalao";
 import FormularioAgendamento from "@/components/FormularioAgendamento";
 
@@ -136,6 +139,7 @@ const ABAS_PAI = [
   { id: "agendar", rotulo: "Agendar", Icone: CalendarPlus },
   { id: "servicos", rotulo: "Serviços", Icone: Scissors },
   { id: "profissionais", rotulo: "Profissionais", Icone: Users },
+  { id: "clientes", rotulo: "Clientes", Icone: UserRound },
 ];
 
 // Filtros da aba Histórico (client-side, por categoria de rotuloHistorico).
@@ -236,6 +240,11 @@ export default function AdminPage() {
   const [salvandoObservacao, setSalvandoObservacao] = useState(false);
   const [observacaoOk, setObservacaoOk] = useState(false);
 
+// Mesma lógica acima, espelhada para a anotação do Histórico.
+  const [idAnotHistorico, setIdAnotHistorico] = useState(null);
+  const [rascunhoAnotHistorico, setRascunhoAnotHistorico] = useState("");
+  const [salvandoAnotHistorico, setSalvandoAnotHistorico] = useState(false);
+  const [okAnotHistorico, setOkAnotHistorico] = useState(null);
   // Filtro ativo da aba Histórico (ver FILTROS_HISTORICO). "todos" = sem filtro.
   const [filtroHistorico, setFiltroHistorico] = useState("todos");
 
@@ -382,6 +391,31 @@ export default function AdminPage() {
     atualizarItemLocal(id, { observacao });
     setObservacaoOk(true);
     return true;
+  }
+
+  // Salva a anotação de um atendimento do HISTÓRICO. Espelha
+  // handleSalvarObservacao (update em `observacao` + patch local via
+  // atualizarItemLocal), mas com estado/feedback próprios dos cards do histórico
+  // — sem tocar no modal do Painel. Texto vazio vira null (limpa a anotação).
+  async function handleSalvarAnotHistorico(id, texto) {
+    const observacao = texto || null;
+    setSalvandoAnotHistorico(true);
+    setOkAnotHistorico(null);
+    const { error } = await supabase
+      .from("agendamentos")
+      .update({ observacao })
+      .eq("id", id);
+    setSalvandoAnotHistorico(false);
+
+    if (error) {
+      setErro(`Não foi possível salvar a anotação: ${error.message}`);
+      return;
+    }
+
+    setErro("");
+    atualizarItemLocal(id, { observacao });
+    setIdAnotHistorico(null);
+    setOkAnotHistorico(id);
   }
 
   // Troca o profissional do agendamento. Grava profissional_id no banco e patcha
@@ -968,6 +1002,81 @@ export default function AdminPage() {
                           Entrar em contato
                         </button>
                       </div>
+
+                      {/* Anotação do atendimento (agendamentos.observacao). Só no
+                          Histórico — o dono registra o que foi feito. Com nota:
+                          preview curto + "Ver/editar anotação"; sem nota só o
+                          botão "Anotação". Clique abre o textarea inline; Salvar
+                          persiste e reflete no card (atualizarItemLocal). */}
+                      <div className="mt-3 border-t border-border pt-3">
+                        {okAnotHistorico === item.id && (
+                          <p className="mb-2 text-xs font-medium text-green-700">
+                            Anotação salva.
+                          </p>
+                        )}
+
+                        {idAnotHistorico === item.id ? (
+                          <div className="flex flex-col gap-2">
+                            <textarea
+                              value={rascunhoAnotHistorico}
+                              onChange={(e) =>
+                                setRascunhoAnotHistorico(e.target.value)
+                              }
+                              maxLength={280}
+                              rows={3}
+                              placeholder="Ex: tintura usada, produtos, preferências do cliente..."
+                              className="w-full resize-none break-words rounded-lg bg-card px-3 py-2 text-sm text-heading ring-1 ring-border transition focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-xs text-muted">
+                                {rascunhoAnotHistorico.length}/280
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setIdAnotHistorico(null)}
+                                  className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                                >
+                                  Cancelar
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={salvandoAnotHistorico}
+                                  onClick={() =>
+                                    handleSalvarAnotHistorico(
+                                      item.id,
+                                      rascunhoAnotHistorico.trim()
+                                    )
+                                  }
+                                  className="inline-flex items-center justify-center rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100 disabled:opacity-60"
+                                >
+                                  {salvandoAnotHistorico ? "Salvando..." : "Salvar"}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {item.observacao && (
+                              <p className="mb-2 line-clamp-2 whitespace-pre-wrap break-words text-sm text-body">
+                                {item.observacao}
+                              </p>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOkAnotHistorico(null);
+                                setRascunhoAnotHistorico(item.observacao ?? "");
+                                setIdAnotHistorico(item.id);
+                              }}
+                              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                            >
+                              <NotebookPen className="h-4 w-4" />
+                              {item.observacao ? "Ver/editar anotação" : "Anotação"}
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </li>
                   );
                 })}
@@ -1026,6 +1135,13 @@ export default function AdminPage() {
             <ConfiguracoesSalao estabelecimento={estabelecimento} />
             <GerenciarProfissionais estabelecimento={estabelecimento} />
           </>
+        )}
+
+        {/* Clientes: consulta somente-leitura da tabela `clientes`, com busca
+            por nome e detalhe do relacionamento (próximo agendamento, último
+            atendimento, anamnese), particionado pelo estabelecimento resolvido. */}
+        {!carregando && !erro && viewPai === "clientes" && (
+          <GerenciarClientes estabelecimento={estabelecimento} />
         )}
       </div>
 

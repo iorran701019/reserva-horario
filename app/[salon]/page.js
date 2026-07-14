@@ -2,9 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 import { linkWhatsApp } from "@/lib/whatsapp";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
+import { precisaAnamnese } from "@/lib/anamnese";
+import { buscarAgendamentosAtivos } from "@/lib/agendamentosCliente";
 import Hero from "@/components/Hero";
+import ContatoDono from "@/components/ContatoDono";
+import IdentificacaoCliente from "@/components/IdentificacaoCliente";
+import FormularioAnamnese from "@/components/FormularioAnamnese";
+import PainelCliente from "@/components/PainelCliente";
 import FormularioAgendamento, {
   formatarData,
 } from "@/components/FormularioAgendamento";
@@ -30,6 +37,62 @@ export default function AgendarPage() {
   // do callback onSucesso; ao desmontar/remontar o formulário, ele zera sozinho.
   const [resumo, setResumo] = useState(null);
 
+  // Cliente identificado pela IdentificacaoCliente (null = ainda não passou por
+  // ela). Persiste entre agendamentos da mesma visita, então um novo
+  // agendamento (após "Fazer novo agendamento") não pede o WhatsApp de novo.
+  const [clienteIdentificado, setClienteIdentificado] = useState(null);
+
+  // null = ainda checando (ou cliente ainda não identificado); true = precisa
+  // preencher a anamnese antes do wizard; false = anamnese em dia, segue
+  // direto pro FormularioAgendamento. Verificado assim que o cliente é
+  // identificado (novo cadastro OU já existente com anamnese vencida).
+  const [anamneseNecessaria, setAnamneseNecessaria] = useState(null);
+
+  // Agendamentos ativos do cliente identificado (null = ainda não checado;
+  // array = carregado). Se houver algum, o PainelCliente aparece antes do
+  // wizard. modoNovoAgendamento força o fluxo normal mesmo com agendamentos
+  // ativos, quando o cliente escolhe "Novo agendamento" no painel.
+  const [agendamentosAtivos, setAgendamentosAtivos] = useState(null);
+  const [modoNovoAgendamento, setModoNovoAgendamento] = useState(false);
+
+  // Incrementado ao "Fazer novo agendamento" pra forçar o useEffect abaixo a
+  // rebuscar mesmo com clienteIdentificado/estabelecimento.id inalterados.
+  const [agendamentosVersao, setAgendamentosVersao] = useState(0);
+
+  // Profissional ativo de menor id, usado como "responsável" tanto no botão
+  // fixo ContatoDono quanto no texto do bloco de sinal do
+  // FormularioAgendamento — buscado uma única vez aqui pra não duplicar a
+  // query nos dois lugares. null = carregando ou nenhum ativo (cai em "a
+  // equipe").
+  const [nomeProfissionalContato, setNomeProfissionalContato] = useState(null);
+
+  useEffect(() => {
+    if (!clienteIdentificado) return;
+    let ativo = true;
+    precisaAnamnese(clienteIdentificado.id, estabelecimento?.id).then(
+      (necessaria) => {
+        if (ativo) setAnamneseNecessaria(necessaria);
+      }
+    );
+    return () => {
+      ativo = false;
+    };
+  }, [clienteIdentificado, estabelecimento?.id]);
+
+  useEffect(() => {
+    if (!clienteIdentificado || !estabelecimento?.id) return;
+    let ativo = true;
+    buscarAgendamentosAtivos(
+      estabelecimento.id,
+      clienteIdentificado.telefone.replace(/\D/g, "")
+    ).then((lista) => {
+      if (ativo) setAgendamentosAtivos(lista);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [clienteIdentificado, estabelecimento?.id, agendamentosVersao]);
+
   // Resolve o estabelecimento pelo slug do path ao montar (ou se o slug mudar).
   useEffect(() => {
     let ativo = true;
@@ -40,6 +103,28 @@ export default function AgendarPage() {
       ativo = false;
     };
   }, [salon]);
+
+  // Busca o profissional ativo de menor id assim que o estabelecimento
+  // resolve, pra alimentar ContatoDono e o texto do bloco de sinal.
+  useEffect(() => {
+    if (!estabelecimento?.id) return;
+    let ativo = true;
+    supabase
+      .from("profissionais")
+      .select("nome")
+      .eq("estabelecimento_id", estabelecimento.id)
+      .eq("ativo", true)
+      .order("id", { ascending: true })
+      .limit(1)
+      .then(({ data }) => {
+        if (ativo) setNomeProfissionalContato(data?.[0]?.nome ?? null);
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento?.id]);
+
+  const nomeContatoExibido = nomeProfissionalContato ?? "a equipe";
 
   // Foca o título da confirmação ao montar — leitores de tela anunciam o status.
   const tituloConfirmacaoRef = useRef(null);
@@ -134,7 +219,12 @@ export default function AgendarPage() {
 
           <button
             type="button"
-            onClick={() => setResumo(null)}
+            onClick={() => {
+              setResumo(null);
+              setModoNovoAgendamento(false);
+              setAgendamentosAtivos(null);
+              setAgendamentosVersao((v) => v + 1);
+            }}
             className="mt-6 w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
           >
             Fazer novo agendamento
@@ -161,6 +251,7 @@ export default function AgendarPage() {
           </a>
         </div>
         </div>
+        <ContatoDono estabelecimento={estabelecimento} nome={nomeContatoExibido} />
       </main>
     );
   }
@@ -176,12 +267,45 @@ export default function AgendarPage() {
           </p>
         </header>
 
-        {/* Sem prop `status`: o insert mantém o default "pendente" do banco. */}
-        <FormularioAgendamento
-          estabelecimento={estabelecimento}
-          onSucesso={(dados) => setResumo(dados)}
-        />
+        {/* Antes do wizard: identifica o cliente pelo WhatsApp e, se a
+            anamnese estiver vencida (ou nunca ter sido preenchida), cobra ela
+            também. Só então monta o FormularioAgendamento, já com
+            clienteInicial preenchido — a etapa "dados" dele vira um resumo em
+            vez de pedir nome/WhatsApp de novo. */}
+        {!clienteIdentificado ? (
+          <IdentificacaoCliente
+            estabelecimentoId={estabelecimento.id}
+            onIdentificado={setClienteIdentificado}
+          />
+        ) : agendamentosAtivos === null ? (
+          <p className="text-sm text-body">Carregando...</p>
+        ) : agendamentosAtivos.length > 0 && !modoNovoAgendamento ? (
+          <PainelCliente
+            estabelecimento={estabelecimento}
+            cliente={clienteIdentificado}
+            onNovoAgendamento={() => setModoNovoAgendamento(true)}
+            nomeProfissionalContato={nomeContatoExibido}
+          />
+        ) : anamneseNecessaria === null ? (
+          <p className="text-sm text-body">Carregando...</p>
+        ) : anamneseNecessaria ? (
+          <FormularioAnamnese
+            estabelecimentoId={estabelecimento.id}
+            clienteId={clienteIdentificado.id}
+            onConcluido={() => setAnamneseNecessaria(false)}
+          />
+        ) : (
+          // Sem prop `status`: o insert mantém o default "pendente" do banco.
+          <FormularioAgendamento
+            estabelecimento={estabelecimento}
+            clienteInicial={clienteIdentificado}
+            clienteEhNovo={clienteIdentificado?.clienteNovo ?? false}
+            nomeProfissionalContato={nomeContatoExibido}
+            onSucesso={(dados) => setResumo(dados)}
+          />
+        )}
       </div>
+      <ContatoDono estabelecimento={estabelecimento} nome={nomeContatoExibido} />
     </main>
   );
 }
