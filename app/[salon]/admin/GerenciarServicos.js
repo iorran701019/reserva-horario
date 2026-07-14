@@ -23,8 +23,20 @@ import { formatarPreco } from "@/components/FormularioAgendamento";
 
 // Estado inicial do formulário. `preco` fica em REAIS (string do input); só é
 // convertido pra centavos na hora de gravar. `profissionais` é a lista de ids
-// (profissionais.id) vinculados ao serviço.
-const FORM_INICIAL = { nome: "", preco: "", duracao: "", profissionais: [], categoria_id: "" };
+// (profissionais.id) vinculados ao serviço. `adicionarAlerta` só controla a
+// UI (mostrar/esconder a textarea); o que vai pro banco é `alertaMensagem`
+// (null se a caixa estiver desmarcada ou vazia — ver validarForm).
+const FORM_INICIAL = {
+  nome: "",
+  preco: "",
+  duracao: "",
+  profissionais: [],
+  categoria_id: "",
+  ocultarPreco: false,
+  ocultarDuracao: false,
+  adicionarAlerta: false,
+  alertaMensagem: "",
+};
 
 // Reais digitado (aceita "35", "35,50" ou "35.50") -> centavos inteiros.
 // Devolve NaN quando não dá pra interpretar, pra validação barrar.
@@ -145,7 +157,9 @@ export default function GerenciarServicos({ estabelecimento }) {
     async function carregar() {
       const { data, error } = await supabase
         .from("servicos")
-        .select("id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem")
+        .select(
+          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem"
+        )
         .eq("estabelecimento_id", estabelecimento.id)
         .order("categoria_id", { ascending: true, nullsFirst: true })
         .order("ordem", { ascending: true });
@@ -232,6 +246,22 @@ export default function GerenciarServicos({ estabelecimento }) {
     setForm((anterior) => ({ ...anterior, [name]: value }));
   }
 
+  function handleCheckbox(e) {
+    const { name, checked } = e.target;
+    setForm((anterior) => ({ ...anterior, [name]: checked }));
+  }
+
+  // Desmarcar "Adicionar alerta" também limpa a mensagem digitada — ao salvar,
+  // uma caixa desmarcada sempre grava alerta_mensagem null (ver validarForm).
+  function handleToggleAlerta(e) {
+    const checked = e.target.checked;
+    setForm((anterior) => ({
+      ...anterior,
+      adicionarAlerta: checked,
+      alertaMensagem: checked ? anterior.alertaMensagem : "",
+    }));
+  }
+
   function abrirNovo() {
     setForm(FORM_INICIAL);
     setErroForm("");
@@ -245,6 +275,11 @@ export default function GerenciarServicos({ estabelecimento }) {
       duracao: String(servico.duracao_min),
       profissionais: [],
       categoria_id: servico.categoria_id != null ? String(servico.categoria_id) : "",
+      ocultarPreco: Boolean(servico.ocultar_preco),
+      ocultarDuracao: Boolean(servico.ocultar_duracao),
+      // A caixa nasce marcada se já houver mensagem salva.
+      adicionarAlerta: Boolean(servico.alerta_mensagem),
+      alertaMensagem: servico.alerta_mensagem ?? "",
     });
     setErroForm("");
     setEditando(servico);
@@ -309,6 +344,14 @@ export default function GerenciarServicos({ estabelecimento }) {
         duracao_min: duracao,
         // "" (Sem categoria) -> null; senão o id numérico da categoria.
         categoria_id: form.categoria_id === "" ? null : Number(form.categoria_id),
+        ocultar_preco: form.ocultarPreco,
+        ocultar_duracao: form.ocultarDuracao,
+        // Caixa desmarcada ou texto em branco -> null (nunca salva alerta
+        // "vazio mas marcado").
+        alerta_mensagem:
+          form.adicionarAlerta && form.alertaMensagem.trim()
+            ? form.alertaMensagem.trim()
+            : null,
       },
     };
   }
@@ -368,7 +411,9 @@ export default function GerenciarServicos({ estabelecimento }) {
           estabelecimento_id: estabelecimento.id,
           ordem: proximaOrdemNoGrupo(payload.categoria_id),
         })
-        .select("id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem")
+        .select(
+          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem"
+        )
         .single();
 
       if (error) {
@@ -616,6 +661,58 @@ export default function GerenciarServicos({ estabelecimento }) {
                 className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
               />
             </div>
+          </div>
+
+          {/* Ocultar preço/duração na exibição pública (ver renderBotaoServico
+              em FormularioAgendamento) — o serviço continua com os valores
+              reais no banco, só não aparece pro cliente. */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:gap-6">
+            <label className="flex items-center gap-2 text-sm text-body">
+              <input
+                type="checkbox"
+                name="ocultarPreco"
+                checked={form.ocultarPreco}
+                onChange={handleCheckbox}
+                className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+              />
+              Ocultar preço
+            </label>
+            <label className="flex items-center gap-2 text-sm text-body">
+              <input
+                type="checkbox"
+                name="ocultarDuracao"
+                checked={form.ocultarDuracao}
+                onChange={handleCheckbox}
+                className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+              />
+              Ocultar duração
+            </label>
+          </div>
+
+          {/* Alerta exibido ao cliente ao escolher este serviço no /agendar
+              (ver bloco de alerta em FormularioAgendamento). Desmarcar some
+              com a textarea E limpa o texto (grava null ao salvar). */}
+          <div>
+            <label className="flex items-center gap-2 text-sm text-body">
+              <input
+                type="checkbox"
+                name="adicionarAlerta"
+                checked={form.adicionarAlerta}
+                onChange={handleToggleAlerta}
+                className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+              />
+              Adicionar alerta
+            </label>
+            {form.adicionarAlerta && (
+              <textarea
+                name="alertaMensagem"
+                value={form.alertaMensagem}
+                onChange={handleChange}
+                rows={3}
+                placeholder="Ex.: Traga uma foto de referência do corte desejado."
+                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            )}
           </div>
 
           {/* Profissionais que atendem este serviço (tabela servico_profissional).

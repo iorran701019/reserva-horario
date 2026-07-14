@@ -276,6 +276,8 @@ export default function AgendarPage() {
           <IdentificacaoCliente
             estabelecimentoId={estabelecimento.id}
             cadastroCompleto={Boolean(estabelecimento.cadastro_completo)}
+            estabelecimentoWhatsapp={estabelecimento.whatsapp}
+            nomeContato={nomeContatoExibido}
             onIdentificado={setClienteIdentificado}
           />
         ) : agendamentosAtivos === null ? (

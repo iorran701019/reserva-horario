@@ -314,6 +314,10 @@ export default function FormularioAgendamento({
 
   const [servicos, setServicos] = useState([]);
   const [servicoSelecionado, setServicoSelecionado] = useState(null);
+  // Serviço com alerta_mensagem que o cliente acabou de tocar, aguardando
+  // confirmação no modal (ver selecionarServico/confirmarAlerta/cancelarAlerta).
+  // A seleção de fato só acontece se o modal for confirmado.
+  const [alertaPendente, setAlertaPendente] = useState(null);
   const [carregandoServicos, setCarregandoServicos] = useState(true);
   const [erroServicos, setErroServicos] = useState("");
 
@@ -388,7 +392,9 @@ export default function FormularioAgendamento({
       const [resServicos, resConfig, resCategorias] = await Promise.all([
         supabase
           .from("servicos")
-          .select("id, nome, duracao_min, preco_centavos, categoria_id")
+          .select(
+            "id, nome, duracao_min, preco_centavos, categoria_id, ocultar_preco, ocultar_duracao, alerta_mensagem"
+          )
           .eq("estabelecimento_id", estabelecimento.id)
           .eq("ativo", true)
           .order("categoria_id", { ascending: true, nullsFirst: true })
@@ -510,17 +516,19 @@ export default function FormularioAgendamento({
       >
         <span className="min-w-0">
           <span className="block font-medium">{servico.nome}</span>
-          <span
-            className={[
-              "block text-sm",
-              selecionado ? "text-on-primary/90" : "text-body",
-            ].join(" ")}
-          >
-            {servico.duracao_min} min
-          </span>
+          {!servico.ocultar_duracao && (
+            <span
+              className={[
+                "block text-sm",
+                selecionado ? "text-on-primary/90" : "text-body",
+              ].join(" ")}
+            >
+              {servico.duracao_min} min
+            </span>
+          )}
         </span>
 
-        {servico.preco_centavos != null && (
+        {servico.preco_centavos > 0 && !servico.ocultar_preco && (
           <span className="shrink-0 font-medium">
             {formatarPreco(servico.preco_centavos)}
           </span>
@@ -641,12 +649,23 @@ export default function FormularioAgendamento({
     setForm((anterior) => ({ ...anterior, [name]: value }));
   }
 
-  // Trocar de serviço muda a duração/grade e a lista de profissionais: o
-  // horário e o profissional escolhidos podem não valer mais, então limpamos.
-  // No encaixe automático (toggle off), avança direto para a data. No fluxo
-  // "cliente escolhe", fica na etapa de serviço pra o cliente escolher o
-  // profissional (os cards aparecem logo abaixo).
+  // Toque num serviço com alerta_mensagem: NÃO seleciona ainda — abre o modal
+  // (ver JSX) e espera a confirmação. Sem alerta, segue direto pra seleção de
+  // fato (mesmo comportamento de sempre).
   function selecionarServico(servico) {
+    if (servico.alerta_mensagem) {
+      setAlertaPendente(servico);
+      return;
+    }
+    confirmarSelecaoServico(servico);
+  }
+
+  // Seleção de fato de um serviço: muda a duração/grade e a lista de
+  // profissionais, então o horário e o profissional escolhidos podem não
+  // valer mais — limpamos os dois. No encaixe automático (toggle off), avança
+  // direto para a data. No fluxo "cliente escolhe", fica na etapa de serviço
+  // pra escolher o profissional (os cards aparecem logo abaixo).
+  function confirmarSelecaoServico(servico) {
     setServicoSelecionado(servico);
     setHorarioSelecionado("");
     setProfissionalSelecionado(null);
@@ -654,6 +673,19 @@ export default function FormularioAgendamento({
     // seleção antiga num dia que virou indisponível.
     setForm((anterior) => ({ ...anterior, data: "" }));
     if (!escolherProfissional) setEtapa("data");
+  }
+
+  // Modal do alerta — "Continuar": confirma a seleção (como se tivesse
+  // acabado de tocar no serviço, sem o alerta no caminho).
+  function confirmarAlerta() {
+    confirmarSelecaoServico(alertaPendente);
+    setAlertaPendente(null);
+  }
+
+  // Modal do alerta — "Voltar": fecha sem selecionar nada, deixando o cliente
+  // escolher outro serviço.
+  function cancelarAlerta() {
+    setAlertaPendente(null);
   }
 
   // Fluxo "cliente escolhe": escolher o profissional conclui a etapa de serviço
@@ -1326,6 +1358,68 @@ export default function FormularioAgendamento({
           </>
         )}
       </form>
+
+      {/* Alerta do serviço tocado (ver GerenciarServicos): trava o wizard
+          antes de avançar pra profissional/data. Continuar confirma a
+          seleção; Voltar fecha sem selecionar nada. */}
+      {alertaPendente && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-alerta-servico"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={cancelarAlerta}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className="mt-0.5 h-6 w-6 shrink-0 text-amber-600"
+              >
+                <path d="M12 9v4M12 17h.01" />
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+              </svg>
+              <div>
+                <h2
+                  id="titulo-alerta-servico"
+                  className="text-lg font-semibold text-heading"
+                >
+                  Atenção
+                </h2>
+                <p className="mt-2 text-sm text-body">
+                  {alertaPendente.alerta_mensagem}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarAlerta}
+                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+              >
+                Continuar
+              </button>
+              <button
+                type="button"
+                onClick={cancelarAlerta}
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
