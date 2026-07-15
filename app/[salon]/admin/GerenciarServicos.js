@@ -10,6 +10,12 @@ import { formatarPreco } from "@/components/FormularioAgendamento";
 // (cards ring-border, botões verdes/vermelhos), então nenhuma lógica de
 // resolução de tenant vive aqui.
 //
+// Categorias e serviços vivem num único acordeão (mesmo padrão retrátil do
+// /agendar — ver `categoriasComServicos`/`alternarCategoria` em
+// FormularioAgendamento): cada categoria é um cabeçalho que expande/recolhe
+// pra mostrar os serviços dela; o grupo sintético "Sem categoria" (serviços
+// com categoria_id null) sempre aparece por último.
+//
 // Convenções da tabela (mesmas usadas em FormularioAgendamento):
 //   preco_centavos – inteiro em centavos (UI mostra/edita em reais)
 //   duracao_min    – inteiro em minutos
@@ -20,6 +26,10 @@ import { formatarPreco } from "@/components/FormularioAgendamento";
 //                    pela Janela C do form de profissional (os dois lados
 //                    refletem os mesmos vínculos). Gravado com "substitui tudo"
 //                    (apaga os vínculos do servico_id e reinsere os marcados).
+
+// Sentinel do grupo sintético "Sem categoria" no acordeão — nunca colide com
+// um id de categoria (numérico).
+const SEM_CATEGORIA = "sem-categoria";
 
 // Estado inicial do formulário. `preco` fica em REAIS (string do input); só é
 // convertido pra centavos na hora de gravar. `profissionais` é a lista de ids
@@ -131,7 +141,7 @@ export default function GerenciarServicos({ estabelecimento }) {
 
   // Trava as setinhas de reordenação enquanto um swap de `ordem` está em
   // andamento, pra não disparar dois swaps concorrentes (mesmo padrão do
-  // `ocupado` em GerenciarCategorias).
+  // `ocupadoCategoria` abaixo).
   const [reordenando, setReordenando] = useState(false);
   const [erroReordenar, setErroReordenar] = useState("");
 
@@ -142,10 +152,35 @@ export default function GerenciarServicos({ estabelecimento }) {
   const [erroProfissionais, setErroProfissionais] = useState("");
 
   // Categorias do salão (tabela categorias_servico). Alimentam tanto o seletor
-  // do form quanto a seção de gerenciamento. Ordenadas por `ordem`.
+  // do form quanto o acordeão de gerenciamento. Ordenadas por `ordem`.
   const [categorias, setCategorias] = useState([]);
   const [carregandoCategorias, setCarregandoCategorias] = useState(true);
   const [erroCategorias, setErroCategorias] = useState("");
+
+  // Acordeão único (Categorias + Serviços): qual grupo está expandido — o id
+  // da categoria, ou o sentinel SEM_CATEGORIA. Só um aberto por vez, mesmo
+  // padrão do acordeão de /agendar (ver `categoriaAberta` em
+  // FormularioAgendamento).
+  const [grupoAberto, setGrupoAberto] = useState(null);
+
+  // Criar categoria: form inline, acima do botão "Novo serviço".
+  const [criandoCategoriaAberto, setCriandoCategoriaAberto] = useState(false);
+  const [novoNomeCategoria, setNovoNomeCategoria] = useState("");
+  const [salvandoCategoria, setSalvandoCategoria] = useState(false);
+  const [erroCriarCategoria, setErroCriarCategoria] = useState("");
+
+  // Renomear categoria: inline, na própria linha do cabeçalho do grupo.
+  const [categoriaEditandoId, setCategoriaEditandoId] = useState(null);
+  const [nomeEdicaoCategoria, setNomeEdicaoCategoria] = useState("");
+
+  // Categoria "armada" para exclusão (modal de confirmação) — mesmo padrão do
+  // servicoParaExcluir.
+  const [categoriaParaExcluir, setCategoriaParaExcluir] = useState(null);
+
+  // Trava as ações de categoria (criar/renomear/mover/apagar) enquanto uma
+  // grava, pra não disparar swaps concorrentes de `ordem`.
+  const [ocupadoCategoria, setOcupadoCategoria] = useState(false);
+  const [erroAcaoCategoria, setErroAcaoCategoria] = useState("");
 
   // Carga inicial. Traz ATIVOS e INATIVOS (o CRUD precisa mostrar os dois, com
   // ação de reativar). Ordena por categoria_id, ordem — mesmo critério do
@@ -211,8 +246,8 @@ export default function GerenciarServicos({ estabelecimento }) {
     };
   }, [estabelecimento.id]);
 
-  // Carrega as categorias do salão (para o seletor e a seção de gerenciamento),
-  // na ordem de exibição definida por `ordem`.
+  // Carrega as categorias do salão (para o seletor e o acordeão de
+  // gerenciamento), na ordem de exibição definida por `ordem`.
   useEffect(() => {
     let ativo = true;
 
@@ -508,7 +543,7 @@ export default function GerenciarServicos({ estabelecimento }) {
 
   // Move o serviço uma posição pra cima (-1) ou baixo (+1) trocando `ordem`
   // com o vizinho DENTRO DO MESMO categoria_id — nunca atravessa grupos.
-  // Mesma técnica de swap usada em GerenciarCategorias.mover.
+  // Mesma técnica de swap usada em moverCategoria.
   async function mover(servico, direcao) {
     const grupo = grupoDaCategoria(servicos, servico);
     const i = grupo.findIndex((s) => s.id === servico.id);
@@ -543,6 +578,223 @@ export default function GerenciarServicos({ estabelecimento }) {
     );
   }
 
+  // Abre/fecha um grupo do acordeão (categoria ou o sentinel SEM_CATEGORIA) —
+  // só um aberto por vez, mesmo padrão do acordeão de /agendar.
+  function alternarGrupo(chave) {
+    setGrupoAberto((atual) => (atual === chave ? null : chave));
+  }
+
+  async function criarCategoria(e) {
+    e.preventDefault();
+    const nome = novoNomeCategoria.trim();
+    if (!nome) return;
+
+    setSalvandoCategoria(true);
+    setErroCriarCategoria("");
+    // Nova categoria vai pro fim da ordem (maior `ordem` atual + 1).
+    const proximaOrdem = categorias.reduce((max, c) => Math.max(max, c.ordem), -1) + 1;
+    const { data, error } = await supabase
+      .from("categorias_servico")
+      .insert({ estabelecimento_id: estabelecimento.id, nome, ordem: proximaOrdem })
+      .select("id, nome, ordem")
+      .single();
+
+    setSalvandoCategoria(false);
+    if (error) {
+      setErroCriarCategoria(error.message);
+      return;
+    }
+    setCategorias((atuais) => ordenarCategorias([...atuais, data]));
+    setNovoNomeCategoria("");
+    setCriandoCategoriaAberto(false);
+  }
+
+  function abrirRenomearCategoria(categoria) {
+    setCategoriaEditandoId(categoria.id);
+    setNomeEdicaoCategoria(categoria.nome);
+    setErroAcaoCategoria("");
+  }
+
+  async function salvarRenomeCategoria(categoria) {
+    const nome = nomeEdicaoCategoria.trim();
+    if (!nome) return;
+    if (nome === categoria.nome) {
+      setCategoriaEditandoId(null);
+      return;
+    }
+
+    setOcupadoCategoria(true);
+    setErroAcaoCategoria("");
+    const { error } = await supabase
+      .from("categorias_servico")
+      .update({ nome })
+      .eq("id", categoria.id);
+
+    setOcupadoCategoria(false);
+    if (error) {
+      setErroAcaoCategoria(error.message);
+      return;
+    }
+    setCategorias((atuais) =>
+      ordenarCategorias(atuais.map((c) => (c.id === categoria.id ? { ...c, nome } : c)))
+    );
+    setCategoriaEditandoId(null);
+  }
+
+  // Move a categoria uma posição pra cima (-1) ou baixo (+1) trocando `ordem`
+  // com a vizinha. O grupo "Sem categoria" nunca entra aqui — não tem `ordem`
+  // própria, fica sempre fixo no fim da lista.
+  async function moverCategoria(categoria, direcao) {
+    const ordenadas = ordenarCategorias(categorias);
+    const i = ordenadas.findIndex((c) => c.id === categoria.id);
+    const j = i + direcao;
+    if (j < 0 || j >= ordenadas.length) return;
+    const vizinha = ordenadas[j];
+
+    setOcupadoCategoria(true);
+    setErroAcaoCategoria("");
+    const { error: erro1 } = await supabase
+      .from("categorias_servico")
+      .update({ ordem: vizinha.ordem })
+      .eq("id", categoria.id);
+    const { error: erro2 } = await supabase
+      .from("categorias_servico")
+      .update({ ordem: categoria.ordem })
+      .eq("id", vizinha.id);
+
+    setOcupadoCategoria(false);
+    if (erro1 || erro2) {
+      setErroAcaoCategoria((erro1 || erro2).message);
+      return;
+    }
+    setCategorias((atuais) =>
+      ordenarCategorias(
+        atuais.map((c) => {
+          if (c.id === categoria.id) return { ...c, ordem: vizinha.ordem };
+          if (c.id === vizinha.id) return { ...c, ordem: categoria.ordem };
+          return c;
+        })
+      )
+    );
+  }
+
+  // Apaga a categoria (FK on delete set null: os serviços dela apenas ficam
+  // sem categoria — nunca são apagados). Atualiza a lista local de serviços
+  // pra refletir o categoria_id null sem precisar de refetch.
+  async function apagarCategoria(categoria) {
+    setOcupadoCategoria(true);
+    setErroAcaoCategoria("");
+    const { error } = await supabase
+      .from("categorias_servico")
+      .delete()
+      .eq("id", categoria.id);
+
+    setOcupadoCategoria(false);
+    if (error) {
+      setErroAcaoCategoria(error.message);
+      setCategoriaParaExcluir(null);
+      return;
+    }
+    setCategorias((atuais) => atuais.filter((c) => c.id !== categoria.id));
+    setServicos((atuais) =>
+      ordenar(
+        atuais.map((s) => (s.categoria_id === categoria.id ? { ...s, categoria_id: null } : s))
+      )
+    );
+    if (grupoAberto === categoria.id) setGrupoAberto(null);
+    setCategoriaParaExcluir(null);
+  }
+
+  // Card de um serviço dentro do corpo de um grupo do acordeão. As setinhas
+  // trocam `ordem` só com o vizinho do MESMO grupo (ver mover()).
+  function renderServicoItem(servico) {
+    const grupo = grupoDaCategoria(servicos, servico);
+    const indiceNoGrupo = grupo.findIndex((s) => s.id === servico.id);
+    return (
+      <li
+        key={servico.id}
+        className={`rounded-2xl p-4 shadow-sm ring-1 transition ${
+          servico.ativo ? "bg-card ring-border" : "bg-surface ring-border"
+        }`}
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex shrink-0 flex-col pt-0.5">
+            <button
+              type="button"
+              onClick={() => mover(servico, -1)}
+              disabled={reordenando || indiceNoGrupo === 0}
+              aria-label="Mover para cima"
+              className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              ▲
+            </button>
+            <button
+              type="button"
+              onClick={() => mover(servico, 1)}
+              disabled={reordenando || indiceNoGrupo === grupo.length - 1}
+              aria-label="Mover para baixo"
+              className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              ▼
+            </button>
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-medium text-heading">
+                  {servico.nome}
+                </p>
+                <p className="mt-0.5 text-sm text-body">
+                  {formatarPreco(servico.preco_centavos)} · {servico.duracao_min} min
+                </p>
+              </div>
+
+              <span
+                className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${
+                  servico.ativo
+                    ? "bg-green-50 text-green-700 ring-green-100"
+                    : "bg-surface text-body ring-border"
+                }`}
+              >
+                {servico.ativo ? "Ativo" : "Inativo"}
+              </span>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              {servico.ativo ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => abrirEdicao(servico)}
+                    className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setServicoParaExcluir(servico)}
+                    className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                  >
+                    Excluir
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleReativar(servico)}
+                  className="inline-flex flex-1 items-center justify-center rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
+                >
+                  Reativar
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </li>
+    );
+  }
+
   if (carregando) {
     return (
       <p className="rounded-lg bg-card px-4 py-3 text-sm text-body shadow-sm ring-1 ring-border">
@@ -559,22 +811,82 @@ export default function GerenciarServicos({ estabelecimento }) {
     );
   }
 
+  // Agrupamento pro acordeão: categorias na ordem de exibição, e o grupo
+  // sintético "Sem categoria" — serviços com categoria_id null, ou apontando
+  // pra uma categoria que não existe mais. Só aparece se tiver algum serviço
+  // (mesmo critério do bloco solto de /agendar).
+  const categoriasOrdenadas = ordenarCategorias(categorias);
+  const idsCategorias = new Set(categorias.map((c) => c.id));
+  const servicosSemCategoria = servicos.filter(
+    (s) => s.categoria_id == null || !idsCategorias.has(s.categoria_id)
+  );
+
   return (
     <>
-      {/* Cabeçalho da aba + ação de criar. O botão some enquanto o formulário
-          está aberto pra não competir com ele. */}
+      {/* Cabeçalho da aba + ações de criar. Somem enquanto o formulário está
+          aberto pra não competir com ele. "Nova categoria" fica acima de
+          "Novo serviço" — hierarquia visual (categoria é o nível "pai"). */}
       {!editando && (
-        <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="mb-4 space-y-3">
           <p className="text-sm text-body">
             {servicos.length} serviço{servicos.length === 1 ? "" : "s"}
           </p>
-          <button
-            type="button"
-            onClick={abrirNovo}
-            className="inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
-          >
-            Novo serviço
-          </button>
+
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setCriandoCategoriaAberto((v) => !v);
+                setErroCriarCategoria("");
+                setNovoNomeCategoria("");
+              }}
+              className="inline-flex items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-primary ring-1 ring-primary/40 transition hover:bg-primary/5"
+            >
+              Nova categoria
+            </button>
+            <button
+              type="button"
+              onClick={abrirNovo}
+              className="inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+            >
+              Novo serviço
+            </button>
+          </div>
+
+          {criandoCategoriaAberto && (
+            <form
+              onSubmit={criarCategoria}
+              className="flex gap-2 rounded-xl bg-surface p-3 ring-1 ring-border"
+            >
+              <input
+                type="text"
+                value={novoNomeCategoria}
+                onChange={(e) => setNovoNomeCategoria(e.target.value)}
+                placeholder="Nova categoria (ex.: Cabelo)"
+                className="min-w-0 flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+              <button
+                type="submit"
+                disabled={salvandoCategoria || !novoNomeCategoria.trim()}
+                className="shrink-0 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {salvandoCategoria ? "..." : "Adicionar"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCriandoCategoriaAberto(false)}
+                className="shrink-0 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Cancelar
+              </button>
+            </form>
+          )}
+
+          {erroCriarCategoria && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+              {erroCriarCategoria}
+            </p>
+          )}
         </div>
       )}
 
@@ -754,134 +1066,176 @@ export default function GerenciarServicos({ estabelecimento }) {
         </form>
       )}
 
-      {/* Lista de serviços. Some enquanto o formulário está aberto pra manter o
-          foco numa coisa só (mobile). */}
+      {/* Acordeão único: cada categoria é um cabeçalho retrátil (mesmo padrão
+          visual/interativo do /agendar) com os serviços dela dentro; o grupo
+          "Sem categoria" sempre por último. Some enquanto o formulário está
+          aberto pra manter o foco numa coisa só (mobile). */}
       {!editando && (
         <>
-        <GerenciarCategorias
-          estabelecimento={estabelecimento}
-          categorias={categorias}
-          setCategorias={setCategorias}
-          carregando={carregandoCategorias}
-          erro={erroCategorias}
-          aoApagarCategoria={(id) =>
-            setServicos((atuais) =>
-              atuais.map((s) => (s.categoria_id === id ? { ...s, categoria_id: null } : s))
-            )
-          }
-        />
-        {erroReordenar && (
-          <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-            {erroReordenar}
-          </p>
-        )}
-        {servicos.length === 0 ? (
-          <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
-            Nenhum serviço cadastrado.
-          </p>
-        ) : (
-          <ul className="space-y-3">
-            {servicos.map((servico) => {
-              const grupo = grupoDaCategoria(servicos, servico);
-              const indiceNoGrupo = grupo.findIndex((s) => s.id === servico.id);
-              return (
-              <li
-                key={servico.id}
-                className={`rounded-2xl p-4 shadow-sm ring-1 transition ${
-                  servico.ativo
-                    ? "bg-card ring-border"
-                    : "bg-surface ring-border"
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  {/* Setinhas de reordenação: trocam `ordem` só com o vizinho
-                      do mesmo categoria_id (ver mover()). Desabilitadas no
-                      primeiro/último do grupo, mesmo padrão visual das
-                      categorias. */}
-                  <div className="flex shrink-0 flex-col pt-0.5">
-                    <button
-                      type="button"
-                      onClick={() => mover(servico, -1)}
-                      disabled={reordenando || indiceNoGrupo === 0}
-                      aria-label="Mover para cima"
-                      className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
-                    >
-                      ▲
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => mover(servico, 1)}
-                      disabled={reordenando || indiceNoGrupo === grupo.length - 1}
-                      aria-label="Mover para baixo"
-                      className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
-                    >
-                      ▼
-                    </button>
-                  </div>
+          {erroAcaoCategoria && (
+            <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+              {erroAcaoCategoria}
+            </p>
+          )}
+          {erroReordenar && (
+            <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+              {erroReordenar}
+            </p>
+          )}
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate font-medium text-heading">
-                          {servico.nome}
-                        </p>
-                        <p className="mt-0.5 text-sm text-body">
-                          {formatarPreco(servico.preco_centavos)} · {servico.duracao_min} min
-                        </p>
-                        {(() => {
-                          const categoria = categorias.find((c) => c.id === servico.categoria_id);
-                          return categoria ? (
-                            <p className="mt-0.5 truncate text-xs text-body">{categoria.nome}</p>
-                          ) : null;
-                        })()}
+          {carregandoCategorias ? (
+            <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
+              Carregando categorias...
+            </p>
+          ) : erroCategorias ? (
+            <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 ring-1 ring-red-100">
+              {erroCategorias}
+            </p>
+          ) : categorias.length === 0 && servicos.length === 0 ? (
+            <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
+              Nenhum serviço cadastrado.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {categoriasOrdenadas.map((categoria, indice) => {
+                const servicosDaCategoria = servicos.filter(
+                  (s) => s.categoria_id === categoria.id
+                );
+                const aberta = grupoAberto === categoria.id;
+                const renomeando = categoriaEditandoId === categoria.id;
+
+                return (
+                  <div
+                    key={categoria.id}
+                    className="rounded-2xl bg-card shadow-sm ring-1 ring-border"
+                  >
+                    <div className="flex items-center gap-2 px-4 py-3">
+                      <div className="flex shrink-0 flex-col">
+                        <button
+                          type="button"
+                          onClick={() => moverCategoria(categoria, -1)}
+                          disabled={ocupadoCategoria || indice === 0}
+                          aria-label="Mover categoria para cima"
+                          className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moverCategoria(categoria, 1)}
+                          disabled={ocupadoCategoria || indice === categoriasOrdenadas.length - 1}
+                          aria-label="Mover categoria para baixo"
+                          className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                          ▼
+                        </button>
                       </div>
 
-                      <span
-                        className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${
-                          servico.ativo
-                            ? "bg-green-50 text-green-700 ring-green-100"
-                            : "bg-surface text-body ring-border"
-                        }`}
-                      >
-                        {servico.ativo ? "Ativo" : "Inativo"}
-                      </span>
-                    </div>
-
-                    <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                      {servico.ativo ? (
+                      {renomeando ? (
                         <>
+                          <input
+                            type="text"
+                            value={nomeEdicaoCategoria}
+                            onChange={(e) => setNomeEdicaoCategoria(e.target.value)}
+                            className="min-w-0 flex-1 rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                          />
                           <button
                             type="button"
-                            onClick={() => abrirEdicao(servico)}
-                            className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                            onClick={() => salvarRenomeCategoria(categoria)}
+                            disabled={ocupadoCategoria || !nomeEdicaoCategoria.trim()}
+                            className="shrink-0 rounded-lg bg-green-50 px-2.5 py-1.5 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            Editar
+                            Salvar
                           </button>
                           <button
                             type="button"
-                            onClick={() => setServicoParaExcluir(servico)}
-                            className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                            onClick={() => setCategoriaEditandoId(null)}
+                            className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
                           >
-                            Excluir
+                            Cancelar
                           </button>
                         </>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleReativar(servico)}
-                          className="inline-flex flex-1 items-center justify-center rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
-                        >
-                          Reativar
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => alternarGrupo(categoria.id)}
+                            aria-expanded={aberta}
+                            className="flex min-w-0 flex-1 items-center justify-between gap-2 py-1 text-left"
+                          >
+                            <span className="min-w-0 truncate font-semibold text-heading">
+                              {categoria.nome}
+                            </span>
+                            <span className="flex shrink-0 items-center gap-1 text-xs text-body">
+                              {servicosDaCategoria.length} serviço
+                              {servicosDaCategoria.length === 1 ? "" : "s"}
+                              <span aria-hidden="true">{aberta ? "▲" : "▼"}</span>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => abrirRenomearCategoria(categoria)}
+                            className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                          >
+                            Renomear
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCategoriaParaExcluir(categoria)}
+                            className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                          >
+                            Apagar
+                          </button>
+                        </>
                       )}
                     </div>
+
+                    {aberta && (
+                      <div className="border-t border-border p-4">
+                        {servicosDaCategoria.length === 0 ? (
+                          <p className="rounded-lg bg-surface px-3 py-3 text-center text-sm text-body ring-1 ring-border">
+                            Nenhum serviço nesta categoria.
+                          </p>
+                        ) : (
+                          <ul className="space-y-3">
+                            {servicosDaCategoria.map((s) => renderServicoItem(s))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
                   </div>
+                );
+              })}
+
+              {servicosSemCategoria.length > 0 && (
+                <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+                  <button
+                    type="button"
+                    onClick={() => alternarGrupo(SEM_CATEGORIA)}
+                    aria-expanded={grupoAberto === SEM_CATEGORIA}
+                    className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+                  >
+                    <span className="font-semibold text-heading">Sem categoria</span>
+                    <span className="flex shrink-0 items-center gap-1 text-xs text-body">
+                      {servicosSemCategoria.length} serviço
+                      {servicosSemCategoria.length === 1 ? "" : "s"}
+                      <span aria-hidden="true">
+                        {grupoAberto === SEM_CATEGORIA ? "▲" : "▼"}
+                      </span>
+                    </span>
+                  </button>
+
+                  {grupoAberto === SEM_CATEGORIA && (
+                    <div className="border-t border-border p-4">
+                      <ul className="space-y-3">
+                        {servicosSemCategoria.map((s) => renderServicoItem(s))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
-              </li>
-              );
-            })}
-          </ul>
-        )}
+              )}
+            </div>
+          )}
         </>
       )}
 
@@ -933,6 +1287,50 @@ export default function GerenciarServicos({ estabelecimento }) {
           </div>
         </div>
       )}
+
+      {/* Confirmação de exclusão de categoria. Deixa claro que os serviços só
+          ficam sem categoria (não são apagados). */}
+      {categoriaParaExcluir && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-excluir-categoria"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setCategoriaParaExcluir(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="titulo-excluir-categoria" className="text-lg font-semibold text-heading">
+              Apagar categoria
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Tem certeza que deseja apagar{" "}
+              <span className="font-medium text-heading">{categoriaParaExcluir.nome}</span>? Os
+              serviços dela apenas ficam sem categoria.
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={() => apagarCategoria(categoriaParaExcluir)}
+                disabled={ocupadoCategoria}
+                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Apagar categoria
+              </button>
+              <button
+                type="button"
+                onClick={() => setCategoriaParaExcluir(null)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -963,315 +1361,6 @@ function grupoDaCategoria(lista, servico) {
 // Patch imutável do campo `ativo` de um serviço na lista.
 function atualizarAtivo(lista, id, ativo) {
   return lista.map((s) => (s.id === id ? { ...s, ativo } : s));
-}
-
-// Seção de gerenciamento das categorias do salão (criar, renomear, reordenar,
-// apagar). Fica recolhida por padrão pra não competir com a lista de serviços;
-// expande sob demanda. Reordenar troca `ordem` entre vizinhos. Apagar só
-// desagrupa os serviços (FK on delete set null); avisamos o pai por
-// `aoApagarCategoria` pra zerar o categoria_id na lista em memória.
-function GerenciarCategorias({
-  estabelecimento,
-  categorias,
-  setCategorias,
-  carregando,
-  erro,
-  aoApagarCategoria,
-}) {
-  const [aberto, setAberto] = useState(false);
-  const [novoNome, setNovoNome] = useState("");
-  const [criando, setCriando] = useState(false);
-  const [editandoId, setEditandoId] = useState(null);
-  const [nomeEdicao, setNomeEdicao] = useState("");
-  const [categoriaParaExcluir, setCategoriaParaExcluir] = useState(null);
-  const [erroAcao, setErroAcao] = useState("");
-  // Trava as ações de linha (renomear/mover/apagar) enquanto uma grava, pra não
-  // disparar swaps concorrentes de `ordem`.
-  const [ocupado, setOcupado] = useState(false);
-
-  const ordenadas = ordenarCategorias(categorias);
-
-  async function criar(e) {
-    e.preventDefault();
-    const nome = novoNome.trim();
-    if (!nome) return;
-
-    setCriando(true);
-    setErroAcao("");
-    // Nova categoria vai pro fim da ordem (maior `ordem` atual + 1).
-    const proximaOrdem = categorias.reduce((max, c) => Math.max(max, c.ordem), -1) + 1;
-    const { data, error } = await supabase
-      .from("categorias_servico")
-      .insert({ estabelecimento_id: estabelecimento.id, nome, ordem: proximaOrdem })
-      .select("id, nome, ordem")
-      .single();
-
-    setCriando(false);
-    if (error) {
-      setErroAcao(error.message);
-      return;
-    }
-    setCategorias((atuais) => ordenarCategorias([...atuais, data]));
-    setNovoNome("");
-  }
-
-  function abrirRenomear(categoria) {
-    setEditandoId(categoria.id);
-    setNomeEdicao(categoria.nome);
-    setErroAcao("");
-  }
-
-  async function salvarRenome(categoria) {
-    const nome = nomeEdicao.trim();
-    if (!nome) return;
-    if (nome === categoria.nome) {
-      setEditandoId(null);
-      return;
-    }
-
-    setOcupado(true);
-    setErroAcao("");
-    const { error } = await supabase
-      .from("categorias_servico")
-      .update({ nome })
-      .eq("id", categoria.id);
-
-    setOcupado(false);
-    if (error) {
-      setErroAcao(error.message);
-      return;
-    }
-    setCategorias((atuais) =>
-      ordenarCategorias(atuais.map((c) => (c.id === categoria.id ? { ...c, nome } : c)))
-    );
-    setEditandoId(null);
-  }
-
-  // Move a categoria uma posição pra cima (-1) ou baixo (+1) trocando o valor de
-  // `ordem` com a vizinha. Dois updates sequenciais; `ocupado` evita corrida.
-  async function mover(categoria, direcao) {
-    const i = ordenadas.findIndex((c) => c.id === categoria.id);
-    const j = i + direcao;
-    if (j < 0 || j >= ordenadas.length) return;
-    const vizinha = ordenadas[j];
-
-    setOcupado(true);
-    setErroAcao("");
-    const { error: erro1 } = await supabase
-      .from("categorias_servico")
-      .update({ ordem: vizinha.ordem })
-      .eq("id", categoria.id);
-    const { error: erro2 } = await supabase
-      .from("categorias_servico")
-      .update({ ordem: categoria.ordem })
-      .eq("id", vizinha.id);
-
-    setOcupado(false);
-    if (erro1 || erro2) {
-      setErroAcao((erro1 || erro2).message);
-      return;
-    }
-    setCategorias((atuais) =>
-      ordenarCategorias(
-        atuais.map((c) => {
-          if (c.id === categoria.id) return { ...c, ordem: vizinha.ordem };
-          if (c.id === vizinha.id) return { ...c, ordem: categoria.ordem };
-          return c;
-        })
-      )
-    );
-  }
-
-  async function apagar(categoria) {
-    setOcupado(true);
-    setErroAcao("");
-    const { error } = await supabase
-      .from("categorias_servico")
-      .delete()
-      .eq("id", categoria.id);
-
-    setOcupado(false);
-    if (error) {
-      setErroAcao(error.message);
-      setCategoriaParaExcluir(null);
-      return;
-    }
-    setCategorias((atuais) => atuais.filter((c) => c.id !== categoria.id));
-    aoApagarCategoria(categoria.id);
-    setCategoriaParaExcluir(null);
-  }
-
-  return (
-    <div className="mb-4 rounded-2xl bg-card shadow-sm ring-1 ring-border">
-      <button
-        type="button"
-        onClick={() => setAberto((v) => !v)}
-        className="flex w-full items-center justify-between gap-3 px-6 py-4 text-left"
-      >
-        <span className="text-base font-semibold text-heading">Categorias</span>
-        <span className="text-sm text-body">
-          {carregando ? "..." : `${categorias.length} · ${aberto ? "ocultar" : "gerenciar"}`}
-        </span>
-      </button>
-
-      {aberto && (
-        <div className="space-y-4 border-t border-border px-6 py-4">
-          {/* Criar categoria. */}
-          <form onSubmit={criar} className="flex gap-2">
-            <input
-              type="text"
-              value={novoNome}
-              onChange={(e) => setNovoNome(e.target.value)}
-              placeholder="Nova categoria (ex.: Cabelo)"
-              className="min-w-0 flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-            />
-            <button
-              type="submit"
-              disabled={criando || !novoNome.trim()}
-              className="shrink-0 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {criando ? "..." : "Adicionar"}
-            </button>
-          </form>
-
-          {(erro || erroAcao) && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-              {erro || erroAcao}
-            </p>
-          )}
-
-          {carregando ? (
-            <p className="rounded-lg bg-surface px-3 py-3 text-sm text-body ring-1 ring-border">
-              Carregando categorias...
-            </p>
-          ) : ordenadas.length === 0 ? (
-            <p className="rounded-lg bg-surface px-3 py-3 text-sm text-body ring-1 ring-border">
-              Nenhuma categoria ainda. Crie a primeira acima.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {ordenadas.map((categoria, indice) => (
-                <li
-                  key={categoria.id}
-                  className="flex items-center gap-2 rounded-xl bg-surface p-2 ring-1 ring-border"
-                >
-                  {editandoId === categoria.id ? (
-                    <>
-                      <input
-                        type="text"
-                        value={nomeEdicao}
-                        onChange={(e) => setNomeEdicao(e.target.value)}
-                        className="min-w-0 flex-1 rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => salvarRenome(categoria)}
-                        disabled={ocupado || !nomeEdicao.trim()}
-                        className="shrink-0 rounded-lg bg-green-50 px-2.5 py-1.5 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        Salvar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditandoId(null)}
-                        className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
-                      >
-                        Cancelar
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex shrink-0 flex-col">
-                        <button
-                          type="button"
-                          onClick={() => mover(categoria, -1)}
-                          disabled={ocupado || indice === 0}
-                          aria-label="Mover para cima"
-                          className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
-                        >
-                          ▲
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => mover(categoria, 1)}
-                          disabled={ocupado || indice === ordenadas.length - 1}
-                          aria-label="Mover para baixo"
-                          className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
-                        >
-                          ▼
-                        </button>
-                      </div>
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-heading">
-                        {categoria.nome}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => abrirRenomear(categoria)}
-                        className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
-                      >
-                        Renomear
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setCategoriaParaExcluir(categoria)}
-                        className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-                      >
-                        Apagar
-                      </button>
-                    </>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {/* Confirmação de exclusão. Deixa claro que os serviços só ficam sem
-          categoria (não são apagados). */}
-      {categoriaParaExcluir && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="titulo-excluir-categoria"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
-          onClick={() => setCategoriaParaExcluir(null)}
-        >
-          <div
-            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="titulo-excluir-categoria" className="text-lg font-semibold text-heading">
-              Apagar categoria
-            </h2>
-            <p className="mt-2 text-sm text-body">
-              Tem certeza que deseja apagar{" "}
-              <span className="font-medium text-heading">{categoriaParaExcluir.nome}</span>? Os
-              serviços dela apenas ficam sem categoria.
-            </p>
-
-            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
-              <button
-                type="button"
-                onClick={() => apagar(categoriaParaExcluir)}
-                disabled={ocupado}
-                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Apagar categoria
-              </button>
-              <button
-                type="button"
-                onClick={() => setCategoriaParaExcluir(null)}
-                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
-              >
-                Voltar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 
 // Ordena as categorias pela sequência de exibição (ordem asc, depois nome).
