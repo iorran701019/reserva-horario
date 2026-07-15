@@ -747,6 +747,8 @@ export default function AdminPage() {
         "--color-border": temaAtivo.bordaHeader,
         "--color-body": temaAtivo.textoSecundario,
         "--color-muted": temaAtivo.textoSecundario,
+        "--color-surface": temaAtivo.bgBody,
+        "--color-card": temaAtivo.bgHeader,
       }
     : undefined;
 

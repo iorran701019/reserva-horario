@@ -176,6 +176,8 @@ export default function AgendarPage() {
         "--color-border": temaAtivo.bordaHeader,
         "--color-body": temaAtivo.textoSecundario,
         "--color-muted": temaAtivo.textoSecundario,
+        "--color-surface": temaAtivo.bgBody,
+        "--color-card": temaAtivo.bgHeader,
       }
     : undefined;
 
