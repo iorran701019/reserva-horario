@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { calcularVagasPorHorario } from "@/lib/disponibilidade";
+import { buscarTema } from "@/lib/temas";
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
 // "pendente") e a aba Agendar do /admin (cria "confirmado"). Toda a lógica de
@@ -351,6 +352,10 @@ export default function FormularioAgendamento({
 
   const [servicos, setServicos] = useState([]);
   const [servicoSelecionado, setServicoSelecionado] = useState(null);
+  // Serviço com alerta_mensagem que o cliente acabou de tocar, aguardando
+  // confirmação no modal (ver selecionarServico/confirmarAlerta/cancelarAlerta).
+  // A seleção de fato só acontece se o modal for confirmado.
+  const [alertaPendente, setAlertaPendente] = useState(null);
   const [carregandoServicos, setCarregandoServicos] = useState(true);
   const [erroServicos, setErroServicos] = useState("");
 
@@ -426,11 +431,12 @@ export default function FormularioAgendamento({
     }
   }
 
-  // Ao montar, busca em paralelo os serviços ativos (ordenados por nome) e a
-  // preferência escolha_profissional do salão. Resolver os dois JUNTOS garante
-  // que o modo (cliente escolhe x encaixe automático) já é conhecido antes de o
-  // cliente conseguir tocar num serviço. Se a config falhar, mantém o default
-  // false (encaixe automático).
+  // Ao montar, busca em paralelo os serviços ativos (ordenados por
+  // categoria_id, ordem — mesmo critério configurado na aba Serviços do
+  // admin, via as setinhas de reordenação) e a preferência escolha_profissional
+  // do salão. Resolver os dois JUNTOS garante que o modo (cliente escolhe x
+  // encaixe automático) já é conhecido antes de o cliente conseguir tocar num
+  // serviço. Se a config falhar, mantém o default false (encaixe automático).
   useEffect(() => {
     let ativo = true;
 
@@ -438,10 +444,13 @@ export default function FormularioAgendamento({
       const [resServicos, resConfig, resCategorias] = await Promise.all([
         supabase
           .from("servicos")
-          .select("id, nome, duracao_min, preco_centavos, categoria_id")
+          .select(
+            "id, nome, duracao_min, preco_centavos, categoria_id, ocultar_preco, ocultar_duracao, alerta_mensagem"
+          )
           .eq("estabelecimento_id", estabelecimento.id)
           .eq("ativo", true)
-          .order("nome"),
+          .order("categoria_id", { ascending: true, nullsFirst: true })
+          .order("ordem", { ascending: true }),
         supabase
           .from("estabelecimentos")
           .select("escolha_profissional")
@@ -479,9 +488,11 @@ export default function FormularioAgendamento({
   }, [estabelecimento.id]);
 
   // Ao escolher um serviço, carrega os profissionais ATIVOS que o atendem, cada
-  // um com seus dias de trabalho embutidos (horarios_trabalho.dia_semana). Roda
-  // nos DOIS modos: alimenta os cards (quando o cliente escolhe) e sempre os
-  // dias disponíveis do calendário. Sem serviço, zera a lista.
+  // um com seus dias de trabalho embutidos — horarios_trabalho.dia_semana (modo
+  // 'janela') OU horarios_fixos.dia_semana (modo 'fixo'; ver diasSemanaAtivos,
+  // que escolhe a fonte certa por profissional). Roda nos DOIS modos: alimenta
+  // os cards (quando o cliente escolhe) e sempre os dias disponíveis do
+  // calendário. Sem serviço, zera a lista.
   useEffect(() => {
     let ativo = true;
 
@@ -496,7 +507,7 @@ export default function FormularioAgendamento({
       const { data, error } = await supabase
         .from("servico_profissional")
         .select(
-          "profissionais!inner(id, nome, ativo, estabelecimento_id, horarios_trabalho(dia_semana))"
+          "profissionais!inner(id, nome, ativo, estabelecimento_id, modo_horario, horarios_trabalho(dia_semana), horarios_fixos(dia_semana))"
         )
         .eq("servico_id", servicoSelecionado.id)
         .eq("profissionais.ativo", true)
@@ -546,6 +557,12 @@ export default function FormularioAgendamento({
   // pelos agrupados dentro de cada categoria aberta.
   function renderBotaoServico(servico) {
     const selecionado = servicoSelecionado?.id === servico.id;
+    // Tema (laysla) selecionado: fundo é um TOM CLARO derivado de
+    // var(--color-primary) (não mais preenchimento sólido) — texto continua
+    // escuro (var(--color-heading)), não branco. A cor em si já vem do
+    // wrapper raiz (app/[salon]/page.js); aqui só decidimos SE aplica o tom
+    // claro (`tema` presente) em vez do preenchimento sólido padrão.
+    const temaSelecionado = tema && selecionado;
 
     return (
       <button
@@ -556,23 +573,36 @@ export default function FormularioAgendamento({
         className={[
           "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 transition",
           selecionado
-            ? "bg-primary text-white ring-primary"
+            ? tema
+              ? ""
+              : "bg-primary text-white ring-primary"
             : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
         ].join(" ")}
+        style={
+          temaSelecionado
+            ? {
+                backgroundColor: "color-mix(in srgb, var(--color-primary) 12%, white)",
+                color: "var(--color-heading)",
+                "--tw-ring-color": "var(--color-primary)",
+              }
+            : undefined
+        }
       >
         <span className="min-w-0">
           <span className="block font-medium">{servico.nome}</span>
-          <span
-            className={[
-              "block text-sm",
-              selecionado ? "text-on-primary/90" : "text-body",
-            ].join(" ")}
-          >
-            {servico.duracao_min} min
-          </span>
+          {!servico.ocultar_duracao && (
+            <span
+              className={[
+                "block text-sm",
+                temaSelecionado ? "" : selecionado ? "text-on-primary/90" : "text-body",
+              ].join(" ")}
+            >
+              {servico.duracao_min} min
+            </span>
+          )}
         </span>
 
-        {servico.preco_centavos != null && (
+        {servico.preco_centavos > 0 && !servico.ocultar_preco && (
           <span className="shrink-0 font-medium">
             {formatarPreco(servico.preco_centavos)}
           </span>
@@ -583,17 +613,23 @@ export default function FormularioAgendamento({
 
   // Dias da semana (0–6) com atendimento para o serviço escolhido. No fluxo
   // "cliente escolhe", só conta o profissional selecionado; no encaixe
-  // automático, a UNIÃO dos dias de todos os profissionais elegíveis. Alimenta
-  // o calendário: dia da semana fora desse conjunto nasce cinza/desabilitado.
+  // automático, a UNIÃO dos dias de todos os profissionais elegíveis. Cada
+  // profissional contribui pela fonte do SEU modo — horarios_trabalho (janela)
+  // ou horarios_fixos (fixo) — senão um profissional 'fixo' (sem linha em
+  // horarios_trabalho, que só existe pro modo janela) some do calendário
+  // inteiro antes mesmo de uma data ser escolhida. Alimenta o calendário: dia
+  // da semana fora desse conjunto nasce cinza/desabilitado.
   const diasSemanaAtivos = (() => {
     const fonte = escolherProfissional
       ? profissionaisDoServico.filter((p) => p.id === profissionalSelecionado?.id)
       : profissionaisDoServico;
 
     const set = new Set();
-    fonte.forEach((p) =>
-      (p.horarios_trabalho ?? []).forEach((h) => set.add(h.dia_semana))
-    );
+    fonte.forEach((p) => {
+      const linhasDia =
+        p.modo_horario === "fixo" ? p.horarios_fixos : p.horarios_trabalho;
+      (linhasDia ?? []).forEach((h) => set.add(h.dia_semana));
+    });
     return set;
   })();
 
@@ -693,12 +729,23 @@ export default function FormularioAgendamento({
     setForm((anterior) => ({ ...anterior, [name]: value }));
   }
 
-  // Trocar de serviço muda a duração/grade e a lista de profissionais: o
-  // horário e o profissional escolhidos podem não valer mais, então limpamos.
-  // No encaixe automático (toggle off), avança direto para a data. No fluxo
-  // "cliente escolhe", fica na etapa de serviço pra o cliente escolher o
-  // profissional (os cards aparecem logo abaixo).
+  // Toque num serviço com alerta_mensagem: NÃO seleciona ainda — abre o modal
+  // (ver JSX) e espera a confirmação. Sem alerta, segue direto pra seleção de
+  // fato (mesmo comportamento de sempre).
   function selecionarServico(servico) {
+    if (servico.alerta_mensagem) {
+      setAlertaPendente(servico);
+      return;
+    }
+    confirmarSelecaoServico(servico);
+  }
+
+  // Seleção de fato de um serviço: muda a duração/grade e a lista de
+  // profissionais, então o horário e o profissional escolhidos podem não
+  // valer mais — limpamos os dois. No encaixe automático (toggle off), avança
+  // direto para a data. No fluxo "cliente escolhe", fica na etapa de serviço
+  // pra escolher o profissional (os cards aparecem logo abaixo).
+  function confirmarSelecaoServico(servico) {
     setServicoSelecionado(servico);
     setHorarioSelecionado("");
     setProfissionalSelecionado(null);
@@ -712,6 +759,19 @@ export default function FormularioAgendamento({
       // O seletor de profissional aparece logo abaixo dos serviços: rola até ele.
       rolarPara(profissionalRef);
     }
+  }
+
+  // Modal do alerta — "Continuar": confirma a seleção (como se tivesse
+  // acabado de tocar no serviço, sem o alerta no caminho).
+  function confirmarAlerta() {
+    confirmarSelecaoServico(alertaPendente);
+    setAlertaPendente(null);
+  }
+
+  // Modal do alerta — "Voltar": fecha sem selecionar nada, deixando o cliente
+  // escolher outro serviço.
+  function cancelarAlerta() {
+    setAlertaPendente(null);
   }
 
   // Fluxo "cliente escolhe": escolher o profissional conclui a etapa de serviço
@@ -952,6 +1012,16 @@ export default function FormularioAgendamento({
     });
   }
 
+  // Tema por salão (lib/temas.js) — mesmo gate do Hero (tema.marca presente).
+  // As cores comuns (botão, bordas, indicador de passo, calendário) NÃO são
+  // lidas daqui: elas vêm de --color-primary/--color-heading/--color-border/
+  // --color-body/--color-muted, sobrescritas UMA VEZ no wrapper raiz de
+  // app/[salon]/page.js — este componente só usa `tema` para os dois
+  // tratamentos que não são um simples swap de cor (fundo CLARO do
+  // serviço/categoria selecionada, ver renderBotaoServico e o acordeão).
+  const temaBruto = buscarTema(estabelecimento?.slug);
+  const tema = temaBruto?.marca ? temaBruto : null;
+
   return (
     <>
       {/* Indicador de progresso do wizard. Etapa atual destacada, etapas
@@ -1062,6 +1132,15 @@ export default function FormularioAgendamento({
                           onClick={() => alternarCategoria(categoria.id)}
                           aria-expanded={aberta}
                           className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left font-medium text-heading transition hover:bg-surface"
+                          style={
+                            tema && aberta
+                              ? {
+                                  backgroundColor:
+                                    "color-mix(in srgb, var(--color-primary) 12%, white)",
+                                  color: "var(--color-heading)",
+                                }
+                              : undefined
+                          }
                         >
                           {categoria.nome}
                           <span aria-hidden="true">{aberta ? "▲" : "▼"}</span>
@@ -1387,6 +1466,68 @@ export default function FormularioAgendamento({
           </>
         )}
       </form>
+
+      {/* Alerta do serviço tocado (ver GerenciarServicos): trava o wizard
+          antes de avançar pra profissional/data. Continuar confirma a
+          seleção; Voltar fecha sem selecionar nada. */}
+      {alertaPendente && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-alerta-servico"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={cancelarAlerta}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className="mt-0.5 h-6 w-6 shrink-0 text-amber-600"
+              >
+                <path d="M12 9v4M12 17h.01" />
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+              </svg>
+              <div>
+                <h2
+                  id="titulo-alerta-servico"
+                  className="text-lg font-semibold text-heading"
+                >
+                  Atenção
+                </h2>
+                <p className="mt-2 text-sm text-body">
+                  {alertaPendente.alerta_mensagem}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarAlerta}
+                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+              >
+                Continuar
+              </button>
+              <button
+                type="button"
+                onClick={cancelarAlerta}
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

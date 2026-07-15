@@ -1,3 +1,6 @@
+import Image from "next/image";
+import { buscarTema } from "@/lib/temas";
+
 // Hero reutilizável no topo das telas (home, /agendar, /admin).
 //
 // IDENTIDADE 100% via tema — nada hardcoded aqui:
@@ -11,6 +14,11 @@
 //   PLACEHOLDER leve. Para ativar a foto em outro salão, adicione o slug ao
 //   conjunto. Use uma foto SEM marca d'água. Sobre a foto, um overlay escuro +
 //   text-shadow garantem o contraste do título em qualquer imagem.
+//
+// >>> MARCA (LOGO) POR SALÃO (lib/temas.js):
+//   Salões com tema.marca cadastrado (ex.: laysla) trocam o título centralizado
+//   por um monograma (esquerda) + nome/tagline empilhados (direita), nas cores
+//   do próprio tema. Sem tema.marca (todo o resto), o Hero não muda em nada.
 
 const NOME_LOJA = process.env.NEXT_PUBLIC_NOME_LOJA || "Agendamento";
 
@@ -32,16 +40,27 @@ const HERO_FOTO_PADRAO = "/images/hero-salao.jpg";
 export default function Hero({ subtitulo, compacto = false, nome, slug }) {
   const usaFoto = slug != null && SLUGS_COM_FOTO.has(String(slug).toLowerCase());
 
+  // tema só entra em jogo com marca cadastrada — sem ela, `tema` fica null e
+  // o resto da função segue exatamente como antes (nenhuma mudança visual).
+  const temaBruto = buscarTema(slug);
+  const tema = temaBruto?.marca ? temaBruto : null;
+
   // Fundo do hero:
   //  - com foto (valeria/junior): a imagem cobrindo o hero; o contraste do texto
   //    vem do overlay escuro + text-shadow, não de scrim claro;
-  //  - sem foto (ex.: barbearia): degradê suave creme → bege, via tokens da paleta.
+  //  - com tema (ex.: laysla): a cor/degradê próprio do tema (`background`, não
+  //    `backgroundImage` — tema.bgHeader pode ser uma cor sólida). A borda
+  //    (border-border já na className abaixo) NÃO precisa de override aqui:
+  //    vem de --color-border, centralizado em app/[salon]/page.js.
+  //  - sem nenhum dos dois: degradê suave creme → bege, via tokens da paleta.
   const estiloFundo = usaFoto
     ? {
         backgroundImage: `url(${FOTOS_POR_SLUG[String(slug).toLowerCase()] ?? HERO_FOTO_PADRAO})`,
         backgroundSize: "cover",
         backgroundPosition: "center 25%",
       }
+    : tema
+    ? { background: tema.bgHeader }
     : {
         backgroundImage:
           "linear-gradient(180deg, var(--color-card), var(--color-border))",
@@ -68,18 +87,59 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
         />
       )}
 
-      <h1
-        className={[
-          // `relative` mantém o título acima do overlay.
-          "relative font-display font-semibold tracking-tight",
-          usaFoto
-            ? "text-white [text-shadow:0_2px_8px_rgba(0,0,0,0.6)]"
-            : "text-heading",
-          compacto ? "text-2xl sm:text-3xl" : "text-4xl sm:text-5xl",
-        ].join(" ")}
-      >
-        {nome || NOME_LOJA}
-      </h1>
+      {tema ? (
+        // Marca (monograma) é o elemento de destaque: grande e colada na
+        // borda esquerda (mx-auto max-w-md replica o inset do conteúdo
+        // abaixo do Hero). Nome/tagline ocupam o espaço restante (flex-1) e
+        // ficam centralizados NESSE espaço — respiro tanto da marca quanto
+        // da borda direita, sem grudar em nenhum dos dois.
+        <div className="relative mx-auto flex w-full max-w-md items-center gap-4">
+          <Image
+            src={tema.marca}
+            alt=""
+            width={266}
+            height={338}
+            className={compacto ? "h-16 w-auto sm:h-20" : "h-24 w-auto sm:h-28"}
+            preload
+          />
+          <div className="flex flex-1 flex-col items-center text-center">
+            <h1
+              className={[
+                tema.fonteDisplay,
+                "font-medium tracking-tight",
+                compacto ? "text-2xl sm:text-3xl" : "text-3xl sm:text-4xl",
+              ].join(" ")}
+              style={{ color: tema.textoSecundario }}
+            >
+              {tema.nomeExibido || nome || NOME_LOJA}
+            </h1>
+            {tema.tagline && (
+              <span
+                className={[
+                  tema.fonteDisplay,
+                  "mt-1 text-xs font-normal uppercase tracking-[0.25em] sm:text-sm",
+                ].join(" ")}
+                style={{ color: tema.textoSecundario }}
+              >
+                {tema.tagline}
+              </span>
+            )}
+          </div>
+        </div>
+      ) : (
+        <h1
+          className={[
+            // `relative` mantém o título acima do overlay.
+            "relative font-display font-semibold tracking-tight",
+            usaFoto
+              ? "text-white [text-shadow:0_2px_8px_rgba(0,0,0,0.6)]"
+              : "text-heading",
+            compacto ? "text-2xl sm:text-3xl" : "text-4xl sm:text-5xl",
+          ].join(" ")}
+        >
+          {nome || NOME_LOJA}
+        </h1>
+      )}
 
       {subtitulo && (
         <p

@@ -2,46 +2,80 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { enderecoCompleto, whatsappConfere } from "@/lib/clienteValidacao";
+import { useConflitoWhatsapp } from "@/lib/checagemWhatsapp";
+import ModalConflitoWhatsapp from "@/components/ModalConflitoWhatsapp";
 
-// Cadastro completo do cliente, exibido pelo IdentificacaoCliente quando o
-// WhatsApp digitado não é encontrado em `clientes` (substitui o trecho
-// provisório da fase anterior, que só colhia o nome). Ao enviar, faz o
-// insert e entrega o registro criado como `clienteInicial` do
-// FormularioAgendamento — mesma prop já usada quando o cliente É encontrado.
+// Completa o cadastro de endereço de um cliente já identificado (tenant com
+// `cadastro_completo = true`), exibido pelo IdentificacaoCliente quando o
+// bloco CEP/número/bairro/cidade está pendente — seja um registro mínimo
+// recém-criado (nome vazio) ou um cliente antigo com endereço incompleto.
+// Faz sempre UPDATE por `clienteId` — quem decide inserir o registro mínimo é
+// o IdentificacaoCliente, antes de montar este formulário.
+//
+// O WhatsApp já foi coletado na etapa anterior e vem em `telefoneReferencia`
+// só como valor INICIAL do campo — ele agora é editável aqui (a cliente pode
+// corrigir um número digitado errado antes de confirmar). "Confirme seu
+// WhatsApp" continua existindo, mas passa a validar contra o campo editável
+// (whatsappConfere), não mais contra `telefoneReferencia` bruto. Antes de
+// gravar, roda a checagem de número já cadastrado (ver
+// lib/checagemWhatsapp.js) — se achar outro cliente com esse WhatsApp, abre
+// o modal em vez de salvar.
 //
 // CEP: ao completar 8 dígitos, busca o ViaCEP e preenche
 // endereço/bairro/cidade/estado. Falha de rede ou CEP inexistente não trava
 // o formulário — os campos seguem editáveis manualmente.
 //
 // Props:
-//   estabelecimentoId – dono da linha inserida em `clientes`.
-//   telefoneInicial   – WhatsApp já digitado na etapa anterior (editável aqui).
-//   onCadastrado      – recebe { id, nome, telefone } pronto pra virar
-//                       clienteInicial do FormularioAgendamento.
+//   estabelecimentoId      – dono da linha em `clientes`; também particiona a
+//                            checagem de WhatsApp já cadastrado.
+//   clienteId              – id da linha em `clientes` a ser atualizada (é o
+//                            "idAtual" excluído da checagem de conflito).
+//   nomeInicial            – nome já existente (pode vir vazio).
+//   telefoneReferencia     – WhatsApp digitado na etapa anterior, usado como
+//                            valor INICIAL do campo editável (não mais como
+//                            referência fixa de confirmação).
+//   valoresIniciais        – cep/endereco/numero/complemento/bairro/cidade/
+//                            estado/nascimento/instagram já existentes.
+//   clienteNovo            – repassado ao onCadastrado (registro recém-criado
+//                            x cliente antigo só completando endereço).
+//   estabelecimentoWhatsapp, nomeContato – pro modal "fale com a gente" da
+//                            checagem de conflito (mesmo padrão ContatoDono).
+//   onCadastrado           – recebe { id, nome, telefone, clienteNovo }
+//                            pronto pra virar clienteInicial do
+//                            FormularioAgendamento. Também usado (via modal
+//                            de conflito) pra pular direto pro agendamento
+//                            de OUTRO cliente, se for o caso.
 export default function CadastroCliente({
   estabelecimentoId,
-  telefoneInicial,
+  clienteId,
+  nomeInicial,
+  telefoneReferencia,
+  valoresIniciais,
+  clienteNovo,
+  estabelecimentoWhatsapp,
+  nomeContato,
   onCadastrado,
 }) {
   const [form, setForm] = useState({
-    nome: "",
-    whatsapp: telefoneInicial ?? "",
-    whatsappConfirmacao: "",
-    cep: "",
-    endereco: "",
-    numero: "",
-    complemento: "",
-    bairro: "",
-    cidade: "",
-    estado: "",
-    nascimento: "",
-    instagram: "",
+    nome: nomeInicial ?? "",
+    whatsapp: telefoneReferencia ?? "",
+    cep: valoresIniciais?.cep ?? "",
+    endereco: valoresIniciais?.endereco ?? "",
+    numero: valoresIniciais?.numero ?? "",
+    complemento: valoresIniciais?.complemento ?? "",
+    bairro: valoresIniciais?.bairro ?? "",
+    cidade: valoresIniciais?.cidade ?? "",
+    estado: valoresIniciais?.estado ?? "",
+    nascimento: valoresIniciais?.nascimento ?? "",
+    instagram: valoresIniciais?.instagram ?? "",
   });
+  const [confirmarWhatsapp, setConfirmarWhatsapp] = useState("");
   const [buscandoCep, setBuscandoCep] = useState(false);
   const [enviando, setEnviando] = useState(false);
+  const conflitoWhatsapp = useConflitoWhatsapp();
   const [erro, setErro] = useState("");
-  const [mostrarReconfirmacao, setMostrarReconfirmacao] = useState(false);
-  const [whatsappReconfirmacao, setWhatsappReconfirmacao] = useState("");
+  const [erroWhatsapp, setErroWhatsapp] = useState("");
 
   function handleChange(e) {
     const { name, value } = e.target;
@@ -86,59 +120,53 @@ export default function CadastroCliente({
   async function handleSubmit(e) {
     e.preventDefault();
     setErro("");
+    setErroWhatsapp("");
 
     if (!form.nome.trim()) {
       setErro("Informe seu nome.");
       return;
     }
 
-    if (!form.numero.trim()) {
-      setErro("Informe o número.");
+    if (!enderecoCompleto(form)) {
+      setErro("Preencha CEP, número, bairro e cidade.");
+      return;
+    }
+
+    if (!whatsappConfere(confirmarWhatsapp, form.whatsapp)) {
+      setErroWhatsapp("O número digitado não confere com o WhatsApp informado.");
       return;
     }
 
     const digitosWhatsapp = form.whatsapp.replace(/\D/g, "");
-    if (digitosWhatsapp.length < 10) {
-      setErro("Informe um WhatsApp válido com DDD.");
-      return;
-    }
-
-    const digitosBase = mostrarReconfirmacao
-      ? form.whatsappConfirmacao.replace(/\D/g, "")
-      : digitosWhatsapp;
-
-    const digitosParaComparar = mostrarReconfirmacao
-      ? whatsappReconfirmacao.replace(/\D/g, "")
-      : form.whatsappConfirmacao.replace(/\D/g, "");
-
-    if (digitosBase !== digitosParaComparar) {
-      setMostrarReconfirmacao(true);
-      setErro("Os números não coincidem. Confirme novamente abaixo.");
-      return;
-    }
-
-    const numeroConfirmado = mostrarReconfirmacao
-      ? whatsappReconfirmacao
-      : form.whatsappConfirmacao;
 
     setEnviando(true);
 
+    const temConflito = await conflitoWhatsapp.verificar(
+      estabelecimentoId,
+      digitosWhatsapp,
+      clienteId
+    );
+    if (temConflito) {
+      setEnviando(false);
+      return;
+    }
+
     const { data, error } = await supabase
       .from("clientes")
-      .insert({
-        estabelecimento_id: estabelecimentoId,
+      .update({
         nome: form.nome.trim(),
-        whatsapp: numeroConfirmado.replace(/\D/g, ""),
-        cep: form.cep || null,
+        whatsapp: digitosWhatsapp,
+        cep: form.cep,
         endereco: form.endereco || null,
-        numero: form.numero.trim(),
+        numero: form.numero,
         complemento: form.complemento || null,
-        bairro: form.bairro || null,
-        cidade: form.cidade || null,
+        bairro: form.bairro,
+        cidade: form.cidade,
         estado: form.estado || null,
         nascimento: form.nascimento || null,
         instagram: form.instagram || null,
       })
+      .eq("id", clienteId)
       .select()
       .single();
 
@@ -152,15 +180,16 @@ export default function CadastroCliente({
     onCadastrado({
       id: data.id,
       nome: data.nome,
-      telefone: numeroConfirmado,
-      clienteNovo: true,
+      telefone: form.whatsapp,
+      clienteNovo: Boolean(clienteNovo),
     });
   }
 
   return (
+    <>
     <form onSubmit={handleSubmit} className="space-y-4">
       <p className="text-sm text-body">
-        Não encontramos esse número. Complete seu cadastro para continuar.
+        Complete seu cadastro para continuar.
       </p>
 
       <div>
@@ -180,23 +209,6 @@ export default function CadastroCliente({
       </div>
 
       <div>
-        <label htmlFor="cad-whatsapp" className="mb-1 block text-sm font-medium text-body">
-          WhatsApp
-        </label>
-        <input
-          id="cad-whatsapp"
-          name="whatsapp"
-          type="tel"
-          inputMode="tel"
-          value={form.whatsapp}
-          onChange={handleChange}
-          required
-          placeholder="(24) 99999-9999"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-        />
-      </div>
-
-      <div>
         <label htmlFor="cad-cep" className="mb-1 block text-sm font-medium text-body">
           CEP
         </label>
@@ -207,6 +219,7 @@ export default function CadastroCliente({
           inputMode="numeric"
           value={form.cep}
           onChange={handleChange}
+          required
           placeholder="28000-000"
           className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
         />
@@ -223,7 +236,7 @@ export default function CadastroCliente({
           type="text"
           value={form.endereco}
           onChange={handleChange}
-          placeholder="Rua, número"
+          placeholder="Rua"
           className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
         />
       </div>
@@ -270,6 +283,7 @@ export default function CadastroCliente({
             type="text"
             value={form.bairro}
             onChange={handleChange}
+            required
             className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
           />
         </div>
@@ -284,6 +298,7 @@ export default function CadastroCliente({
             type="text"
             value={form.cidade}
             onChange={handleChange}
+            required
             className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
           />
         </div>
@@ -321,15 +336,15 @@ export default function CadastroCliente({
       </div>
 
       <div>
-        <label htmlFor="cad-whatsapp-confirmacao" className="mb-1 block text-sm font-medium text-body">
-          Confirme seu WhatsApp
+        <label htmlFor="cad-whatsapp" className="mb-1 block text-sm font-medium text-body">
+          WhatsApp
         </label>
         <input
-          id="cad-whatsapp-confirmacao"
-          name="whatsappConfirmacao"
+          id="cad-whatsapp"
+          name="whatsapp"
           type="tel"
           inputMode="tel"
-          value={form.whatsappConfirmacao}
+          value={form.whatsapp}
           onChange={handleChange}
           required
           placeholder="(24) 99999-9999"
@@ -337,24 +352,25 @@ export default function CadastroCliente({
         />
       </div>
 
-      {mostrarReconfirmacao && (
-        <div>
-          <label htmlFor="cad-whatsapp-reconfirmacao" className="mb-1 block text-sm font-medium text-body">
-            Confirme seu WhatsApp novamente
-          </label>
-          <input
-            id="cad-whatsapp-reconfirmacao"
-            name="whatsappReconfirmacao"
-            type="tel"
-            inputMode="tel"
-            value={whatsappReconfirmacao}
-            onChange={(e) => setWhatsappReconfirmacao(e.target.value)}
-            required
-            placeholder="(24) 99999-9999"
-            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-          />
-        </div>
-      )}
+      <div>
+        <label htmlFor="cad-whatsapp-confirmacao" className="mb-1 block text-sm font-medium text-body">
+          Confirme seu WhatsApp
+        </label>
+        <input
+          id="cad-whatsapp-confirmacao"
+          name="confirmarWhatsapp"
+          type="tel"
+          inputMode="tel"
+          value={confirmarWhatsapp}
+          onChange={(e) => setConfirmarWhatsapp(e.target.value)}
+          required
+          placeholder="(24) 99999-9999"
+          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+        />
+        {erroWhatsapp && (
+          <p className="mt-1 text-sm text-red-700">{erroWhatsapp}</p>
+        )}
+      </div>
 
       <div>
         <label htmlFor="cad-instagram" className="mb-1 block text-sm font-medium text-body">
@@ -385,5 +401,16 @@ export default function CadastroCliente({
         </p>
       )}
     </form>
+
+    <ModalConflitoWhatsapp
+      clienteConflitante={conflitoWhatsapp.clienteConflitante}
+      modalContato={conflitoWhatsapp.modalContato}
+      estabelecimentoWhatsapp={estabelecimentoWhatsapp}
+      nomeContato={nomeContato}
+      onConfirmar={() => conflitoWhatsapp.confirmarConflito(onCadastrado, form.whatsapp)}
+      onNegar={conflitoWhatsapp.negarConflito}
+      onFecharContato={conflitoWhatsapp.fecharModalContato}
+    />
+    </>
   );
 }
