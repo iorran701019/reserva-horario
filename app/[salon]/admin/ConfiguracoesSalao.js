@@ -37,6 +37,12 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   // Feedback de gravação: "" | "salvando" | "salvo".
   const [status, setStatus] = useState("");
 
+  // Contagem de profissionais ATIVOS do salão, recontada a cada carga (nunca
+  // hardcoded) — com 1 só, o cliente não tem outro pra escolher de qualquer
+  // forma, então o toggle não faz sentido nessa tela. null = ainda carregando
+  // (mantém o toggle oculto até saber o número de verdade, pra não piscar).
+  const [qtdProfissionaisAtivos, setQtdProfissionaisAtivos] = useState(null);
+
   // Regra do sinal: 'desligado' | 'novos' | 'todos'. undefined = carregando.
   const [sinalRegra, setSinalRegra] = useState(undefined);
   const [sinalValor, setSinalValor] = useState("");
@@ -74,6 +80,28 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     }
 
     carregar();
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento.id]);
+
+  // Conta os profissionais ATIVOS do salão (pra decidir se o toggle acima
+  // aparece). Separado do carregar() de cima pra não acoplar as duas queries.
+  useEffect(() => {
+    let ativo = true;
+
+    async function contar() {
+      const { count, error } = await supabase
+        .from("profissionais")
+        .select("id", { count: "exact", head: true })
+        .eq("estabelecimento_id", estabelecimento.id)
+        .eq("ativo", true);
+
+      if (!ativo) return;
+      if (!error) setQtdProfissionaisAtivos(count ?? 0);
+    }
+
+    contar();
     return () => {
       ativo = false;
     };
@@ -153,9 +181,18 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const carregandoValor = escolhaProfissional === undefined;
   const carregandoSinal = sinalRegra === undefined;
   const sinalDesligado = sinalRegra === "desligado";
+  // Com 1 só profissional ativo (ou enquanto a contagem ainda carrega), o
+  // toggle some — não há outro profissional pro cliente escolher de qualquer
+  // forma. Se o salão já tinha o valor "true" salvo de quando tinha 2+
+  // profissionais, ele fica preservado no banco (não escrevemos nada aqui),
+  // mas some da tela e não tem efeito prático nesse cenário. Volta a
+  // aparecer normalmente assim que houver 2+ profissionais ativos de novo.
+  const mostrarToggleEscolha =
+    qtdProfissionaisAtivos != null && qtdProfissionaisAtivos >= 2;
 
   return (
     <>
+    {mostrarToggleEscolha && (
     <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -199,6 +236,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       )}
       {erro && <p className="mt-2 text-xs text-red-600">{erro}</p>}
     </section>
+    )}
 
     <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
       <h3 className="text-sm font-medium text-heading">Sinal de reserva</h3>

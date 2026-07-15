@@ -31,6 +31,13 @@ import { formatarPreco } from "@/components/FormularioAgendamento";
 //                              estratégia "substitui tudo" dos horários (apaga os
 //                              vínculos do profissional e reinsere os marcados).
 
+// Troca de modo_horario ('janela'/'fixo') é operação sensível (reidrata toda a
+// agenda do profissional) — por ora fica controlada manualmente via SQL direto
+// em vez de exposta na tela de edição. Só oculta o seletor da EDIÇÃO (o wizard
+// de criação continua com o seletor normal); o valor salvo continua sendo
+// respeitado no cálculo de disponibilidade. Reverter: true.
+const MOSTRAR_TOGGLE_MODO_HORARIO = false;
+
 // Dias da semana no padrão de Date.getDay()/dia_semana: 0=domingo … 6=sábado.
 const DIAS = [
   { n: 0, rotulo: "Domingo", curto: "Dom" },
@@ -2381,34 +2388,36 @@ export default function GerenciarProfissionais({ estabelecimento }) {
                   tags de horário fixo, conforme o modo. */}
               {abaEdicao === "horarios" && (
                 <div className="space-y-4">
-                  <div>
-                    <span className="mb-2 block text-sm font-medium text-body">
-                      Tipo de agenda
-                    </span>
-                    <div className="flex gap-2">
-                      {[
-                        { valor: "janela", rotulo: "Janela contínua" },
-                        { valor: "fixo", rotulo: "Horários fixos" },
-                      ].map((opcao) => {
-                        const selecionado = form.modoHorario === opcao.valor;
-                        return (
-                          <button
-                            key={opcao.valor}
-                            type="button"
-                            aria-pressed={selecionado}
-                            onClick={() => setModoHorario(opcao.valor)}
-                            className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-medium ring-1 transition ${
-                              selecionado
-                                ? "bg-primary text-white ring-primary"
-                                : "bg-card text-body ring-border hover:bg-surface"
-                            }`}
-                          >
-                            {opcao.rotulo}
-                          </button>
-                        );
-                      })}
+                  {MOSTRAR_TOGGLE_MODO_HORARIO && (
+                    <div>
+                      <span className="mb-2 block text-sm font-medium text-body">
+                        Tipo de agenda
+                      </span>
+                      <div className="flex gap-2">
+                        {[
+                          { valor: "janela", rotulo: "Janela contínua" },
+                          { valor: "fixo", rotulo: "Horários fixos" },
+                        ].map((opcao) => {
+                          const selecionado = form.modoHorario === opcao.valor;
+                          return (
+                            <button
+                              key={opcao.valor}
+                              type="button"
+                              aria-pressed={selecionado}
+                              onClick={() => setModoHorario(opcao.valor)}
+                              className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-medium ring-1 transition ${
+                                selecionado
+                                  ? "bg-primary text-white ring-primary"
+                                  : "bg-card text-body ring-border hover:bg-surface"
+                              }`}
+                            >
+                              {opcao.rotulo}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {form.modoHorario === "fixo" ? (
                     <div>
