@@ -746,10 +746,10 @@ export default function AdminPage() {
   // app/[salon]/page.js): sobrescreve as custom properties que todo botão/
   // borda/texto secundário do admin já lê via classe Tailwind. A aba ativa do
   // drawer (mais abaixo) usa text-heading/ring-border, então herda o tema
-  // automaticamente — nenhuma classe precisa mudar. Sem tema.marca, nada é
-  // sobrescrito e o admin de qualquer outro salão continua idêntico.
+  // automaticamente — nenhuma classe precisa mudar. Sem tema.personalizado,
+  // nada é sobrescrito e o admin de qualquer outro salão continua idêntico.
   const tema = buscarTema(estabelecimento.slug);
-  const temaAtivo = tema?.marca ? tema : null;
+  const temaAtivo = tema?.personalizado ? tema : null;
   const estiloTemaRaiz = temaAtivo
     ? {
         "--color-primary": temaAtivo.botao,
