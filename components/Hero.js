@@ -16,9 +16,14 @@ import { buscarTema } from "@/lib/temas";
 //   text-shadow garantem o contraste do título em qualquer imagem.
 //
 // >>> MARCA (LOGO) POR SALÃO (lib/temas.js):
-//   Salões com tema.marca cadastrado (ex.: laysla) trocam o título centralizado
-//   por um monograma (esquerda) + nome/tagline empilhados (direita), nas cores
-//   do próprio tema. Sem tema.marca (todo o resto), o Hero não muda em nada.
+//   Salões com tema cadastrado trocam o título centralizado por uma marca
+//   própria, conforme tema.layoutMarca:
+//     'esquerda'        → monograma (esquerda) + nome/tagline empilhados
+//                          (direita), nas cores do tema (ex.: laysla).
+//     'pilha-completa'  → símbolo + wordmark empilhados e centralizados,
+//                          sem nome em texto — a imagem já contém a marca
+//                          por extenso (ex.: flavia).
+//   Sem tema cadastrado (todo o resto), o Hero não muda em nada.
 
 const NOME_LOJA = process.env.NEXT_PUBLIC_NOME_LOJA || "Agendamento";
 
@@ -34,10 +39,13 @@ const HERO_FOTO = "/images/hero-salao.jpg";
 export default function Hero({ subtitulo, compacto = false, nome, slug }) {
   const usaFoto = slug != null && SLUGS_COM_FOTO.has(String(slug).toLowerCase());
 
-  // tema só entra em jogo com marca cadastrada — sem ela, `tema` fica null e
-  // o resto da função segue exatamente como antes (nenhuma mudança visual).
+  // tema só entra em jogo com identidade própria cadastrada — sem ela, `tema`
+  // fica null e o resto da função segue exatamente como antes (nenhuma
+  // mudança visual). `personalizado` é o gatilho explícito (independe do
+  // formato da marca: monograma+texto ou pilha de imagens).
   const temaBruto = buscarTema(slug);
-  const tema = temaBruto?.marca ? temaBruto : null;
+  const tema = temaBruto?.personalizado ? temaBruto : null;
+  const ehPilhaCompleta = tema?.layoutMarca === "pilha-completa";
 
   // Fundo do hero:
   //  - com foto (valeria/junior): a imagem cobrindo o hero; o contraste do texto
@@ -66,8 +74,16 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
         // Corte limpo entre hero e corpo: borda definida, sem fade esfumaçado.
         // `relative` ancora o overlay escuro da foto.
         "relative flex flex-col items-center justify-center border-b border-border px-4 text-center",
+        // 'pilha-completa' (ex.: flavia) usa padding vertical reduzido: as
+        // duas imagens empilhadas já preenchem mais altura que um título de
+        // texto, então o mesmo py do padrão deixaria o header "grosso"
+        // demais. Os demais layouts (laysla, texto padrão) não mudam.
         compacto
-          ? "min-h-[110px] py-8 sm:min-h-[130px]"
+          ? ehPilhaCompleta
+            ? "min-h-[70px] py-4 sm:min-h-[90px] sm:py-5"
+            : "min-h-[110px] py-8 sm:min-h-[130px]"
+          : ehPilhaCompleta
+          ? "min-h-[120px] py-6 sm:min-h-[150px] sm:py-7"
           : "min-h-[180px] py-12 sm:min-h-[220px]",
       ].join(" ")}
       style={estiloFundo}
@@ -81,7 +97,31 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
         />
       )}
 
-      {tema ? (
+      {tema?.layoutMarca === "pilha-completa" ? (
+        // Logo completo (símbolo + wordmark) empilhado e centralizado — a
+        // imagem já contém o nome do estabelecimento por extenso, então
+        // nenhum texto adicional é renderizado aqui.
+        <div className="relative flex flex-col items-center justify-center gap-2">
+          <Image
+            src={tema.marcaSimbolo}
+            alt=""
+            width={220}
+            height={110}
+            style={{ width: "auto" }}
+            className={compacto ? "h-[70px] sm:h-[90px]" : "h-[90px] sm:h-[110px]"}
+            preload
+          />
+          <Image
+            src={tema.marcaTexto}
+            alt={tema.nomeExibido || nome || NOME_LOJA}
+            width={340}
+            height={130}
+            style={{ width: "auto" }}
+            className={compacto ? "h-10 sm:h-12" : "h-12 sm:h-14"}
+            preload
+          />
+        </div>
+      ) : tema ? (
         // Marca (monograma) é o elemento de destaque: grande e colada na
         // borda esquerda (mx-auto max-w-md replica o inset do conteúdo
         // abaixo do Hero). Nome/tagline ocupam o espaço restante (flex-1) e

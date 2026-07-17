@@ -163,10 +163,10 @@ export default function AgendarPage() {
   // (text-body, text-muted — calendário, "Voltar", histórico). Qualquer
   // componente descendente que já usa esses tokens herda a cor certa
   // automaticamente — não precisa (nem deve) ler `tema` sozinho pra isso.
-  // Sem tema.marca (todo o resto, incl. um 3º tenant sem identidade própria),
-  // nada é sobrescrito e a paleta marrom global segue intacta.
+  // Sem tema.personalizado (todo o resto, incl. um 3º tenant sem identidade
+  // própria), nada é sobrescrito e a paleta marrom global segue intacta.
   const tema = buscarTema(estabelecimento.slug);
-  const temaAtivo = tema?.marca ? tema : null;
+  const temaAtivo = tema?.personalizado ? tema : null;
   const estiloTemaRaiz = temaAtivo
     ? {
         ...(temaAtivo.bgBody ? { backgroundColor: temaAtivo.bgBody } : {}),

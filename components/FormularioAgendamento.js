@@ -950,7 +950,7 @@ export default function FormularioAgendamento({
     });
   }
 
-  // Tema por salão (lib/temas.js) — mesmo gate do Hero (tema.marca presente).
+  // Tema por salão (lib/temas.js) — mesmo gate do Hero (tema cadastrado).
   // As cores comuns (botão, bordas, indicador de passo, calendário) NÃO são
   // lidas daqui: elas vêm de --color-primary/--color-heading/--color-border/
   // --color-body/--color-muted, sobrescritas UMA VEZ no wrapper raiz de
@@ -958,7 +958,7 @@ export default function FormularioAgendamento({
   // tratamentos que não são um simples swap de cor (fundo CLARO do
   // serviço/categoria selecionada, ver renderBotaoServico e o acordeão).
   const temaBruto = buscarTema(estabelecimento?.slug);
-  const tema = temaBruto?.marca ? temaBruto : null;
+  const tema = temaBruto?.personalizado ? temaBruto : null;
 
   return (
     <>
