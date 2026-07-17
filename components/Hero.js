@@ -27,15 +27,17 @@ import { buscarTema } from "@/lib/temas";
 
 const NOME_LOJA = process.env.NEXT_PUBLIC_NOME_LOJA || "Agendamento";
 
-// Slugs que usam a foto de fundo do hero. Fonte única — comparação em minúsculas.
-const SLUGS_COM_FOTO = new Set(["valeria", "junior", "flavia"]);
+// Slugs que usam a foto de fundo do hero. Fonte única — comparação em
+// minúsculas. NÃO incluir slugs com layoutMarca 'pilha-completa' (ex.:
+// flavia) — esses usam só a cor sólida de tema.bgHeader atrás do logo, sem
+// foto/overlay.
+const SLUGS_COM_FOTO = new Set(["valeria", "junior"]);
 
 // Caminho da foto de fundo (arquivo em /public).
 // Foto de fundo por slug. Slug fora do mapa usa a foto padrão.
 const FOTOS_POR_SLUG = {
   valeria: "/images/hero-salao.jpg",
   junior: "/images/hero-salao.jpg",
-  flavia: "/images/flavia.jpg",
 };
 const HERO_FOTO_PADRAO = "/images/hero-salao.jpg";
 
