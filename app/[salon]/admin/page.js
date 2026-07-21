@@ -169,7 +169,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -693,9 +693,12 @@ export default function AdminPage() {
   // caducaram caem em "historico" e somem daqui. `agendamentos` já vem ordenado
   // por data asc + horário asc da query, então o inbox sai cronológico
   // (mais próximo primeiro). Um único `agora` para classificar tudo no render.
+  // item.finalizado exclui reserva antecipada abandonada no meio do wizard
+  // (ver FormularioAgendamento): sem isso ela apareceria como pendência real
+  // pra dona agir, mesmo nunca tendo sido de fato concluída pela cliente.
   const agora = new Date();
   const inbox = agendamentos.filter(
-    (item) => classificarAgendamento(item, agora) === "inbox"
+    (item) => classificarAgendamento(item, agora) === "inbox" && item.finalizado
   );
 
   // Histórico (aba "Histórico"): tudo arquivado — cancelados, pendentes

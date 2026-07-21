@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { calcularVagasPorHorario } from "@/lib/disponibilidade";
 import { buscarTema } from "@/lib/temas";
+import { calcularPrecoManutencao } from "@/lib/manutencaoSugerida";
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
 // "pendente") e a aba Agendar do /admin (cria "confirmado"). Toda a lógica de
@@ -339,6 +340,11 @@ export default function FormularioAgendamento({
   // Popup "Qual serviço foi feito?" do item único "Manutenção" do acordeão
   // (ver servicosManutencao/renderBotaoManutencao/escolherManutencao).
   const [modalManutencaoAberto, setModalManutencaoAberto] = useState(false);
+  // Preço a exibir/cobrar quando servicoSelecionado é uma manutenção — null
+  // enquanto não se aplica (serviço normal) ou ainda calculando (ver efeito
+  // abaixo, que chama calcularPrecoManutencao assim que serviço + telefone da
+  // cliente estão disponíveis). { centavos, valorCheio } quando pronto.
+  const [precoManutencao, setPrecoManutencao] = useState(null);
   const [carregandoServicos, setCarregandoServicos] = useState(true);
   const [erroServicos, setErroServicos] = useState("");
 
@@ -515,6 +521,35 @@ export default function FormularioAgendamento({
       ativo = false;
     };
   }, [servicoSelecionado, estabelecimento.id]);
+
+  // Recalcula o preço de exibição/cobrança quando servicoSelecionado é uma
+  // manutenção (ver calcularPrecoManutencao). Precisa do telefone da cliente,
+  // que já vem pronto em clienteInicial no fluxo público (identificado ANTES
+  // do wizard) mas só chega em form.telefone na etapa "dados" do /admin — daí
+  // o efeito reagir aos dois. Serviço normal (sem servico_origem_id) nunca
+  // dispara a busca e mantém precoManutencao null — o reset pra null ao TROCAR
+  // de serviço mora em confirmarSelecaoServico (efeito só faz a busca, não
+  // limpa estado nele mesmo — mesmo padrão do efeito de vagas acima).
+  useEffect(() => {
+    const telefoneDigitos = (clienteInicial?.telefone ?? form.telefone).replace(
+      /\D/g,
+      ""
+    );
+
+    if (servicoSelecionado?.servico_origem_id == null || telefoneDigitos.length < 10) {
+      return;
+    }
+
+    let ativo = true;
+    calcularPrecoManutencao(estabelecimento.id, telefoneDigitos, servicoSelecionado).then(
+      (resultado) => {
+        if (ativo) setPrecoManutencao(resultado);
+      }
+    );
+    return () => {
+      ativo = false;
+    };
+  }, [servicoSelecionado, clienteInicial?.telefone, form.telefone, estabelecimento.id]);
 
   const [hoje] = useState(dataDeHoje);
 
@@ -762,6 +797,9 @@ export default function FormularioAgendamento({
     setServicoSelecionado(servico);
     setHorarioSelecionado("");
     setProfissionalSelecionado(null);
+    // Preço da manutenção anterior (se houver) não vale mais pro novo
+    // serviço — o efeito acima recalcula do zero quando o novo for manutenção.
+    setPrecoManutencao(null);
     // A troca muda os dias/horários válidos: zera a data pra não ficar uma
     // seleção antiga num dia que virou indisponível.
     setForm((anterior) => ({ ...anterior, data: "" }));
@@ -852,6 +890,7 @@ export default function FormularioAgendamento({
         estabelecimento_id: estabelecimento.id,
         profissional_id: profissionalId,
         status: precisaSinal ? "aguardando_sinal" : "pendente",
+        finalizado: false,
       })
       .select()
       .single();
@@ -939,6 +978,7 @@ export default function FormularioAgendamento({
         .update({
           sinal_declarado_pago: precisaSinal ? sinalDeclarado : false,
           status: "pendente",
+          finalizado: true,
         })
         .eq("id", agendamentoId));
     } else {
@@ -975,6 +1015,7 @@ export default function FormularioAgendamento({
         estabelecimento_id: estabelecimento.id,
         profissional_id: profissionalId,
         sinal_declarado_pago: precisaSinal ? sinalDeclarado : false,
+        finalizado: true,
       };
       if (status) payload.status = status;
       ({ error } = await supabase.from("agendamentos").insert(payload));
@@ -1416,6 +1457,39 @@ export default function FormularioAgendamento({
                   />
                 </div>
               </>
+            )}
+
+            {/* Preço da manutenção selecionada (ver efeito acima que chama
+                calcularPrecoManutencao). Só aparece pra manutenções — serviços
+                normais não têm precoManutencao setado. Quando valorCheio é
+                true, o destaque âmbar deixa claro que NÃO é o valor normal da
+                manutenção (evita parecer erro de cobrança). */}
+            {servicoSelecionado?.servico_origem_id != null && precoManutencao && (
+              <div
+                className={
+                  precoManutencao.valorCheio
+                    ? "rounded-lg bg-amber-50 px-3 py-2 ring-1 ring-amber-200"
+                    : "rounded-lg bg-surface px-3 py-2"
+                }
+              >
+                <p
+                  className={
+                    precoManutencao.valorCheio
+                      ? "text-sm font-medium text-amber-800"
+                      : "text-sm text-body"
+                  }
+                >
+                  {precoManutencao.valorCheio
+                    ? `Valor cheio do serviço: ${formatarPreco(precoManutencao.centavos)}`
+                    : `Valor da manutenção: ${formatarPreco(precoManutencao.centavos)}`}
+                </p>
+                {precoManutencao.valorCheio && (
+                  <p className="mt-1 text-xs text-amber-800">
+                    Sua última manutenção já passou do prazo, por isso o valor
+                    cobrado é o do serviço completo, não o de manutenção.
+                  </p>
+                )}
+              </div>
             )}
 
             {precisaSinal && (
