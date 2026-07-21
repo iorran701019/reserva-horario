@@ -46,6 +46,8 @@ const FORM_INICIAL = {
   ocultarDuracao: false,
   adicionarAlerta: false,
   alertaMensagem: "",
+  servico_origem_id: "",
+  prazoManutencaoDias: "",
 };
 
 // Reais digitado (aceita "35", "35,50" ou "35.50") -> centavos inteiros.
@@ -193,7 +195,7 @@ export default function GerenciarServicos({ estabelecimento }) {
       const { data, error } = await supabase
         .from("servicos")
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem"
+          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias"
         )
         .eq("estabelecimento_id", estabelecimento.id)
         .order("categoria_id", { ascending: true, nullsFirst: true })
@@ -297,6 +299,18 @@ export default function GerenciarServicos({ estabelecimento }) {
     }));
   }
 
+  // Selecionar um serviço de origem esconde o campo de prazo de manutenção
+  // (só faz sentido no serviço "original"); limpamos o valor digitado pra não
+  // ficar um prazo escondido pendente de salvar.
+  function handleChangeServicoOrigem(e) {
+    const value = e.target.value;
+    setForm((anterior) => ({
+      ...anterior,
+      servico_origem_id: value,
+      prazoManutencaoDias: value === "" ? anterior.prazoManutencaoDias : "",
+    }));
+  }
+
   function abrirNovo() {
     setForm(FORM_INICIAL);
     setErroForm("");
@@ -315,6 +329,10 @@ export default function GerenciarServicos({ estabelecimento }) {
       // A caixa nasce marcada se já houver mensagem salva.
       adicionarAlerta: Boolean(servico.alerta_mensagem),
       alertaMensagem: servico.alerta_mensagem ?? "",
+      servico_origem_id:
+        servico.servico_origem_id != null ? String(servico.servico_origem_id) : "",
+      prazoManutencaoDias:
+        servico.prazo_manutencao_dias != null ? String(servico.prazo_manutencao_dias) : "",
     });
     setErroForm("");
     setEditando(servico);
@@ -372,6 +390,21 @@ export default function GerenciarServicos({ estabelecimento }) {
       return { erro: "Informe uma duração (em minutos) maior que zero." };
     }
 
+    // "" (Nenhum) -> null; senão o id numérico do serviço de origem.
+    const servicoOrigemId =
+      form.servico_origem_id === "" ? null : Number(form.servico_origem_id);
+
+    // Prazo de manutenção só existe no serviço "original" (sem servico_origem_id).
+    // Com origem selecionada, o campo fica escondido e sempre grava null.
+    let prazoManutencaoDias = null;
+    if (servicoOrigemId === null && form.prazoManutencaoDias.trim() !== "") {
+      const prazo = Number(form.prazoManutencaoDias);
+      if (!Number.isInteger(prazo) || prazo <= 0) {
+        return { erro: "Informe um prazo de manutenção (em dias) maior que zero." };
+      }
+      prazoManutencaoDias = prazo;
+    }
+
     return {
       payload: {
         nome,
@@ -387,6 +420,8 @@ export default function GerenciarServicos({ estabelecimento }) {
           form.adicionarAlerta && form.alertaMensagem.trim()
             ? form.alertaMensagem.trim()
             : null,
+        servico_origem_id: servicoOrigemId,
+        prazo_manutencao_dias: prazoManutencaoDias,
       },
     };
   }
@@ -447,7 +482,7 @@ export default function GerenciarServicos({ estabelecimento }) {
           ordem: proximaOrdemNoGrupo(payload.categoria_id),
         })
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem"
+          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias"
         )
         .single();
 
@@ -936,6 +971,60 @@ export default function GerenciarServicos({ estabelecimento }) {
               ))}
             </select>
           </div>
+
+          {/* Serviço de origem (opcional): marca este serviço como uma
+              "manutenção" de outro já cadastrado (grava servico_origem_id).
+              Selecionando um, o prazo de manutenção abaixo some — só o
+              serviço "original" (sem origem) tem prazo. */}
+          <div>
+            <label
+              htmlFor="servico_origem_id"
+              className="mb-1 block text-sm font-medium text-body"
+            >
+              Serviço de origem
+            </label>
+            <select
+              id="servico_origem_id"
+              name="servico_origem_id"
+              value={form.servico_origem_id}
+              onChange={handleChangeServicoOrigem}
+              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+            >
+              <option value="">Nenhum (serviço original)</option>
+              {servicos
+                .filter(
+                  (s) => s.ativo && (editando === "novo" || s.id !== editando.id)
+                )
+                .map((s) => (
+                  <option key={s.id} value={String(s.id)}>
+                    {s.nome}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          {form.servico_origem_id === "" && (
+            <div>
+              <label
+                htmlFor="prazoManutencaoDias"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Prazo de manutenção (dias)
+              </label>
+              <input
+                id="prazoManutencaoDias"
+                name="prazoManutencaoDias"
+                type="number"
+                inputMode="numeric"
+                step="1"
+                min="0"
+                value={form.prazoManutencaoDias}
+                onChange={handleChange}
+                placeholder="Ex.: 21"
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            </div>
+          )}
 
           <div className="flex gap-3">
             <div className="flex-1">
