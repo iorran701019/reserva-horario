@@ -79,7 +79,11 @@ export default function PainelCliente({
       estabelecimento.id,
       clienteAtual.telefone.replace(/\D/g, "")
     ).then((lista) => {
-      if (ativo) setAgendamentos(lista);
+      if (ativo) {
+        setAgendamentos(
+          lista.filter((item) => classificarAgendamento(item) !== "historico")
+        );
+      }
     });
     return () => {
       ativo = false;
