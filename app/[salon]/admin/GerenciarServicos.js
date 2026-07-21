@@ -31,6 +31,11 @@ import { formatarPreco } from "@/components/FormularioAgendamento";
 // um id de categoria (numérico).
 const SEM_CATEGORIA = "sem-categoria";
 
+// Sentinel do grupo sintético "Manutenções" — serviços com servico_origem_id
+// preenchido (ver `servicosManutencao` mais abaixo). Nunca colide com um id
+// de categoria (numérico) nem com SEM_CATEGORIA.
+const CATEGORIA_MANUTENCOES = "manutencoes";
+
 // Estado inicial do formulário. `preco` fica em REAIS (string do input); só é
 // convertido pra centavos na hora de gravar. `profissionais` é a lista de ids
 // (profissionais.id) vinculados ao serviço. `adicionarAlerta` só controla a
@@ -846,14 +851,21 @@ export default function GerenciarServicos({ estabelecimento }) {
     );
   }
 
-  // Agrupamento pro acordeão: categorias na ordem de exibição, e o grupo
-  // sintético "Sem categoria" — serviços com categoria_id null, ou apontando
-  // pra uma categoria que não existe mais. Só aparece se tiver algum serviço
-  // (mesmo critério do bloco solto de /agendar).
+  // Agrupamento pro acordeão: categorias na ordem de exibição, o grupo
+  // sintético "Manutenções" — serviços com servico_origem_id preenchido,
+  // IGNORANDO a categoria_id que porventura tenham (mesmo critério do
+  // /agendar público, ver categoriasComServicos em FormularioAgendamento) —
+  // e o grupo sintético "Sem categoria" — serviços sem categoria_id, ou
+  // apontando pra uma categoria que não existe mais, e que não sejam
+  // manutenção. Cada um só aparece se tiver algum serviço.
   const categoriasOrdenadas = ordenarCategorias(categorias);
   const idsCategorias = new Set(categorias.map((c) => c.id));
+  const servicosManutencao = servicos.filter((s) => s.servico_origem_id != null);
+  const idsManutencao = new Set(servicosManutencao.map((s) => s.id));
   const servicosSemCategoria = servicos.filter(
-    (s) => s.categoria_id == null || !idsCategorias.has(s.categoria_id)
+    (s) =>
+      !idsManutencao.has(s.id) &&
+      (s.categoria_id == null || !idsCategorias.has(s.categoria_id))
   );
 
   return (
@@ -1188,7 +1200,7 @@ export default function GerenciarServicos({ estabelecimento }) {
             <div className="space-y-3">
               {categoriasOrdenadas.map((categoria, indice) => {
                 const servicosDaCategoria = servicos.filter(
-                  (s) => s.categoria_id === categoria.id
+                  (s) => s.categoria_id === categoria.id && !idsManutencao.has(s.id)
                 );
                 const aberta = grupoAberto === categoria.id;
                 const renomeando = categoriaEditandoId === categoria.id;
@@ -1295,6 +1307,34 @@ export default function GerenciarServicos({ estabelecimento }) {
                   </div>
                 );
               })}
+
+              {servicosManutencao.length > 0 && (
+                <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+                  <button
+                    type="button"
+                    onClick={() => alternarGrupo(CATEGORIA_MANUTENCOES)}
+                    aria-expanded={grupoAberto === CATEGORIA_MANUTENCOES}
+                    className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+                  >
+                    <span className="font-semibold text-heading">Manutenções</span>
+                    <span className="flex shrink-0 items-center gap-1 text-xs text-body">
+                      {servicosManutencao.length} serviço
+                      {servicosManutencao.length === 1 ? "" : "s"}
+                      <span aria-hidden="true">
+                        {grupoAberto === CATEGORIA_MANUTENCOES ? "▲" : "▼"}
+                      </span>
+                    </span>
+                  </button>
+
+                  {grupoAberto === CATEGORIA_MANUTENCOES && (
+                    <div className="border-t border-border p-4">
+                      <ul className="space-y-3">
+                        {servicosManutencao.map((s) => renderServicoItem(s))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {servicosSemCategoria.length > 0 && (
                 <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
@@ -1440,11 +1480,18 @@ function ordenar(lista) {
   });
 }
 
-// Serviços do mesmo grupo de categoria de `servico` (mesmo categoria_id,
-// null incluso), na ordem já vigente em `lista` — usado pra achar o vizinho
-// de cima/baixo e desenhar as setinhas.
+// Serviços do mesmo grupo VISUAL de `servico` (mesmo categoria_id, null
+// incluso — MAS serviços com servico_origem_id preenchido formam seu próprio
+// grupo "Manutenções", independente da categoria_id real), na ordem já
+// vigente em `lista` — usado pra achar o vizinho de cima/baixo e desenhar as
+// setinhas, mantendo consistência com o agrupamento exibido no acordeão.
 function grupoDaCategoria(lista, servico) {
-  return lista.filter((s) => s.categoria_id === servico.categoria_id);
+  if (servico.servico_origem_id != null) {
+    return lista.filter((s) => s.servico_origem_id != null);
+  }
+  return lista.filter(
+    (s) => s.categoria_id === servico.categoria_id && s.servico_origem_id == null
+  );
 }
 
 // Patch imutável do campo `ativo` de um serviço na lista.

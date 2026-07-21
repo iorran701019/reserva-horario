@@ -69,6 +69,10 @@ function formatarISO(date) {
 // (0=domingo … 6=sábado).
 const DIAS_SEMANA_CURTO = ["D", "S", "T", "Q", "Q", "S", "S"];
 
+// Sentinel do grupo sintético "Manutenções" no acordeão de serviços — nunca
+// colide com um id de categoria (numérico). Ver `categoriasComServicos`.
+const CATEGORIA_MANUTENCOES = "manutencoes";
+
 // "YYYY-MM-DD" -> "dd/mm · dia da semana". Parse manual pra evitar o
 // deslocamento de fuso que new Date("YYYY-MM-DD") sofre (vira UTC). Exportado
 // pra tela de confirmação do consumidor reaproveitar a mesma formatação.
@@ -394,7 +398,7 @@ export default function FormularioAgendamento({
         supabase
           .from("servicos")
           .select(
-            "id, nome, duracao_min, preco_centavos, categoria_id, ocultar_preco, ocultar_duracao, alerta_mensagem"
+            "id, nome, duracao_min, preco_centavos, categoria_id, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id"
           )
           .eq("estabelecimento_id", estabelecimento.id)
           .eq("ativo", true)
@@ -482,17 +486,33 @@ export default function FormularioAgendamento({
   // Agrupamento da lista de serviços da etapa "servico": soltos no topo os
   // sem categoria (ou apontando pra uma categoria que não existe mais), depois
   // uma seção por categoria (na ordem vinda do banco) só com quem tem >=1
-  // serviço ativo.
+  // serviço ativo. Serviços com servico_origem_id preenchido (manutenção de
+  // outro serviço) IGNORAM a categoria_id própria e vão sempre pro grupo
+  // sintético "Manutenções", por último — mesmo critério do admin
+  // (GerenciarServicos).
   const idsCategorias = new Set(categorias.map((c) => c.id));
+  const servicosManutencao = servicos.filter((s) => s.servico_origem_id != null);
+  const idsManutencao = new Set(servicosManutencao.map((s) => s.id));
   const servicosSemCategoria = servicos.filter(
-    (s) => s.categoria_id == null || !idsCategorias.has(s.categoria_id)
+    (s) =>
+      !idsManutencao.has(s.id) &&
+      (s.categoria_id == null || !idsCategorias.has(s.categoria_id))
   );
   const categoriasComServicos = categorias
     .map((c) => ({
       ...c,
-      servicos: servicos.filter((s) => s.categoria_id === c.id),
+      servicos: servicos.filter(
+        (s) => s.categoria_id === c.id && !idsManutencao.has(s.id)
+      ),
     }))
     .filter((c) => c.servicos.length > 0);
+  if (servicosManutencao.length > 0) {
+    categoriasComServicos.push({
+      id: CATEGORIA_MANUTENCOES,
+      nome: "Manutenções",
+      servicos: servicosManutencao,
+    });
+  }
 
   // Abre/fecha uma categoria no acordeão — só uma aberta por vez.
   function alternarCategoria(id) {
