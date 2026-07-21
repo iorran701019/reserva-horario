@@ -541,15 +541,24 @@ export default function FormularioAgendamento({
     }
 
     let ativo = true;
-    calcularPrecoManutencao(estabelecimento.id, telefoneDigitos, servicoSelecionado).then(
-      (resultado) => {
-        if (ativo) setPrecoManutencao(resultado);
-      }
-    );
+    calcularPrecoManutencao(
+      estabelecimento.id,
+      telefoneDigitos,
+      servicoSelecionado,
+      form.data
+    ).then((resultado) => {
+      if (ativo) setPrecoManutencao(resultado);
+    });
     return () => {
       ativo = false;
     };
-  }, [servicoSelecionado, clienteInicial?.telefone, form.telefone, estabelecimento.id]);
+  }, [
+    servicoSelecionado,
+    clienteInicial?.telefone,
+    form.telefone,
+    form.data,
+    estabelecimento.id,
+  ]);
 
   const [hoje] = useState(dataDeHoje);
 
