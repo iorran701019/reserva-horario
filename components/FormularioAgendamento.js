@@ -289,6 +289,11 @@ function CalendarioDias({
 //                   (menor id ativo, ou "a equipe"). Usado só no texto do
 //                   bloco do sinal; buscado uma vez em app/[salon]/page.js e
 //                   repassado aqui pra não duplicar a query.
+//   servicoInicial – linha de `servicos` (mesmo formato da query de serviços
+//                   abaixo) já escolhida ANTES do wizard abrir — ex.: o card de
+//                   sugestão de manutenção do PainelCliente. Pula a etapa
+//                   "servico" e cai direto em "data". Omitido (o normal), a
+//                   etapa "servico" funciona como sempre.
 export default function FormularioAgendamento({
   estabelecimento,
   status,
@@ -298,6 +303,7 @@ export default function FormularioAgendamento({
   clienteInicial = null,
   clienteEhNovo = false,
   nomeProfissionalContato = "a equipe",
+  servicoInicial = null,
 }) {
   const [form, setForm] = useState(() => ({
     ...ESTADO_INICIAL,
@@ -318,7 +324,14 @@ export default function FormularioAgendamento({
   const [etapa, setEtapa] = useState("servico");
 
   const [servicos, setServicos] = useState([]);
-  const [servicoSelecionado, setServicoSelecionado] = useState(null);
+  const [servicoSelecionado, setServicoSelecionado] = useState(servicoInicial);
+  // Enquanto true, ainda não decidimos se dá pra pular a etapa "servico" pro
+  // servicoInicial — depende da config escolha_profissional, que só chega
+  // depois do fetch em `carregar` (ver efeito abaixo). Sem servicoInicial,
+  // nasce false e nunca entra em jogo.
+  const [servicoInicialPendente, setServicoInicialPendente] = useState(
+    Boolean(servicoInicial)
+  );
   // Serviço com alerta_mensagem que o cliente acabou de tocar, aguardando
   // confirmação no modal (ver selecionarServico/confirmarAlerta/cancelarAlerta).
   // A seleção de fato só acontece se o modal for confirmado.
@@ -348,6 +361,25 @@ export default function FormularioAgendamento({
   // (forcarEscolhaProfissional), senão vale o toggle do salão. O state acima
   // guarda só o valor cru do banco; daqui pra baixo tudo lê `escolherProfissional`.
   const escolherProfissional = forcarEscolhaProfissional || escolhaProfissional;
+
+  // Resolve o pulo de etapa do servicoInicial assim que a config
+  // escolha_profissional carrega (carregandoServicos vira false). Sem exigir
+  // profissional, vai direto pra "data" — igual confirmarSelecaoServico faz
+  // pra qualquer serviço no encaixe automático. Exigindo, fica em "servico"
+  // (a lista de serviços não atrapalha: com servicoSelecionado já preenchido,
+  // os cards de profissional já aparecem logo abaixo dela). Ajuste de estado
+  // durante a renderização (não um efeito — dispara só na transição
+  // true -> false, comparando com o valor da renderização anterior).
+  const [carregandoServicosAnterior, setCarregandoServicosAnterior] = useState(
+    carregandoServicos
+  );
+  if (carregandoServicos !== carregandoServicosAnterior) {
+    setCarregandoServicosAnterior(carregandoServicos);
+    if (servicoInicialPendente && !carregandoServicos) {
+      if (!escolherProfissional) setEtapa("data");
+      setServicoInicialPendente(false);
+    }
+  }
 
   // Profissionais ATIVOS que atendem o serviço escolhido, cada um já com seus
   // dias de trabalho (horarios_trabalho.dia_semana) embutidos — carregados nos
