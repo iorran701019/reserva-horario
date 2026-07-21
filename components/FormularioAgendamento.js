@@ -974,7 +974,6 @@ setRespostasPerguntas({});
       rolarPara(profissionalRef);
     }
   }
-  }
 
   // Modal do alerta — "Continuar": confirma a seleção (como se tivesse
   // acabado de tocar no serviço, sem o alerta no caminho).
