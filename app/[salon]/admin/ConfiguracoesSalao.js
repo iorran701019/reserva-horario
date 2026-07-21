@@ -50,6 +50,27 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const [erroSinal, setErroSinal] = useState("");
   const [statusSinal, setStatusSinal] = useState("");
 
+  // Dias pra manter a manutenção vencida em destaque. String vazia = nunca
+  // caduca (grava null). undefined = ainda carregando o estado atual do banco.
+  const [caducidadeDias, setCaducidadeDias] = useState(undefined);
+  const [erroCaducidade, setErroCaducidade] = useState("");
+  const [statusCaducidade, setStatusCaducidade] = useState("");
+
+  // Cobrar o valor cheio do serviço de origem quando a manutenção é feita
+  // depois do prazo (ver lib/manutencaoSugerida.js -> calcularPrecoManutencao,
+  // usado pelo wizard de agendamento). undefined = ainda carregando.
+  const [valorCheioAposPrazo, setValorCheioAposPrazo] = useState(undefined);
+  const [erroValorCheio, setErroValorCheio] = useState("");
+  const [statusValorCheio, setStatusValorCheio] = useState("");
+
+  // Horas até uma reserva provisória (pendente/aguardando_sinal, criada
+  // antecipadamente pelo wizard público — ver FormularioAgendamento) parar de
+  // bloquear disponibilidade (ver lib/disponibilidade.js ->
+  // calcularVagasPorHorario). String pro input; undefined = ainda carregando.
+  const [reservaExpiraHoras, setReservaExpiraHoras] = useState(undefined);
+  const [erroReservaExpira, setErroReservaExpira] = useState("");
+  const [statusReservaExpira, setStatusReservaExpira] = useState("");
+
   // Carrega os valores atuais ao abrir.
   useEffect(() => {
     let ativo = true;
@@ -58,7 +79,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -68,6 +89,9 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       if (error) {
         setErro(error.message);
         setErroSinal(error.message);
+        setErroCaducidade(error.message);
+        setErroValorCheio(error.message);
+        setErroReservaExpira(error.message);
         return;
       }
       setErro("");
@@ -77,6 +101,23 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       setSinalRegra(data?.sinal_regra ?? "desligado");
       setSinalValor(centavosParaReais(data?.sinal_valor_centavos));
       setSinalChavePix(data?.sinal_chave_pix ?? "");
+
+      setErroCaducidade("");
+      setCaducidadeDias(
+        data?.manutencao_caducidade_dias == null
+          ? ""
+          : String(data.manutencao_caducidade_dias)
+      );
+
+      setErroValorCheio("");
+      setValorCheioAposPrazo(Boolean(data?.manutencao_valor_cheio_apos_prazo));
+
+      setErroReservaExpira("");
+      setReservaExpiraHoras(
+        data?.reserva_provisoria_expira_horas == null
+          ? ""
+          : String(data.reserva_provisoria_expira_horas)
+      );
     }
 
     carregar();
@@ -119,6 +160,24 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     const t = setTimeout(() => setStatusSinal(""), 2500);
     return () => clearTimeout(t);
   }, [statusSinal]);
+
+  useEffect(() => {
+    if (statusCaducidade !== "salvo") return;
+    const t = setTimeout(() => setStatusCaducidade(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusCaducidade]);
+
+  useEffect(() => {
+    if (statusValorCheio !== "salvo") return;
+    const t = setTimeout(() => setStatusValorCheio(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusValorCheio]);
+
+  useEffect(() => {
+    if (statusReservaExpira !== "salvo") return;
+    const t = setTimeout(() => setStatusReservaExpira(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusReservaExpira]);
 
   // Alterna e grava na hora. Otimista: reflete o novo valor imediatamente e, se
   // o banco recusar (ex.: RLS), reverte e mostra o erro.
@@ -178,8 +237,83 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     salvarSinal({ sinalRegra: nova });
   }
 
+  // Vazio grava null (nunca caduca); caso contrário grava o inteiro digitado.
+  async function salvarCaducidade() {
+    const dias = caducidadeDias === "" ? null : parseInt(caducidadeDias, 10);
+
+    setStatusCaducidade("salvando");
+    setErroCaducidade("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ manutencao_caducidade_dias: dias })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setStatusCaducidade("");
+      setErroCaducidade(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setStatusCaducidade("salvo");
+  }
+
+  // Alterna e grava na hora, mesmo padrão otimista de `alternar` acima.
+  async function alternarValorCheioAposPrazo() {
+    const novo = !valorCheioAposPrazo;
+    setValorCheioAposPrazo(novo);
+    setStatusValorCheio("salvando");
+    setErroValorCheio("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ manutencao_valor_cheio_apos_prazo: novo })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setValorCheioAposPrazo(!novo);
+      setStatusValorCheio("");
+      setErroValorCheio(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setStatusValorCheio("salvo");
+  }
+
+  // Exige um inteiro > 0 (não faz sentido "nunca expira" aqui — a coluna já
+  // nasce com default 48 no banco). Valor inválido/vazio reverte pro último
+  // válido carregado, sem gravar.
+  async function salvarReservaExpira() {
+    const horas = parseInt(reservaExpiraHoras, 10);
+
+    if (!Number.isInteger(horas) || horas <= 0) {
+      setErroReservaExpira("Informe um número de horas maior que 0.");
+      return;
+    }
+
+    setStatusReservaExpira("salvando");
+    setErroReservaExpira("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ reserva_provisoria_expira_horas: horas })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setStatusReservaExpira("");
+      setErroReservaExpira(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setReservaExpiraHoras(String(horas));
+    setStatusReservaExpira("salvo");
+  }
+
   const carregandoValor = escolhaProfissional === undefined;
   const carregandoSinal = sinalRegra === undefined;
+  const carregandoCaducidade = caducidadeDias === undefined;
+  const carregandoValorCheio = valorCheioAposPrazo === undefined;
+  const carregandoReservaExpira = reservaExpiraHoras === undefined;
   const sinalDesligado = sinalRegra === "desligado";
   // Com 1 só profissional ativo (ou enquanto a contagem ainda carrega), o
   // toggle some — não há outro profissional pro cliente escolher de qualquer
@@ -315,6 +449,115 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
         <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
       )}
       {erroSinal && <p className="mt-2 text-xs text-red-600">{erroSinal}</p>}
+    </section>
+
+    <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+      <h3 className="text-sm font-medium text-heading">
+        Tolerância após o vencimento (dias)
+      </h3>
+
+      <div className="mt-3">
+        <label
+          htmlFor="manutencao-caducidade-dias"
+          className="mb-1 block text-sm font-medium text-body"
+        >
+          Depois de vencida, destacar por quantos dias? (deixe em branco para
+          nunca caducar)
+        </label>
+        <input
+          id="manutencao-caducidade-dias"
+          type="number"
+          min="0"
+          step="1"
+          inputMode="numeric"
+          value={caducidadeDias ?? ""}
+          onChange={(e) => setCaducidadeDias(e.target.value)}
+          onBlur={salvarCaducidade}
+          disabled={carregandoCaducidade}
+          placeholder="Nunca caduca"
+          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+        />
+      </div>
+
+      {statusCaducidade === "salvando" && (
+        <p className="mt-2 text-xs text-muted">Salvando…</p>
+      )}
+      {statusCaducidade === "salvo" && !erroCaducidade && (
+        <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+      )}
+      {erroCaducidade && (
+        <p className="mt-2 text-xs text-red-600">{erroCaducidade}</p>
+      )}
+    </section>
+
+    <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+      <label className="flex items-start gap-2 text-sm text-body">
+        <input
+          type="checkbox"
+          checked={Boolean(valorCheioAposPrazo)}
+          onChange={alternarValorCheioAposPrazo}
+          disabled={carregandoValorCheio}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <span>
+          <span className="block font-medium text-heading">
+            Cobrar valor cheio do serviço quando a manutenção passar do prazo
+          </span>
+          <span className="mt-1 block text-xs text-muted">
+            Se a última manutenção da cliente já venceu, o wizard de
+            agendamento cobra o preço do serviço original em vez do preço da
+            manutenção.
+          </span>
+        </span>
+      </label>
+
+      {statusValorCheio === "salvando" && (
+        <p className="mt-2 text-xs text-muted">Salvando…</p>
+      )}
+      {statusValorCheio === "salvo" && !erroValorCheio && (
+        <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+      )}
+      {erroValorCheio && (
+        <p className="mt-2 text-xs text-red-600">{erroValorCheio}</p>
+      )}
+    </section>
+
+    <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+      <h3 className="text-sm font-medium text-heading">
+        Expiração de reservas provisórias
+      </h3>
+
+      <div className="mt-3">
+        <label
+          htmlFor="reserva-expira-horas"
+          className="mb-1 block text-sm font-medium text-body"
+        >
+          Cancelar reservas pendentes não confirmadas após quantas horas?
+        </label>
+        <input
+          id="reserva-expira-horas"
+          type="number"
+          min="1"
+          step="1"
+          inputMode="numeric"
+          value={reservaExpiraHoras ?? ""}
+          onChange={(e) => setReservaExpiraHoras(e.target.value)}
+          onBlur={salvarReservaExpira}
+          disabled={carregandoReservaExpira}
+          placeholder="48"
+          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+        />
+      </div>
+
+      {statusReservaExpira === "salvando" && (
+        <p className="mt-2 text-xs text-muted">Salvando…</p>
+      )}
+      {statusReservaExpira === "salvo" && !erroReservaExpira && (
+        <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+      )}
+      {erroReservaExpira && (
+        <p className="mt-2 text-xs text-red-600">{erroReservaExpira}</p>
+      )}
     </section>
     </>
   );

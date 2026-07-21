@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { calcularVagasPorHorario } from "@/lib/disponibilidade";
 import { buscarTema } from "@/lib/temas";
+import {
+  calcularPrecoManutencao,
+  buscarVencimentoManutencao,
+} from "@/lib/manutencaoSugerida";
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
 // "pendente") e a aba Agendar do /admin (cria "confirmado"). Toda a lógica de
@@ -68,6 +72,10 @@ function formatarISO(date) {
 // Cabeçalho do calendário: iniciais dos dias no padrão Date.getDay()
 // (0=domingo … 6=sábado).
 const DIAS_SEMANA_CURTO = ["D", "S", "T", "Q", "Q", "S", "S"];
+
+// Key do item único "Manutenção" no acordeão de serviços — nunca colide com
+// um id de serviço (numérico). Ver `renderBotaoManutencao`.
+const ITEM_MANUTENCAO = "manutencoes";
 
 // "YYYY-MM-DD" -> "dd/mm · dia da semana". Parse manual pra evitar o
 // deslocamento de fuso que new Date("YYYY-MM-DD") sofre (vira UTC). Exportado
@@ -173,6 +181,12 @@ async function escolherMenosOcupado(estabelecimentoId, data, candidatos) {
 //   selecionado      – "YYYY-MM-DD" atualmente escolhido (destaca a célula).
 //   onSelecionar     – recebe o "YYYY-MM-DD" do dia clicado (só dias válidos).
 //   onPrev/onNext    – navegação de mês. podeVoltar trava o passado.
+//   vencimentoManutencao – Date (meia-noite local) do vencimento da manutenção
+//                   selecionada, ou null. Quando presente, só INFORMA (não
+//                   bloqueia): dias até e incluindo o vencimento ganham um
+//                   fundo verde sutil, dias após ganham laranja. Um dia
+//                   desabilitado (cinza, sem profissional) mantém prioridade
+//                   visual sobre essas cores.
 function CalendarioDias({
   mes,
   min,
@@ -182,6 +196,7 @@ function CalendarioDias({
   onPrev,
   onNext,
   podeVoltar,
+  vencimentoManutencao,
 }) {
   const ano = mes.getFullYear();
   const mesIdx = mes.getMonth();
@@ -265,6 +280,10 @@ function CalendarioDias({
           const fechado = !diasSemanaAtivos.has(date.getDay());
           const desabilitado = passado || fechado;
           const sel = iso === selecionado;
+          const dentroDoPrazo =
+            vencimentoManutencao != null && date <= vencimentoManutencao;
+          const foraDoPrazo =
+            vencimentoManutencao != null && date > vencimentoManutencao;
 
           return (
             <button
@@ -280,6 +299,10 @@ function CalendarioDias({
                   ? "cursor-not-allowed text-muted/40"
                   : sel
                   ? "bg-primary font-semibold text-white ring-1 ring-primary"
+                  : dentroDoPrazo
+                  ? "bg-green-50 text-body ring-1 ring-green-200 hover:border-primary hover:ring-primary"
+                  : foraDoPrazo
+                  ? "bg-orange-50 text-body ring-1 ring-orange-200 hover:border-primary hover:ring-primary"
                   : "text-body ring-1 ring-border hover:border-primary hover:ring-primary",
               ].join(" ")}
             >
@@ -322,6 +345,11 @@ function CalendarioDias({
 //                   (menor id ativo, ou "a equipe"). Usado só no texto do
 //                   bloco do sinal; buscado uma vez em app/[salon]/page.js e
 //                   repassado aqui pra não duplicar a query.
+//   servicoInicial – linha de `servicos` (mesmo formato da query de serviços
+//                   abaixo) já escolhida ANTES do wizard abrir — ex.: o card de
+//                   sugestão de manutenção do PainelCliente. Pula a etapa
+//                   "servico" e cai direto em "data". Omitido (o normal), a
+//                   etapa "servico" funciona como sempre.
 export default function FormularioAgendamento({
   estabelecimento,
   status,
@@ -331,6 +359,7 @@ export default function FormularioAgendamento({
   clienteInicial = null,
   clienteEhNovo = false,
   nomeProfissionalContato = "a equipe",
+  servicoInicial = null,
 }) {
   const [form, setForm] = useState(() => ({
     ...ESTADO_INICIAL,
@@ -351,17 +380,49 @@ export default function FormularioAgendamento({
   const [etapa, setEtapa] = useState("servico");
 
   const [servicos, setServicos] = useState([]);
-  const [servicoSelecionado, setServicoSelecionado] = useState(null);
+  const [servicoSelecionado, setServicoSelecionado] = useState(servicoInicial);
+  // Enquanto true, ainda não decidimos se dá pra pular a etapa "servico" pro
+  // servicoInicial — depende da config escolha_profissional, que só chega
+  // depois do fetch em `carregar` (ver efeito abaixo). Sem servicoInicial,
+  // nasce false e nunca entra em jogo.
+  const [servicoInicialPendente, setServicoInicialPendente] = useState(
+    Boolean(servicoInicial)
+  );
   // Serviço com alerta_mensagem que o cliente acabou de tocar, aguardando
   // confirmação no modal (ver selecionarServico/confirmarAlerta/cancelarAlerta).
   // A seleção de fato só acontece se o modal for confirmado.
   const [alertaPendente, setAlertaPendente] = useState(null);
+  // Popup "Qual serviço foi feito?" do item único "Manutenção" do acordeão
+  // (ver servicosManutencao/renderBotaoManutencao/escolherManutencao).
+  const [modalManutencaoAberto, setModalManutencaoAberto] = useState(false);
+  // Preço a exibir/cobrar quando servicoSelecionado é uma manutenção — null
+  // enquanto não se aplica (serviço normal) ou ainda calculando (ver efeito
+  // abaixo, que chama calcularPrecoManutencao assim que serviço + telefone da
+  // cliente estão disponíveis). { centavos, valorCheio } quando pronto.
+  const [precoManutencao, setPrecoManutencao] = useState(null);
+  // Vencimento (Date à meia-noite local) da manutenção selecionada, pra
+  // colorir o calendário da etapa "Data" — ver buscarVencimentoManutencao e o
+  // efeito abaixo. null enquanto não se aplica (serviço normal) ou sem
+  // atendimento de referência (cliente nova pro serviço de origem).
+  const [vencimentoManutencao, setVencimentoManutencao] = useState(null);
   const [carregandoServicos, setCarregandoServicos] = useState(true);
   const [erroServicos, setErroServicos] = useState("");
 
 // Categorias do salão (categorias_servico), na ordem de exibição (`ordem`).
   // Usadas só para agrupar a lista de serviços em acordeões. `categoriaAberta`
   // guarda o id da categoria expandida (só uma por vez); null = todas fechadas.
+
+  // Perguntas do serviço selecionado (servico_perguntas + suas
+  // servico_pergunta_opcoes), buscadas em confirmarSelecaoServico. Vazio ->
+  // popup não abre e o fluxo segue direto (ver avancarAposServico).
+  const [perguntasServico, setPerguntasServico] = useState([]);
+  const [modalPerguntasAberto, setModalPerguntasAberto] = useState(false);
+  // Respostas do cliente no popup, por pergunta_id: { opcaoId } pra
+  // sim_nao/multipla_escolha, { textoLivre } pra texto_livre. Alimentam tanto
+  // a validação (confirmarModalPerguntas) quanto o cálculo de ajuste de preço
+  // (ver calcularAjustePerguntas) e a gravação em agendamento_respostas.
+  const [respostasPerguntas, setRespostasPerguntas] = useState({});
+  const [erroModalPerguntas, setErroModalPerguntas] = useState("");
   const [categorias, setCategorias] = useState([]);
   const [categoriaAberta, setCategoriaAberta] = useState(null);
 
@@ -378,6 +439,25 @@ export default function FormularioAgendamento({
   // (forcarEscolhaProfissional), senão vale o toggle do salão. O state acima
   // guarda só o valor cru do banco; daqui pra baixo tudo lê `escolherProfissional`.
   const escolherProfissional = forcarEscolhaProfissional || escolhaProfissional;
+
+  // Resolve o pulo de etapa do servicoInicial assim que a config
+  // escolha_profissional carrega (carregandoServicos vira false). Sem exigir
+  // profissional, vai direto pra "data" — igual confirmarSelecaoServico faz
+  // pra qualquer serviço no encaixe automático. Exigindo, fica em "servico"
+  // (a lista de serviços não atrapalha: com servicoSelecionado já preenchido,
+  // os cards de profissional já aparecem logo abaixo dela). Ajuste de estado
+  // durante a renderização (não um efeito — dispara só na transição
+  // true -> false, comparando com o valor da renderização anterior).
+  const [carregandoServicosAnterior, setCarregandoServicosAnterior] = useState(
+    carregandoServicos
+  );
+  if (carregandoServicos !== carregandoServicosAnterior) {
+    setCarregandoServicosAnterior(carregandoServicos);
+    if (servicoInicialPendente && !carregandoServicos) {
+      if (!escolherProfissional) setEtapa("data");
+      setServicoInicialPendente(false);
+    }
+  }
 
   // Profissionais ATIVOS que atendem o serviço escolhido, cada um já com seus
   // dias de trabalho (horarios_trabalho.dia_semana) embutidos — carregados nos
@@ -445,7 +525,7 @@ export default function FormularioAgendamento({
         supabase
           .from("servicos")
           .select(
-            "id, nome, duracao_min, preco_centavos, categoria_id, ocultar_preco, ocultar_duracao, alerta_mensagem"
+            "id, nome, duracao_min, preco_centavos, categoria_id, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id"
           )
           .eq("estabelecimento_id", estabelecimento.id)
           .eq("ativo", true)
@@ -531,20 +611,101 @@ export default function FormularioAgendamento({
     };
   }, [servicoSelecionado, estabelecimento.id]);
 
+  // Recalcula o preço de exibição/cobrança quando servicoSelecionado é uma
+  // manutenção (ver calcularPrecoManutencao). Precisa do telefone da cliente,
+  // que já vem pronto em clienteInicial no fluxo público (identificado ANTES
+  // do wizard) mas só chega em form.telefone na etapa "dados" do /admin — daí
+  // o efeito reagir aos dois. Serviço normal (sem servico_origem_id) nunca
+  // dispara a busca e mantém precoManutencao null — o reset pra null ao TROCAR
+  // de serviço mora em confirmarSelecaoServico (efeito só faz a busca, não
+  // limpa estado nele mesmo — mesmo padrão do efeito de vagas acima).
+  useEffect(() => {
+    const telefoneDigitos = (clienteInicial?.telefone ?? form.telefone).replace(
+      /\D/g,
+      ""
+    );
+
+    if (servicoSelecionado?.servico_origem_id == null || telefoneDigitos.length < 10) {
+      return;
+    }
+
+    let ativo = true;
+    calcularPrecoManutencao(
+      estabelecimento.id,
+      telefoneDigitos,
+      servicoSelecionado,
+      form.data
+    ).then((resultado) => {
+      if (ativo) setPrecoManutencao(resultado);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [
+    servicoSelecionado,
+    clienteInicial?.telefone,
+    form.telefone,
+    form.data,
+    estabelecimento.id,
+  ]);
+
+  // Busca o vencimento pra colorir o calendário (ver CalendarioDias) quando
+  // servicoSelecionado é uma manutenção — mesmo gate de telefone do efeito
+  // acima, mas SEM depender de form.data (o vencimento não muda conforme a
+  // data escolhida no wizard, só o preço). Reset ao trocar de serviço mora em
+  // confirmarSelecaoServico, mesmo padrão do efeito de preço.
+  useEffect(() => {
+    const telefoneDigitos = (clienteInicial?.telefone ?? form.telefone).replace(
+      /\D/g,
+      ""
+    );
+
+    if (servicoSelecionado?.servico_origem_id == null || telefoneDigitos.length < 10) {
+      return;
+    }
+
+    let ativo = true;
+    buscarVencimentoManutencao(
+      estabelecimento.id,
+      telefoneDigitos,
+      servicoSelecionado
+    ).then((resultado) => {
+      if (ativo) setVencimentoManutencao(resultado);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [
+    servicoSelecionado,
+    clienteInicial?.telefone,
+    form.telefone,
+    estabelecimento.id,
+  ]);
+
   const [hoje] = useState(dataDeHoje);
 
   // Agrupamento da lista de serviços da etapa "servico": soltos no topo os
   // sem categoria (ou apontando pra uma categoria que não existe mais), depois
   // uma seção por categoria (na ordem vinda do banco) só com quem tem >=1
-  // serviço ativo.
+  // serviço ativo. Serviços com servico_origem_id preenchido (manutenção de
+  // outro serviço) IGNORAM a categoria_id própria e NÃO entram em nenhuma
+  // dessas seções — em vez disso viram o item único "Manutenção", renderizado
+  // por último (ver renderBotaoManutencao/servicosManutencao no JSX), que abre
+  // um popup pra escolher qual serviço de origem foi feito.
   const idsCategorias = new Set(categorias.map((c) => c.id));
+  const servicosManutencao = servicos.filter((s) => s.servico_origem_id != null);
+  const idsManutencao = new Set(servicosManutencao.map((s) => s.id));
   const servicosSemCategoria = servicos.filter(
-    (s) => s.categoria_id == null || !idsCategorias.has(s.categoria_id)
+    (s) =>
+      !idsManutencao.has(s.id) &&
+      (s.categoria_id == null || !idsCategorias.has(s.categoria_id))
   );
   const categoriasComServicos = categorias
     .map((c) => ({
       ...c,
-      servicos: servicos.filter((s) => s.categoria_id === c.id),
+      servicos: servicos.filter(
+        (s) => s.categoria_id === c.id && !idsManutencao.has(s.id)
+      ),
     }))
     .filter((c) => c.servicos.length > 0);
 
@@ -607,6 +768,24 @@ export default function FormularioAgendamento({
             {formatarPreco(servico.preco_centavos)}
           </span>
         )}
+      </button>
+    );
+  }
+
+  // Item único "Manutenção", renderizado por último no acordeão (mesmo estilo
+  // de renderBotaoServico). Não seleciona nada diretamente — abre o popup
+  // (ver JSX) que lista os serviços de manutenção pra escolha.
+  function renderBotaoManutencao() {
+    return (
+      <button
+        key={ITEM_MANUTENCAO}
+        type="button"
+        onClick={() => setModalManutencaoAberto(true)}
+        className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 ring-border bg-card text-body transition hover:border-primary hover:ring-primary"
+      >
+        <span className="min-w-0">
+          <span className="block font-medium">Manutenção</span>
+        </span>
       </button>
     );
   }
@@ -742,16 +921,51 @@ export default function FormularioAgendamento({
 
   // Seleção de fato de um serviço: muda a duração/grade e a lista de
   // profissionais, então o horário e o profissional escolhidos podem não
-  // valer mais — limpamos os dois. No encaixe automático (toggle off), avança
-  // direto para a data. No fluxo "cliente escolhe", fica na etapa de serviço
-  // pra escolher o profissional (os cards aparecem logo abaixo).
-  function confirmarSelecaoServico(servico) {
+  // valer mais — limpamos os dois. Também busca as perguntas vinculadas ao
+  // serviço (servico_perguntas); havendo alguma, abre o popup ANTES de
+  // avançar (ver avancarAposServico, chamado só depois de confirmarModalPerguntas
+  // quando há perguntas, ou direto daqui quando não há).
+  async function confirmarSelecaoServico(servico) {
     setServicoSelecionado(servico);
     setHorarioSelecionado("");
     setProfissionalSelecionado(null);
+    // Preço e vencimento da manutenção anterior (se houver) não valem mais
+    // pro novo serviço — os efeitos acima recalculam do zero quando o novo
+    // for manutenção.
+    setPrecoManutencao(null);
+    setVencimentoManutencao(null);
     // A troca muda os dias/horários válidos: zera a data pra não ficar uma
     // seleção antiga num dia que virou indisponível.
     setForm((anterior) => ({ ...anterior, data: "" }));
+setRespostasPerguntas({});
+    setErroModalPerguntas("");
+    const { data, error } = await supabase
+      .from("servico_perguntas")
+      .select(
+        "id, texto, tipo, ordem, servico_pergunta_opcoes(id, label, ajuste_preco_centavos, ordem)"
+      )
+      .eq("servico_id", servico.id)
+      .order("ordem", { ascending: true })
+      .order("ordem", { ascending: true, referencedTable: "servico_pergunta_opcoes" });
+
+    // RLS bloqueando a leitura pro público equivale, aqui, a "sem perguntas":
+    // o fluxo segue igual a hoje em vez de travar no popup.
+    const perguntas = error ? [] : (data ?? []);
+    setPerguntasServico(perguntas);
+
+    if (perguntas.length > 0) {
+      setModalPerguntasAberto(true);
+      return;
+    }
+    avancarAposServico();
+  }
+
+  // Avanço pós-seleção de serviço: no encaixe automático (toggle off) vai
+  // direto pra data; no fluxo "cliente escolhe" fica na etapa de serviço pra
+  // escolher o profissional (os cards aparecem logo abaixo), rolando até o
+  // elemento certo em cada caso. Extraído de confirmarSelecaoServico pra ser
+  // reaproveitado depois do popup de perguntas (ver confirmarModalPerguntas).
+  function avancarAposServico() {
     if (!escolherProfissional) {
       setEtapa("data");
       rolarPara(dataRef);
@@ -759,6 +973,7 @@ export default function FormularioAgendamento({
       // O seletor de profissional aparece logo abaixo dos serviços: rola até ele.
       rolarPara(profissionalRef);
     }
+  }
   }
 
   // Modal do alerta — "Continuar": confirma a seleção (como se tivesse
@@ -772,6 +987,120 @@ export default function FormularioAgendamento({
   // escolher outro serviço.
   function cancelarAlerta() {
     setAlertaPendente(null);
+  }
+
+  // Popup "Qual serviço foi feito?" — escolher uma opção seleciona o serviço
+  // de manutenção correspondente como se o cliente tivesse tocado nele
+  // direto na lista (segue alerta_mensagem etc. via selecionarServico).
+  function escolherManutencao(servico) {
+    setModalManutencaoAberto(false);
+    selecionarServico(servico);
+  }
+
+  // Registra a resposta de uma pergunta sim_nao/multipla_escolha (opção
+  // escolhida) ou texto_livre (texto digitado) — ver popup de perguntas no
+  // JSX. Substitui qualquer resposta anterior da mesma pergunta.
+  function responderOpcao(perguntaId, opcaoId) {
+    setRespostasPerguntas((atual) => ({ ...atual, [perguntaId]: { opcaoId } }));
+    setErroModalPerguntas("");
+  }
+
+  function responderTexto(perguntaId, valor) {
+    setRespostasPerguntas((atual) => ({ ...atual, [perguntaId]: { textoLivre: valor } }));
+    setErroModalPerguntas("");
+  }
+
+  // Popup de perguntas — "Voltar": fecha sem confirmar e desfaz a seleção do
+  // serviço (mesmo espírito do "Voltar" do alerta: o cliente pode escolher
+  // outro serviço em vez de responder).
+  function cancelarModalPerguntas() {
+    setModalPerguntasAberto(false);
+    setPerguntasServico([]);
+    setRespostasPerguntas({});
+    setErroModalPerguntas("");
+    setServicoSelecionado(null);
+  }
+
+  // Popup de perguntas — "Continuar": só avança se TODAS as perguntas tiverem
+  // resposta (opção marcada, ou texto livre não-vazio).
+  function confirmarModalPerguntas() {
+    for (const pergunta of perguntasServico) {
+      const resposta = respostasPerguntas[pergunta.id];
+      const respondida =
+        pergunta.tipo === "texto_livre"
+          ? Boolean(resposta?.textoLivre?.trim())
+          : resposta?.opcaoId != null;
+      if (!respondida) {
+        setErroModalPerguntas("Responda todas as perguntas para continuar.");
+        return;
+      }
+    }
+    setErroModalPerguntas("");
+    setModalPerguntasAberto(false);
+    avancarAposServico();
+  }
+
+  // Soma os ajustes de preço (ajuste_preco_centavos) das opções escolhidas —
+  // texto_livre nunca ajusta preço. Devolve o total e a lista de itens com
+  // ajuste != 0, pra exibição transparente na etapa "Dados" (ver JSX).
+  function calcularAjustePerguntas() {
+    let centavos = 0;
+    const itens = [];
+    for (const pergunta of perguntasServico) {
+      const resposta = respostasPerguntas[pergunta.id];
+      if (resposta?.opcaoId == null) continue;
+      const opcao = (pergunta.servico_pergunta_opcoes ?? []).find(
+        (o) => o.id === resposta.opcaoId
+      );
+      if (opcao && opcao.ajuste_preco_centavos !== 0) {
+        centavos += opcao.ajuste_preco_centavos;
+        itens.push({ label: opcao.label, centavos: opcao.ajuste_preco_centavos });
+      }
+    }
+    return { centavos, itens };
+  }
+
+  // Monta as linhas prontas pra inserir em agendamento_respostas (uma por
+  // pergunta respondida) — null quando a pergunta ficou sem resposta (não
+  // deveria acontecer, confirmarModalPerguntas já valida antes de fechar).
+  function linhasRespostasPerguntas(agendamentoId) {
+    return perguntasServico
+      .map((pergunta) => {
+        const resposta = respostasPerguntas[pergunta.id];
+        if (!resposta) return null;
+        if (pergunta.tipo === "texto_livre") {
+          const texto = resposta.textoLivre?.trim();
+          if (!texto) return null;
+          return {
+            agendamento_id: agendamentoId,
+            pergunta_id: pergunta.id,
+            opcao_id: null,
+            texto_livre: texto,
+          };
+        }
+        if (resposta.opcaoId == null) return null;
+        return {
+          agendamento_id: agendamentoId,
+          pergunta_id: pergunta.id,
+          opcao_id: resposta.opcaoId,
+          texto_livre: null,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  // Grava as respostas do popup junto com o agendamento recém-criado.
+  // Melhor esforço: agendamento_respostas é uma tabela nova (ver SQL sugerido
+  // na conversa) — se a gravação falhar (tabela ainda não existe, RLS etc.),
+  // não bloqueia nem desfaz o agendamento já confirmado, só perde esse
+  // detalhe complementar.
+  async function salvarRespostasPerguntas(agendamentoId) {
+    const linhas = linhasRespostasPerguntas(agendamentoId);
+    if (linhas.length === 0) return;
+    const { error } = await supabase.from("agendamento_respostas").insert(linhas);
+    if (error) {
+      console.error("Não foi possível salvar as respostas das perguntas:", error.message);
+    }
   }
 
   // Fluxo "cliente escolhe": escolher o profissional conclui a etapa de serviço
@@ -839,6 +1168,7 @@ export default function FormularioAgendamento({
         estabelecimento_id: estabelecimento.id,
         profissional_id: profissionalId,
         status: precisaSinal ? "aguardando_sinal" : "pendente",
+        finalizado: false,
       })
       .select()
       .single();
@@ -873,6 +1203,7 @@ export default function FormularioAgendamento({
     }
 
     setAgendamentoId(data.id);
+    await salvarRespostasPerguntas(data.id);
     setEtapa("dados");
   }
 
@@ -926,6 +1257,7 @@ export default function FormularioAgendamento({
         .update({
           sinal_declarado_pago: precisaSinal ? sinalDeclarado : false,
           status: "pendente",
+          finalizado: true,
         })
         .eq("id", agendamentoId));
     } else {
@@ -962,9 +1294,18 @@ export default function FormularioAgendamento({
         estabelecimento_id: estabelecimento.id,
         profissional_id: profissionalId,
         sinal_declarado_pago: precisaSinal ? sinalDeclarado : false,
+        finalizado: true,
       };
       if (status) payload.status = status;
-      ({ error } = await supabase.from("agendamentos").insert(payload));
+      const resultadoInsert = await supabase
+        .from("agendamentos")
+        .insert(payload)
+        .select("id")
+        .single();
+      error = resultadoInsert.error;
+      if (!error) {
+        await salvarRespostasPerguntas(resultadoInsert.data.id);
+      }
     }
 
     setEnviando(false);
@@ -1021,6 +1362,17 @@ export default function FormularioAgendamento({
   // serviço/categoria selecionada, ver renderBotaoServico e o acordeão).
   const temaBruto = buscarTema(estabelecimento?.slug);
   const tema = temaBruto?.personalizado ? temaBruto : null;
+
+  // Ajuste de preço das respostas do popup de perguntas (ver
+  // calcularAjustePerguntas) somado ao preço base do serviço — o preço da
+  // manutenção quando aplicável, senão o preco_centavos normal. Alimenta o
+  // box de transparência na etapa "Dados" (ver JSX).
+  const { centavos: ajusteCentavosPerguntas, itens: itensAjustePerguntas } =
+    calcularAjustePerguntas();
+  const precoBaseCentavos =
+    servicoSelecionado?.servico_origem_id != null && precoManutencao
+      ? precoManutencao.centavos
+      : (servicoSelecionado?.preco_centavos ?? 0);
 
   return (
     <>
@@ -1113,7 +1465,8 @@ export default function FormularioAgendamento({
             {!carregandoServicos &&
               !erroServicos &&
               (servicosSemCategoria.length > 0 ||
-                categoriasComServicos.length > 0) && (
+                categoriasComServicos.length > 0 ||
+                servicosManutencao.length > 0) && (
                 <div className="space-y-2">
                   {servicosSemCategoria.map((servico) =>
                     renderBotaoServico(servico)
@@ -1156,6 +1509,8 @@ export default function FormularioAgendamento({
                       </div>
                     );
                   })}
+
+                  {servicosManutencao.length > 0 && renderBotaoManutencao()}
                 </div>
               )}
 
@@ -1271,6 +1626,7 @@ export default function FormularioAgendamento({
                   onPrev={mesAnterior}
                   onNext={proximoMes}
                   podeVoltar={podeVoltarMes}
+                  vencimentoManutencao={vencimentoManutencao}
                 />
               )}
             </div>
@@ -1403,6 +1759,60 @@ export default function FormularioAgendamento({
               </>
             )}
 
+            {/* Preço da manutenção selecionada (ver efeito acima que chama
+                calcularPrecoManutencao). Só aparece pra manutenções — serviços
+                normais não têm precoManutencao setado. Quando valorCheio é
+                true, o destaque âmbar deixa claro que NÃO é o valor normal da
+                manutenção (evita parecer erro de cobrança). */}
+            {servicoSelecionado?.servico_origem_id != null && precoManutencao && (
+              <div
+                className={
+                  precoManutencao.valorCheio
+                    ? "rounded-lg bg-amber-50 px-3 py-2 ring-1 ring-amber-200"
+                    : "rounded-lg bg-surface px-3 py-2"
+                }
+              >
+                <p
+                  className={
+                    precoManutencao.valorCheio
+                      ? "text-sm font-medium text-amber-800"
+                      : "text-sm text-body"
+                  }
+                >
+                  {precoManutencao.valorCheio
+                    ? `Valor cheio do serviço: ${formatarPreco(precoManutencao.centavos)}`
+                    : `Valor da manutenção: ${formatarPreco(precoManutencao.centavos)}`}
+                </p>
+                {precoManutencao.valorCheio && (
+                  <p className="mt-1 text-xs text-amber-800">
+                    Sua última manutenção já passou do prazo, por isso o valor
+                    cobrado é o do serviço completo, não o de manutenção.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Valor final com os ajustes das respostas do popup de perguntas
+                (ver calcularAjustePerguntas) — só aparece havendo algum ajuste
+                != 0, com transparência sobre o que compõe o total. Respeita
+                ocultar_preco: o dono escondeu o preço deste serviço do
+                público, então o total também fica escondido. */}
+            {!servicoSelecionado?.ocultar_preco && itensAjustePerguntas.length > 0 && (
+              <div className="rounded-lg bg-surface px-3 py-2">
+                <p className="text-sm font-medium text-heading">
+                  Valor total: {formatarPreco(precoBaseCentavos + ajusteCentavosPerguntas)}
+                </p>
+                <ul className="mt-1 space-y-0.5">
+                  {itensAjustePerguntas.map((item, i) => (
+                    <li key={i} className="text-xs text-body">
+                      {item.label} ({item.centavos > 0 ? "+" : ""}
+                      {formatarPreco(item.centavos)})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {precisaSinal && (
               <div className="space-y-3 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
                 <div>
@@ -1520,6 +1930,155 @@ export default function FormularioAgendamento({
               <button
                 type="button"
                 onClick={cancelarAlerta}
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup do item único "Manutenção" (ver renderBotaoManutencao): lista os
+          serviços de manutenção pra escolha. Escolher uma opção equivale a
+          tocar nela direto na lista (escolherManutencao -> selecionarServico).
+          Reaproveita o padrão visual do modal de alerta acima. */}
+      {modalManutencaoAberto && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-modal-manutencao"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setModalManutencaoAberto(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-modal-manutencao"
+              className="text-lg font-semibold text-heading"
+            >
+              Qual serviço foi feito?
+            </h2>
+
+            <div className="mt-4 space-y-2">
+              {servicosManutencao.map((servico) => (
+                <button
+                  key={servico.id}
+                  type="button"
+                  onClick={() => escolherManutencao(servico)}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 ring-border bg-card text-body transition hover:border-primary hover:ring-primary"
+                >
+                  <span className="font-medium">{servico.nome}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-6">
+              <button
+                type="button"
+                onClick={() => setModalManutencaoAberto(false)}
+                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup de perguntas do serviço (servico_perguntas), aberto logo após
+          a seleção (ver confirmarSelecaoServico) quando o serviço tem alguma
+          cadastrada. Reaproveita o padrão visual dos modais acima (mesmo
+          overlay, mesmo card, mesmo par Continuar/Voltar); "Continuar" só
+          fecha com todas as perguntas respondidas (ver confirmarModalPerguntas). */}
+      {modalPerguntasAberto && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-modal-perguntas"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={cancelarModalPerguntas}
+        >
+          <div
+            className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Sem cabeçalho visível (só as perguntas) — o h2 fica só pra
+                acessibilidade, dando nome ao dialog via aria-labelledby. */}
+            <h2 id="titulo-modal-perguntas" className="sr-only">
+              Perguntas do serviço
+            </h2>
+
+            <div className="space-y-5">
+              {perguntasServico.map((pergunta) => (
+                <div key={pergunta.id}>
+                  <p className="mb-2 text-sm font-medium text-heading">{pergunta.texto}</p>
+
+                  {pergunta.tipo === "texto_livre" ? (
+                    <textarea
+                      value={respostasPerguntas[pergunta.id]?.textoLivre ?? ""}
+                      onChange={(e) => responderTexto(pergunta.id, e.target.value)}
+                      rows={2}
+                      placeholder="Digite sua resposta"
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                    />
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {(pergunta.servico_pergunta_opcoes ?? []).map((opcao) => {
+                        const selecionada =
+                          respostasPerguntas[pergunta.id]?.opcaoId === opcao.id;
+                        return (
+                          <button
+                            key={opcao.id}
+                            type="button"
+                            onClick={() => responderOpcao(pergunta.id, opcao.id)}
+                            aria-pressed={selecionada}
+                            className={[
+                              "rounded-lg px-3 py-2 text-sm font-medium ring-1 transition",
+                              selecionada
+                                ? "bg-primary text-white ring-primary"
+                                : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+                            ].join(" ")}
+                          >
+                            {opcao.label}
+                            {opcao.ajuste_preco_centavos !== 0 && (
+                              <span
+                                className={
+                                  selecionada ? "ml-1 text-on-primary/80" : "ml-1 text-muted"
+                                }
+                              >
+                                {opcao.ajuste_preco_centavos > 0 ? " (+" : " ("}
+                                {formatarPreco(opcao.ajuste_preco_centavos)})
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {erroModalPerguntas && (
+              <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                {erroModalPerguntas}
+              </p>
+            )}
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarModalPerguntas}
+                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+              >
+                Continuar
+              </button>
+              <button
+                type="button"
+                onClick={cancelarModalPerguntas}
                 className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar

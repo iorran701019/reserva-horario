@@ -56,6 +56,11 @@ export default function AgendarPage() {
   const [agendamentosAtivos, setAgendamentosAtivos] = useState(null);
   const [modoNovoAgendamento, setModoNovoAgendamento] = useState(false);
 
+  // Serviço de manutenção escolhido no card de sugestão do PainelCliente
+  // (null = fluxo normal). Repassado como `servicoInicial` pro
+  // FormularioAgendamento pular a etapa de escolha de serviço.
+  const [servicoManutencao, setServicoManutencao] = useState(null);
+
   // Incrementado ao "Fazer novo agendamento" pra forçar o useEffect abaixo a
   // rebuscar mesmo com clienteIdentificado/estabelecimento.id inalterados.
   const [agendamentosVersao, setAgendamentosVersao] = useState(0);
@@ -251,6 +256,7 @@ export default function AgendarPage() {
             onClick={() => {
               setResumo(null);
               setModoNovoAgendamento(false);
+              setServicoManutencao(null);
               setAgendamentosAtivos(null);
               setAgendamentosVersao((v) => v + 1);
             }}
@@ -318,7 +324,10 @@ export default function AgendarPage() {
           <PainelCliente
             estabelecimento={estabelecimento}
             cliente={clienteIdentificado}
-            onNovoAgendamento={() => setModoNovoAgendamento(true)}
+            onNovoAgendamento={(servico) => {
+              setServicoManutencao(servico ?? null);
+              setModoNovoAgendamento(true);
+            }}
             nomeProfissionalContato={nomeContatoExibido}
           />
         ) : anamneseNecessaria === null ? (
@@ -336,6 +345,7 @@ export default function AgendarPage() {
             clienteInicial={clienteIdentificado}
             clienteEhNovo={clienteIdentificado?.clienteNovo ?? false}
             nomeProfissionalContato={nomeContatoExibido}
+            servicoInicial={servicoManutencao}
             onSucesso={(dados) => setResumo(dados)}
           />
         )}

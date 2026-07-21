@@ -31,6 +31,11 @@ import { formatarPreco } from "@/components/FormularioAgendamento";
 // um id de categoria (numérico).
 const SEM_CATEGORIA = "sem-categoria";
 
+// Sentinel do grupo sintético "Manutenções" — serviços com servico_origem_id
+// preenchido (ver `servicosManutencao` mais abaixo). Nunca colide com um id
+// de categoria (numérico) nem com SEM_CATEGORIA.
+const CATEGORIA_MANUTENCOES = "manutencoes";
+
 // Estado inicial do formulário. `preco` fica em REAIS (string do input); só é
 // convertido pra centavos na hora de gravar. `profissionais` é a lista de ids
 // (profissionais.id) vinculados ao serviço. `adicionarAlerta` só controla a
@@ -46,6 +51,9 @@ const FORM_INICIAL = {
   ocultarDuracao: false,
   adicionarAlerta: false,
   alertaMensagem: "",
+  servico_origem_id: "",
+  prazoManutencaoDias: "",
+  ehManutencao: false,
 };
 
 // Reais digitado (aceita "35", "35,50" ou "35.50") -> centavos inteiros.
@@ -59,6 +67,33 @@ function reaisParaCentavos(reais) {
 // centavos -> string em reais pro input de edição ("3550" -> "35.50").
 function centavosParaReais(centavos) {
   return (centavos / 100).toFixed(2);
+}
+
+// Perguntas por serviço (servico_perguntas/servico_pergunta_opcoes): cada
+// pergunta tem um `tipo` que determina como as opções funcionam.
+//   sim_nao          – sempre exatamente duas opções fixas ("Sim"/"Não"),
+//                      só o ajuste de preço é editável.
+//   multipla_escolha – lista dinâmica de opções (label + ajuste de preço).
+//   texto_livre       – sem opções; a resposta é digitada pelo cliente depois.
+// `opcoes` no form fica em reais (mesmo padrão de `preco` no form de
+// serviço); só vira `ajuste_preco_centavos` na hora de gravar.
+function opcoesSimNaoIniciais() {
+  return [
+    { id: null, label: "Sim", preco: centavosParaReais(0) },
+    { id: null, label: "Não", preco: centavosParaReais(0) },
+  ];
+}
+
+const FORM_PERGUNTA_INICIAL = {
+  texto: "",
+  tipo: "sim_nao",
+  opcoes: opcoesSimNaoIniciais(),
+};
+
+function rotuloTipoPergunta(tipo) {
+  if (tipo === "sim_nao") return "Sim ou não";
+  if (tipo === "multipla_escolha") return "Múltipla escolha";
+  return "Texto livre";
 }
 
 // Seção de profissionais do form de serviço: lista os profissionais ATIVOS do
@@ -182,6 +217,28 @@ export default function GerenciarServicos({ estabelecimento }) {
   const [ocupadoCategoria, setOcupadoCategoria] = useState(false);
   const [erroAcaoCategoria, setErroAcaoCategoria] = useState("");
 
+  // Seção "Perguntas" de cada card de serviço: quais estão expandidas (chave
+  // servico.id) e, pra cada uma, as perguntas já carregadas (+ suas opções).
+  // Carregado sob demanda na primeira expansão e cacheado aqui — nunca
+  // refetchado depois (as mutações abaixo atualizam este cache localmente,
+  // mesmo padrão usado pra `servicos`/`categorias`).
+  const [perguntasAberto, setPerguntasAberto] = useState({});
+  const [perguntasPorServico, setPerguntasPorServico] = useState({});
+
+  // Form de criar/editar pergunta: no máximo um aberto por vez em toda a tela.
+  // `perguntaEditando`: null (fechado) | { servicoId, id: null } pra criar |
+  // { servicoId, id } pra editar.
+  const [perguntaEditando, setPerguntaEditando] = useState(null);
+  const [formPergunta, setFormPergunta] = useState(FORM_PERGUNTA_INICIAL);
+  const [erroFormPergunta, setErroFormPergunta] = useState("");
+  const [salvandoPergunta, setSalvandoPergunta] = useState(false);
+
+  // Pergunta "armada" pra exclusão (modal de confirmação) — mesmo padrão do
+  // servicoParaExcluir/categoriaParaExcluir. O ON DELETE CASCADE do banco cuida
+  // de apagar as opções vinculadas.
+  const [perguntaParaExcluir, setPerguntaParaExcluir] = useState(null);
+  const [erroExcluirPergunta, setErroExcluirPergunta] = useState("");
+
   // Carga inicial. Traz ATIVOS e INATIVOS (o CRUD precisa mostrar os dois, com
   // ação de reativar). Ordena por categoria_id, ordem — mesmo critério do
   // acordeão de /agendar — pra manter os grupos de categoria juntos e as
@@ -193,7 +250,7 @@ export default function GerenciarServicos({ estabelecimento }) {
       const { data, error } = await supabase
         .from("servicos")
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem"
+          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao"
         )
         .eq("estabelecimento_id", estabelecimento.id)
         .order("categoria_id", { ascending: true, nullsFirst: true })
@@ -303,6 +360,23 @@ export default function GerenciarServicos({ estabelecimento }) {
     setEditando("novo");
   }
 
+  // Atalho "+ Criar manutenção" num card de serviço original: abre o mesmo
+  // formulário de criação, mas já pré-preenchido como uma manutenção daquele
+  // serviço — nome sugerido, servico_origem_id fixo (sem UI pra trocar) e sem
+  // categoria (a categoria sintética "Manutenções" cuida do agrupamento
+  // visual, ver GerenciarServicos/FormularioAgendamento). Preço, duração e
+  // demais campos ficam em branco pro dono preencher.
+  function abrirCriarManutencao(servicoOrigem) {
+    setForm({
+      ...FORM_INICIAL,
+      nome: `Manutenção – ${servicoOrigem.nome}`,
+      servico_origem_id: String(servicoOrigem.id),
+      ehManutencao: true,
+    });
+    setErroForm("");
+    setEditando("novo");
+  }
+
   async function abrirEdicao(servico) {
     setForm({
       nome: servico.nome,
@@ -315,6 +389,11 @@ export default function GerenciarServicos({ estabelecimento }) {
       // A caixa nasce marcada se já houver mensagem salva.
       adicionarAlerta: Boolean(servico.alerta_mensagem),
       alertaMensagem: servico.alerta_mensagem ?? "",
+      servico_origem_id:
+        servico.servico_origem_id != null ? String(servico.servico_origem_id) : "",
+      prazoManutencaoDias:
+        servico.prazo_manutencao_dias != null ? String(servico.prazo_manutencao_dias) : "",
+      ehManutencao: Boolean(servico.eh_manutencao),
     });
     setErroForm("");
     setEditando(servico);
@@ -372,13 +451,33 @@ export default function GerenciarServicos({ estabelecimento }) {
       return { erro: "Informe uma duração (em minutos) maior que zero." };
     }
 
+    // "" (Nenhum) -> null; senão o id numérico do serviço de origem.
+    const servicoOrigemId =
+      form.servico_origem_id === "" ? null : Number(form.servico_origem_id);
+
+    // Prazo de manutenção só existe no serviço "original" (eh_manutencao
+    // false). Numa manutenção o campo fica escondido e sempre grava null.
+    let prazoManutencaoDias = null;
+    if (!form.ehManutencao && form.prazoManutencaoDias.trim() !== "") {
+      const prazo = Number(form.prazoManutencaoDias);
+      if (!Number.isInteger(prazo) || prazo <= 0) {
+        return { erro: "Informe um prazo de manutenção (em dias) maior que zero." };
+      }
+      prazoManutencaoDias = prazo;
+    }
+
     return {
       payload: {
         nome,
         preco_centavos: centavos,
         duracao_min: duracao,
-        // "" (Sem categoria) -> null; senão o id numérico da categoria.
-        categoria_id: form.categoria_id === "" ? null : Number(form.categoria_id),
+        // Manutenção nunca tem categoria própria (agrupa no sintético
+        // "Manutenções"); "" (Sem categoria) -> null; senão o id numérico.
+        categoria_id: form.ehManutencao
+          ? null
+          : form.categoria_id === ""
+            ? null
+            : Number(form.categoria_id),
         ocultar_preco: form.ocultarPreco,
         ocultar_duracao: form.ocultarDuracao,
         // Caixa desmarcada ou texto em branco -> null (nunca salva alerta
@@ -387,6 +486,9 @@ export default function GerenciarServicos({ estabelecimento }) {
           form.adicionarAlerta && form.alertaMensagem.trim()
             ? form.alertaMensagem.trim()
             : null,
+        servico_origem_id: servicoOrigemId,
+        prazo_manutencao_dias: prazoManutencaoDias,
+        eh_manutencao: form.ehManutencao,
       },
     };
   }
@@ -447,7 +549,7 @@ export default function GerenciarServicos({ estabelecimento }) {
           ordem: proximaOrdemNoGrupo(payload.categoria_id),
         })
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem"
+          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao"
         )
         .single();
 
@@ -705,6 +807,318 @@ export default function GerenciarServicos({ estabelecimento }) {
     setCategoriaParaExcluir(null);
   }
 
+  // Abre/fecha a seção "Perguntas" de um serviço. Na primeira abertura (sem
+  // cache ainda) dispara o carregamento.
+  function alternarPerguntas(servico) {
+    const abrindo = !perguntasAberto[servico.id];
+    setPerguntasAberto((atual) => ({ ...atual, [servico.id]: abrindo }));
+    if (abrindo && !perguntasPorServico[servico.id]) {
+      carregarPerguntas(servico.id);
+    }
+  }
+
+  // Busca as perguntas do serviço e, em seguida, as opções de todas elas
+  // (duas queries simples, combinadas aqui — mesmo estilo do resto do
+  // arquivo, sem select aninhado).
+  async function carregarPerguntas(servicoId) {
+    setPerguntasPorServico((atual) => ({
+      ...atual,
+      [servicoId]: { perguntas: atual[servicoId]?.perguntas ?? [], carregando: true, erro: "" },
+    }));
+
+    const { data: perguntas, error: erroPerguntas } = await supabase
+      .from("servico_perguntas")
+      .select("id, texto, tipo, ordem")
+      .eq("servico_id", servicoId)
+      .order("ordem", { ascending: true });
+
+    if (erroPerguntas) {
+      setPerguntasPorServico((atual) => ({
+        ...atual,
+        [servicoId]: { perguntas: [], carregando: false, erro: erroPerguntas.message },
+      }));
+      return;
+    }
+
+    const idsPerguntas = perguntas.map((p) => p.id);
+    let opcoesPorPergunta = {};
+    if (idsPerguntas.length > 0) {
+      const { data: opcoes, error: erroOpcoes } = await supabase
+        .from("servico_pergunta_opcoes")
+        .select("id, pergunta_id, label, ajuste_preco_centavos, ordem")
+        .in("pergunta_id", idsPerguntas)
+        .order("ordem", { ascending: true });
+
+      if (erroOpcoes) {
+        setPerguntasPorServico((atual) => ({
+          ...atual,
+          [servicoId]: { perguntas: [], carregando: false, erro: erroOpcoes.message },
+        }));
+        return;
+      }
+
+      opcoesPorPergunta = (opcoes ?? []).reduce((acc, op) => {
+        (acc[op.pergunta_id] ??= []).push(op);
+        return acc;
+      }, {});
+    }
+
+    setPerguntasPorServico((atual) => ({
+      ...atual,
+      [servicoId]: {
+        perguntas: perguntas.map((p) => ({ ...p, opcoes: opcoesPorPergunta[p.id] ?? [] })),
+        carregando: false,
+        erro: "",
+      },
+    }));
+  }
+
+  function abrirNovaPergunta(servicoId) {
+    setFormPergunta(FORM_PERGUNTA_INICIAL);
+    setErroFormPergunta("");
+    setPerguntaEditando({ servicoId, id: null });
+  }
+
+  function abrirEditarPergunta(servicoId, pergunta) {
+    setFormPergunta({
+      texto: pergunta.texto,
+      tipo: pergunta.tipo,
+      opcoes:
+        pergunta.tipo === "texto_livre"
+          ? []
+          : pergunta.opcoes.map((op) => ({
+              id: op.id,
+              label: op.label,
+              preco: centavosParaReais(op.ajuste_preco_centavos),
+            })),
+    });
+    setErroFormPergunta("");
+    setPerguntaEditando({ servicoId, id: pergunta.id });
+  }
+
+  function fecharFormPergunta() {
+    setPerguntaEditando(null);
+    setFormPergunta(FORM_PERGUNTA_INICIAL);
+    setErroFormPergunta("");
+  }
+
+  // Troca de tipo dentro do form: reseta as opções pro formato do novo tipo
+  // (sim/não fixas, uma opção em branco pra múltipla escolha, nenhuma pra
+  // texto livre).
+  function handleTipoPerguntaChange(e) {
+    const tipo = e.target.value;
+    setFormPergunta((atual) => ({
+      ...atual,
+      tipo,
+      opcoes:
+        tipo === "sim_nao"
+          ? opcoesSimNaoIniciais()
+          : tipo === "multipla_escolha"
+            ? [{ id: null, label: "", preco: centavosParaReais(0) }]
+            : [],
+    }));
+  }
+
+  function alterarLabelOpcao(indice, valor) {
+    setFormPergunta((atual) => ({
+      ...atual,
+      opcoes: atual.opcoes.map((op, i) => (i === indice ? { ...op, label: valor } : op)),
+    }));
+  }
+
+  function alterarPrecoOpcao(indice, valor) {
+    setFormPergunta((atual) => ({
+      ...atual,
+      opcoes: atual.opcoes.map((op, i) => (i === indice ? { ...op, preco: valor } : op)),
+    }));
+  }
+
+  function adicionarOpcao() {
+    setFormPergunta((atual) => ({
+      ...atual,
+      opcoes: [...atual.opcoes, { id: null, label: "", preco: centavosParaReais(0) }],
+    }));
+  }
+
+  function removerOpcao(indice) {
+    setFormPergunta((atual) => ({
+      ...atual,
+      opcoes: atual.opcoes.filter((_, i) => i !== indice),
+    }));
+  }
+
+  // Valida o form de pergunta e devolve o payload pronto pro banco, ou uma
+  // string de erro. Múltipla escolha exige ao menos uma opção com label;
+  // sim/não sempre grava as duas opções fixas.
+  function validarFormPergunta() {
+    const texto = formPergunta.texto.trim();
+    if (!texto) return { erro: "Informe o texto da pergunta." };
+
+    if (formPergunta.tipo === "texto_livre") {
+      return { texto, tipo: formPergunta.tipo, opcoesPayload: [] };
+    }
+
+    const opcoesComLabel =
+      formPergunta.tipo === "multipla_escolha"
+        ? formPergunta.opcoes
+            .map((op) => ({ ...op, label: op.label.trim() }))
+            .filter((op) => op.label !== "")
+        : formPergunta.opcoes;
+
+    if (formPergunta.tipo === "multipla_escolha" && opcoesComLabel.length === 0) {
+      return { erro: "Adicione ao menos uma opção." };
+    }
+
+    const opcoesPayload = [];
+    for (const op of opcoesComLabel) {
+      const centavos = reaisParaCentavos(op.preco);
+      if (Number.isNaN(centavos)) {
+        return { erro: `Ajuste de preço inválido em "${op.label}".` };
+      }
+      opcoesPayload.push({ id: op.id, label: op.label, ajuste_preco_centavos: centavos });
+    }
+
+    return { texto, tipo: formPergunta.tipo, opcoesPayload };
+  }
+
+  // Regrava as opções da pergunta: apaga as do pergunta_id e insere as
+  // atuais ("substitui tudo" — mesma estratégia de salvarVinculos). Devolve
+  // as opções gravadas (com id gerado) pra atualizar o cache local sem
+  // refetch, e o erro do Supabase ou null.
+  async function salvarOpcoesPergunta(perguntaId, opcoesPayload) {
+    const { error: erroDelete } = await supabase
+      .from("servico_pergunta_opcoes")
+      .delete()
+      .eq("pergunta_id", perguntaId);
+    if (erroDelete) return { opcoes: [], error: erroDelete };
+
+    if (opcoesPayload.length === 0) return { opcoes: [], error: null };
+
+    const linhas = opcoesPayload.map((op, indice) => ({
+      pergunta_id: perguntaId,
+      label: op.label,
+      ajuste_preco_centavos: op.ajuste_preco_centavos,
+      ordem: indice + 1,
+    }));
+
+    const { data, error: erroInsert } = await supabase
+      .from("servico_pergunta_opcoes")
+      .insert(linhas)
+      .select("id, pergunta_id, label, ajuste_preco_centavos, ordem");
+
+    return { opcoes: data ?? [], error: erroInsert ?? null };
+  }
+
+  async function handleSalvarPergunta(e, servicoId) {
+    e.preventDefault();
+
+    const resultado = validarFormPergunta();
+    if (resultado.erro) {
+      setErroFormPergunta(resultado.erro);
+      return;
+    }
+    const { texto, tipo, opcoesPayload } = resultado;
+
+    setSalvandoPergunta(true);
+    setErroFormPergunta("");
+
+    const editandoId = perguntaEditando.id;
+
+    if (editandoId == null) {
+      const perguntasAtuais = perguntasPorServico[servicoId]?.perguntas ?? [];
+      const ordem = perguntasAtuais.reduce((max, p) => Math.max(max, p.ordem ?? 0), 0) + 1;
+
+      const { data: novaPergunta, error: erroPergunta } = await supabase
+        .from("servico_perguntas")
+        .insert({ servico_id: servicoId, texto, tipo, ordem })
+        .select("id, texto, tipo, ordem")
+        .single();
+
+      if (erroPergunta) {
+        setSalvandoPergunta(false);
+        setErroFormPergunta(erroPergunta.message);
+        return;
+      }
+
+      const { opcoes, error: erroOpcoes } = await salvarOpcoesPergunta(
+        novaPergunta.id,
+        opcoesPayload
+      );
+      setSalvandoPergunta(false);
+      if (erroOpcoes) {
+        setErroFormPergunta(`Pergunta criada, mas as opções falharam: ${erroOpcoes.message}`);
+        return;
+      }
+
+      setPerguntasPorServico((atual) => ({
+        ...atual,
+        [servicoId]: {
+          perguntas: [...perguntasAtuais, { ...novaPergunta, opcoes }].sort(
+            (a, b) => a.ordem - b.ordem
+          ),
+          carregando: false,
+          erro: "",
+        },
+      }));
+      fecharFormPergunta();
+      return;
+    }
+
+    const { error: erroPergunta } = await supabase
+      .from("servico_perguntas")
+      .update({ texto, tipo })
+      .eq("id", editandoId);
+
+    if (erroPergunta) {
+      setSalvandoPergunta(false);
+      setErroFormPergunta(erroPergunta.message);
+      return;
+    }
+
+    const { opcoes, error: erroOpcoes } = await salvarOpcoesPergunta(editandoId, opcoesPayload);
+    setSalvandoPergunta(false);
+    if (erroOpcoes) {
+      setErroFormPergunta(`Pergunta salva, mas as opções falharam: ${erroOpcoes.message}`);
+      return;
+    }
+
+    setPerguntasPorServico((atual) => ({
+      ...atual,
+      [servicoId]: {
+        perguntas: (atual[servicoId]?.perguntas ?? []).map((p) =>
+          p.id === editandoId ? { ...p, texto, tipo, opcoes } : p
+        ),
+        carregando: false,
+        erro: "",
+      },
+    }));
+    fecharFormPergunta();
+  }
+
+  // Exclui a pergunta (o ON DELETE CASCADE do banco cuida das opções
+  // vinculadas). Roda só depois do "Confirmar exclusão" no modal.
+  async function handleExcluirPergunta() {
+    if (!perguntaParaExcluir) return;
+    const { servicoId, pergunta } = perguntaParaExcluir;
+
+    const { error } = await supabase.from("servico_perguntas").delete().eq("id", pergunta.id);
+
+    if (error) {
+      setErroExcluirPergunta(error.message);
+      return;
+    }
+
+    setPerguntasPorServico((atual) => ({
+      ...atual,
+      [servicoId]: {
+        ...atual[servicoId],
+        perguntas: (atual[servicoId]?.perguntas ?? []).filter((p) => p.id !== pergunta.id),
+      },
+    }));
+    setErroExcluirPergunta("");
+    setPerguntaParaExcluir(null);
+  }
+
   // Card de um serviço dentro do corpo de um grupo do acordeão. As setinhas
   // trocam `ordem` só com o vizinho do MESMO grupo (ver mover()).
   function renderServicoItem(servico) {
@@ -778,6 +1192,25 @@ export default function GerenciarServicos({ estabelecimento }) {
                   >
                     Excluir
                   </button>
+                  {/* Só em serviços "originais" (eh_manutencao false) que
+                      ainda não têm manutenção vinculada — regra um-para-um. */}
+                  {!servico.eh_manutencao && !idsComManutencaoVinculada.has(servico.id) && (
+                    <button
+                      type="button"
+                      onClick={() => abrirCriarManutencao(servico)}
+                      className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-primary ring-1 ring-primary/40 transition hover:bg-primary/5"
+                    >
+                      + Criar manutenção
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => alternarPerguntas(servico)}
+                    aria-expanded={Boolean(perguntasAberto[servico.id])}
+                    className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-indigo-600 ring-1 ring-indigo-200 transition hover:bg-indigo-50"
+                  >
+                    Perguntas {perguntasAberto[servico.id] ? "▲" : "▼"}
+                  </button>
                 </>
               ) : (
                 <button
@@ -789,9 +1222,223 @@ export default function GerenciarServicos({ estabelecimento }) {
                 </button>
               )}
             </div>
+
+            {servico.ativo && perguntasAberto[servico.id] && renderSecaoPerguntas(servico)}
           </div>
         </div>
       </li>
+    );
+  }
+
+  // Seção expansível "Perguntas" de um card de serviço: lista as perguntas
+  // já cadastradas (com suas opções) e o botão/form de criar uma nova.
+  function renderSecaoPerguntas(servico) {
+    const estado = perguntasPorServico[servico.id];
+    const formAqui = perguntaEditando && perguntaEditando.servicoId === servico.id;
+
+    return (
+      <div className="mt-4 border-t border-border pt-4">
+        {estado?.carregando ? (
+          <p className="rounded-lg bg-surface px-3 py-3 text-center text-sm text-body ring-1 ring-border">
+            Carregando perguntas...
+          </p>
+        ) : estado?.erro ? (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+            {estado.erro}
+          </p>
+        ) : (
+          <>
+            {(estado?.perguntas ?? []).length === 0 ? (
+              <p className="rounded-lg bg-surface px-3 py-3 text-center text-sm text-body ring-1 ring-border">
+                Nenhuma pergunta cadastrada.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {estado.perguntas.map((pergunta) => renderItemPergunta(servico, pergunta))}
+              </ul>
+            )}
+
+            {formAqui ? (
+              renderFormPergunta(servico)
+            ) : (
+              <button
+                type="button"
+                onClick={() => abrirNovaPergunta(servico.id)}
+                className="mt-3 inline-flex items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-primary ring-1 ring-primary/40 transition hover:bg-primary/5"
+              >
+                + Nova pergunta
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // Uma pergunta já cadastrada, com suas opções (se houver) e ações de
+  // editar/excluir.
+  function renderItemPergunta(servico, pergunta) {
+    return (
+      <li key={pergunta.id} className="rounded-xl bg-surface p-3 ring-1 ring-border">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-heading">{pergunta.texto}</p>
+            <p className="mt-0.5 text-xs text-body">{rotuloTipoPergunta(pergunta.tipo)}</p>
+            {pergunta.opcoes.length > 0 && (
+              <ul className="mt-2 space-y-0.5">
+                {pergunta.opcoes.map((opcao) => (
+                  <li key={opcao.id} className="text-xs text-body">
+                    {opcao.label}
+                    {opcao.ajuste_preco_centavos !== 0 && (
+                      <span className="ml-1 text-heading">
+                        {opcao.ajuste_preco_centavos > 0 ? "+" : ""}
+                        {formatarPreco(opcao.ajuste_preco_centavos)}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              onClick={() => abrirEditarPergunta(servico.id, pergunta)}
+              className="rounded-lg bg-card px-2.5 py-1.5 text-xs font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+            >
+              Editar
+            </button>
+            <button
+              type="button"
+              onClick={() => setPerguntaParaExcluir({ servicoId: servico.id, pergunta })}
+              className="rounded-lg bg-card px-2.5 py-1.5 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+            >
+              Excluir
+            </button>
+          </div>
+        </div>
+      </li>
+    );
+  }
+
+  // Form inline de criar/editar pergunta. Opções mudam de acordo com
+  // `formPergunta.tipo` (ver handleTipoPerguntaChange).
+  function renderFormPergunta(servico) {
+    return (
+      <form
+        onSubmit={(e) => handleSalvarPergunta(e, servico.id)}
+        className="mt-3 space-y-3 rounded-xl bg-surface p-4 ring-1 ring-border"
+      >
+        <div>
+          <label className="mb-1 block text-sm font-medium text-body">Pergunta</label>
+          <input
+            type="text"
+            value={formPergunta.texto}
+            onChange={(e) =>
+              setFormPergunta((atual) => ({ ...atual, texto: e.target.value }))
+            }
+            placeholder="Ex.: Você tem alergia a algum produto?"
+            className="w-full rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-body">Tipo de resposta</label>
+          <select
+            value={formPergunta.tipo}
+            onChange={handleTipoPerguntaChange}
+            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+          >
+            <option value="sim_nao">Sim ou não</option>
+            <option value="multipla_escolha">Múltipla escolha</option>
+            <option value="texto_livre">Texto livre</option>
+          </select>
+        </div>
+
+        {formPergunta.tipo === "sim_nao" && (
+          <div className="space-y-2">
+            <span className="block text-sm font-medium text-body">Ajuste de preço (R$)</span>
+            {formPergunta.opcoes.map((opcao, indice) => (
+              <div key={opcao.label} className="flex items-center gap-2">
+                <span className="w-12 shrink-0 text-sm text-heading">{opcao.label}</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  value={opcao.preco}
+                  onChange={(e) => alterarPrecoOpcao(indice, e.target.value)}
+                  placeholder="0,00"
+                  className="w-full rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {formPergunta.tipo === "multipla_escolha" && (
+          <div className="space-y-2">
+            <span className="block text-sm font-medium text-body">Opções</span>
+            {formPergunta.opcoes.map((opcao, indice) => (
+              <div key={indice} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={opcao.label}
+                  onChange={(e) => alterarLabelOpcao(indice, e.target.value)}
+                  placeholder="Opção"
+                  className="min-w-0 flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                />
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  value={opcao.preco}
+                  onChange={(e) => alterarPrecoOpcao(indice, e.target.value)}
+                  placeholder="0,00"
+                  className="w-24 shrink-0 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                />
+                <button
+                  type="button"
+                  onClick={() => removerOpcao(indice)}
+                  aria-label="Remover opção"
+                  className="shrink-0 rounded-lg bg-card px-2.5 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={adicionarOpcao}
+              className="inline-flex items-center justify-center rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-primary/40 transition hover:bg-primary/5"
+            >
+              + Opção
+            </button>
+          </div>
+        )}
+
+        {erroFormPergunta && (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+            {erroFormPergunta}
+          </p>
+        )}
+
+        <div className="flex flex-col gap-2 sm:flex-row-reverse">
+          <button
+            type="submit"
+            disabled={salvandoPergunta}
+            className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {salvandoPergunta ? "Salvando..." : "Salvar"}
+          </button>
+          <button
+            type="button"
+            onClick={fecharFormPergunta}
+            className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+          >
+            Cancelar
+          </button>
+        </div>
+      </form>
     );
   }
 
@@ -811,14 +1458,33 @@ export default function GerenciarServicos({ estabelecimento }) {
     );
   }
 
-  // Agrupamento pro acordeão: categorias na ordem de exibição, e o grupo
-  // sintético "Sem categoria" — serviços com categoria_id null, ou apontando
-  // pra uma categoria que não existe mais. Só aparece se tiver algum serviço
-  // (mesmo critério do bloco solto de /agendar).
+  // Agrupamento pro acordeão: categorias na ordem de exibição, o grupo
+  // sintético "Manutenções" — serviços com eh_manutencao=true, IGNORANDO a
+  // categoria_id que porventura tenham (mesmo critério do /agendar público,
+  // ver categoriasComServicos em FormularioAgendamento) — e o grupo sintético
+  // "Sem categoria" — serviços sem categoria_id, ou apontando pra uma
+  // categoria que não existe mais, e que não sejam manutenção. Cada um só
+  // aparece se tiver algum serviço.
   const categoriasOrdenadas = ordenarCategorias(categorias);
   const idsCategorias = new Set(categorias.map((c) => c.id));
+  const servicosManutencao = servicos.filter((s) => s.eh_manutencao);
+  const idsManutencao = new Set(servicosManutencao.map((s) => s.id));
   const servicosSemCategoria = servicos.filter(
-    (s) => s.categoria_id == null || !idsCategorias.has(s.categoria_id)
+    (s) =>
+      !idsManutencao.has(s.id) &&
+      (s.categoria_id == null || !idsCategorias.has(s.categoria_id))
+  );
+
+  // Serviços que já têm uma manutenção vinculada via servico_origem_id (regra
+  // um-para-um garantida pelo índice único parcial no banco) — exclui a
+  // manutenção em edição, pra ela não "bloquear" seu próprio vínculo atual no
+  // dropdown/no botão. Usado tanto pro "+ Criar manutenção" (esconder se já
+  // houver vínculo) quanto pro dropdown "Serviço vinculado" do formulário.
+  const idEmEdicao = editando && editando !== "novo" ? editando.id : null;
+  const idsComManutencaoVinculada = new Set(
+    servicos
+      .filter((s) => s.eh_manutencao && s.servico_origem_id != null && s.id !== idEmEdicao)
+      .map((s) => s.servico_origem_id)
   );
 
   return (
@@ -898,7 +1564,13 @@ export default function GerenciarServicos({ estabelecimento }) {
           className="mb-4 space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border"
         >
           <h3 className="text-base font-semibold text-heading">
-            {editando === "novo" ? "Novo serviço" : "Editar serviço"}
+            {form.ehManutencao
+              ? editando === "novo"
+                ? "Nova manutenção"
+                : "Editar manutenção"
+              : editando === "novo"
+                ? "Novo serviço"
+                : "Editar serviço"}
           </h3>
 
           <div>
@@ -916,26 +1588,93 @@ export default function GerenciarServicos({ estabelecimento }) {
             />
           </div>
 
-          {/* Categoria (opcional). "Sem categoria" grava categoria_id null. */}
-          <div>
-            <label htmlFor="categoria_id" className="mb-1 block text-sm font-medium text-body">
-              Categoria
-            </label>
-            <select
-              id="categoria_id"
-              name="categoria_id"
-              value={form.categoria_id}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-            >
-              <option value="">Sem categoria</option>
-              {categorias.map((categoria) => (
-                <option key={categoria.id} value={String(categoria.id)}>
-                  {categoria.nome}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Categoria (opcional). Não existe pra manutenção — ela agrupa no
+              sintético "Manutenções", nunca numa categoria própria. "Sem
+              categoria" grava categoria_id null. */}
+          {!form.ehManutencao && (
+            <div>
+              <label htmlFor="categoria_id" className="mb-1 block text-sm font-medium text-body">
+                Categoria
+              </label>
+              <select
+                id="categoria_id"
+                name="categoria_id"
+                value={form.categoria_id}
+                onChange={handleChange}
+                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              >
+                <option value="">Sem categoria</option>
+                {categorias.map((categoria) => (
+                  <option key={categoria.id} value={String(categoria.id)}>
+                    {categoria.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Prazo de manutenção: só existe no serviço "original" (eh_manutencao
+              false) — numa manutenção o campo não faz sentido e fica escondido. */}
+          {!form.ehManutencao && (
+            <div>
+              <label
+                htmlFor="prazoManutencaoDias"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Prazo de manutenção (dias)
+              </label>
+              <input
+                id="prazoManutencaoDias"
+                name="prazoManutencaoDias"
+                type="number"
+                inputMode="numeric"
+                step="1"
+                min="0"
+                value={form.prazoManutencaoDias}
+                onChange={handleChange}
+                placeholder="Ex.: 21"
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            </div>
+          )}
+
+          {/* Serviço vinculado (opcional): só numa manutenção (eh_manutencao
+              true). Lista os demais serviços "originais" do estabelecimento
+              que ainda não têm outra manutenção vinculada (regra
+              um-para-um garantida pelo índice único parcial no banco);
+              "Nenhum" representa manutenção sem vínculo (ex.: veio de outra
+              manicure). */}
+          {form.ehManutencao && (
+            <div>
+              <label
+                htmlFor="servico_origem_id"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Serviço vinculado (opcional)
+              </label>
+              <select
+                id="servico_origem_id"
+                name="servico_origem_id"
+                value={form.servico_origem_id}
+                onChange={handleChange}
+                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              >
+                <option value="">Nenhum</option>
+                {servicos
+                  .filter(
+                    (s) =>
+                      s.ativo &&
+                      !s.eh_manutencao &&
+                      !idsComManutencaoVinculada.has(s.id)
+                  )
+                  .map((s) => (
+                    <option key={s.id} value={String(s.id)}>
+                      {s.nome}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          )}
 
           <div className="flex gap-3">
             <div className="flex-1">
@@ -1099,7 +1838,7 @@ export default function GerenciarServicos({ estabelecimento }) {
             <div className="space-y-3">
               {categoriasOrdenadas.map((categoria, indice) => {
                 const servicosDaCategoria = servicos.filter(
-                  (s) => s.categoria_id === categoria.id
+                  (s) => s.categoria_id === categoria.id && !idsManutencao.has(s.id)
                 );
                 const aberta = grupoAberto === categoria.id;
                 const renomeando = categoriaEditandoId === categoria.id;
@@ -1206,6 +1945,32 @@ export default function GerenciarServicos({ estabelecimento }) {
                   </div>
                 );
               })}
+
+              {servicosManutencao.length > 0 && (
+                <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+                  <button
+                    type="button"
+                    onClick={() => alternarGrupo(CATEGORIA_MANUTENCOES)}
+                    aria-expanded={grupoAberto === CATEGORIA_MANUTENCOES}
+                    className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+                  >
+                    <span className="font-semibold text-heading">Manutenções</span>
+                    <span className="flex shrink-0 items-center gap-1 text-xs text-body">
+                      <span aria-hidden="true">
+                        {grupoAberto === CATEGORIA_MANUTENCOES ? "▲" : "▼"}
+                      </span>
+                    </span>
+                  </button>
+
+                  {grupoAberto === CATEGORIA_MANUTENCOES && (
+                    <div className="border-t border-border p-4">
+                      <ul className="space-y-3">
+                        {servicosManutencao.map((s) => renderServicoItem(s))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {servicosSemCategoria.length > 0 && (
                 <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
@@ -1331,6 +2096,57 @@ export default function GerenciarServicos({ estabelecimento }) {
           </div>
         </div>
       )}
+
+      {/* Confirmação de exclusão de pergunta. As opções vinculadas somem
+          junto (ON DELETE CASCADE no banco). */}
+      {perguntaParaExcluir && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-excluir-pergunta"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setPerguntaParaExcluir(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="titulo-excluir-pergunta" className="text-lg font-semibold text-heading">
+              Excluir pergunta
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Tem certeza que deseja excluir{" "}
+              <span className="font-medium text-heading">
+                {perguntaParaExcluir.pergunta.texto}
+              </span>
+              ? As opções vinculadas também serão excluídas.
+            </p>
+
+            {erroExcluirPergunta && (
+              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                {erroExcluirPergunta}
+              </p>
+            )}
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={handleExcluirPergunta}
+                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700"
+              >
+                Confirmar exclusão
+              </button>
+              <button
+                type="button"
+                onClick={() => setPerguntaParaExcluir(null)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -1351,11 +2167,18 @@ function ordenar(lista) {
   });
 }
 
-// Serviços do mesmo grupo de categoria de `servico` (mesmo categoria_id,
-// null incluso), na ordem já vigente em `lista` — usado pra achar o vizinho
-// de cima/baixo e desenhar as setinhas.
+// Serviços do mesmo grupo VISUAL de `servico` (mesmo categoria_id, null
+// incluso — MAS serviços com eh_manutencao=true formam seu próprio grupo
+// "Manutenções", independente da categoria_id real), na ordem já vigente em
+// `lista` — usado pra achar o vizinho de cima/baixo e desenhar as setinhas,
+// mantendo consistência com o agrupamento exibido no acordeão.
 function grupoDaCategoria(lista, servico) {
-  return lista.filter((s) => s.categoria_id === servico.categoria_id);
+  if (servico.eh_manutencao) {
+    return lista.filter((s) => s.eh_manutencao);
+  }
+  return lista.filter(
+    (s) => s.categoria_id === servico.categoria_id && !s.eh_manutencao
+  );
 }
 
 // Patch imutável do campo `ativo` de um serviço na lista.

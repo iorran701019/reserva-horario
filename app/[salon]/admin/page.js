@@ -14,6 +14,7 @@ import {
 } from "@/lib/whatsapp";
 import { classificarAgendamento, fimDoAtendimento } from "@/lib/particao";
 import { profissionaisLivresNoHorario } from "@/lib/disponibilidade";
+import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
 import {
   Menu,
   X,
@@ -26,6 +27,7 @@ import {
   UserRound,
   LogOut,
   NotebookPen,
+  Settings,
 } from "lucide-react";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
@@ -141,6 +143,7 @@ const ABAS_PAI = [
   { id: "servicos", rotulo: "Serviços", Icone: Scissors },
   { id: "profissionais", rotulo: "Profissionais", Icone: Users },
   { id: "clientes", rotulo: "Clientes", Icone: UserRound },
+  { id: "regras", rotulo: "Regras de negócio", Icone: Settings },
 ];
 
 // Filtros da aba Histórico (client-side, por categoria de rotuloHistorico).
@@ -167,7 +170,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -210,6 +213,12 @@ export default function AdminPage() {
   const [agendamentos, setAgendamentos] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
+
+  // Respostas do popup de perguntas (ver FormularioAgendamento), por
+  // agendamento_id — Map<id, string[]> já formatado (lib/agendamentoRespostas),
+  // buscado em bulk junto com `agendamentos` (mesmo id list). Agendamento sem
+  // nenhuma entrada aqui (serviço sem perguntas) não mostra a linha extra.
+  const [respostasPorAgendamento, setRespostasPorAgendamento] = useState(new Map());
 
   // Aba-pai do topo (ver ABAS_PAI): "pendentes" (inbox), "painel" (calendário),
   // "historico" e "agendar". A partição é derivada (lib/particao), sem status novo.
@@ -286,7 +295,12 @@ export default function AdminPage() {
   // otimista não basta; recarregamos pelo mesmo helper único de query.
   async function recarregarAgendamentos() {
     const { dados, error } = await buscarAgendamentos(estabelecimento.id);
-    if (!error) setAgendamentos(dados);
+    if (!error) {
+      setAgendamentos(dados);
+      setRespostasPorAgendamento(
+        await buscarRespostasPorAgendamento(dados.map((item) => item.id))
+      );
+    }
   }
 
   // Botão A: grava o status 'confirmado' no banco e, se der certo, abre o
@@ -582,6 +596,11 @@ export default function AdminPage() {
 
       if (!silencioso) setErro("");
       setAgendamentos(dados);
+
+      const respostas = await buscarRespostasPorAgendamento(
+        dados.map((item) => item.id)
+      );
+      if (ativo) setRespostasPorAgendamento(respostas);
     }
 
     // `carregando` já começa true, então a carga inicial mostra o indicador.
@@ -702,9 +721,12 @@ export default function AdminPage() {
   // caducaram caem em "historico" e somem daqui. `agendamentos` já vem ordenado
   // por data asc + horário asc da query, então o inbox sai cronológico
   // (mais próximo primeiro). Um único `agora` para classificar tudo no render.
+  // item.finalizado exclui reserva antecipada abandonada no meio do wizard
+  // (ver FormularioAgendamento): sem isso ela apareceria como pendência real
+  // pra dona agir, mesmo nunca tendo sido de fato concluída pela cliente.
   const agora = new Date();
   const inbox = agendamentos.filter(
-    (item) => classificarAgendamento(item, agora) === "inbox"
+    (item) => classificarAgendamento(item, agora) === "inbox" && item.finalizado
   );
 
   // Histórico (aba "Histórico"): tudo arquivado — cancelados, pendentes
@@ -871,6 +893,18 @@ export default function AdminPage() {
                       </span>
                     )}
                   </div>
+
+                  {/* Respostas do popup de perguntas do serviço (ver
+                      lib/agendamentoRespostas), quando houver. */}
+                  {(respostasPorAgendamento.get(item.id) ?? []).length > 0 && (
+                    <ul className="mt-2 space-y-0.5">
+                      {respostasPorAgendamento.get(item.id).map((texto, i) => (
+                        <li key={i} className="text-xs text-body">
+                          {texto}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
 
                   <div className="mt-4 flex flex-col gap-2">
                     <button
@@ -1148,15 +1182,11 @@ export default function AdminPage() {
           <GerenciarServicos estabelecimento={estabelecimento} />
         )}
 
-        {/* Profissionais: config do salão (escolha_profissional) no topo, depois
-            o CRUD dos profissionais (tabela `profissionais`) + grade de horários
-            (tabela `horarios_trabalho`), particionado pelo estabelecimento
-            resolvido. "Desativar" é soft delete (ativo=false). */}
+        {/* Profissionais: CRUD dos profissionais (tabela `profissionais`) +
+            grade de horários (tabela `horarios_trabalho`), particionado pelo
+            estabelecimento resolvido. "Desativar" é soft delete (ativo=false). */}
         {!carregando && !erro && viewPai === "profissionais" && (
-          <>
-            <ConfiguracoesSalao estabelecimento={estabelecimento} />
-            <GerenciarProfissionais estabelecimento={estabelecimento} />
-          </>
+          <GerenciarProfissionais estabelecimento={estabelecimento} />
         )}
 
         {/* Clientes: consulta somente-leitura da tabela `clientes`, com busca
@@ -1164,6 +1194,13 @@ export default function AdminPage() {
             atendimento, anamnese), particionado pelo estabelecimento resolvido. */}
         {!carregando && !erro && viewPai === "clientes" && (
           <GerenciarClientes estabelecimento={estabelecimento} />
+        )}
+
+        {/* Regras de negócio: config do salão (escolha_profissional, sinal/Pix
+            e prazo de vencimento da manutenção), particionado pelo
+            estabelecimento resolvido. */}
+        {!carregando && !erro && viewPai === "regras" && (
+          <ConfiguracoesSalao estabelecimento={estabelecimento} />
         )}
       </div>
 
@@ -1301,6 +1338,17 @@ export default function AdminPage() {
                   )}
                 </dd>
               </div>
+              {/* Respostas do popup de perguntas do serviço (ver
+                  lib/agendamentoRespostas), quando houver. */}
+              {(respostasPorAgendamento.get(selecionado.id) ?? []).length > 0 && (
+                <ul className="space-y-0.5">
+                  {respostasPorAgendamento.get(selecionado.id).map((texto, i) => (
+                    <li key={i} className="text-right text-xs text-body">
+                      {texto}
+                    </li>
+                  ))}
+                </ul>
+              )}
               {selecionado.profissional_nome && (
                 <div className="flex justify-between gap-3">
                   <dt className="text-body">Profissional</dt>

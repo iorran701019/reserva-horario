@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { linkWhatsApp } from "@/lib/whatsapp";
 import { buscarAgendamentosAtivos, buscarHistoricoRecente } from "@/lib/agendamentosCliente";
+import { buscarManutencaoSugerida } from "@/lib/manutencaoSugerida";
 import { classificarAgendamento } from "@/lib/particao";
 import { formatarData } from "@/components/FormularioAgendamento";
 import AtualizarDadosCliente from "@/components/AtualizarDadosCliente";
@@ -36,9 +37,11 @@ const SELO_STATUS = {
 // Props:
 //   estabelecimento – { id, nome, whatsapp } do salão resolvido pelo slug.
 //   cliente          – { id, nome, telefone } já identificado.
-//   onNovoAgendamento – chamado (sem args) ao clicar em "Novo agendamento";
-//                       quem monta a página decide o que fazer (abrir o
-//                       wizard).
+//   onNovoAgendamento – chamado ao clicar em "Novo agendamento" (sem args) ou
+//                       em "Agendar manutenção" do card de sugestão (com o
+//                       serviço de manutenção); quem monta a página decide o
+//                       que fazer (abrir o wizard, opcionalmente já com esse
+//                       serviço pré-selecionado).
 //   nomeProfissionalContato – mesmo texto usado no bloco do sinal do
 //                       FormularioAgendamento; repassado ao ConfirmacaoSinal.
 export default function PainelCliente({
@@ -50,6 +53,11 @@ export default function PainelCliente({
   const [agendamentos, setAgendamentos] = useState(null);
   const [historico, setHistorico] = useState(null);
   const [cancelandoId, setCancelandoId] = useState(null);
+
+  // Sugestão de manutenção em destaque no topo do painel (null = nenhuma ou
+  // ainda carregando — sem diferença visual entre os dois, o card só aparece
+  // quando há de fato uma sugestão).
+  const [manutencaoSugerida, setManutencaoSugerida] = useState(null);
 
   // Id do agendamento em processo de confirmação de sinal (troca a exibição
   // do painel pelo ConfirmacaoSinal), igual ao padrão já usado por `editando`.
@@ -71,7 +79,11 @@ export default function PainelCliente({
       estabelecimento.id,
       clienteAtual.telefone.replace(/\D/g, "")
     ).then((lista) => {
-      if (ativo) setAgendamentos(lista);
+      if (ativo) {
+        setAgendamentos(
+          lista.filter((item) => classificarAgendamento(item) !== "historico")
+        );
+      }
     });
     return () => {
       ativo = false;
@@ -91,6 +103,19 @@ export default function PainelCliente({
       if (ativo) {
         setHistorico(lista.filter((item) => classificarAgendamento(item) === "historico"));
       }
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento.id, clienteAtual.telefone]);
+
+  useEffect(() => {
+    let ativo = true;
+    buscarManutencaoSugerida(
+      estabelecimento.id,
+      clienteAtual.telefone.replace(/\D/g, "")
+    ).then((resultado) => {
+      if (ativo) setManutencaoSugerida(resultado);
     });
     return () => {
       ativo = false;
@@ -159,6 +184,28 @@ export default function PainelCliente({
 
   return (
     <div className="space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border">
+      {manutencaoSugerida && (
+        <div className="rounded-xl bg-primary/5 p-4 ring-1 ring-primary/30">
+          <p className="text-sm font-semibold text-heading">
+            Hora de renovar: {manutencaoSugerida.servico.nome}
+          </p>
+          <p className="mt-1 text-sm text-body">
+            {manutencaoSugerida.vencido
+              ? `Venceu há ${manutencaoSugerida.dias} dia${manutencaoSugerida.dias === 1 ? "" : "s"}.`
+              : manutencaoSugerida.dias === 0
+              ? "Vence hoje."
+              : `Vence em ${manutencaoSugerida.dias} dia${manutencaoSugerida.dias === 1 ? "" : "s"}.`}
+          </p>
+          <button
+            type="button"
+            onClick={() => onNovoAgendamento(manutencaoSugerida.servico)}
+            className="mt-3 w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+          >
+            Agendar manutenção
+          </button>
+        </div>
+      )}
+
       <div>
         <h2 className="text-lg font-semibold text-heading">
           Seus agendamentos
@@ -259,7 +306,7 @@ export default function PainelCliente({
 
       <button
         type="button"
-        onClick={onNovoAgendamento}
+        onClick={() => onNovoAgendamento()}
         className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
       >
         Novo agendamento
