@@ -53,6 +53,7 @@ const FORM_INICIAL = {
   alertaMensagem: "",
   servico_origem_id: "",
   prazoManutencaoDias: "",
+  ehManutencao: false,
 };
 
 // Reais digitado (aceita "35", "35,50" ou "35.50") -> centavos inteiros.
@@ -200,7 +201,7 @@ export default function GerenciarServicos({ estabelecimento }) {
       const { data, error } = await supabase
         .from("servicos")
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias"
+          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao"
         )
         .eq("estabelecimento_id", estabelecimento.id)
         .order("categoria_id", { ascending: true, nullsFirst: true })
@@ -304,20 +305,25 @@ export default function GerenciarServicos({ estabelecimento }) {
     }));
   }
 
-  // Selecionar um serviço de origem esconde o campo de prazo de manutenção
-  // (só faz sentido no serviço "original"); limpamos o valor digitado pra não
-  // ficar um prazo escondido pendente de salvar.
-  function handleChangeServicoOrigem(e) {
-    const value = e.target.value;
-    setForm((anterior) => ({
-      ...anterior,
-      servico_origem_id: value,
-      prazoManutencaoDias: value === "" ? anterior.prazoManutencaoDias : "",
-    }));
-  }
-
   function abrirNovo() {
     setForm(FORM_INICIAL);
+    setErroForm("");
+    setEditando("novo");
+  }
+
+  // Atalho "+ Criar manutenção" num card de serviço original: abre o mesmo
+  // formulário de criação, mas já pré-preenchido como uma manutenção daquele
+  // serviço — nome sugerido, servico_origem_id fixo (sem UI pra trocar) e sem
+  // categoria (a categoria sintética "Manutenções" cuida do agrupamento
+  // visual, ver GerenciarServicos/FormularioAgendamento). Preço, duração e
+  // demais campos ficam em branco pro dono preencher.
+  function abrirCriarManutencao(servicoOrigem) {
+    setForm({
+      ...FORM_INICIAL,
+      nome: `Manutenção – ${servicoOrigem.nome}`,
+      servico_origem_id: String(servicoOrigem.id),
+      ehManutencao: true,
+    });
     setErroForm("");
     setEditando("novo");
   }
@@ -338,6 +344,7 @@ export default function GerenciarServicos({ estabelecimento }) {
         servico.servico_origem_id != null ? String(servico.servico_origem_id) : "",
       prazoManutencaoDias:
         servico.prazo_manutencao_dias != null ? String(servico.prazo_manutencao_dias) : "",
+      ehManutencao: Boolean(servico.eh_manutencao),
     });
     setErroForm("");
     setEditando(servico);
@@ -399,10 +406,10 @@ export default function GerenciarServicos({ estabelecimento }) {
     const servicoOrigemId =
       form.servico_origem_id === "" ? null : Number(form.servico_origem_id);
 
-    // Prazo de manutenção só existe no serviço "original" (sem servico_origem_id).
-    // Com origem selecionada, o campo fica escondido e sempre grava null.
+    // Prazo de manutenção só existe no serviço "original" (eh_manutencao
+    // false). Numa manutenção o campo fica escondido e sempre grava null.
     let prazoManutencaoDias = null;
-    if (servicoOrigemId === null && form.prazoManutencaoDias.trim() !== "") {
+    if (!form.ehManutencao && form.prazoManutencaoDias.trim() !== "") {
       const prazo = Number(form.prazoManutencaoDias);
       if (!Number.isInteger(prazo) || prazo <= 0) {
         return { erro: "Informe um prazo de manutenção (em dias) maior que zero." };
@@ -415,8 +422,13 @@ export default function GerenciarServicos({ estabelecimento }) {
         nome,
         preco_centavos: centavos,
         duracao_min: duracao,
-        // "" (Sem categoria) -> null; senão o id numérico da categoria.
-        categoria_id: form.categoria_id === "" ? null : Number(form.categoria_id),
+        // Manutenção nunca tem categoria própria (agrupa no sintético
+        // "Manutenções"); "" (Sem categoria) -> null; senão o id numérico.
+        categoria_id: form.ehManutencao
+          ? null
+          : form.categoria_id === ""
+            ? null
+            : Number(form.categoria_id),
         ocultar_preco: form.ocultarPreco,
         ocultar_duracao: form.ocultarDuracao,
         // Caixa desmarcada ou texto em branco -> null (nunca salva alerta
@@ -427,6 +439,7 @@ export default function GerenciarServicos({ estabelecimento }) {
             : null,
         servico_origem_id: servicoOrigemId,
         prazo_manutencao_dias: prazoManutencaoDias,
+        eh_manutencao: form.ehManutencao,
       },
     };
   }
@@ -487,7 +500,7 @@ export default function GerenciarServicos({ estabelecimento }) {
           ordem: proximaOrdemNoGrupo(payload.categoria_id),
         })
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias"
+          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao"
         )
         .single();
 
@@ -818,6 +831,17 @@ export default function GerenciarServicos({ estabelecimento }) {
                   >
                     Excluir
                   </button>
+                  {/* Só em serviços "originais" (eh_manutencao false) que
+                      ainda não têm manutenção vinculada — regra um-para-um. */}
+                  {!servico.eh_manutencao && !idsComManutencaoVinculada.has(servico.id) && (
+                    <button
+                      type="button"
+                      onClick={() => abrirCriarManutencao(servico)}
+                      className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-primary ring-1 ring-primary/40 transition hover:bg-primary/5"
+                    >
+                      + Criar manutenção
+                    </button>
+                  )}
                 </>
               ) : (
                 <button
@@ -852,20 +876,32 @@ export default function GerenciarServicos({ estabelecimento }) {
   }
 
   // Agrupamento pro acordeão: categorias na ordem de exibição, o grupo
-  // sintético "Manutenções" — serviços com servico_origem_id preenchido,
-  // IGNORANDO a categoria_id que porventura tenham (mesmo critério do
-  // /agendar público, ver categoriasComServicos em FormularioAgendamento) —
-  // e o grupo sintético "Sem categoria" — serviços sem categoria_id, ou
-  // apontando pra uma categoria que não existe mais, e que não sejam
-  // manutenção. Cada um só aparece se tiver algum serviço.
+  // sintético "Manutenções" — serviços com eh_manutencao=true, IGNORANDO a
+  // categoria_id que porventura tenham (mesmo critério do /agendar público,
+  // ver categoriasComServicos em FormularioAgendamento) — e o grupo sintético
+  // "Sem categoria" — serviços sem categoria_id, ou apontando pra uma
+  // categoria que não existe mais, e que não sejam manutenção. Cada um só
+  // aparece se tiver algum serviço.
   const categoriasOrdenadas = ordenarCategorias(categorias);
   const idsCategorias = new Set(categorias.map((c) => c.id));
-  const servicosManutencao = servicos.filter((s) => s.servico_origem_id != null);
+  const servicosManutencao = servicos.filter((s) => s.eh_manutencao);
   const idsManutencao = new Set(servicosManutencao.map((s) => s.id));
   const servicosSemCategoria = servicos.filter(
     (s) =>
       !idsManutencao.has(s.id) &&
       (s.categoria_id == null || !idsCategorias.has(s.categoria_id))
+  );
+
+  // Serviços que já têm uma manutenção vinculada via servico_origem_id (regra
+  // um-para-um garantida pelo índice único parcial no banco) — exclui a
+  // manutenção em edição, pra ela não "bloquear" seu próprio vínculo atual no
+  // dropdown/no botão. Usado tanto pro "+ Criar manutenção" (esconder se já
+  // houver vínculo) quanto pro dropdown "Serviço vinculado" do formulário.
+  const idEmEdicao = editando && editando !== "novo" ? editando.id : null;
+  const idsComManutencaoVinculada = new Set(
+    servicos
+      .filter((s) => s.eh_manutencao && s.servico_origem_id != null && s.id !== idEmEdicao)
+      .map((s) => s.servico_origem_id)
   );
 
   return (
@@ -945,7 +981,13 @@ export default function GerenciarServicos({ estabelecimento }) {
           className="mb-4 space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border"
         >
           <h3 className="text-base font-semibold text-heading">
-            {editando === "novo" ? "Novo serviço" : "Editar serviço"}
+            {form.ehManutencao
+              ? editando === "novo"
+                ? "Nova manutenção"
+                : "Editar manutenção"
+              : editando === "novo"
+                ? "Novo serviço"
+                : "Editar serviço"}
           </h3>
 
           <div>
@@ -963,59 +1005,34 @@ export default function GerenciarServicos({ estabelecimento }) {
             />
           </div>
 
-          {/* Categoria (opcional). "Sem categoria" grava categoria_id null. */}
-          <div>
-            <label htmlFor="categoria_id" className="mb-1 block text-sm font-medium text-body">
-              Categoria
-            </label>
-            <select
-              id="categoria_id"
-              name="categoria_id"
-              value={form.categoria_id}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-            >
-              <option value="">Sem categoria</option>
-              {categorias.map((categoria) => (
-                <option key={categoria.id} value={String(categoria.id)}>
-                  {categoria.nome}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Serviço de origem (opcional): marca este serviço como uma
-              "manutenção" de outro já cadastrado (grava servico_origem_id).
-              Selecionando um, o prazo de manutenção abaixo some — só o
-              serviço "original" (sem origem) tem prazo. */}
-          <div>
-            <label
-              htmlFor="servico_origem_id"
-              className="mb-1 block text-sm font-medium text-body"
-            >
-              Serviço de origem
-            </label>
-            <select
-              id="servico_origem_id"
-              name="servico_origem_id"
-              value={form.servico_origem_id}
-              onChange={handleChangeServicoOrigem}
-              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-            >
-              <option value="">Nenhum (serviço original)</option>
-              {servicos
-                .filter(
-                  (s) => s.ativo && (editando === "novo" || s.id !== editando.id)
-                )
-                .map((s) => (
-                  <option key={s.id} value={String(s.id)}>
-                    {s.nome}
+          {/* Categoria (opcional). Não existe pra manutenção — ela agrupa no
+              sintético "Manutenções", nunca numa categoria própria. "Sem
+              categoria" grava categoria_id null. */}
+          {!form.ehManutencao && (
+            <div>
+              <label htmlFor="categoria_id" className="mb-1 block text-sm font-medium text-body">
+                Categoria
+              </label>
+              <select
+                id="categoria_id"
+                name="categoria_id"
+                value={form.categoria_id}
+                onChange={handleChange}
+                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              >
+                <option value="">Sem categoria</option>
+                {categorias.map((categoria) => (
+                  <option key={categoria.id} value={String(categoria.id)}>
+                    {categoria.nome}
                   </option>
                 ))}
-            </select>
-          </div>
+              </select>
+            </div>
+          )}
 
-          {form.servico_origem_id === "" && (
+          {/* Prazo de manutenção: só existe no serviço "original" (eh_manutencao
+              false) — numa manutenção o campo não faz sentido e fica escondido. */}
+          {!form.ehManutencao && (
             <div>
               <label
                 htmlFor="prazoManutencaoDias"
@@ -1035,6 +1052,44 @@ export default function GerenciarServicos({ estabelecimento }) {
                 placeholder="Ex.: 21"
                 className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
               />
+            </div>
+          )}
+
+          {/* Serviço vinculado (opcional): só numa manutenção (eh_manutencao
+              true). Lista os demais serviços "originais" do estabelecimento
+              que ainda não têm outra manutenção vinculada (regra
+              um-para-um garantida pelo índice único parcial no banco);
+              "Nenhum" representa manutenção sem vínculo (ex.: veio de outra
+              manicure). */}
+          {form.ehManutencao && (
+            <div>
+              <label
+                htmlFor="servico_origem_id"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Serviço vinculado (opcional)
+              </label>
+              <select
+                id="servico_origem_id"
+                name="servico_origem_id"
+                value={form.servico_origem_id}
+                onChange={handleChange}
+                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              >
+                <option value="">Nenhum</option>
+                {servicos
+                  .filter(
+                    (s) =>
+                      s.ativo &&
+                      !s.eh_manutencao &&
+                      !idsComManutencaoVinculada.has(s.id)
+                  )
+                  .map((s) => (
+                    <option key={s.id} value={String(s.id)}>
+                      {s.nome}
+                    </option>
+                  ))}
+              </select>
             </div>
           )}
 
@@ -1318,8 +1373,6 @@ export default function GerenciarServicos({ estabelecimento }) {
                   >
                     <span className="font-semibold text-heading">Manutenções</span>
                     <span className="flex shrink-0 items-center gap-1 text-xs text-body">
-                      {servicosManutencao.length} serviço
-                      {servicosManutencao.length === 1 ? "" : "s"}
                       <span aria-hidden="true">
                         {grupoAberto === CATEGORIA_MANUTENCOES ? "▲" : "▼"}
                       </span>
@@ -1481,16 +1534,16 @@ function ordenar(lista) {
 }
 
 // Serviços do mesmo grupo VISUAL de `servico` (mesmo categoria_id, null
-// incluso — MAS serviços com servico_origem_id preenchido formam seu próprio
-// grupo "Manutenções", independente da categoria_id real), na ordem já
-// vigente em `lista` — usado pra achar o vizinho de cima/baixo e desenhar as
-// setinhas, mantendo consistência com o agrupamento exibido no acordeão.
+// incluso — MAS serviços com eh_manutencao=true formam seu próprio grupo
+// "Manutenções", independente da categoria_id real), na ordem já vigente em
+// `lista` — usado pra achar o vizinho de cima/baixo e desenhar as setinhas,
+// mantendo consistência com o agrupamento exibido no acordeão.
 function grupoDaCategoria(lista, servico) {
-  if (servico.servico_origem_id != null) {
-    return lista.filter((s) => s.servico_origem_id != null);
+  if (servico.eh_manutencao) {
+    return lista.filter((s) => s.eh_manutencao);
   }
   return lista.filter(
-    (s) => s.categoria_id === servico.categoria_id && s.servico_origem_id == null
+    (s) => s.categoria_id === servico.categoria_id && !s.eh_manutencao
   );
 }
 

@@ -69,9 +69,9 @@ function formatarISO(date) {
 // (0=domingo … 6=sábado).
 const DIAS_SEMANA_CURTO = ["D", "S", "T", "Q", "Q", "S", "S"];
 
-// Sentinel do grupo sintético "Manutenções" no acordeão de serviços — nunca
-// colide com um id de categoria (numérico). Ver `categoriasComServicos`.
-const CATEGORIA_MANUTENCOES = "manutencoes";
+// Key do item único "Manutenção" no acordeão de serviços — nunca colide com
+// um id de serviço (numérico). Ver `renderBotaoManutencao`.
+const ITEM_MANUTENCAO = "manutencoes";
 
 // "YYYY-MM-DD" -> "dd/mm · dia da semana". Parse manual pra evitar o
 // deslocamento de fuso que new Date("YYYY-MM-DD") sofre (vira UTC). Exportado
@@ -323,6 +323,9 @@ export default function FormularioAgendamento({
   // confirmação no modal (ver selecionarServico/confirmarAlerta/cancelarAlerta).
   // A seleção de fato só acontece se o modal for confirmado.
   const [alertaPendente, setAlertaPendente] = useState(null);
+  // Popup "Qual serviço foi feito?" do item único "Manutenção" do acordeão
+  // (ver servicosManutencao/renderBotaoManutencao/escolherManutencao).
+  const [modalManutencaoAberto, setModalManutencaoAberto] = useState(false);
   const [carregandoServicos, setCarregandoServicos] = useState(true);
   const [erroServicos, setErroServicos] = useState("");
 
@@ -487,9 +490,10 @@ export default function FormularioAgendamento({
   // sem categoria (ou apontando pra uma categoria que não existe mais), depois
   // uma seção por categoria (na ordem vinda do banco) só com quem tem >=1
   // serviço ativo. Serviços com servico_origem_id preenchido (manutenção de
-  // outro serviço) IGNORAM a categoria_id própria e vão sempre pro grupo
-  // sintético "Manutenções", por último — mesmo critério do admin
-  // (GerenciarServicos).
+  // outro serviço) IGNORAM a categoria_id própria e NÃO entram em nenhuma
+  // dessas seções — em vez disso viram o item único "Manutenção", renderizado
+  // por último (ver renderBotaoManutencao/servicosManutencao no JSX), que abre
+  // um popup pra escolher qual serviço de origem foi feito.
   const idsCategorias = new Set(categorias.map((c) => c.id));
   const servicosManutencao = servicos.filter((s) => s.servico_origem_id != null);
   const idsManutencao = new Set(servicosManutencao.map((s) => s.id));
@@ -506,13 +510,6 @@ export default function FormularioAgendamento({
       ),
     }))
     .filter((c) => c.servicos.length > 0);
-  if (servicosManutencao.length > 0) {
-    categoriasComServicos.push({
-      id: CATEGORIA_MANUTENCOES,
-      nome: "Manutenções",
-      servicos: servicosManutencao,
-    });
-  }
 
   // Abre/fecha uma categoria no acordeão — só uma aberta por vez.
   function alternarCategoria(id) {
@@ -573,6 +570,24 @@ export default function FormularioAgendamento({
             {formatarPreco(servico.preco_centavos)}
           </span>
         )}
+      </button>
+    );
+  }
+
+  // Item único "Manutenção", renderizado por último no acordeão (mesmo estilo
+  // de renderBotaoServico). Não seleciona nada diretamente — abre o popup
+  // (ver JSX) que lista os serviços de manutenção pra escolha.
+  function renderBotaoManutencao() {
+    return (
+      <button
+        key={ITEM_MANUTENCAO}
+        type="button"
+        onClick={() => setModalManutencaoAberto(true)}
+        className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 ring-border bg-card text-body transition hover:border-primary hover:ring-primary"
+      >
+        <span className="min-w-0">
+          <span className="block font-medium">Manutenção</span>
+        </span>
       </button>
     );
   }
@@ -732,6 +747,14 @@ export default function FormularioAgendamento({
   // escolher outro serviço.
   function cancelarAlerta() {
     setAlertaPendente(null);
+  }
+
+  // Popup "Qual serviço foi feito?" — escolher uma opção seleciona o serviço
+  // de manutenção correspondente como se o cliente tivesse tocado nele
+  // direto na lista (segue alerta_mensagem etc. via selecionarServico).
+  function escolherManutencao(servico) {
+    setModalManutencaoAberto(false);
+    selecionarServico(servico);
   }
 
   // Fluxo "cliente escolhe": escolher o profissional conclui a etapa de serviço
@@ -1070,7 +1093,8 @@ export default function FormularioAgendamento({
             {!carregandoServicos &&
               !erroServicos &&
               (servicosSemCategoria.length > 0 ||
-                categoriasComServicos.length > 0) && (
+                categoriasComServicos.length > 0 ||
+                servicosManutencao.length > 0) && (
                 <div className="space-y-2">
                   {servicosSemCategoria.map((servico) =>
                     renderBotaoServico(servico)
@@ -1113,6 +1137,8 @@ export default function FormularioAgendamento({
                       </div>
                     );
                   })}
+
+                  {servicosManutencao.length > 0 && renderBotaoManutencao()}
                 </div>
               )}
 
@@ -1478,6 +1504,55 @@ export default function FormularioAgendamento({
                 type="button"
                 onClick={cancelarAlerta}
                 className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup do item único "Manutenção" (ver renderBotaoManutencao): lista os
+          serviços de manutenção pra escolha. Escolher uma opção equivale a
+          tocar nela direto na lista (escolherManutencao -> selecionarServico).
+          Reaproveita o padrão visual do modal de alerta acima. */}
+      {modalManutencaoAberto && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-modal-manutencao"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setModalManutencaoAberto(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-modal-manutencao"
+              className="text-lg font-semibold text-heading"
+            >
+              Qual serviço foi feito?
+            </h2>
+
+            <div className="mt-4 space-y-2">
+              {servicosManutencao.map((servico) => (
+                <button
+                  key={servico.id}
+                  type="button"
+                  onClick={() => escolherManutencao(servico)}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 ring-border bg-card text-body transition hover:border-primary hover:ring-primary"
+                >
+                  <span className="font-medium">{servico.nome}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-6">
+              <button
+                type="button"
+                onClick={() => setModalManutencaoAberto(false)}
+                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar
               </button>
