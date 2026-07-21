@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { calcularVagasPorHorario } from "@/lib/disponibilidade";
 import { buscarTema } from "@/lib/temas";
-import { calcularPrecoManutencao } from "@/lib/manutencaoSugerida";
+import {
+  calcularPrecoManutencao,
+  buscarVencimentoManutencao,
+} from "@/lib/manutencaoSugerida";
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
 // "pendente") e a aba Agendar do /admin (cria "confirmado"). Toda a lógica de
@@ -141,6 +144,12 @@ async function escolherMenosOcupado(estabelecimentoId, data, candidatos) {
 //   selecionado      – "YYYY-MM-DD" atualmente escolhido (destaca a célula).
 //   onSelecionar     – recebe o "YYYY-MM-DD" do dia clicado (só dias válidos).
 //   onPrev/onNext    – navegação de mês. podeVoltar trava o passado.
+//   vencimentoManutencao – Date (meia-noite local) do vencimento da manutenção
+//                   selecionada, ou null. Quando presente, só INFORMA (não
+//                   bloqueia): dias até e incluindo o vencimento ganham um
+//                   fundo verde sutil, dias após ganham laranja. Um dia
+//                   desabilitado (cinza, sem profissional) mantém prioridade
+//                   visual sobre essas cores.
 function CalendarioDias({
   mes,
   min,
@@ -150,6 +159,7 @@ function CalendarioDias({
   onPrev,
   onNext,
   podeVoltar,
+  vencimentoManutencao,
 }) {
   const ano = mes.getFullYear();
   const mesIdx = mes.getMonth();
@@ -233,6 +243,10 @@ function CalendarioDias({
           const fechado = !diasSemanaAtivos.has(date.getDay());
           const desabilitado = passado || fechado;
           const sel = iso === selecionado;
+          const dentroDoPrazo =
+            vencimentoManutencao != null && date <= vencimentoManutencao;
+          const foraDoPrazo =
+            vencimentoManutencao != null && date > vencimentoManutencao;
 
           return (
             <button
@@ -248,6 +262,10 @@ function CalendarioDias({
                   ? "cursor-not-allowed text-muted/40"
                   : sel
                   ? "bg-primary font-semibold text-white ring-1 ring-primary"
+                  : dentroDoPrazo
+                  ? "bg-green-50 text-body ring-1 ring-green-200 hover:border-primary hover:ring-primary"
+                  : foraDoPrazo
+                  ? "bg-orange-50 text-body ring-1 ring-orange-200 hover:border-primary hover:ring-primary"
                   : "text-body ring-1 ring-border hover:border-primary hover:ring-primary",
               ].join(" ")}
             >
@@ -345,6 +363,11 @@ export default function FormularioAgendamento({
   // abaixo, que chama calcularPrecoManutencao assim que serviço + telefone da
   // cliente estão disponíveis). { centavos, valorCheio } quando pronto.
   const [precoManutencao, setPrecoManutencao] = useState(null);
+  // Vencimento (Date à meia-noite local) da manutenção selecionada, pra
+  // colorir o calendário da etapa "Data" — ver buscarVencimentoManutencao e o
+  // efeito abaixo. null enquanto não se aplica (serviço normal) ou sem
+  // atendimento de referência (cliente nova pro serviço de origem).
+  const [vencimentoManutencao, setVencimentoManutencao] = useState(null);
   const [carregandoServicos, setCarregandoServicos] = useState(true);
   const [erroServicos, setErroServicos] = useState("");
 
@@ -557,6 +580,39 @@ export default function FormularioAgendamento({
     clienteInicial?.telefone,
     form.telefone,
     form.data,
+    estabelecimento.id,
+  ]);
+
+  // Busca o vencimento pra colorir o calendário (ver CalendarioDias) quando
+  // servicoSelecionado é uma manutenção — mesmo gate de telefone do efeito
+  // acima, mas SEM depender de form.data (o vencimento não muda conforme a
+  // data escolhida no wizard, só o preço). Reset ao trocar de serviço mora em
+  // confirmarSelecaoServico, mesmo padrão do efeito de preço.
+  useEffect(() => {
+    const telefoneDigitos = (clienteInicial?.telefone ?? form.telefone).replace(
+      /\D/g,
+      ""
+    );
+
+    if (servicoSelecionado?.servico_origem_id == null || telefoneDigitos.length < 10) {
+      return;
+    }
+
+    let ativo = true;
+    buscarVencimentoManutencao(
+      estabelecimento.id,
+      telefoneDigitos,
+      servicoSelecionado
+    ).then((resultado) => {
+      if (ativo) setVencimentoManutencao(resultado);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [
+    servicoSelecionado,
+    clienteInicial?.telefone,
+    form.telefone,
     estabelecimento.id,
   ]);
 
@@ -806,9 +862,11 @@ export default function FormularioAgendamento({
     setServicoSelecionado(servico);
     setHorarioSelecionado("");
     setProfissionalSelecionado(null);
-    // Preço da manutenção anterior (se houver) não vale mais pro novo
-    // serviço — o efeito acima recalcula do zero quando o novo for manutenção.
+    // Preço e vencimento da manutenção anterior (se houver) não valem mais
+    // pro novo serviço — os efeitos acima recalculam do zero quando o novo
+    // for manutenção.
     setPrecoManutencao(null);
+    setVencimentoManutencao(null);
     // A troca muda os dias/horários válidos: zera a data pra não ficar uma
     // seleção antiga num dia que virou indisponível.
     setForm((anterior) => ({ ...anterior, data: "" }));
@@ -1336,6 +1394,7 @@ export default function FormularioAgendamento({
                   onPrev={mesAnterior}
                   onNext={proximoMes}
                   podeVoltar={podeVoltarMes}
+                  vencimentoManutencao={vencimentoManutencao}
                 />
               )}
             </div>
