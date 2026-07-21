@@ -371,6 +371,18 @@ export default function FormularioAgendamento({
   const [carregandoServicos, setCarregandoServicos] = useState(true);
   const [erroServicos, setErroServicos] = useState("");
 
+  // Perguntas do serviço selecionado (servico_perguntas + suas
+  // servico_pergunta_opcoes), buscadas em confirmarSelecaoServico. Vazio ->
+  // popup não abre e o fluxo segue direto (ver avancarAposServico).
+  const [perguntasServico, setPerguntasServico] = useState([]);
+  const [modalPerguntasAberto, setModalPerguntasAberto] = useState(false);
+  // Respostas do cliente no popup, por pergunta_id: { opcaoId } pra
+  // sim_nao/multipla_escolha, { textoLivre } pra texto_livre. Alimentam tanto
+  // a validação (confirmarModalPerguntas) quanto o cálculo de ajuste de preço
+  // (ver calcularAjustePerguntas) e a gravação em agendamento_respostas.
+  const [respostasPerguntas, setRespostasPerguntas] = useState({});
+  const [erroModalPerguntas, setErroModalPerguntas] = useState("");
+
   // Categorias de serviço do salão, pra agrupar a lista da etapa "servico" em
   // acordeão. `categoriaAberta` guarda o id da única categoria expandida por
   // vez (null = todas fechadas).
@@ -855,10 +867,11 @@ export default function FormularioAgendamento({
 
   // Seleção de fato de um serviço: muda a duração/grade e a lista de
   // profissionais, então o horário e o profissional escolhidos podem não
-  // valer mais — limpamos os dois. No encaixe automático (toggle off), avança
-  // direto para a data. No fluxo "cliente escolhe", fica na etapa de serviço
-  // pra escolher o profissional (os cards aparecem logo abaixo).
-  function confirmarSelecaoServico(servico) {
+  // valer mais — limpamos os dois. Também busca as perguntas vinculadas ao
+  // serviço (servico_perguntas); havendo alguma, abre o popup ANTES de
+  // avançar (ver avancarAposServico, chamado só depois de confirmarModalPerguntas
+  // quando há perguntas, ou direto daqui quando não há).
+  async function confirmarSelecaoServico(servico) {
     setServicoSelecionado(servico);
     setHorarioSelecionado("");
     setProfissionalSelecionado(null);
@@ -870,6 +883,36 @@ export default function FormularioAgendamento({
     // A troca muda os dias/horários válidos: zera a data pra não ficar uma
     // seleção antiga num dia que virou indisponível.
     setForm((anterior) => ({ ...anterior, data: "" }));
+
+    setRespostasPerguntas({});
+    setErroModalPerguntas("");
+    const { data, error } = await supabase
+      .from("servico_perguntas")
+      .select(
+        "id, texto, tipo, ordem, servico_pergunta_opcoes(id, label, ajuste_preco_centavos, ordem)"
+      )
+      .eq("servico_id", servico.id)
+      .order("ordem", { ascending: true })
+      .order("ordem", { ascending: true, referencedTable: "servico_pergunta_opcoes" });
+
+    // RLS bloqueando a leitura pro público equivale, aqui, a "sem perguntas":
+    // o fluxo segue igual a hoje em vez de travar no popup.
+    const perguntas = error ? [] : (data ?? []);
+    setPerguntasServico(perguntas);
+
+    if (perguntas.length > 0) {
+      setModalPerguntasAberto(true);
+      return;
+    }
+    avancarAposServico();
+  }
+
+  // Avanço pós-seleção de serviço: no encaixe automático (toggle off) vai
+  // direto pra data; no fluxo "cliente escolhe" fica na etapa de serviço pra
+  // escolher o profissional (os cards aparecem logo abaixo). Extraído de
+  // confirmarSelecaoServico pra ser reaproveitado depois do popup de
+  // perguntas (ver confirmarModalPerguntas).
+  function avancarAposServico() {
     if (!escolherProfissional) setEtapa("data");
   }
 
@@ -892,6 +935,112 @@ export default function FormularioAgendamento({
   function escolherManutencao(servico) {
     setModalManutencaoAberto(false);
     selecionarServico(servico);
+  }
+
+  // Registra a resposta de uma pergunta sim_nao/multipla_escolha (opção
+  // escolhida) ou texto_livre (texto digitado) — ver popup de perguntas no
+  // JSX. Substitui qualquer resposta anterior da mesma pergunta.
+  function responderOpcao(perguntaId, opcaoId) {
+    setRespostasPerguntas((atual) => ({ ...atual, [perguntaId]: { opcaoId } }));
+    setErroModalPerguntas("");
+  }
+
+  function responderTexto(perguntaId, valor) {
+    setRespostasPerguntas((atual) => ({ ...atual, [perguntaId]: { textoLivre: valor } }));
+    setErroModalPerguntas("");
+  }
+
+  // Popup de perguntas — "Voltar": fecha sem confirmar e desfaz a seleção do
+  // serviço (mesmo espírito do "Voltar" do alerta: o cliente pode escolher
+  // outro serviço em vez de responder).
+  function cancelarModalPerguntas() {
+    setModalPerguntasAberto(false);
+    setPerguntasServico([]);
+    setRespostasPerguntas({});
+    setErroModalPerguntas("");
+    setServicoSelecionado(null);
+  }
+
+  // Popup de perguntas — "Continuar": só avança se TODAS as perguntas tiverem
+  // resposta (opção marcada, ou texto livre não-vazio).
+  function confirmarModalPerguntas() {
+    for (const pergunta of perguntasServico) {
+      const resposta = respostasPerguntas[pergunta.id];
+      const respondida =
+        pergunta.tipo === "texto_livre"
+          ? Boolean(resposta?.textoLivre?.trim())
+          : resposta?.opcaoId != null;
+      if (!respondida) {
+        setErroModalPerguntas("Responda todas as perguntas para continuar.");
+        return;
+      }
+    }
+    setErroModalPerguntas("");
+    setModalPerguntasAberto(false);
+    avancarAposServico();
+  }
+
+  // Soma os ajustes de preço (ajuste_preco_centavos) das opções escolhidas —
+  // texto_livre nunca ajusta preço. Devolve o total e a lista de itens com
+  // ajuste != 0, pra exibição transparente na etapa "Dados" (ver JSX).
+  function calcularAjustePerguntas() {
+    let centavos = 0;
+    const itens = [];
+    for (const pergunta of perguntasServico) {
+      const resposta = respostasPerguntas[pergunta.id];
+      if (resposta?.opcaoId == null) continue;
+      const opcao = (pergunta.servico_pergunta_opcoes ?? []).find(
+        (o) => o.id === resposta.opcaoId
+      );
+      if (opcao && opcao.ajuste_preco_centavos !== 0) {
+        centavos += opcao.ajuste_preco_centavos;
+        itens.push({ label: opcao.label, centavos: opcao.ajuste_preco_centavos });
+      }
+    }
+    return { centavos, itens };
+  }
+
+  // Monta as linhas prontas pra inserir em agendamento_respostas (uma por
+  // pergunta respondida) — null quando a pergunta ficou sem resposta (não
+  // deveria acontecer, confirmarModalPerguntas já valida antes de fechar).
+  function linhasRespostasPerguntas(agendamentoId) {
+    return perguntasServico
+      .map((pergunta) => {
+        const resposta = respostasPerguntas[pergunta.id];
+        if (!resposta) return null;
+        if (pergunta.tipo === "texto_livre") {
+          const texto = resposta.textoLivre?.trim();
+          if (!texto) return null;
+          return {
+            agendamento_id: agendamentoId,
+            pergunta_id: pergunta.id,
+            opcao_id: null,
+            texto_livre: texto,
+          };
+        }
+        if (resposta.opcaoId == null) return null;
+        return {
+          agendamento_id: agendamentoId,
+          pergunta_id: pergunta.id,
+          opcao_id: resposta.opcaoId,
+          texto_livre: null,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  // Grava as respostas do popup junto com o agendamento recém-criado.
+  // Melhor esforço: agendamento_respostas é uma tabela nova (ver SQL sugerido
+  // na conversa) — se a gravação falhar (tabela ainda não existe, RLS etc.),
+  // não bloqueia nem desfaz o agendamento já confirmado, só perde esse
+  // detalhe complementar.
+  async function salvarRespostasPerguntas(agendamentoId) {
+    const linhas = linhasRespostasPerguntas(agendamentoId);
+    if (linhas.length === 0) return;
+    const { error } = await supabase.from("agendamento_respostas").insert(linhas);
+    if (error) {
+      console.error("Não foi possível salvar as respostas das perguntas:", error.message);
+    }
   }
 
   // Fluxo "cliente escolhe": escolher o profissional conclui a etapa de serviço
@@ -992,6 +1141,7 @@ export default function FormularioAgendamento({
     }
 
     setAgendamentoId(data.id);
+    await salvarRespostasPerguntas(data.id);
     setEtapa("dados");
   }
 
@@ -1085,7 +1235,15 @@ export default function FormularioAgendamento({
         finalizado: true,
       };
       if (status) payload.status = status;
-      ({ error } = await supabase.from("agendamentos").insert(payload));
+      const resultadoInsert = await supabase
+        .from("agendamentos")
+        .insert(payload)
+        .select("id")
+        .single();
+      error = resultadoInsert.error;
+      if (!error) {
+        await salvarRespostasPerguntas(resultadoInsert.data.id);
+      }
     }
 
     setEnviando(false);
@@ -1142,6 +1300,17 @@ export default function FormularioAgendamento({
   // serviço/categoria selecionada, ver renderBotaoServico e o acordeão).
   const temaBruto = buscarTema(estabelecimento?.slug);
   const tema = temaBruto?.personalizado ? temaBruto : null;
+
+  // Ajuste de preço das respostas do popup de perguntas (ver
+  // calcularAjustePerguntas) somado ao preço base do serviço — o preço da
+  // manutenção quando aplicável, senão o preco_centavos normal. Alimenta o
+  // box de transparência na etapa "Dados" (ver JSX).
+  const { centavos: ajusteCentavosPerguntas, itens: itensAjustePerguntas } =
+    calcularAjustePerguntas();
+  const precoBaseCentavos =
+    servicoSelecionado?.servico_origem_id != null && precoManutencao
+      ? precoManutencao.centavos
+      : (servicoSelecionado?.preco_centavos ?? 0);
 
   return (
     <>
@@ -1560,6 +1729,27 @@ export default function FormularioAgendamento({
               </div>
             )}
 
+            {/* Valor final com os ajustes das respostas do popup de perguntas
+                (ver calcularAjustePerguntas) — só aparece havendo algum ajuste
+                != 0, com transparência sobre o que compõe o total. Respeita
+                ocultar_preco: o dono escondeu o preço deste serviço do
+                público, então o total também fica escondido. */}
+            {!servicoSelecionado?.ocultar_preco && itensAjustePerguntas.length > 0 && (
+              <div className="rounded-lg bg-surface px-3 py-2">
+                <p className="text-sm font-medium text-heading">
+                  Valor total: {formatarPreco(precoBaseCentavos + ajusteCentavosPerguntas)}
+                </p>
+                <ul className="mt-1 space-y-0.5">
+                  {itensAjustePerguntas.map((item, i) => (
+                    <li key={i} className="text-xs text-body">
+                      {item.label} ({item.centavos > 0 ? "+" : ""}
+                      {formatarPreco(item.centavos)})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {precisaSinal && (
               <div className="space-y-3 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
                 <div>
@@ -1727,6 +1917,106 @@ export default function FormularioAgendamento({
                 type="button"
                 onClick={() => setModalManutencaoAberto(false)}
                 className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup de perguntas do serviço (servico_perguntas), aberto logo após
+          a seleção (ver confirmarSelecaoServico) quando o serviço tem alguma
+          cadastrada. Reaproveita o padrão visual dos modais acima (mesmo
+          overlay, mesmo card, mesmo par Continuar/Voltar); "Continuar" só
+          fecha com todas as perguntas respondidas (ver confirmarModalPerguntas). */}
+      {modalPerguntasAberto && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-modal-perguntas"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={cancelarModalPerguntas}
+        >
+          <div
+            className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Sem cabeçalho visível (só as perguntas) — o h2 fica só pra
+                acessibilidade, dando nome ao dialog via aria-labelledby. */}
+            <h2 id="titulo-modal-perguntas" className="sr-only">
+              Perguntas do serviço
+            </h2>
+
+            <div className="space-y-5">
+              {perguntasServico.map((pergunta) => (
+                <div key={pergunta.id}>
+                  <p className="mb-2 text-sm font-medium text-heading">{pergunta.texto}</p>
+
+                  {pergunta.tipo === "texto_livre" ? (
+                    <textarea
+                      value={respostasPerguntas[pergunta.id]?.textoLivre ?? ""}
+                      onChange={(e) => responderTexto(pergunta.id, e.target.value)}
+                      rows={2}
+                      placeholder="Digite sua resposta"
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                    />
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {(pergunta.servico_pergunta_opcoes ?? []).map((opcao) => {
+                        const selecionada =
+                          respostasPerguntas[pergunta.id]?.opcaoId === opcao.id;
+                        return (
+                          <button
+                            key={opcao.id}
+                            type="button"
+                            onClick={() => responderOpcao(pergunta.id, opcao.id)}
+                            aria-pressed={selecionada}
+                            className={[
+                              "rounded-lg px-3 py-2 text-sm font-medium ring-1 transition",
+                              selecionada
+                                ? "bg-primary text-white ring-primary"
+                                : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+                            ].join(" ")}
+                          >
+                            {opcao.label}
+                            {opcao.ajuste_preco_centavos !== 0 && (
+                              <span
+                                className={
+                                  selecionada ? "ml-1 text-on-primary/80" : "ml-1 text-muted"
+                                }
+                              >
+                                {opcao.ajuste_preco_centavos > 0 ? " (+" : " ("}
+                                {formatarPreco(opcao.ajuste_preco_centavos)})
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {erroModalPerguntas && (
+              <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                {erroModalPerguntas}
+              </p>
+            )}
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarModalPerguntas}
+                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+              >
+                Continuar
+              </button>
+              <button
+                type="button"
+                onClick={cancelarModalPerguntas}
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar
               </button>

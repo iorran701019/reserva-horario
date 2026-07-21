@@ -94,6 +94,17 @@ function BlocoAgendamento({ titulo, item, vazio, mostrarSelo }) {
               {SELO_STATUS[item.status].rotulo}
             </span>
           )}
+          {/* Respostas do popup de perguntas do serviço (ver
+              lib/agendamentoRespostas), quando houver. */}
+          {(item.respostas ?? []).length > 0 && (
+            <ul className="mt-1 basis-full space-y-0.5">
+              {item.respostas.map((texto, i) => (
+                <li key={i} className="text-xs text-body">
+                  {texto}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       ) : (
         <p className="mt-1.5 text-sm text-body">{vazio}</p>
@@ -358,6 +369,17 @@ function DetalheCliente({ cliente, estabelecimentoId, onVoltar }) {
                       >
                         {item.status === "cancelado" ? "Cancelado" : "Concluído"}
                       </span>
+                      {/* Respostas do popup de perguntas do serviço (ver
+                          lib/agendamentoRespostas), quando houver. */}
+                      {(item.respostas ?? []).length > 0 && (
+                        <ul className="basis-full space-y-0.5">
+                          {item.respostas.map((texto, i) => (
+                            <li key={i} className="text-xs text-body">
+                              {texto}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                   ))
                 )}

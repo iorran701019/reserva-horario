@@ -14,6 +14,7 @@ import {
 } from "@/lib/whatsapp";
 import { classificarAgendamento, fimDoAtendimento } from "@/lib/particao";
 import { profissionaisLivresNoHorario } from "@/lib/disponibilidade";
+import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
 import {
   Menu,
   X,
@@ -213,6 +214,12 @@ export default function AdminPage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
 
+  // Respostas do popup de perguntas (ver FormularioAgendamento), por
+  // agendamento_id — Map<id, string[]> já formatado (lib/agendamentoRespostas),
+  // buscado em bulk junto com `agendamentos` (mesmo id list). Agendamento sem
+  // nenhuma entrada aqui (serviço sem perguntas) não mostra a linha extra.
+  const [respostasPorAgendamento, setRespostasPorAgendamento] = useState(new Map());
+
   // Aba-pai do topo (ver ABAS_PAI): "pendentes" (inbox), "painel" (calendário),
   // "historico" e "agendar". A partição é derivada (lib/particao), sem status novo.
   const [viewPai, setViewPai] = useState("pendentes");
@@ -289,7 +296,12 @@ export default function AdminPage() {
   // otimista não basta; recarregamos pelo mesmo helper único de query.
   async function recarregarAgendamentos() {
     const { dados, error } = await buscarAgendamentos(estabelecimento.id);
-    if (!error) setAgendamentos(dados);
+    if (!error) {
+      setAgendamentos(dados);
+      setRespostasPorAgendamento(
+        await buscarRespostasPorAgendamento(dados.map((item) => item.id))
+      );
+    }
   }
 
   // Botão A: grava o status 'confirmado' no banco e, se der certo, abre o
@@ -573,6 +585,11 @@ export default function AdminPage() {
 
       if (!silencioso) setErro("");
       setAgendamentos(dados);
+
+      const respostas = await buscarRespostasPorAgendamento(
+        dados.map((item) => item.id)
+      );
+      if (ativo) setRespostasPorAgendamento(respostas);
     }
 
     // `carregando` já começa true, então a carga inicial mostra o indicador.
@@ -865,6 +882,18 @@ export default function AdminPage() {
                       </span>
                     )}
                   </div>
+
+                  {/* Respostas do popup de perguntas do serviço (ver
+                      lib/agendamentoRespostas), quando houver. */}
+                  {(respostasPorAgendamento.get(item.id) ?? []).length > 0 && (
+                    <ul className="mt-2 space-y-0.5">
+                      {respostasPorAgendamento.get(item.id).map((texto, i) => (
+                        <li key={i} className="text-xs text-body">
+                          {texto}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
 
                   <div className="mt-4 flex flex-col gap-2">
                     <button
@@ -1298,6 +1327,17 @@ export default function AdminPage() {
                   )}
                 </dd>
               </div>
+              {/* Respostas do popup de perguntas do serviço (ver
+                  lib/agendamentoRespostas), quando houver. */}
+              {(respostasPorAgendamento.get(selecionado.id) ?? []).length > 0 && (
+                <ul className="space-y-0.5">
+                  {respostasPorAgendamento.get(selecionado.id).map((texto, i) => (
+                    <li key={i} className="text-right text-xs text-body">
+                      {texto}
+                    </li>
+                  ))}
+                </ul>
+              )}
               {selecionado.profissional_nome && (
                 <div className="flex justify-between gap-3">
                   <dt className="text-body">Profissional</dt>
