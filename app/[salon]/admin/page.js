@@ -26,6 +26,7 @@ import {
   UserRound,
   LogOut,
   NotebookPen,
+  Settings,
 } from "lucide-react";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
@@ -141,6 +142,7 @@ const ABAS_PAI = [
   { id: "servicos", rotulo: "Serviços", Icone: Scissors },
   { id: "profissionais", rotulo: "Profissionais", Icone: Users },
   { id: "clientes", rotulo: "Clientes", Icone: UserRound },
+  { id: "regras", rotulo: "Regras de negócio", Icone: Settings },
 ];
 
 // Filtros da aba Histórico (client-side, por categoria de rotuloHistorico).
@@ -1137,15 +1139,11 @@ export default function AdminPage() {
           <GerenciarServicos estabelecimento={estabelecimento} />
         )}
 
-        {/* Profissionais: config do salão (escolha_profissional) no topo, depois
-            o CRUD dos profissionais (tabela `profissionais`) + grade de horários
-            (tabela `horarios_trabalho`), particionado pelo estabelecimento
-            resolvido. "Desativar" é soft delete (ativo=false). */}
+        {/* Profissionais: CRUD dos profissionais (tabela `profissionais`) +
+            grade de horários (tabela `horarios_trabalho`), particionado pelo
+            estabelecimento resolvido. "Desativar" é soft delete (ativo=false). */}
         {!carregando && !erro && viewPai === "profissionais" && (
-          <>
-            <ConfiguracoesSalao estabelecimento={estabelecimento} />
-            <GerenciarProfissionais estabelecimento={estabelecimento} />
-          </>
+          <GerenciarProfissionais estabelecimento={estabelecimento} />
         )}
 
         {/* Clientes: consulta somente-leitura da tabela `clientes`, com busca
@@ -1153,6 +1151,13 @@ export default function AdminPage() {
             atendimento, anamnese), particionado pelo estabelecimento resolvido. */}
         {!carregando && !erro && viewPai === "clientes" && (
           <GerenciarClientes estabelecimento={estabelecimento} />
+        )}
+
+        {/* Regras de negócio: config do salão (escolha_profissional, sinal/Pix
+            e prazo de vencimento da manutenção), particionado pelo
+            estabelecimento resolvido. */}
+        {!carregando && !erro && viewPai === "regras" && (
+          <ConfiguracoesSalao estabelecimento={estabelecimento} />
         )}
       </div>
 
