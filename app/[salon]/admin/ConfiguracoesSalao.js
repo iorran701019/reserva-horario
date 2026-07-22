@@ -71,6 +71,14 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const [erroReservaExpira, setErroReservaExpira] = useState("");
   const [statusReservaExpira, setStatusReservaExpira] = useState("");
 
+  // Horas mínimas de antecedência pra cliente cancelar um agendamento pelo
+  // painel público (ver PainelCliente) — abaixo disso o botão "Cancelar"
+  // some de lá. Não afeta o cancelamento pelo /admin. String pro input;
+  // undefined = ainda carregando.
+  const [cancelamentoPrazoHoras, setCancelamentoPrazoHoras] = useState(undefined);
+  const [erroCancelamentoPrazo, setErroCancelamentoPrazo] = useState("");
+  const [statusCancelamentoPrazo, setStatusCancelamentoPrazo] = useState("");
+
   // Carrega os valores atuais ao abrir.
   useEffect(() => {
     let ativo = true;
@@ -79,7 +87,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -92,6 +100,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
         setErroCaducidade(error.message);
         setErroValorCheio(error.message);
         setErroReservaExpira(error.message);
+        setErroCancelamentoPrazo(error.message);
         return;
       }
       setErro("");
@@ -117,6 +126,13 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
         data?.reserva_provisoria_expira_horas == null
           ? ""
           : String(data.reserva_provisoria_expira_horas)
+      );
+
+      setErroCancelamentoPrazo("");
+      setCancelamentoPrazoHoras(
+        data?.cancelamento_prazo_horas == null
+          ? ""
+          : String(data.cancelamento_prazo_horas)
       );
     }
 
@@ -178,6 +194,12 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     const t = setTimeout(() => setStatusReservaExpira(""), 2500);
     return () => clearTimeout(t);
   }, [statusReservaExpira]);
+
+  useEffect(() => {
+    if (statusCancelamentoPrazo !== "salvo") return;
+    const t = setTimeout(() => setStatusCancelamentoPrazo(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusCancelamentoPrazo]);
 
   // Alterna e grava na hora. Otimista: reflete o novo valor imediatamente e, se
   // o banco recusar (ex.: RLS), reverte e mostra o erro.
@@ -309,11 +331,41 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     setStatusReservaExpira("salvo");
   }
 
+  // Aceita 0 (sem trava de prazo — comportamento atual do botão "Cancelar" no
+  // PainelCliente é preservado). Valor inválido/vazio reverte pro último
+  // válido carregado, sem gravar.
+  async function salvarCancelamentoPrazo() {
+    const horas = parseInt(cancelamentoPrazoHoras, 10);
+
+    if (!Number.isInteger(horas) || horas < 0) {
+      setErroCancelamentoPrazo("Informe um número de horas maior ou igual a 0.");
+      return;
+    }
+
+    setStatusCancelamentoPrazo("salvando");
+    setErroCancelamentoPrazo("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ cancelamento_prazo_horas: horas })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setStatusCancelamentoPrazo("");
+      setErroCancelamentoPrazo(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setCancelamentoPrazoHoras(String(horas));
+    setStatusCancelamentoPrazo("salvo");
+  }
+
   const carregandoValor = escolhaProfissional === undefined;
   const carregandoSinal = sinalRegra === undefined;
   const carregandoCaducidade = caducidadeDias === undefined;
   const carregandoValorCheio = valorCheioAposPrazo === undefined;
   const carregandoReservaExpira = reservaExpiraHoras === undefined;
+  const carregandoCancelamentoPrazo = cancelamentoPrazoHoras === undefined;
   const sinalDesligado = sinalRegra === "desligado";
   // Com 1 só profissional ativo (ou enquanto a contagem ainda carrega), o
   // toggle some — não há outro profissional pro cliente escolher de qualquer
@@ -557,6 +609,48 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       )}
       {erroReservaExpira && (
         <p className="mt-2 text-xs text-red-600">{erroReservaExpira}</p>
+      )}
+    </section>
+
+    <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+      <h3 className="text-sm font-medium text-heading">
+        Prazo mínimo para cancelamento (horas)
+      </h3>
+
+      <div className="mt-3">
+        <label
+          htmlFor="cancelamento-prazo-horas"
+          className="mb-1 block text-sm font-medium text-body"
+        >
+          Horas de antecedência
+        </label>
+        <input
+          id="cancelamento-prazo-horas"
+          type="number"
+          min="0"
+          step="1"
+          inputMode="numeric"
+          value={cancelamentoPrazoHoras ?? ""}
+          onChange={(e) => setCancelamentoPrazoHoras(e.target.value)}
+          onBlur={salvarCancelamentoPrazo}
+          disabled={carregandoCancelamentoPrazo}
+          placeholder="24"
+          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <p className="mt-1 text-xs text-muted">
+          A cliente não conseguirá mais cancelar o agendamento pelo painel a
+          partir desse número de horas antes do horário marcado.
+        </p>
+      </div>
+
+      {statusCancelamentoPrazo === "salvando" && (
+        <p className="mt-2 text-xs text-muted">Salvando…</p>
+      )}
+      {statusCancelamentoPrazo === "salvo" && !erroCancelamentoPrazo && (
+        <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+      )}
+      {erroCancelamentoPrazo && (
+        <p className="mt-2 text-xs text-red-600">{erroCancelamentoPrazo}</p>
       )}
     </section>
     </>
