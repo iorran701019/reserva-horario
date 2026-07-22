@@ -373,7 +373,13 @@ export default function GerenciarServicos({ estabelecimento }) {
   }
 
   function abrirNovo() {
-    setForm(FORM_INICIAL);
+    setForm({
+      ...FORM_INICIAL,
+      // Novo serviço: pré-marca todos os profissionais ativos por padrão (a
+      // dona desmarca manualmente se algum não atender). Edição não passa
+      // por aqui — ver abrirEdicao, que carrega o vínculo já salvo.
+      profissionais: profissionaisSalao.map((p) => p.id),
+    });
     setErroForm("");
     setEditando("novo");
   }
@@ -391,6 +397,8 @@ export default function GerenciarServicos({ estabelecimento }) {
       nome: `Manutenção – ${servicoOrigem.nome}`,
       servico_origem_id: String(servicoOrigem.id),
       ehManutencao: true,
+      // Mesmo padrão do abrirNovo: pré-marca todos os profissionais ativos.
+      profissionais: profissionaisSalao.map((p) => p.id),
     });
     setErroForm("");
     setEditando("novo");
