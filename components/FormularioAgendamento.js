@@ -73,10 +73,6 @@ function formatarISO(date) {
 // (0=domingo … 6=sábado).
 const DIAS_SEMANA_CURTO = ["D", "S", "T", "Q", "Q", "S", "S"];
 
-// Key do item único "Manutenção" no acordeão de serviços — nunca colide com
-// um id de serviço (numérico). Ver `renderBotaoManutencao`.
-const ITEM_MANUTENCAO = "manutencoes";
-
 // "YYYY-MM-DD" -> "dd/mm · dia da semana". Parse manual pra evitar o
 // deslocamento de fuso que new Date("YYYY-MM-DD") sofre (vira UTC). Exportado
 // pra tela de confirmação do consumidor reaproveitar a mesma formatação.
@@ -392,9 +388,6 @@ export default function FormularioAgendamento({
   // confirmação no modal (ver selecionarServico/confirmarAlerta/cancelarAlerta).
   // A seleção de fato só acontece se o modal for confirmado.
   const [alertaPendente, setAlertaPendente] = useState(null);
-  // Popup "Qual serviço foi feito?" do item único "Manutenção" do acordeão
-  // (ver servicosManutencao/renderBotaoManutencao/escolherManutencao).
-  const [modalManutencaoAberto, setModalManutencaoAberto] = useState(false);
   // Preço a exibir/cobrar quando servicoSelecionado é uma manutenção — null
   // enquanto não se aplica (serviço normal) ou ainda calculando (ver efeito
   // abaixo, que chama calcularPrecoManutencao assim que serviço + telefone da
@@ -687,25 +680,17 @@ export default function FormularioAgendamento({
   // Agrupamento da lista de serviços da etapa "servico": soltos no topo os
   // sem categoria (ou apontando pra uma categoria que não existe mais), depois
   // uma seção por categoria (na ordem vinda do banco) só com quem tem >=1
-  // serviço ativo. Serviços com servico_origem_id preenchido (manutenção de
-  // outro serviço) IGNORAM a categoria_id própria e NÃO entram em nenhuma
-  // dessas seções — em vez disso viram o item único "Manutenção", renderizado
-  // por último (ver renderBotaoManutencao/servicosManutencao no JSX), que abre
-  // um popup pra escolher qual serviço de origem foi feito.
+  // serviço ativo. Serviços de manutenção (servico_origem_id preenchido)
+  // entram pela própria categoria_id igual a qualquer outro serviço — ficam
+  // lado a lado com o serviço de origem no mesmo acordeão.
   const idsCategorias = new Set(categorias.map((c) => c.id));
-  const servicosManutencao = servicos.filter((s) => s.servico_origem_id != null);
-  const idsManutencao = new Set(servicosManutencao.map((s) => s.id));
   const servicosSemCategoria = servicos.filter(
-    (s) =>
-      !idsManutencao.has(s.id) &&
-      (s.categoria_id == null || !idsCategorias.has(s.categoria_id))
+    (s) => s.categoria_id == null || !idsCategorias.has(s.categoria_id)
   );
   const categoriasComServicos = categorias
     .map((c) => ({
       ...c,
-      servicos: servicos.filter(
-        (s) => s.categoria_id === c.id && !idsManutencao.has(s.id)
-      ),
+      servicos: servicos.filter((s) => s.categoria_id === c.id),
     }))
     .filter((c) => c.servicos.length > 0);
 
@@ -768,24 +753,6 @@ export default function FormularioAgendamento({
             {formatarPreco(servico.preco_centavos)}
           </span>
         )}
-      </button>
-    );
-  }
-
-  // Item único "Manutenção", renderizado por último no acordeão (mesmo estilo
-  // de renderBotaoServico). Não seleciona nada diretamente — abre o popup
-  // (ver JSX) que lista os serviços de manutenção pra escolha.
-  function renderBotaoManutencao() {
-    return (
-      <button
-        key={ITEM_MANUTENCAO}
-        type="button"
-        onClick={() => setModalManutencaoAberto(true)}
-        className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 ring-border bg-card text-body transition hover:border-primary hover:ring-primary"
-      >
-        <span className="min-w-0">
-          <span className="block font-medium">Manutenção</span>
-        </span>
       </button>
     );
   }
@@ -986,14 +953,6 @@ setRespostasPerguntas({});
   // escolher outro serviço.
   function cancelarAlerta() {
     setAlertaPendente(null);
-  }
-
-  // Popup "Qual serviço foi feito?" — escolher uma opção seleciona o serviço
-  // de manutenção correspondente como se o cliente tivesse tocado nele
-  // direto na lista (segue alerta_mensagem etc. via selecionarServico).
-  function escolherManutencao(servico) {
-    setModalManutencaoAberto(false);
-    selecionarServico(servico);
   }
 
   // Registra a resposta de uma pergunta sim_nao/multipla_escolha (opção
@@ -1464,8 +1423,7 @@ setRespostasPerguntas({});
             {!carregandoServicos &&
               !erroServicos &&
               (servicosSemCategoria.length > 0 ||
-                categoriasComServicos.length > 0 ||
-                servicosManutencao.length > 0) && (
+                categoriasComServicos.length > 0) && (
                 <div className="space-y-2">
                   {servicosSemCategoria.map((servico) =>
                     renderBotaoServico(servico)
@@ -1508,8 +1466,6 @@ setRespostasPerguntas({});
                       </div>
                     );
                   })}
-
-                  {servicosManutencao.length > 0 && renderBotaoManutencao()}
                 </div>
               )}
 
@@ -1930,55 +1886,6 @@ setRespostasPerguntas({});
                 type="button"
                 onClick={cancelarAlerta}
                 className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
-              >
-                Voltar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Popup do item único "Manutenção" (ver renderBotaoManutencao): lista os
-          serviços de manutenção pra escolha. Escolher uma opção equivale a
-          tocar nela direto na lista (escolherManutencao -> selecionarServico).
-          Reaproveita o padrão visual do modal de alerta acima. */}
-      {modalManutencaoAberto && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="titulo-modal-manutencao"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
-          onClick={() => setModalManutencaoAberto(false)}
-        >
-          <div
-            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2
-              id="titulo-modal-manutencao"
-              className="text-lg font-semibold text-heading"
-            >
-              Qual serviço foi feito?
-            </h2>
-
-            <div className="mt-4 space-y-2">
-              {servicosManutencao.map((servico) => (
-                <button
-                  key={servico.id}
-                  type="button"
-                  onClick={() => escolherManutencao(servico)}
-                  className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 ring-border bg-card text-body transition hover:border-primary hover:ring-primary"
-                >
-                  <span className="font-medium">{servico.nome}</span>
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-6">
-              <button
-                type="button"
-                onClick={() => setModalManutencaoAberto(false)}
-                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar
               </button>

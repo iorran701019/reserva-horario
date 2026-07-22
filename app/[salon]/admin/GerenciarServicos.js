@@ -31,11 +31,6 @@ import { formatarPreco } from "@/components/FormularioAgendamento";
 // um id de categoria (numérico).
 const SEM_CATEGORIA = "sem-categoria";
 
-// Sentinel do grupo sintético "Manutenções" — serviços com servico_origem_id
-// preenchido (ver `servicosManutencao` mais abaixo). Nunca colide com um id
-// de categoria (numérico) nem com SEM_CATEGORIA.
-const CATEGORIA_MANUTENCOES = "manutencoes";
-
 // Estado inicial do formulário. `preco` fica em REAIS (string do input); só é
 // convertido pra centavos na hora de gravar. `profissionais` é a lista de ids
 // (profissionais.id) vinculados ao serviço. `adicionarAlerta` só controla a
@@ -371,15 +366,17 @@ export default function GerenciarServicos({ estabelecimento }) {
 
   // Atalho "+ Criar manutenção" num card de serviço original: abre o mesmo
   // formulário de criação, mas já pré-preenchido como uma manutenção daquele
-  // serviço — nome sugerido, servico_origem_id fixo (sem UI pra trocar) e sem
-  // categoria (a categoria sintética "Manutenções" cuida do agrupamento
-  // visual, ver GerenciarServicos/FormularioAgendamento). Preço, duração e
-  // demais campos ficam em branco pro dono preencher.
+  // serviço — nome sugerido, servico_origem_id fixo (sem UI pra trocar) e a
+  // MESMA categoria_id do serviço de origem (agrupa junto dele no acordeão,
+  // igual qualquer outro serviço). Preço, duração e demais campos ficam em
+  // branco pro dono preencher.
   function abrirCriarManutencao(servicoOrigem) {
     setForm({
       ...FORM_INICIAL,
       nome: `Manutenção – ${servicoOrigem.nome}`,
       servico_origem_id: String(servicoOrigem.id),
+      categoria_id:
+        servicoOrigem.categoria_id != null ? String(servicoOrigem.categoria_id) : "",
       ehManutencao: true,
     });
     setErroForm("");
@@ -480,13 +477,10 @@ export default function GerenciarServicos({ estabelecimento }) {
         nome,
         preco_centavos: centavos,
         duracao_min: duracao,
-        // Manutenção nunca tem categoria própria (agrupa no sintético
-        // "Manutenções"); "" (Sem categoria) -> null; senão o id numérico.
-        categoria_id: form.ehManutencao
-          ? null
-          : form.categoria_id === ""
-            ? null
-            : Number(form.categoria_id),
+        // "" (Sem categoria) -> null; senão o id numérico. Vale igual pra
+        // manutenção — ela agrupa na própria categoria, junto do serviço de
+        // origem, como qualquer outro serviço.
+        categoria_id: form.categoria_id === "" ? null : Number(form.categoria_id),
         ocultar_preco: form.ocultarPreco,
         ocultar_duracao: form.ocultarDuracao,
         // Caixa desmarcada ou texto em branco -> null (nunca salva alerta
@@ -1541,30 +1535,17 @@ export default function GerenciarServicos({ estabelecimento }) {
     );
   }
 
-  // Agrupamento pro acordeão: categorias na ordem de exibição, o grupo
-  // sintético "Manutenções" — serviços com eh_manutencao=true, IGNORANDO a
-  // categoria_id que porventura tenham (mesmo critério do /agendar público,
-  // ver categoriasComServicos em FormularioAgendamento) — e o grupo sintético
-  // "Sem categoria" — serviços sem categoria_id, ou apontando pra uma
-  // categoria que não existe mais, e que não sejam manutenção. Cada um só
-  // aparece se tiver algum serviço.
+  // Agrupamento pro acordeão: categorias na ordem de exibição — manutenção
+  // (eh_manutencao=true) entra pela própria categoria_id, junto do serviço de
+  // origem, igual qualquer outro serviço — e o grupo sintético "Sem
+  // categoria", com quem não tem categoria_id ou aponta pra uma que não
+  // existe mais. Cada um só aparece se tiver algum serviço.
   const categoriasOrdenadas = ordenarCategorias(categorias);
   const idsCategorias = new Set(categorias.map((c) => c.id));
-  // `servicosManutencao` inclui ativos e inativos (oculto incluso) — precisa
-  // ser assim pra `idsManutencao` excluir corretamente todos das demais
-  // listas (senão uma manutenção oculta vazaria pro grupo "Sem categoria").
-  // A exibição no grupo "Manutenções" usa a versão filtrada por
-  // ativo/oculto abaixo.
-  const servicosManutencao = servicos.filter((s) => s.eh_manutencao);
-  const idsManutencao = new Set(servicosManutencao.map((s) => s.id));
-  const servicosManutencaoAtivos = servicosManutencao.filter(
-    (s) => s.ativo && !s.oculto
-  );
   const servicosSemCategoria = servicos.filter(
     (s) =>
       s.ativo &&
       !s.oculto &&
-      !idsManutencao.has(s.id) &&
       (s.categoria_id == null || !idsCategorias.has(s.categoria_id))
   );
   const servicosAtivos = servicos.filter((s) => s.ativo && !s.oculto);
@@ -1695,30 +1676,28 @@ export default function GerenciarServicos({ estabelecimento }) {
             />
           </div>
 
-          {/* Categoria (opcional). Não existe pra manutenção — ela agrupa no
-              sintético "Manutenções", nunca numa categoria própria. "Sem
-              categoria" grava categoria_id null. */}
-          {!form.ehManutencao && (
-            <div>
-              <label htmlFor="categoria_id" className="mb-1 block text-sm font-medium text-body">
-                Categoria
-              </label>
-              <select
-                id="categoria_id"
-                name="categoria_id"
-                value={form.categoria_id}
-                onChange={handleChange}
-                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-              >
-                <option value="">Sem categoria</option>
-                {categorias.map((categoria) => (
-                  <option key={categoria.id} value={String(categoria.id)}>
-                    {categoria.nome}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          {/* Categoria (opcional) — vale igual pra manutenção: ela agrupa na
+              própria categoria, junto do serviço de origem. "Sem categoria"
+              grava categoria_id null. */}
+          <div>
+            <label htmlFor="categoria_id" className="mb-1 block text-sm font-medium text-body">
+              Categoria
+            </label>
+            <select
+              id="categoria_id"
+              name="categoria_id"
+              value={form.categoria_id}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+            >
+              <option value="">Sem categoria</option>
+              {categorias.map((categoria) => (
+                <option key={categoria.id} value={String(categoria.id)}>
+                  {categoria.nome}
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* Prazo de manutenção: só existe no serviço "original" (eh_manutencao
               false) — numa manutenção o campo não faz sentido e fica escondido. */}
@@ -1945,11 +1924,7 @@ export default function GerenciarServicos({ estabelecimento }) {
             <div className="space-y-3">
               {categoriasOrdenadas.map((categoria, indice) => {
                 const servicosDaCategoria = servicos.filter(
-                  (s) =>
-                    s.categoria_id === categoria.id &&
-                    !idsManutencao.has(s.id) &&
-                    s.ativo &&
-                    !s.oculto
+                  (s) => s.categoria_id === categoria.id && s.ativo && !s.oculto
                 );
                 const aberta = grupoAberto === categoria.id;
                 const renomeando = categoriaEditandoId === categoria.id;
@@ -2069,32 +2044,6 @@ export default function GerenciarServicos({ estabelecimento }) {
                   </div>
                 );
               })}
-
-              {servicosManutencaoAtivos.length > 0 && (
-                <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
-                  <button
-                    type="button"
-                    onClick={() => alternarGrupo(CATEGORIA_MANUTENCOES)}
-                    aria-expanded={grupoAberto === CATEGORIA_MANUTENCOES}
-                    className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
-                  >
-                    <span className="font-semibold text-heading">Manutenções</span>
-                    <span className="flex shrink-0 items-center gap-1 text-xs text-body">
-                      <span aria-hidden="true">
-                        {grupoAberto === CATEGORIA_MANUTENCOES ? "▲" : "▼"}
-                      </span>
-                    </span>
-                  </button>
-
-                  {grupoAberto === CATEGORIA_MANUTENCOES && (
-                    <div className="border-t border-border p-4">
-                      <ul className="space-y-3">
-                        {servicosManutencaoAtivos.map((s) => renderServicoItem(s))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              )}
 
               {servicosSemCategoria.length > 0 && (
                 <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
@@ -2377,17 +2326,11 @@ function ordenar(lista) {
 }
 
 // Serviços do mesmo grupo VISUAL de `servico` (mesmo categoria_id, null
-// incluso — MAS serviços com eh_manutencao=true formam seu próprio grupo
-// "Manutenções", independente da categoria_id real), na ordem já vigente em
-// `lista` — usado pra achar o vizinho de cima/baixo e desenhar as setinhas,
-// mantendo consistência com o agrupamento exibido no acordeão.
+// incluso), na ordem já vigente em `lista` — usado pra achar o vizinho de
+// cima/baixo e desenhar as setinhas, mantendo consistência com o
+// agrupamento exibido no acordeão.
 function grupoDaCategoria(lista, servico) {
-  if (servico.eh_manutencao) {
-    return lista.filter((s) => s.eh_manutencao);
-  }
-  return lista.filter(
-    (s) => s.categoria_id === servico.categoria_id && !s.eh_manutencao
-  );
+  return lista.filter((s) => s.categoria_id === servico.categoria_id);
 }
 
 // Patch imutável do campo `ativo` de um serviço na lista.
