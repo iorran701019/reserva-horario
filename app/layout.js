@@ -26,7 +26,7 @@ const cormorantGaramond = Cormorant_Garamond({
 });
 
 export const metadata = {
-  title: process.env.NEXT_PUBLIC_NOME_LOJA || "Agendamento",
+  title: "reserva-horario",
   description: "Agende seu horário online.",
 };
 
