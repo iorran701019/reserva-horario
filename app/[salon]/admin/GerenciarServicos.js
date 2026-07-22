@@ -171,8 +171,17 @@ export default function GerenciarServicos({ estabelecimento }) {
   // Carregando os vínculos do serviço em edição (quais profissionais atendem).
   const [carregandoForm, setCarregandoForm] = useState(false);
 
-  // Serviço "armado" para soft delete (controla o modal de confirmação).
-  const [servicoParaExcluir, setServicoParaExcluir] = useState(null);
+  // Serviço "armado" para soft delete / desativação (controla o modal de confirmação).
+  const [servicoParaDesativar, setServicoParaDesativar] = useState(null);
+
+  // Seção retrátil "Serviços desativados", no final da aba — fechada por padrão.
+  const [secaoDesativadosAberta, setSecaoDesativadosAberta] = useState(false);
+
+  // Serviço "armado" para exclusão PERMANENTE (DELETE físico), disparado a
+  // partir da seção de desativados — controla o modal de confirmação.
+  const [servicoParaExcluirPermanente, setServicoParaExcluirPermanente] = useState(null);
+  const [excluindoPermanente, setExcluindoPermanente] = useState(false);
+  const [erroExcluirPermanente, setErroExcluirPermanente] = useState("");
 
   // Trava as setinhas de reordenação enquanto um swap de `ordem` está em
   // andamento, pra não disparar dois swaps concorrentes (mesmo padrão do
@@ -209,7 +218,7 @@ export default function GerenciarServicos({ estabelecimento }) {
   const [nomeEdicaoCategoria, setNomeEdicaoCategoria] = useState("");
 
   // Categoria "armada" para exclusão (modal de confirmação) — mesmo padrão do
-  // servicoParaExcluir.
+  // servicoParaDesativar.
   const [categoriaParaExcluir, setCategoriaParaExcluir] = useState(null);
 
   // Trava as ações de categoria (criar/renomear/mover/apagar) enquanto uma
@@ -234,7 +243,7 @@ export default function GerenciarServicos({ estabelecimento }) {
   const [salvandoPergunta, setSalvandoPergunta] = useState(false);
 
   // Pergunta "armada" pra exclusão (modal de confirmação) — mesmo padrão do
-  // servicoParaExcluir/categoriaParaExcluir. O ON DELETE CASCADE do banco cuida
+  // servicoParaDesativar/categoriaParaExcluir. O ON DELETE CASCADE do banco cuida
   // de apagar as opções vinculadas.
   const [perguntaParaExcluir, setPerguntaParaExcluir] = useState(null);
   const [erroExcluirPergunta, setErroExcluirPergunta] = useState("");
@@ -608,23 +617,66 @@ export default function GerenciarServicos({ estabelecimento }) {
     fecharForm();
   }
 
-  // Soft delete: marca ativo=false (nunca DELETE físico). Roda só depois do
-  // "Confirmar exclusão" no modal.
-  async function handleExcluir(servico) {
+  // Soft delete: marca ativo=false (nunca DELETE físico aqui — ver
+  // handleExcluirPermanente pra isso). Roda só depois do "Confirmar
+  // desativação" no modal.
+  async function handleDesativar(servico) {
     const { error } = await supabase
       .from("servicos")
       .update({ ativo: false })
       .eq("id", servico.id);
 
     if (error) {
-      setErro(`Não foi possível excluir o serviço: ${error.message}`);
-      setServicoParaExcluir(null);
+      setErro(`Não foi possível desativar o serviço: ${error.message}`);
+      setServicoParaDesativar(null);
       return;
     }
 
     setErro("");
     setServicos((atuais) => ordenar(atualizarAtivo(atuais, servico.id, false)));
-    setServicoParaExcluir(null);
+    setServicoParaDesativar(null);
+  }
+
+  // DELETE físico, disparado só a partir da seção "Serviços desativados".
+  // Antes de apagar, confere se algum agendamento referencia o serviço: se
+  // sim, o DELETE quebraria a FK — nesse caso não tenta apagar (o serviço já
+  // está inativo, então do ponto de vista da dona nada muda) e fecha o modal
+  // normalmente, sem expor esse detalhe técnico como erro.
+  async function handleExcluirPermanente(servico) {
+    setExcluindoPermanente(true);
+    setErroExcluirPermanente("");
+
+    const { data: vinculo, error: erroVinculo } = await supabase
+      .from("agendamentos")
+      .select("id")
+      .eq("servico_id", servico.id)
+      .limit(1);
+
+    if (erroVinculo) {
+      setExcluindoPermanente(false);
+      setErroExcluirPermanente(erroVinculo.message);
+      return;
+    }
+
+    if ((vinculo ?? []).length > 0) {
+      setExcluindoPermanente(false);
+      setServicoParaExcluirPermanente(null);
+      return;
+    }
+
+    const { error: erroDelete } = await supabase
+      .from("servicos")
+      .delete()
+      .eq("id", servico.id);
+
+    setExcluindoPermanente(false);
+    if (erroDelete) {
+      setErroExcluirPermanente(erroDelete.message);
+      return;
+    }
+
+    setServicos((atuais) => atuais.filter((s) => s.id !== servico.id));
+    setServicoParaExcluirPermanente(null);
   }
 
   // Reativa um serviço soft-deleted (ativo=true).
@@ -1119,17 +1171,16 @@ export default function GerenciarServicos({ estabelecimento }) {
     setPerguntaParaExcluir(null);
   }
 
-  // Card de um serviço dentro do corpo de um grupo do acordeão. As setinhas
-  // trocam `ordem` só com o vizinho do MESMO grupo (ver mover()).
+  // Card de um serviço ATIVO dentro do corpo de um grupo do acordeão. As
+  // setinhas trocam `ordem` só com o vizinho do MESMO grupo (ver mover()).
+  // Serviços inativos não passam por aqui — ver renderServicoDesativado.
   function renderServicoItem(servico) {
     const grupo = grupoDaCategoria(servicos, servico);
     const indiceNoGrupo = grupo.findIndex((s) => s.id === servico.id);
     return (
       <li
         key={servico.id}
-        className={`rounded-2xl p-4 shadow-sm ring-1 transition ${
-          servico.ativo ? "bg-card ring-border" : "bg-surface ring-border"
-        }`}
+        className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border transition"
       >
         <div className="flex items-start gap-3">
           <div className="flex shrink-0 flex-col pt-0.5">
@@ -1138,7 +1189,7 @@ export default function GerenciarServicos({ estabelecimento }) {
               onClick={() => mover(servico, -1)}
               disabled={reordenando || indiceNoGrupo === 0}
               aria-label="Mover para cima"
-              className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+              className="px-2 py-1 text-2xl leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
             >
               ▲
             </button>
@@ -1147,7 +1198,7 @@ export default function GerenciarServicos({ estabelecimento }) {
               onClick={() => mover(servico, 1)}
               disabled={reordenando || indiceNoGrupo === grupo.length - 1}
               aria-label="Mover para baixo"
-              className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+              className="px-2 py-1 text-2xl leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
             >
               ▼
             </button>
@@ -1156,7 +1207,7 @@ export default function GerenciarServicos({ estabelecimento }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="truncate font-medium text-heading">
+                <p className="line-clamp-2 font-medium text-heading">
                   {servico.nome}
                 </p>
                 <p className="mt-0.5 text-sm text-body">
@@ -1164,67 +1215,84 @@ export default function GerenciarServicos({ estabelecimento }) {
                 </p>
               </div>
 
-              <span
-                className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${
-                  servico.ativo
-                    ? "bg-green-50 text-green-700 ring-green-100"
-                    : "bg-surface text-body ring-border"
-                }`}
-              >
-                {servico.ativo ? "Ativo" : "Inativo"}
+              <span className="shrink-0 rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700 ring-1 ring-green-100">
+                Ativo
               </span>
             </div>
 
             <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-              {servico.ativo ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => abrirEdicao(servico)}
-                    className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setServicoParaExcluir(servico)}
-                    className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-                  >
-                    Excluir
-                  </button>
-                  {/* Só em serviços "originais" (eh_manutencao false) que
-                      ainda não têm manutenção vinculada — regra um-para-um. */}
-                  {!servico.eh_manutencao && !idsComManutencaoVinculada.has(servico.id) && (
-                    <button
-                      type="button"
-                      onClick={() => abrirCriarManutencao(servico)}
-                      className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-primary ring-1 ring-primary/40 transition hover:bg-primary/5"
-                    >
-                      + Criar manutenção
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => alternarPerguntas(servico)}
-                    aria-expanded={Boolean(perguntasAberto[servico.id])}
-                    className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-indigo-600 ring-1 ring-indigo-200 transition hover:bg-indigo-50"
-                  >
-                    Perguntas {perguntasAberto[servico.id] ? "▲" : "▼"}
-                  </button>
-                </>
-              ) : (
+              <button
+                type="button"
+                onClick={() => abrirEdicao(servico)}
+                className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+              >
+                Editar
+              </button>
+              <button
+                type="button"
+                onClick={() => setServicoParaDesativar(servico)}
+                className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+              >
+                Desativar
+              </button>
+              {/* Só em serviços "originais" (eh_manutencao false) que
+                  ainda não têm manutenção vinculada — regra um-para-um. */}
+              {!servico.eh_manutencao && !idsComManutencaoVinculada.has(servico.id) && (
                 <button
                   type="button"
-                  onClick={() => handleReativar(servico)}
-                  className="inline-flex flex-1 items-center justify-center rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
+                  onClick={() => abrirCriarManutencao(servico)}
+                  className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-primary ring-1 ring-primary/40 transition hover:bg-primary/5"
                 >
-                  Reativar
+                  + Criar manutenção
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => alternarPerguntas(servico)}
+                aria-expanded={Boolean(perguntasAberto[servico.id])}
+                className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-indigo-600 ring-1 ring-indigo-200 transition hover:bg-indigo-50"
+              >
+                Perguntas {perguntasAberto[servico.id] ? "▲" : "▼"}
+              </button>
             </div>
 
-            {servico.ativo && perguntasAberto[servico.id] && renderSecaoPerguntas(servico)}
+            {perguntasAberto[servico.id] && renderSecaoPerguntas(servico)}
           </div>
+        </div>
+      </li>
+    );
+  }
+
+  // Card de um serviço INATIVO na seção retrátil "Serviços desativados": só
+  // "Reativar" (volta ativo=true) e "Excluir permanentemente" (ver
+  // handleExcluirPermanente) — sem setinhas de ordem, já que a lista aqui é
+  // uma listagem plana, fora do acordeão de categorias.
+  function renderServicoDesativado(servico) {
+    return (
+      <li
+        key={servico.id}
+        className="rounded-2xl bg-surface p-4 shadow-sm ring-1 ring-border"
+      >
+        <p className="line-clamp-2 font-medium text-heading">{servico.nome}</p>
+        <p className="mt-0.5 text-sm text-body">
+          {formatarPreco(servico.preco_centavos)} · {servico.duracao_min} min
+        </p>
+
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={() => handleReativar(servico)}
+            className="inline-flex flex-1 items-center justify-center rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
+          >
+            Reativar
+          </button>
+          <button
+            type="button"
+            onClick={() => setServicoParaExcluirPermanente(servico)}
+            className="inline-flex flex-1 items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+          >
+            Excluir permanentemente
+          </button>
         </div>
       </li>
     );
@@ -1467,13 +1535,23 @@ export default function GerenciarServicos({ estabelecimento }) {
   // aparece se tiver algum serviço.
   const categoriasOrdenadas = ordenarCategorias(categorias);
   const idsCategorias = new Set(categorias.map((c) => c.id));
+  // `servicosManutencao` inclui ativos e inativos — precisa ser assim pra
+  // `idsManutencao` excluir corretamente os dois das demais listas. A
+  // exibição no grupo "Manutenções" usa a versão filtrada por ativo abaixo.
   const servicosManutencao = servicos.filter((s) => s.eh_manutencao);
   const idsManutencao = new Set(servicosManutencao.map((s) => s.id));
+  const servicosManutencaoAtivos = servicosManutencao.filter((s) => s.ativo);
   const servicosSemCategoria = servicos.filter(
     (s) =>
+      s.ativo &&
       !idsManutencao.has(s.id) &&
       (s.categoria_id == null || !idsCategorias.has(s.categoria_id))
   );
+  const servicosAtivos = servicos.filter((s) => s.ativo);
+  // Seção "Serviços desativados": listagem plana (sem agrupar por categoria)
+  // dos serviços com ativo=false, manutenção incluída — sem tratamento
+  // separado (ver renderServicoDesativado).
+  const servicosInativos = servicos.filter((s) => !s.ativo);
 
   // Serviços que já têm uma manutenção vinculada via servico_origem_id (regra
   // um-para-um garantida pelo índice único parcial no banco) — exclui a
@@ -1495,7 +1573,7 @@ export default function GerenciarServicos({ estabelecimento }) {
       {!editando && (
         <div className="mb-4 space-y-3">
           <p className="text-sm text-body">
-            {servicos.length} serviço{servicos.length === 1 ? "" : "s"}
+            {servicosAtivos.length} serviço{servicosAtivos.length === 1 ? "" : "s"}
           </p>
 
           <div className="flex flex-col gap-2">
@@ -1830,7 +1908,7 @@ export default function GerenciarServicos({ estabelecimento }) {
             <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 ring-1 ring-red-100">
               {erroCategorias}
             </p>
-          ) : categorias.length === 0 && servicos.length === 0 ? (
+          ) : categorias.length === 0 && servicosAtivos.length === 0 ? (
             <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
               Nenhum serviço cadastrado.
             </p>
@@ -1838,7 +1916,7 @@ export default function GerenciarServicos({ estabelecimento }) {
             <div className="space-y-3">
               {categoriasOrdenadas.map((categoria, indice) => {
                 const servicosDaCategoria = servicos.filter(
-                  (s) => s.categoria_id === categoria.id && !idsManutencao.has(s.id)
+                  (s) => s.categoria_id === categoria.id && !idsManutencao.has(s.id) && s.ativo
                 );
                 const aberta = grupoAberto === categoria.id;
                 const renomeando = categoriaEditandoId === categoria.id;
@@ -1855,7 +1933,7 @@ export default function GerenciarServicos({ estabelecimento }) {
                           onClick={() => moverCategoria(categoria, -1)}
                           disabled={ocupadoCategoria || indice === 0}
                           aria-label="Mover categoria para cima"
-                          className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                          className="px-2 py-1 text-2xl leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
                         >
                           ▲
                         </button>
@@ -1864,7 +1942,7 @@ export default function GerenciarServicos({ estabelecimento }) {
                           onClick={() => moverCategoria(categoria, 1)}
                           disabled={ocupadoCategoria || indice === categoriasOrdenadas.length - 1}
                           aria-label="Mover categoria para baixo"
-                          className="px-1 text-xs leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                          className="px-2 py-1 text-2xl leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
                         >
                           ▼
                         </button>
@@ -1902,7 +1980,7 @@ export default function GerenciarServicos({ estabelecimento }) {
                             aria-expanded={aberta}
                             className="flex min-w-0 flex-1 items-center justify-between gap-2 py-1 text-left"
                           >
-                            <span className="min-w-0 truncate font-semibold text-heading">
+                            <span className="min-w-0 line-clamp-2 font-semibold text-heading">
                               {categoria.nome}
                             </span>
                             <span className="flex shrink-0 items-center gap-1 text-xs text-body">
@@ -1946,7 +2024,7 @@ export default function GerenciarServicos({ estabelecimento }) {
                 );
               })}
 
-              {servicosManutencao.length > 0 && (
+              {servicosManutencaoAtivos.length > 0 && (
                 <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
                   <button
                     type="button"
@@ -1965,7 +2043,7 @@ export default function GerenciarServicos({ estabelecimento }) {
                   {grupoAberto === CATEGORIA_MANUTENCOES && (
                     <div className="border-t border-border p-4">
                       <ul className="space-y-3">
-                        {servicosManutencao.map((s) => renderServicoItem(s))}
+                        {servicosManutencaoAtivos.map((s) => renderServicoItem(s))}
                       </ul>
                     </div>
                   )}
@@ -2001,33 +2079,64 @@ export default function GerenciarServicos({ estabelecimento }) {
               )}
             </div>
           )}
+
+          {/* Seção retrátil, fechada por padrão, com os serviços ativo=false
+              — cada um só com "Reativar" e "Excluir permanentemente" (ver
+              renderServicoDesativado). Fica fora do bloco acima de propósito:
+              deve aparecer mesmo quando não há categoria/serviço ativo pra
+              montar o acordeão principal. */}
+          {servicosInativos.length > 0 && (
+            <div className="mt-3 rounded-2xl bg-card shadow-sm ring-1 ring-border">
+              <button
+                type="button"
+                onClick={() => setSecaoDesativadosAberta((v) => !v)}
+                aria-expanded={secaoDesativadosAberta}
+                className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+              >
+                <span className="font-semibold text-heading">
+                  Serviços desativados ({servicosInativos.length})
+                </span>
+                <span aria-hidden="true" className="shrink-0 text-xs text-body">
+                  {secaoDesativadosAberta ? "▲" : "▼"}
+                </span>
+              </button>
+
+              {secaoDesativadosAberta && (
+                <div className="border-t border-border p-4">
+                  <ul className="space-y-3">
+                    {servicosInativos.map((s) => renderServicoDesativado(s))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
 
       {/* Modal de confirmação do soft delete. Deixa claro que o histórico é
           preservado (o serviço só fica inativo). */}
-      {servicoParaExcluir && (
+      {servicoParaDesativar && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-labelledby="titulo-excluir-servico"
+          aria-labelledby="titulo-desativar-servico"
           className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
-          onClick={() => setServicoParaExcluir(null)}
+          onClick={() => setServicoParaDesativar(null)}
         >
           <div
             className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
             onClick={(e) => e.stopPropagation()}
           >
             <h2
-              id="titulo-excluir-servico"
+              id="titulo-desativar-servico"
               className="text-lg font-semibold text-heading"
             >
-              Excluir serviço
+              Desativar serviço
             </h2>
             <p className="mt-2 text-sm text-body">
-              Tem certeza que deseja excluir{" "}
+              Tem certeza que deseja desativar{" "}
               <span className="font-medium text-heading">
-                {servicoParaExcluir.nome}
+                {servicoParaDesativar.nome}
               </span>
               ? Ele deixará de aparecer para novos agendamentos, mas os
               agendamentos antigos são preservados.
@@ -2036,14 +2145,68 @@ export default function GerenciarServicos({ estabelecimento }) {
             <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
               <button
                 type="button"
-                onClick={() => handleExcluir(servicoParaExcluir)}
+                onClick={() => handleDesativar(servicoParaDesativar)}
                 className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700"
               >
-                Confirmar exclusão
+                Confirmar desativação
               </button>
               <button
                 type="button"
-                onClick={() => setServicoParaExcluir(null)}
+                onClick={() => setServicoParaDesativar(null)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmação da exclusão PERMANENTE (DELETE físico), a partir
+          da seção "Serviços desativados". Se houver agendamentos vinculados,
+          handleExcluirPermanente não apaga de fato (evita erro de FK) e
+          fecha o modal em silêncio — sem expor esse detalhe técnico aqui. */}
+      {servicoParaExcluirPermanente && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-excluir-permanente-servico"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setServicoParaExcluirPermanente(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-excluir-permanente-servico"
+              className="text-lg font-semibold text-heading"
+            >
+              Excluir permanentemente
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Deseja excluir esse serviço permanentemente? Essa ação não pode
+              ser desfeita.
+            </p>
+
+            {erroExcluirPermanente && (
+              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                {erroExcluirPermanente}
+              </p>
+            )}
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={() => handleExcluirPermanente(servicoParaExcluirPermanente)}
+                disabled={excluindoPermanente}
+                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {excluindoPermanente ? "Excluindo..." : "Confirmar exclusão"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setServicoParaExcluirPermanente(null)}
                 className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar
