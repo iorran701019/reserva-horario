@@ -259,7 +259,7 @@ export default function GerenciarServicos({ estabelecimento }) {
       const { data, error } = await supabase
         .from("servicos")
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao"
+          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao"
         )
         .eq("estabelecimento_id", estabelecimento.id)
         .order("categoria_id", { ascending: true, nullsFirst: true })
@@ -558,7 +558,7 @@ export default function GerenciarServicos({ estabelecimento }) {
           ordem: proximaOrdemNoGrupo(payload.categoria_id),
         })
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao"
+          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao"
         )
         .single();
 
@@ -640,8 +640,10 @@ export default function GerenciarServicos({ estabelecimento }) {
   // DELETE físico, disparado só a partir da seção "Serviços desativados".
   // Antes de apagar, confere se algum agendamento referencia o serviço: se
   // sim, o DELETE quebraria a FK — nesse caso não tenta apagar (o serviço já
-  // está inativo, então do ponto de vista da dona nada muda) e fecha o modal
-  // normalmente, sem expor esse detalhe técnico como erro.
+  // está inativo) e em vez disso marca oculto=true, que tira o serviço de
+  // qualquer listagem do admin (ver servicosAtivos/servicosInativos/etc.)
+  // sem apagar o registro, preservando os agendamentos antigos que o
+  // referenciam.
   async function handleExcluirPermanente(servico) {
     setExcluindoPermanente(true);
     setErroExcluirPermanente("");
@@ -659,7 +661,20 @@ export default function GerenciarServicos({ estabelecimento }) {
     }
 
     if ((vinculo ?? []).length > 0) {
+      const { error: erroOcultar } = await supabase
+        .from("servicos")
+        .update({ oculto: true })
+        .eq("id", servico.id);
+
       setExcluindoPermanente(false);
+      if (erroOcultar) {
+        setErroExcluirPermanente(erroOcultar.message);
+        return;
+      }
+
+      setServicos((atuais) =>
+        atuais.map((s) => (s.id === servico.id ? { ...s, oculto: true } : s))
+      );
       setServicoParaExcluirPermanente(null);
       return;
     }
@@ -1535,33 +1550,47 @@ export default function GerenciarServicos({ estabelecimento }) {
   // aparece se tiver algum serviço.
   const categoriasOrdenadas = ordenarCategorias(categorias);
   const idsCategorias = new Set(categorias.map((c) => c.id));
-  // `servicosManutencao` inclui ativos e inativos — precisa ser assim pra
-  // `idsManutencao` excluir corretamente os dois das demais listas. A
-  // exibição no grupo "Manutenções" usa a versão filtrada por ativo abaixo.
+  // `servicosManutencao` inclui ativos e inativos (oculto incluso) — precisa
+  // ser assim pra `idsManutencao` excluir corretamente todos das demais
+  // listas (senão uma manutenção oculta vazaria pro grupo "Sem categoria").
+  // A exibição no grupo "Manutenções" usa a versão filtrada por
+  // ativo/oculto abaixo.
   const servicosManutencao = servicos.filter((s) => s.eh_manutencao);
   const idsManutencao = new Set(servicosManutencao.map((s) => s.id));
-  const servicosManutencaoAtivos = servicosManutencao.filter((s) => s.ativo);
+  const servicosManutencaoAtivos = servicosManutencao.filter(
+    (s) => s.ativo && !s.oculto
+  );
   const servicosSemCategoria = servicos.filter(
     (s) =>
       s.ativo &&
+      !s.oculto &&
       !idsManutencao.has(s.id) &&
       (s.categoria_id == null || !idsCategorias.has(s.categoria_id))
   );
-  const servicosAtivos = servicos.filter((s) => s.ativo);
+  const servicosAtivos = servicos.filter((s) => s.ativo && !s.oculto);
   // Seção "Serviços desativados": listagem plana (sem agrupar por categoria)
   // dos serviços com ativo=false, manutenção incluída — sem tratamento
-  // separado (ver renderServicoDesativado).
-  const servicosInativos = servicos.filter((s) => !s.ativo);
+  // separado (ver renderServicoDesativado). oculto=true (exclusão
+  // permanente bloqueada por FK) nunca aparece aqui nem entra no contador.
+  const servicosInativos = servicos.filter((s) => !s.ativo && !s.oculto);
 
   // Serviços que já têm uma manutenção vinculada via servico_origem_id (regra
   // um-para-um garantida pelo índice único parcial no banco) — exclui a
   // manutenção em edição, pra ela não "bloquear" seu próprio vínculo atual no
-  // dropdown/no botão. Usado tanto pro "+ Criar manutenção" (esconder se já
-  // houver vínculo) quanto pro dropdown "Serviço vinculado" do formulário.
+  // dropdown/no botão, e ignora manutenções ocultas (a exclusão permanente
+  // bloqueada por FK não deve impedir criar uma nova manutenção pro mesmo
+  // serviço). Usado tanto pro "+ Criar manutenção" (esconder se já houver
+  // vínculo) quanto pro dropdown "Serviço vinculado" do formulário.
   const idEmEdicao = editando && editando !== "novo" ? editando.id : null;
   const idsComManutencaoVinculada = new Set(
     servicos
-      .filter((s) => s.eh_manutencao && s.servico_origem_id != null && s.id !== idEmEdicao)
+      .filter(
+        (s) =>
+          s.eh_manutencao &&
+          !s.oculto &&
+          s.servico_origem_id != null &&
+          s.id !== idEmEdicao
+      )
       .map((s) => s.servico_origem_id)
   );
 
@@ -1916,7 +1945,11 @@ export default function GerenciarServicos({ estabelecimento }) {
             <div className="space-y-3">
               {categoriasOrdenadas.map((categoria, indice) => {
                 const servicosDaCategoria = servicos.filter(
-                  (s) => s.categoria_id === categoria.id && !idsManutencao.has(s.id) && s.ativo
+                  (s) =>
+                    s.categoria_id === categoria.id &&
+                    !idsManutencao.has(s.id) &&
+                    s.ativo &&
+                    !s.oculto
                 );
                 const aberta = grupoAberto === categoria.id;
                 const renomeando = categoriaEditandoId === categoria.id;
@@ -1926,85 +1959,98 @@ export default function GerenciarServicos({ estabelecimento }) {
                     key={categoria.id}
                     className="rounded-2xl bg-card shadow-sm ring-1 ring-border"
                   >
-                    <div className="flex items-center gap-2 px-4 py-3">
-                      <div className="flex shrink-0 flex-col">
-                        <button
-                          type="button"
-                          onClick={() => moverCategoria(categoria, -1)}
-                          disabled={ocupadoCategoria || indice === 0}
-                          aria-label="Mover categoria para cima"
-                          className="px-2 py-1 text-2xl leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
-                        >
-                          ▲
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => moverCategoria(categoria, 1)}
-                          disabled={ocupadoCategoria || indice === categoriasOrdenadas.length - 1}
-                          aria-label="Mover categoria para baixo"
-                          className="px-2 py-1 text-2xl leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
-                        >
-                          ▼
-                        </button>
-                      </div>
-
-                      {renomeando ? (
-                        <>
-                          <input
-                            type="text"
-                            value={nomeEdicaoCategoria}
-                            onChange={(e) => setNomeEdicaoCategoria(e.target.value)}
-                            className="min-w-0 flex-1 rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => salvarRenomeCategoria(categoria)}
-                            disabled={ocupadoCategoria || !nomeEdicaoCategoria.trim()}
-                            className="shrink-0 rounded-lg bg-green-50 px-2.5 py-1.5 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            Salvar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setCategoriaEditandoId(null)}
-                            className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
-                          >
-                            Cancelar
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => alternarGrupo(categoria.id)}
-                            aria-expanded={aberta}
-                            className="flex min-w-0 flex-1 items-center justify-between gap-2 py-1 text-left"
-                          >
-                            <span className="min-w-0 line-clamp-2 font-semibold text-heading">
-                              {categoria.nome}
-                            </span>
-                            <span className="flex shrink-0 items-center gap-1 text-xs text-body">
-                              {servicosDaCategoria.length} serviço
-                              {servicosDaCategoria.length === 1 ? "" : "s"}
-                              <span aria-hidden="true">{aberta ? "▲" : "▼"}</span>
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => abrirRenomearCategoria(categoria)}
-                            className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
-                          >
-                            Renomear
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setCategoriaParaExcluir(categoria)}
-                            className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-                          >
-                            Apagar
-                          </button>
-                        </>
+                    <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center">
+                      {/* Nome em linha própria e largura total no mobile — a
+                          linha abaixo (setas + badge + botões) não sobra
+                          espaço suficiente pro nome quando tudo fica lado a
+                          lado. A partir de sm: o nome volta a integrar a
+                          mesma linha (ver span "hidden sm:inline" abaixo). */}
+                      {!renomeando && (
+                        <span className="w-full min-w-0 line-clamp-2 font-semibold text-heading sm:hidden">
+                          {categoria.nome}
+                        </span>
                       )}
+
+                      <div className="flex items-center gap-2 sm:min-w-0 sm:flex-1">
+                        <div className="flex shrink-0 flex-col">
+                          <button
+                            type="button"
+                            onClick={() => moverCategoria(categoria, -1)}
+                            disabled={ocupadoCategoria || indice === 0}
+                            aria-label="Mover categoria para cima"
+                            className="px-2 py-1 text-2xl leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                          >
+                            ▲
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moverCategoria(categoria, 1)}
+                            disabled={ocupadoCategoria || indice === categoriasOrdenadas.length - 1}
+                            aria-label="Mover categoria para baixo"
+                            className="px-2 py-1 text-2xl leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                          >
+                            ▼
+                          </button>
+                        </div>
+
+                        {renomeando ? (
+                          <>
+                            <input
+                              type="text"
+                              value={nomeEdicaoCategoria}
+                              onChange={(e) => setNomeEdicaoCategoria(e.target.value)}
+                              className="min-w-0 flex-1 rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => salvarRenomeCategoria(categoria)}
+                              disabled={ocupadoCategoria || !nomeEdicaoCategoria.trim()}
+                              className="shrink-0 rounded-lg bg-green-50 px-2.5 py-1.5 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Salvar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCategoriaEditandoId(null)}
+                              className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                            >
+                              Cancelar
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => alternarGrupo(categoria.id)}
+                              aria-expanded={aberta}
+                              className="flex min-w-0 flex-1 items-center justify-between gap-2 py-1 text-left"
+                            >
+                              <span className="hidden min-w-0 line-clamp-2 font-semibold text-heading sm:inline">
+                                {categoria.nome}
+                              </span>
+                              <span className="flex shrink-0 items-center gap-1 text-xs text-body">
+                                {servicosDaCategoria.length} serviço
+                                {servicosDaCategoria.length === 1 ? "" : "s"}
+                                <span aria-hidden="true">{aberta ? "▲" : "▼"}</span>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => abrirRenomearCategoria(categoria)}
+                              className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                            >
+                              Renomear
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCategoriaParaExcluir(categoria)}
+                              className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                            >
+                              Apagar
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
 
                     {aberta && (
