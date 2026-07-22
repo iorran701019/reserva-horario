@@ -36,6 +36,7 @@ import GerenciarProfissionais from "./GerenciarProfissionais";
 import GerenciarClientes from "@/components/GerenciarClientes";
 import ConfiguracoesSalao from "./ConfiguracoesSalao";
 import FormularioAgendamento from "@/components/FormularioAgendamento";
+import AtivarNotificacoes from "@/components/AtivarNotificacoes";
 
 // URL do login do salão, carregando o destino pretendido em ?next= pra reentrar
 // no MESMO salão após autenticar. Com o slug agora no PATH, tanto o login quanto
@@ -1267,6 +1268,9 @@ export default function AdminPage() {
               );
             })}
           </nav>
+
+          {/* Item fixo, visível em qualquer aba (ver componente). */}
+          <AtivarNotificacoes estabelecimento={estabelecimento} />
 
           {/* "Sair" mora no drawer (saiu do header). */}
           <div className="border-t border-border p-2">

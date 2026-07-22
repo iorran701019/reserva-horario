@@ -183,7 +183,7 @@ export default function PainelCliente({
 
     const { error } = await supabase
       .from("agendamentos")
-      .update({ status: "cancelado" })
+      .update({ status: "cancelado", cancelado_por_cliente: true })
       .eq("id", item.id);
 
     setCancelandoId(null);
