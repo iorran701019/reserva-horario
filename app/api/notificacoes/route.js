@@ -65,6 +65,22 @@ export async function POST(request) {
   } else {
     titulo = `Cancelado: ${record.nome_cliente}`;
     corpo = `${record.nome_cliente} · ${quando}`;
+
+    // Além do push (efêmero), deixa um registro persistente na aba Pendentes
+    // do /admin (ver sql/pendencias_admin.sql) — a dona pode não estar com o
+    // navegador aberto quando o push chega.
+    const { error: erroPendencia } = await supabaseAdmin
+      .from("pendencias_admin")
+      .insert({
+        estabelecimento_id: record.estabelecimento_id,
+        tipo: "cancelamento_cliente",
+        titulo: `Cancelamento: ${record.nome_cliente}`,
+        descricao: `Cancelou o agendamento de ${quando}.`,
+        agendamento_id: record.id,
+      });
+    if (erroPendencia) {
+      console.error("Falha ao registrar pendência de cancelamento", erroPendencia);
+    }
   }
 
   const { data: estabelecimento } = await supabaseAdmin
