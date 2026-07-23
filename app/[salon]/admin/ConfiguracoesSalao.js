@@ -50,6 +50,13 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const [erroSinal, setErroSinal] = useState("");
   const [statusSinal, setStatusSinal] = useState("");
 
+  // Aviso mostrado num popup pra cliente, no fluxo público, antes do bloco de
+  // pagamento do sinal (ver PopupAvisoSinal/FormularioAgendamento). Texto
+  // livre; vazio grava null (nenhum popup aparece). undefined = carregando.
+  const [avisoPreSinal, setAvisoPreSinal] = useState(undefined);
+  const [erroAvisoPreSinal, setErroAvisoPreSinal] = useState("");
+  const [statusAvisoPreSinal, setStatusAvisoPreSinal] = useState("");
+
   // Dias pra manter a manutenção vencida em destaque. String vazia = nunca
   // caduca (grava null). undefined = ainda carregando o estado atual do banco.
   const [caducidadeDias, setCaducidadeDias] = useState(undefined);
@@ -87,7 +94,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_pre_sinal, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -97,6 +104,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       if (error) {
         setErro(error.message);
         setErroSinal(error.message);
+        setErroAvisoPreSinal(error.message);
         setErroCaducidade(error.message);
         setErroValorCheio(error.message);
         setErroReservaExpira(error.message);
@@ -110,6 +118,9 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       setSinalRegra(data?.sinal_regra ?? "desligado");
       setSinalValor(centavosParaReais(data?.sinal_valor_centavos));
       setSinalChavePix(data?.sinal_chave_pix ?? "");
+
+      setErroAvisoPreSinal("");
+      setAvisoPreSinal(data?.aviso_pre_sinal ?? "");
 
       setErroCaducidade("");
       setCaducidadeDias(
@@ -176,6 +187,12 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     const t = setTimeout(() => setStatusSinal(""), 2500);
     return () => clearTimeout(t);
   }, [statusSinal]);
+
+  useEffect(() => {
+    if (statusAvisoPreSinal !== "salvo") return;
+    const t = setTimeout(() => setStatusAvisoPreSinal(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusAvisoPreSinal]);
 
   useEffect(() => {
     if (statusCaducidade !== "salvo") return;
@@ -257,6 +274,25 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     const nova = e.target.value;
     setSinalRegra(nova);
     salvarSinal({ sinalRegra: nova });
+  }
+
+  // Vazio grava null (nenhum popup aparece no fluxo público).
+  async function salvarAvisoPreSinal() {
+    setStatusAvisoPreSinal("salvando");
+    setErroAvisoPreSinal("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ aviso_pre_sinal: avisoPreSinal || null })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setStatusAvisoPreSinal("");
+      setErroAvisoPreSinal(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setStatusAvisoPreSinal("salvo");
   }
 
   // Vazio grava null (nunca caduca); caso contrário grava o inteiro digitado.
@@ -362,6 +398,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
 
   const carregandoValor = escolhaProfissional === undefined;
   const carregandoSinal = sinalRegra === undefined;
+  const carregandoAvisoPreSinal = avisoPreSinal === undefined;
   const carregandoCaducidade = caducidadeDias === undefined;
   const carregandoValorCheio = valorCheioAposPrazo === undefined;
   const carregandoReservaExpira = reservaExpiraHoras === undefined;
@@ -501,6 +538,44 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
         <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
       )}
       {erroSinal && <p className="mt-2 text-xs text-red-600">{erroSinal}</p>}
+    </section>
+
+    <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+      <h3 className="text-sm font-medium text-heading">Aviso antes do sinal</h3>
+
+      <div className="mt-3">
+        <label
+          htmlFor="aviso-pre-sinal"
+          className="mb-1 block text-sm font-medium text-body"
+        >
+          Texto do aviso
+        </label>
+        <textarea
+          id="aviso-pre-sinal"
+          rows={4}
+          value={avisoPreSinal ?? ""}
+          onChange={(e) => setAvisoPreSinal(e.target.value)}
+          onBlur={salvarAvisoPreSinal}
+          disabled={carregandoAvisoPreSinal}
+          placeholder="Deixe em branco para não mostrar nenhum aviso"
+          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <p className="mt-1 text-xs text-muted">
+          Esse aviso aparece num popup pra cliente antes dela pagar o sinal.
+          Use *texto* para deixar uma parte em negrito, igual no WhatsApp.
+          Deixe em branco para não mostrar nenhum aviso.
+        </p>
+      </div>
+
+      {statusAvisoPreSinal === "salvando" && (
+        <p className="mt-2 text-xs text-muted">Salvando…</p>
+      )}
+      {statusAvisoPreSinal === "salvo" && !erroAvisoPreSinal && (
+        <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+      )}
+      {erroAvisoPreSinal && (
+        <p className="mt-2 text-xs text-red-600">{erroAvisoPreSinal}</p>
+      )}
     </section>
 
     <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
