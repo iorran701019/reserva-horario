@@ -60,10 +60,10 @@ export async function POST(request) {
         .single();
       nomeServico = servico?.nome ?? nomeServico;
     }
-    titulo = "Novo agendamento pendente";
+    titulo = `Pendente: ${record.nome_cliente}`;
     corpo = `${record.nome_cliente} · ${nomeServico ?? "serviço"} · ${quando}`;
   } else {
-    titulo = "Agendamento cancelado";
+    titulo = `Cancelado: ${record.nome_cliente}`;
     corpo = `${record.nome_cliente} · ${quando}`;
   }
 
