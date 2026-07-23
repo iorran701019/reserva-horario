@@ -86,6 +86,14 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const [erroCancelamentoPrazo, setErroCancelamentoPrazo] = useState("");
   const [statusCancelamentoPrazo, setStatusCancelamentoPrazo] = useState("");
 
+  // Link de compartilhamento do Google Maps, usado pelo card "Ver
+  // localização" na tela de confirmação do agendamento (ver
+  // app/[salon]/page.js). Vazio grava null (card não aparece pro cliente).
+  // undefined = ainda carregando.
+  const [linkLocalizacao, setLinkLocalizacao] = useState(undefined);
+  const [erroLinkLocalizacao, setErroLinkLocalizacao] = useState("");
+  const [statusLinkLocalizacao, setStatusLinkLocalizacao] = useState("");
+
   // Carrega os valores atuais ao abrir.
   useEffect(() => {
     let ativo = true;
@@ -94,7 +102,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_pre_sinal, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_pre_sinal, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -109,6 +117,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
         setErroValorCheio(error.message);
         setErroReservaExpira(error.message);
         setErroCancelamentoPrazo(error.message);
+        setErroLinkLocalizacao(error.message);
         return;
       }
       setErro("");
@@ -145,6 +154,9 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
           ? ""
           : String(data.cancelamento_prazo_horas)
       );
+
+      setErroLinkLocalizacao("");
+      setLinkLocalizacao(data?.link_localizacao ?? "");
     }
 
     carregar();
@@ -217,6 +229,12 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     const t = setTimeout(() => setStatusCancelamentoPrazo(""), 2500);
     return () => clearTimeout(t);
   }, [statusCancelamentoPrazo]);
+
+  useEffect(() => {
+    if (statusLinkLocalizacao !== "salvo") return;
+    const t = setTimeout(() => setStatusLinkLocalizacao(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusLinkLocalizacao]);
 
   // Alterna e grava na hora. Otimista: reflete o novo valor imediatamente e, se
   // o banco recusar (ex.: RLS), reverte e mostra o erro.
@@ -396,6 +414,25 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     setStatusCancelamentoPrazo("salvo");
   }
 
+  // Vazio grava null (nenhum card "Ver localização" aparece pro cliente).
+  async function salvarLinkLocalizacao() {
+    setStatusLinkLocalizacao("salvando");
+    setErroLinkLocalizacao("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ link_localizacao: linkLocalizacao || null })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setStatusLinkLocalizacao("");
+      setErroLinkLocalizacao(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setStatusLinkLocalizacao("salvo");
+  }
+
   const carregandoValor = escolhaProfissional === undefined;
   const carregandoSinal = sinalRegra === undefined;
   const carregandoAvisoPreSinal = avisoPreSinal === undefined;
@@ -403,6 +440,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const carregandoValorCheio = valorCheioAposPrazo === undefined;
   const carregandoReservaExpira = reservaExpiraHoras === undefined;
   const carregandoCancelamentoPrazo = cancelamentoPrazoHoras === undefined;
+  const carregandoLinkLocalizacao = linkLocalizacao === undefined;
   const sinalDesligado = sinalRegra === "desligado";
   // Com 1 só profissional ativo (ou enquanto a contagem ainda carrega), o
   // toggle some — não há outro profissional pro cliente escolher de qualquer
@@ -460,6 +498,44 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       {erro && <p className="mt-2 text-xs text-red-600">{erro}</p>}
     </section>
     )}
+
+    <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+      <h3 className="text-sm font-medium text-heading">Link do Google Maps</h3>
+
+      <div className="mt-3">
+        <label
+          htmlFor="link-localizacao"
+          className="mb-1 block text-sm font-medium text-body"
+        >
+          Link
+        </label>
+        <input
+          id="link-localizacao"
+          type="text"
+          value={linkLocalizacao ?? ""}
+          onChange={(e) => setLinkLocalizacao(e.target.value)}
+          onBlur={salvarLinkLocalizacao}
+          disabled={carregandoLinkLocalizacao}
+          placeholder="https://maps.app.goo.gl/..."
+          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <p className="mt-1 text-xs text-muted">
+          Cole o link de compartilhamento do Google Maps (ex:
+          maps.app.goo.gl/...). Se vazio, o card de localização não aparece
+          pra cliente.
+        </p>
+      </div>
+
+      {statusLinkLocalizacao === "salvando" && (
+        <p className="mt-2 text-xs text-muted">Salvando…</p>
+      )}
+      {statusLinkLocalizacao === "salvo" && !erroLinkLocalizacao && (
+        <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+      )}
+      {erroLinkLocalizacao && (
+        <p className="mt-2 text-xs text-red-600">{erroLinkLocalizacao}</p>
+      )}
+    </section>
 
     <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
       <h3 className="text-sm font-medium text-heading">Sinal de reserva</h3>
