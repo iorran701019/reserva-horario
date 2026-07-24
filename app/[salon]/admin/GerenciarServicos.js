@@ -480,7 +480,16 @@ export default function GerenciarServicos({ estabelecimento }) {
       return { erro: "Informe uma duração (em minutos) maior que zero." };
     }
 
-    // "" (Nenhum) -> null; senão o id numérico do serviço de origem.
+    // Toda manutenção precisa de um serviço-origem vinculado (ver dropdown
+    // sem opção vazia no form) — sem isso o preço/manutenção sugerida não
+    // tem base pra calcular em cima.
+    if (form.ehManutencao && form.servico_origem_id === "") {
+      return {
+        erro:
+          "Toda manutenção precisa estar vinculada a um serviço. Se você quer um serviço avulso, crie como um serviço comum em vez de uma manutenção.",
+      };
+    }
+
     const servicoOrigemId =
       form.servico_origem_id === "" ? null : Number(form.servico_origem_id);
 
@@ -1784,18 +1793,21 @@ export default function GerenciarServicos({ estabelecimento }) {
             </div>
           )}
 
-          {/* Serviço vinculado (opcional): só numa manutenção (eh_manutencao
-              true). Lista os serviços "originais" ativos do estabelecimento —
-              um mesmo serviço original pode ter várias manutenções vinculadas
-              (a trava de unicidade foi removida no banco); "Nenhum" representa
-              manutenção sem vínculo (ex.: veio de outra manicure). */}
+          {/* Serviço vinculado: obrigatório numa manutenção (eh_manutencao
+              true) — ver checagem em validarForm. Lista os serviços
+              "originais" ativos do estabelecimento — um mesmo serviço
+              original pode ter várias manutenções vinculadas (a trava de
+              unicidade foi removida no banco). Sem opção vazia: se o valor
+              não bater com nenhum serviço (ex.: manutenção legada sem
+              vínculo), o select aparece sem seleção, forçando a dona a
+              escolher antes de salvar. */}
           {form.ehManutencao && (
             <div>
               <label
                 htmlFor="servico_origem_id"
                 className="mb-1 block text-sm font-medium text-body"
               >
-                Serviço vinculado (opcional)
+                Serviço vinculado
               </label>
               <select
                 id="servico_origem_id"
@@ -1804,7 +1816,6 @@ export default function GerenciarServicos({ estabelecimento }) {
                 onChange={handleChange}
                 className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
               >
-                <option value="">Nenhum</option>
                 {servicos
                   .filter((s) => s.ativo && !s.eh_manutencao)
                   .map((s) => (
