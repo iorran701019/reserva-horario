@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { calcularVagasPorHorario } from "@/lib/disponibilidade";
 import { buscarTema } from "@/lib/temas";
-import PopupAvisoSinal from "@/components/PopupAvisoSinal";
+import PopupRegrasAgendamento from "@/components/PopupRegrasAgendamento";
 import {
   calcularPrecoManutencao,
   buscarVencimentoManutencao,
@@ -513,12 +513,13 @@ export default function FormularioAgendamento({
   const [sinalDeclarado, setSinalDeclarado] = useState(false);
   const [chavePixCopiada, setChavePixCopiada] = useState(false);
 
-  // Aviso pré-sinal (estabelecimento.aviso_pre_sinal, configurado no admin):
-  // popup bloqueante no fluxo público, mostrado uma vez por sessão de
-  // agendamento antes de entrar na etapa "dados" com sinal a pagar (ver
-  // avancarParaDados/confirmarAvisoSinal e PopupAvisoSinal no JSX abaixo).
-  const [avisoSinalConfirmado, setAvisoSinalConfirmado] = useState(false);
-  const [mostrarPopupAvisoSinal, setMostrarPopupAvisoSinal] = useState(false);
+  // Regras do agendamento (estabelecimento.aviso_regras_agendamento,
+  // configurado no admin): popup bloqueante no fluxo público, mostrado uma
+  // vez por sessão de agendamento na etapa final de confirmação, sempre —
+  // com ou sem sinal a pagar (ver handleSubmit/confirmarAvisoRegras e
+  // PopupRegrasAgendamento no JSX abaixo).
+  const [avisoRegrasConfirmado, setAvisoRegrasConfirmado] = useState(false);
+  const [mostrarPopupAvisoRegras, setMostrarPopupAvisoRegras] = useState(false);
 
   async function copiarChavePix() {
     try {
@@ -1205,25 +1206,6 @@ setRespostasPerguntas({});
     if (indice > 0) setEtapa(ETAPAS[indice - 1].id);
   }
 
-  // Etapa "dados" só é alcançada direto quando não há aviso pré-sinal
-  // pendente: no fluxo público (`status` omitido, o único que chama isso),
-  // havendo sinal a pagar e um aviso configurado (estabelecimento.aviso_pre_sinal)
-  // ainda não confirmado nesta sessão do wizard, abre o popup bloqueante em
-  // vez de avançar — "Entendi, continuar" (confirmarAvisoSinal) que libera.
-  function avancarParaDados() {
-    if (precisaSinal && estabelecimento.aviso_pre_sinal && !avisoSinalConfirmado) {
-      setMostrarPopupAvisoSinal(true);
-      return;
-    }
-    setEtapa("dados");
-  }
-
-  function confirmarAvisoSinal() {
-    setAvisoSinalConfirmado(true);
-    setMostrarPopupAvisoSinal(false);
-    setEtapa("dados");
-  }
-
   // Clique num horário na etapa "data". Fluxo /admin (`status` fornecido):
   // só marca o horário e avança, o insert único acontece no submit — igual
   // sempre foi. Fluxo público (`status` omitido): já insere a reserva agora
@@ -1304,7 +1286,7 @@ setRespostasPerguntas({});
 
     setAgendamentoId(data.id);
     await salvarRespostasPerguntas(data.id);
-    avancarParaDados();
+    setEtapa("dados");
   }
 
   async function handleSubmit(e) {
@@ -1343,6 +1325,26 @@ setRespostasPerguntas({});
       return;
     }
 
+    // Regras do agendamento (estabelecimento.aviso_regras_agendamento):
+    // popup bloqueante mostrado uma vez por sessão do wizard, na etapa final
+    // de confirmação — sempre, com ou sem sinal a pagar. Confirmado, quem
+    // libera o envio de fato é confirmarAvisoRegras, chamando
+    // finalizarAgendamento diretamente.
+    if (estabelecimento.aviso_regras_agendamento && !avisoRegrasConfirmado) {
+      setMostrarPopupAvisoRegras(true);
+      return;
+    }
+
+    await finalizarAgendamento();
+  }
+
+  async function confirmarAvisoRegras() {
+    setAvisoRegrasConfirmado(true);
+    setMostrarPopupAvisoRegras(false);
+    await finalizarAgendamento();
+  }
+
+  async function finalizarAgendamento() {
     setEnviando(true);
 
     // Fluxo público (`status` omitido) com reserva já criada em
@@ -2277,12 +2279,12 @@ setRespostasPerguntas({});
         </div>
       )}
 
-      {/* Aviso pré-sinal (ver avancarParaDados/confirmarAvisoSinal acima):
-          bloqueia o avanço pro passo do sinal até a cliente confirmar. */}
-      {mostrarPopupAvisoSinal && (
-        <PopupAvisoSinal
-          texto={estabelecimento.aviso_pre_sinal}
-          onConfirmar={confirmarAvisoSinal}
+      {/* Regras do agendamento (ver handleSubmit/confirmarAvisoRegras acima):
+          bloqueia o envio final do agendamento até a cliente confirmar. */}
+      {mostrarPopupAvisoRegras && (
+        <PopupRegrasAgendamento
+          texto={estabelecimento.aviso_regras_agendamento}
+          onConfirmar={confirmarAvisoRegras}
         />
       )}
     </>

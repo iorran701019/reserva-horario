@@ -1,16 +1,19 @@
 "use client";
 
-// Popup bloqueante exibido no fluxo público do FormularioAgendamento, antes
-// do bloco de pagamento do sinal, quando o salão tem um aviso configurado
-// (estabelecimento.aviso_pre_sinal, ver ConfiguracoesSalao). Componente só de
-// apresentação: quem decide SE mostra é quem chama (ver avancarParaDados em
-// FormularioAgendamento); aqui só desenha o texto e o botão de confirmação.
-// Mesmo padrão visual dos outros modais do wizard (ModalConflitoWhatsapp etc).
+// Popup bloqueante exibido no fluxo público do FormularioAgendamento, na
+// etapa final de confirmação do agendamento — sempre, com ou sem sinal a
+// pagar — quando o salão tem um aviso configurado
+// (estabelecimento.aviso_regras_agendamento, ver ConfiguracoesSalao).
+// Componente só de apresentação: quem decide SE mostra é quem chama (ver
+// handleSubmit em FormularioAgendamento); aqui só desenha o texto e o botão
+// de confirmação. Mesmo padrão visual dos outros modais do wizard
+// (ModalConflitoWhatsapp etc).
 //
 // Props:
-//   texto        – aviso_pre_sinal do estabelecimento (texto livre). Quebras
-//                  de linha são preservadas; *trecho* vira negrito (mesmo
-//                  padrão do WhatsApp), via parse simples de regex.
+//   texto        – aviso_regras_agendamento do estabelecimento (texto
+//                  livre). Quebras de linha são preservadas; *trecho* vira
+//                  negrito (mesmo padrão do WhatsApp), via parse simples de
+//                  regex.
 //   onConfirmar  – clique em "Entendi, continuar".
 
 // "algo *em negrito* aqui" -> partes alternando texto normal e o conteúdo
@@ -26,16 +29,16 @@ function formatarAviso(texto) {
   );
 }
 
-export default function PopupAvisoSinal({ texto, onConfirmar }) {
+export default function PopupRegrasAgendamento({ texto, onConfirmar }) {
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby="titulo-aviso-sinal"
+      aria-labelledby="titulo-aviso-regras-agendamento"
       className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
     >
       <div className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border">
-        <h2 id="titulo-aviso-sinal" className="sr-only">
+        <h2 id="titulo-aviso-regras-agendamento" className="sr-only">
           Aviso
         </h2>
 

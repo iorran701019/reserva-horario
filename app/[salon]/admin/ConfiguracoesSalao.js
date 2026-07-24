@@ -50,12 +50,13 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const [erroSinal, setErroSinal] = useState("");
   const [statusSinal, setStatusSinal] = useState("");
 
-  // Aviso mostrado num popup pra cliente, no fluxo público, antes do bloco de
-  // pagamento do sinal (ver PopupAvisoSinal/FormularioAgendamento). Texto
-  // livre; vazio grava null (nenhum popup aparece). undefined = carregando.
-  const [avisoPreSinal, setAvisoPreSinal] = useState(undefined);
-  const [erroAvisoPreSinal, setErroAvisoPreSinal] = useState("");
-  const [statusAvisoPreSinal, setStatusAvisoPreSinal] = useState("");
+  // Texto das regras do agendamento, mostrado num popup pra cliente, no
+  // fluxo público, na etapa final de confirmação — sempre, com ou sem sinal
+  // (ver PopupRegrasAgendamento/FormularioAgendamento). Texto livre; vazio
+  // grava null (nenhum popup aparece). undefined = carregando.
+  const [avisoRegrasAgendamento, setAvisoRegrasAgendamento] = useState(undefined);
+  const [erroRegrasAgendamento, setErroRegrasAgendamento] = useState("");
+  const [statusRegrasAgendamento, setStatusRegrasAgendamento] = useState("");
 
   // Dias pra manter a manutenção vencida em destaque. String vazia = nunca
   // caduca (grava null). undefined = ainda carregando o estado atual do banco.
@@ -77,6 +78,10 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const [reservaExpiraHoras, setReservaExpiraHoras] = useState(undefined);
   const [erroReservaExpira, setErroReservaExpira] = useState("");
   const [statusReservaExpira, setStatusReservaExpira] = useState("");
+
+  // Qual bloco retrátil está expandido — só um aberto por vez, mesmo padrão
+  // do acordeão de categorias de serviço (ver GerenciarServicos.js).
+  const [blocoAberto, setBlocoAberto] = useState(null);
 
   // Horas mínimas de antecedência pra cliente cancelar um agendamento pelo
   // painel público (ver PainelCliente) — abaixo disso o botão "Cancelar"
@@ -102,7 +107,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_pre_sinal, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -112,7 +117,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       if (error) {
         setErro(error.message);
         setErroSinal(error.message);
-        setErroAvisoPreSinal(error.message);
+        setErroRegrasAgendamento(error.message);
         setErroCaducidade(error.message);
         setErroValorCheio(error.message);
         setErroReservaExpira(error.message);
@@ -128,8 +133,8 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       setSinalValor(centavosParaReais(data?.sinal_valor_centavos));
       setSinalChavePix(data?.sinal_chave_pix ?? "");
 
-      setErroAvisoPreSinal("");
-      setAvisoPreSinal(data?.aviso_pre_sinal ?? "");
+      setErroRegrasAgendamento("");
+      setAvisoRegrasAgendamento(data?.aviso_regras_agendamento ?? "");
 
       setErroCaducidade("");
       setCaducidadeDias(
@@ -201,10 +206,10 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   }, [statusSinal]);
 
   useEffect(() => {
-    if (statusAvisoPreSinal !== "salvo") return;
-    const t = setTimeout(() => setStatusAvisoPreSinal(""), 2500);
+    if (statusRegrasAgendamento !== "salvo") return;
+    const t = setTimeout(() => setStatusRegrasAgendamento(""), 2500);
     return () => clearTimeout(t);
-  }, [statusAvisoPreSinal]);
+  }, [statusRegrasAgendamento]);
 
   useEffect(() => {
     if (statusCaducidade !== "salvo") return;
@@ -235,6 +240,12 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     const t = setTimeout(() => setStatusLinkLocalizacao(""), 2500);
     return () => clearTimeout(t);
   }, [statusLinkLocalizacao]);
+
+  // Abre/fecha um bloco retrátil — só um aberto por vez, mesmo padrão do
+  // acordeão de categorias de serviço.
+  function alternarBloco(chave) {
+    setBlocoAberto((atual) => (atual === chave ? null : chave));
+  }
 
   // Alterna e grava na hora. Otimista: reflete o novo valor imediatamente e, se
   // o banco recusar (ex.: RLS), reverte e mostra o erro.
@@ -295,22 +306,22 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   }
 
   // Vazio grava null (nenhum popup aparece no fluxo público).
-  async function salvarAvisoPreSinal() {
-    setStatusAvisoPreSinal("salvando");
-    setErroAvisoPreSinal("");
+  async function salvarRegrasAgendamento() {
+    setStatusRegrasAgendamento("salvando");
+    setErroRegrasAgendamento("");
 
     const { error } = await supabase
       .from("estabelecimentos")
-      .update({ aviso_pre_sinal: avisoPreSinal || null })
+      .update({ aviso_regras_agendamento: avisoRegrasAgendamento || null })
       .eq("id", estabelecimento.id);
 
     if (error) {
-      setStatusAvisoPreSinal("");
-      setErroAvisoPreSinal(`Não foi possível salvar: ${error.message}`);
+      setStatusRegrasAgendamento("");
+      setErroRegrasAgendamento(`Não foi possível salvar: ${error.message}`);
       return;
     }
 
-    setStatusAvisoPreSinal("salvo");
+    setStatusRegrasAgendamento("salvo");
   }
 
   // Vazio grava null (nunca caduca); caso contrário grava o inteiro digitado.
@@ -435,7 +446,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
 
   const carregandoValor = escolhaProfissional === undefined;
   const carregandoSinal = sinalRegra === undefined;
-  const carregandoAvisoPreSinal = avisoPreSinal === undefined;
+  const carregandoRegrasAgendamento = avisoRegrasAgendamento === undefined;
   const carregandoCaducidade = caducidadeDias === undefined;
   const carregandoValorCheio = valorCheioAposPrazo === undefined;
   const carregandoReservaExpira = reservaExpiraHoras === undefined;
@@ -499,311 +510,394 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     </section>
     )}
 
-    <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
-      <h3 className="text-sm font-medium text-heading">Link do Google Maps</h3>
-
-      <div className="mt-3">
-        <label
-          htmlFor="link-localizacao"
-          className="mb-1 block text-sm font-medium text-body"
+    <div className="space-y-4">
+      {/* Bloco: Localização — mesmo padrão visual/comportamental do acordeão
+          de categorias em GerenciarServicos.js (cabeçalho com título + seta,
+          conteúdo só renderizado quando expandido). */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("localizacao")}
+          aria-expanded={blocoAberto === "localizacao"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
         >
-          Link
-        </label>
-        <input
-          id="link-localizacao"
-          type="text"
-          value={linkLocalizacao ?? ""}
-          onChange={(e) => setLinkLocalizacao(e.target.value)}
-          onBlur={salvarLinkLocalizacao}
-          disabled={carregandoLinkLocalizacao}
-          placeholder="https://maps.app.goo.gl/..."
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-        />
-        <p className="mt-1 text-xs text-muted">
-          Cole o link de compartilhamento do Google Maps (ex:
-          maps.app.goo.gl/...). Se vazio, o card de localização não aparece
-          pra cliente.
-        </p>
-      </div>
-
-      {statusLinkLocalizacao === "salvando" && (
-        <p className="mt-2 text-xs text-muted">Salvando…</p>
-      )}
-      {statusLinkLocalizacao === "salvo" && !erroLinkLocalizacao && (
-        <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
-      )}
-      {erroLinkLocalizacao && (
-        <p className="mt-2 text-xs text-red-600">{erroLinkLocalizacao}</p>
-      )}
-    </section>
-
-    <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
-      <h3 className="text-sm font-medium text-heading">Sinal de reserva</h3>
-      <p className="mt-1 text-xs text-muted">
-        Exige que o cliente declare o pagamento de um sinal via Pix antes de
-        confirmar o agendamento.
-      </p>
-
-      <div className="mt-3 space-y-3">
-        <div>
-          <label
-            htmlFor="sinal-regra"
-            className="mb-1 block text-sm font-medium text-body"
-          >
-            Regra
-          </label>
-          <select
-            id="sinal-regra"
-            value={sinalRegra ?? "desligado"}
-            onChange={handleSinalRegraChange}
-            disabled={carregandoSinal}
-            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <option value="desligado">Desligado</option>
-            <option value="novos">Obrigatório para clientes novos</option>
-            <option value="todos">Obrigatório para todos</option>
-          </select>
-        </div>
-
-        <div>
-          <label
-            htmlFor="sinal-valor"
-            className="mb-1 block text-sm font-medium text-body"
-          >
-            Valor do sinal (R$)
-          </label>
-          <input
-            id="sinal-valor"
-            type="number"
-            min="0"
-            step="0.01"
-            inputMode="decimal"
-            value={sinalValor}
-            onChange={(e) => setSinalValor(e.target.value)}
-            onBlur={() => salvarSinal()}
-            disabled={carregandoSinal || sinalDesligado}
-            placeholder="0,00"
-            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-          />
-        </div>
-
-        <div>
-          <label
-            htmlFor="sinal-chave-pix"
-            className="mb-1 block text-sm font-medium text-body"
-          >
-            Chave Pix
-          </label>
-          <input
-            id="sinal-chave-pix"
-            type="text"
-            value={sinalChavePix}
-            onChange={(e) => setSinalChavePix(e.target.value)}
-            onBlur={() => salvarSinal()}
-            disabled={carregandoSinal || sinalDesligado}
-            placeholder="CPF, e-mail, telefone ou chave aleatória"
-            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-          />
-        </div>
-      </div>
-
-      {statusSinal === "salvando" && (
-        <p className="mt-2 text-xs text-muted">Salvando…</p>
-      )}
-      {statusSinal === "salvo" && !erroSinal && (
-        <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
-      )}
-      {erroSinal && <p className="mt-2 text-xs text-red-600">{erroSinal}</p>}
-    </section>
-
-    <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
-      <h3 className="text-sm font-medium text-heading">Aviso antes do sinal</h3>
-
-      <div className="mt-3">
-        <label
-          htmlFor="aviso-pre-sinal"
-          className="mb-1 block text-sm font-medium text-body"
-        >
-          Texto do aviso
-        </label>
-        <textarea
-          id="aviso-pre-sinal"
-          rows={4}
-          value={avisoPreSinal ?? ""}
-          onChange={(e) => setAvisoPreSinal(e.target.value)}
-          onBlur={salvarAvisoPreSinal}
-          disabled={carregandoAvisoPreSinal}
-          placeholder="Deixe em branco para não mostrar nenhum aviso"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-        />
-        <p className="mt-1 text-xs text-muted">
-          Esse aviso aparece num popup pra cliente antes dela pagar o sinal.
-          Use *texto* para deixar uma parte em negrito, igual no WhatsApp.
-          Deixe em branco para não mostrar nenhum aviso.
-        </p>
-      </div>
-
-      {statusAvisoPreSinal === "salvando" && (
-        <p className="mt-2 text-xs text-muted">Salvando…</p>
-      )}
-      {statusAvisoPreSinal === "salvo" && !erroAvisoPreSinal && (
-        <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
-      )}
-      {erroAvisoPreSinal && (
-        <p className="mt-2 text-xs text-red-600">{erroAvisoPreSinal}</p>
-      )}
-    </section>
-
-    <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
-      <h3 className="text-sm font-medium text-heading">
-        Tolerância após o vencimento (dias)
-      </h3>
-
-      <div className="mt-3">
-        <label
-          htmlFor="manutencao-caducidade-dias"
-          className="mb-1 block text-sm font-medium text-body"
-        >
-          Depois de vencida, destacar por quantos dias? (deixe em branco para
-          nunca caducar)
-        </label>
-        <input
-          id="manutencao-caducidade-dias"
-          type="number"
-          min="0"
-          step="1"
-          inputMode="numeric"
-          value={caducidadeDias ?? ""}
-          onChange={(e) => setCaducidadeDias(e.target.value)}
-          onBlur={salvarCaducidade}
-          disabled={carregandoCaducidade}
-          placeholder="Nunca caduca"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-        />
-      </div>
-
-      {statusCaducidade === "salvando" && (
-        <p className="mt-2 text-xs text-muted">Salvando…</p>
-      )}
-      {statusCaducidade === "salvo" && !erroCaducidade && (
-        <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
-      )}
-      {erroCaducidade && (
-        <p className="mt-2 text-xs text-red-600">{erroCaducidade}</p>
-      )}
-    </section>
-
-    <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
-      <label className="flex items-start gap-2 text-sm text-body">
-        <input
-          type="checkbox"
-          checked={Boolean(valorCheioAposPrazo)}
-          onChange={alternarValorCheioAposPrazo}
-          disabled={carregandoValorCheio}
-          className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
-        />
-        <span>
-          <span className="block font-medium text-heading">
-            Cobrar valor cheio do serviço quando a manutenção passar do prazo
+          <span className="font-semibold text-heading">Localização</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "localizacao" ? "▲" : "▼"}
           </span>
-          <span className="mt-1 block text-xs text-muted">
-            Se a última manutenção da cliente já venceu, o wizard de
-            agendamento cobra o preço do serviço original em vez do preço da
-            manutenção.
+        </button>
+
+        {blocoAberto === "localizacao" && (
+          <div className="border-t border-border p-4">
+            <div>
+              <label
+                htmlFor="link-localizacao"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Link do Google Maps
+              </label>
+              <input
+                id="link-localizacao"
+                type="text"
+                value={linkLocalizacao ?? ""}
+                onChange={(e) => setLinkLocalizacao(e.target.value)}
+                onBlur={salvarLinkLocalizacao}
+                disabled={carregandoLinkLocalizacao}
+                placeholder="https://maps.app.goo.gl/..."
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <p className="mt-1 text-xs text-muted">
+                Cole o link de compartilhamento do Google Maps (ex:
+                maps.app.goo.gl/...). Se vazio, o card de localização não
+                aparece pra cliente.
+              </p>
+            </div>
+
+            {statusLinkLocalizacao === "salvando" && (
+              <p className="mt-2 text-xs text-muted">Salvando…</p>
+            )}
+            {statusLinkLocalizacao === "salvo" && !erroLinkLocalizacao && (
+              <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+            )}
+            {erroLinkLocalizacao && (
+              <p className="mt-2 text-xs text-red-600">{erroLinkLocalizacao}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Bloco: Sinal de reserva */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("sinal")}
+          aria-expanded={blocoAberto === "sinal"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Sinal de reserva</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "sinal" ? "▲" : "▼"}
           </span>
-        </span>
-      </label>
+        </button>
 
-      {statusValorCheio === "salvando" && (
-        <p className="mt-2 text-xs text-muted">Salvando…</p>
-      )}
-      {statusValorCheio === "salvo" && !erroValorCheio && (
-        <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
-      )}
-      {erroValorCheio && (
-        <p className="mt-2 text-xs text-red-600">{erroValorCheio}</p>
-      )}
-    </section>
+        {blocoAberto === "sinal" && (
+          <div className="border-t border-border p-4">
+            <p className="text-xs text-muted">
+              Exige que o cliente declare o pagamento de um sinal via Pix
+              antes de confirmar o agendamento.
+            </p>
 
-    <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
-      <h3 className="text-sm font-medium text-heading">
-        Expiração de reservas provisórias
-      </h3>
+            <div className="mt-3 space-y-3">
+              <div>
+                <label
+                  htmlFor="sinal-regra"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Regra
+                </label>
+                <select
+                  id="sinal-regra"
+                  value={sinalRegra ?? "desligado"}
+                  onChange={handleSinalRegraChange}
+                  disabled={carregandoSinal}
+                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <option value="desligado">Desligado</option>
+                  <option value="novos">Obrigatório para clientes novos</option>
+                  <option value="todos">Obrigatório para todos</option>
+                </select>
+              </div>
 
-      <div className="mt-3">
-        <label
-          htmlFor="reserva-expira-horas"
-          className="mb-1 block text-sm font-medium text-body"
-        >
-          Cancelar reservas pendentes não confirmadas após quantas horas?
-        </label>
-        <input
-          id="reserva-expira-horas"
-          type="number"
-          min="1"
-          step="1"
-          inputMode="numeric"
-          value={reservaExpiraHoras ?? ""}
-          onChange={(e) => setReservaExpiraHoras(e.target.value)}
-          onBlur={salvarReservaExpira}
-          disabled={carregandoReservaExpira}
-          placeholder="48"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-        />
+              <div>
+                <label
+                  htmlFor="sinal-valor"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Valor do sinal (R$)
+                </label>
+                <input
+                  id="sinal-valor"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={sinalValor}
+                  onChange={(e) => setSinalValor(e.target.value)}
+                  onBlur={() => salvarSinal()}
+                  disabled={carregandoSinal || sinalDesligado}
+                  placeholder="0,00"
+                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="sinal-chave-pix"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Chave Pix
+                </label>
+                <input
+                  id="sinal-chave-pix"
+                  type="text"
+                  value={sinalChavePix}
+                  onChange={(e) => setSinalChavePix(e.target.value)}
+                  onBlur={() => salvarSinal()}
+                  disabled={carregandoSinal || sinalDesligado}
+                  placeholder="CPF, e-mail, telefone ou chave aleatória"
+                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+            </div>
+
+            {statusSinal === "salvando" && (
+              <p className="mt-2 text-xs text-muted">Salvando…</p>
+            )}
+            {statusSinal === "salvo" && !erroSinal && (
+              <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+            )}
+            {erroSinal && (
+              <p className="mt-2 text-xs text-red-600">{erroSinal}</p>
+            )}
+          </div>
+        )}
       </div>
 
-      {statusReservaExpira === "salvando" && (
-        <p className="mt-2 text-xs text-muted">Salvando…</p>
-      )}
-      {statusReservaExpira === "salvo" && !erroReservaExpira && (
-        <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
-      )}
-      {erroReservaExpira && (
-        <p className="mt-2 text-xs text-red-600">{erroReservaExpira}</p>
-      )}
-    </section>
-
-    <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
-      <h3 className="text-sm font-medium text-heading">
-        Prazo mínimo para cancelamento (horas)
-      </h3>
-
-      <div className="mt-3">
-        <label
-          htmlFor="cancelamento-prazo-horas"
-          className="mb-1 block text-sm font-medium text-body"
+      {/* Bloco: Regras do agendamento */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("regras")}
+          aria-expanded={blocoAberto === "regras"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
         >
-          Horas de antecedência
-        </label>
-        <input
-          id="cancelamento-prazo-horas"
-          type="number"
-          min="0"
-          step="1"
-          inputMode="numeric"
-          value={cancelamentoPrazoHoras ?? ""}
-          onChange={(e) => setCancelamentoPrazoHoras(e.target.value)}
-          onBlur={salvarCancelamentoPrazo}
-          disabled={carregandoCancelamentoPrazo}
-          placeholder="24"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-        />
-        <p className="mt-1 text-xs text-muted">
-          A cliente não conseguirá mais cancelar o agendamento pelo painel a
-          partir desse número de horas antes do horário marcado.
-        </p>
+          <span className="font-semibold text-heading">Regras do agendamento</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "regras" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "regras" && (
+          <div className="border-t border-border p-4">
+            <div>
+              <label
+                htmlFor="regras-agendamento"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Texto das regras
+              </label>
+              <textarea
+                id="regras-agendamento"
+                rows={4}
+                value={avisoRegrasAgendamento ?? ""}
+                onChange={(e) => setAvisoRegrasAgendamento(e.target.value)}
+                onBlur={salvarRegrasAgendamento}
+                disabled={carregandoRegrasAgendamento}
+                placeholder="Deixe em branco para não mostrar nenhum aviso"
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <p className="mt-1 text-xs text-muted">
+                Um texto com as regras do seu atendimento — política de
+                atraso, tolerância, e outras informações importantes. Aparece
+                pra cliente confirmar que leu antes de fechar qualquer
+                agendamento, com ou sem sinal. Use *asterisco* pra deixar
+                palavras em negrito, como no WhatsApp. Deixe em branco se não
+                quiser mostrar nada.
+              </p>
+            </div>
+
+            {statusRegrasAgendamento === "salvando" && (
+              <p className="mt-2 text-xs text-muted">Salvando…</p>
+            )}
+            {statusRegrasAgendamento === "salvo" && !erroRegrasAgendamento && (
+              <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+            )}
+            {erroRegrasAgendamento && (
+              <p className="mt-2 text-xs text-red-600">{erroRegrasAgendamento}</p>
+            )}
+          </div>
+        )}
       </div>
 
-      {statusCancelamentoPrazo === "salvando" && (
-        <p className="mt-2 text-xs text-muted">Salvando…</p>
-      )}
-      {statusCancelamentoPrazo === "salvo" && !erroCancelamentoPrazo && (
-        <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
-      )}
-      {erroCancelamentoPrazo && (
-        <p className="mt-2 text-xs text-red-600">{erroCancelamentoPrazo}</p>
-      )}
-    </section>
+      {/* Bloco: Cancelamento e prazos */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("cancelamento")}
+          aria-expanded={blocoAberto === "cancelamento"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Cancelamento e prazos</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "cancelamento" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "cancelamento" && (
+          <div className="border-t border-border p-4 space-y-4">
+            <div>
+              <label
+                htmlFor="cancelamento-prazo-horas"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Prazo para Cancelamento (horas), em até:
+              </label>
+              <input
+                id="cancelamento-prazo-horas"
+                type="number"
+                min="0"
+                step="1"
+                inputMode="numeric"
+                value={cancelamentoPrazoHoras ?? ""}
+                onChange={(e) => setCancelamentoPrazoHoras(e.target.value)}
+                onBlur={salvarCancelamentoPrazo}
+                disabled={carregandoCancelamentoPrazo}
+                placeholder="24"
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <p className="mt-1 text-xs text-muted">
+                Quantas horas antes do horário marcado a cliente ainda pode
+                cancelar sozinha pelo painel dela. Depois desse prazo, o
+                botão de cancelar some e ela precisa falar direto com você.
+              </p>
+
+              {statusCancelamentoPrazo === "salvando" && (
+                <p className="mt-2 text-xs text-muted">Salvando…</p>
+              )}
+              {statusCancelamentoPrazo === "salvo" && !erroCancelamentoPrazo && (
+                <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+              )}
+              {erroCancelamentoPrazo && (
+                <p className="mt-2 text-xs text-red-600">{erroCancelamentoPrazo}</p>
+              )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="reserva-expira-horas"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Expiração de reserva provisória (horas)
+              </label>
+              <input
+                id="reserva-expira-horas"
+                type="number"
+                min="1"
+                step="1"
+                inputMode="numeric"
+                value={reservaExpiraHoras ?? ""}
+                onChange={(e) => setReservaExpiraHoras(e.target.value)}
+                onBlur={salvarReservaExpira}
+                disabled={carregandoReservaExpira}
+                placeholder="48"
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <p className="mt-1 text-xs text-muted">
+                Cancelar reservas pendentes não confirmadas após quantas
+                horas?
+              </p>
+
+              {statusReservaExpira === "salvando" && (
+                <p className="mt-2 text-xs text-muted">Salvando…</p>
+              )}
+              {statusReservaExpira === "salvo" && !erroReservaExpira && (
+                <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+              )}
+              {erroReservaExpira && (
+                <p className="mt-2 text-xs text-red-600">{erroReservaExpira}</p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bloco: Manutenção */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("manutencao")}
+          aria-expanded={blocoAberto === "manutencao"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Manutenção</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "manutencao" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "manutencao" && (
+          <div className="border-t border-border p-4 space-y-4">
+            <div>
+              <label
+                htmlFor="manutencao-caducidade-dias"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Tolerância após o vencimento (dias)
+              </label>
+              <input
+                id="manutencao-caducidade-dias"
+                type="number"
+                min="0"
+                step="1"
+                inputMode="numeric"
+                value={caducidadeDias ?? ""}
+                onChange={(e) => setCaducidadeDias(e.target.value)}
+                onBlur={salvarCaducidade}
+                disabled={carregandoCaducidade}
+                placeholder="Nunca caduca"
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <p className="mt-1 text-xs text-muted">
+                Depois de vencida, destacar por quantos dias? (deixe em
+                branco para nunca caducar)
+              </p>
+
+              {statusCaducidade === "salvando" && (
+                <p className="mt-2 text-xs text-muted">Salvando…</p>
+              )}
+              {statusCaducidade === "salvo" && !erroCaducidade && (
+                <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+              )}
+              {erroCaducidade && (
+                <p className="mt-2 text-xs text-red-600">{erroCaducidade}</p>
+              )}
+            </div>
+
+            <div>
+              <label className="flex items-start gap-2 text-sm text-body">
+                <input
+                  type="checkbox"
+                  checked={Boolean(valorCheioAposPrazo)}
+                  onChange={alternarValorCheioAposPrazo}
+                  disabled={carregandoValorCheio}
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                <span>
+                  <span className="block font-medium text-heading">
+                    Valor cheio após o prazo
+                  </span>
+                  <span className="mt-1 block text-xs text-muted">
+                    Se a última manutenção da cliente já venceu, o wizard de
+                    agendamento cobra o preço do serviço original em vez do
+                    preço da manutenção.
+                  </span>
+                </span>
+              </label>
+
+              {statusValorCheio === "salvando" && (
+                <p className="mt-2 text-xs text-muted">Salvando…</p>
+              )}
+              {statusValorCheio === "salvo" && !erroValorCheio && (
+                <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+              )}
+              {erroValorCheio && (
+                <p className="mt-2 text-xs text-red-600">{erroValorCheio}</p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
     </>
   );
 }
