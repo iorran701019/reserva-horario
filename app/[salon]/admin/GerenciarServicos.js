@@ -47,7 +47,8 @@ const FORM_INICIAL = {
   adicionarAlerta: false,
   alertaMensagem: "",
   servico_origem_id: "",
-  prazoManutencaoDias: "",
+  prazoInicioDias: "",
+  prazoFimDias: "",
   ehManutencao: false,
 };
 
@@ -62,6 +63,15 @@ function reaisParaCentavos(reais) {
 // centavos -> string em reais pro input de edição ("3550" -> "35.50").
 function centavosParaReais(centavos) {
   return (centavos / 100).toFixed(2);
+}
+
+// Texto da faixa de dias de uma manutenção, pro card da listagem (ex.: "20 a
+// 30 dias", ou "até 30 dias" quando prazo_inicio_dias é null). null quando não
+// há prazo_fim_dias cadastrado (faixa não preenchida).
+function faixaManutencao(servico) {
+  if (servico.prazo_fim_dias == null) return null;
+  if (servico.prazo_inicio_dias == null) return `até ${servico.prazo_fim_dias} dias`;
+  return `${servico.prazo_inicio_dias} a ${servico.prazo_fim_dias} dias`;
 }
 
 // Perguntas por serviço (servico_perguntas/servico_pergunta_opcoes): cada
@@ -163,6 +173,10 @@ export default function GerenciarServicos({ estabelecimento }) {
   const [form, setForm] = useState(FORM_INICIAL);
   const [erroForm, setErroForm] = useState("");
   const [salvando, setSalvando] = useState(false);
+  // Conflito de faixa de dias detectado em handleSalvar (duas manutenções do
+  // mesmo servico_origem_id com prazos sobrepostos) — controla o popup de
+  // aviso que bloqueia o salvamento até o usuário ajustar o prazo.
+  const [conflitoManutencao, setConflitoManutencao] = useState(null);
   // Carregando os vínculos do serviço em edição (quais profissionais atendem).
   const [carregandoForm, setCarregandoForm] = useState(false);
 
@@ -254,7 +268,7 @@ export default function GerenciarServicos({ estabelecimento }) {
       const { data, error } = await supabase
         .from("servicos")
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao"
+          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias"
         )
         .eq("estabelecimento_id", estabelecimento.id)
         .order("categoria_id", { ascending: true, nullsFirst: true })
@@ -359,17 +373,29 @@ export default function GerenciarServicos({ estabelecimento }) {
   }
 
   function abrirNovo() {
-    setForm(FORM_INICIAL);
+    setForm({
+      ...FORM_INICIAL,
+      // Novo serviço: pré-marca todos os profissionais ativos por padrão (a
+      // dona desmarca manualmente se algum não atender). Edição não passa
+      // por aqui — ver abrirEdicao, que carrega o vínculo já salvo.
+      profissionais: profissionaisSalao.map((p) => p.id),
+    });
     setErroForm("");
     setEditando("novo");
   }
 
   // Atalho "+ Criar manutenção" num card de serviço original: abre o mesmo
   // formulário de criação, mas já pré-preenchido como uma manutenção daquele
-  // serviço — nome sugerido, servico_origem_id fixo (sem UI pra trocar) e a
-  // MESMA categoria_id do serviço de origem (agrupa junto dele no acordeão,
-  // igual qualquer outro serviço). Preço, duração e demais campos ficam em
-  // branco pro dono preencher.
+// Manutenção não tem campo de categoria no form — herda a categoria
+        // do servico_origem_id (mesmo categoria_id do serviço-base, pra
+        // aparecer agrupada com ele no acordeão), recalculada em
+        // handleSalvar logo antes de salvar. Placeholder null aqui,
+        // sobrescrito lá.
+        categoria_id: form.ehManutencao
+          ? null
+          : form.categoria_id === ""
+            ? null
+            : Number(form.categoria_id),
   function abrirCriarManutencao(servicoOrigem) {
     setForm({
       ...FORM_INICIAL,
@@ -378,6 +404,8 @@ export default function GerenciarServicos({ estabelecimento }) {
       categoria_id:
         servicoOrigem.categoria_id != null ? String(servicoOrigem.categoria_id) : "",
       ehManutencao: true,
+      // Mesmo padrão do abrirNovo: pré-marca todos os profissionais ativos.
+      profissionais: profissionaisSalao.map((p) => p.id),
     });
     setErroForm("");
     setEditando("novo");
@@ -397,8 +425,10 @@ export default function GerenciarServicos({ estabelecimento }) {
       alertaMensagem: servico.alerta_mensagem ?? "",
       servico_origem_id:
         servico.servico_origem_id != null ? String(servico.servico_origem_id) : "",
-      prazoManutencaoDias:
-        servico.prazo_manutencao_dias != null ? String(servico.prazo_manutencao_dias) : "",
+      prazoInicioDias:
+        servico.prazo_inicio_dias != null ? String(servico.prazo_inicio_dias) : "",
+      prazoFimDias:
+        servico.prazo_fim_dias != null ? String(servico.prazo_fim_dias) : "",
       ehManutencao: Boolean(servico.eh_manutencao),
     });
     setErroForm("");
@@ -457,19 +487,45 @@ export default function GerenciarServicos({ estabelecimento }) {
       return { erro: "Informe uma duração (em minutos) maior que zero." };
     }
 
-    // "" (Nenhum) -> null; senão o id numérico do serviço de origem.
+    // Toda manutenção precisa de um serviço-origem vinculado (ver dropdown
+    // sem opção vazia no form) — sem isso o preço/manutenção sugerida não
+    // tem base pra calcular em cima.
+    if (form.ehManutencao && form.servico_origem_id === "") {
+      return {
+        erro:
+          "Toda manutenção precisa estar vinculada a um serviço. Se você quer um serviço avulso, crie como um serviço comum em vez de uma manutenção.",
+      };
+    }
+
     const servicoOrigemId =
       form.servico_origem_id === "" ? null : Number(form.servico_origem_id);
 
-    // Prazo de manutenção só existe no serviço "original" (eh_manutencao
-    // false). Numa manutenção o campo fica escondido e sempre grava null.
-    let prazoManutencaoDias = null;
-    if (!form.ehManutencao && form.prazoManutencaoDias.trim() !== "") {
-      const prazo = Number(form.prazoManutencaoDias);
-      if (!Number.isInteger(prazo) || prazo <= 0) {
-        return { erro: "Informe um prazo de manutenção (em dias) maior que zero." };
+    // Faixa de dias (prazo_inicio_dias/prazo_fim_dias) só existe numa
+    // manutenção (eh_manutencao true); no serviço original os dois ficam
+    // sempre null. Ambos opcionais: "A partir de" em branco = manutenção vale
+    // desde o início do prazo; "Até" em branco = sem limite superior.
+    let prazoInicioDias = null;
+    let prazoFimDias = null;
+    if (form.ehManutencao) {
+      if (form.prazoInicioDias.trim() !== "") {
+        const valor = Number(form.prazoInicioDias);
+        if (!Number.isInteger(valor) || valor < 0) {
+          return { erro: "Informe 'A partir de quantos dias' como um número inteiro válido." };
+        }
+        prazoInicioDias = valor;
       }
-      prazoManutencaoDias = prazo;
+      if (form.prazoFimDias.trim() !== "") {
+        const valor = Number(form.prazoFimDias);
+        if (!Number.isInteger(valor) || valor < 0) {
+          return { erro: "Informe 'Até quantos dias' como um número inteiro válido." };
+        }
+        prazoFimDias = valor;
+      }
+      if (prazoInicioDias != null && prazoFimDias != null && prazoFimDias < prazoInicioDias) {
+        return {
+          erro: "'Até quantos dias' deve ser maior ou igual a 'A partir de quantos dias'.",
+        };
+      }
     }
 
     return {
@@ -477,10 +533,11 @@ export default function GerenciarServicos({ estabelecimento }) {
         nome,
         preco_centavos: centavos,
         duracao_min: duracao,
-        // "" (Sem categoria) -> null; senão o id numérico. Vale igual pra
-        // manutenção — ela agrupa na própria categoria, junto do serviço de
-        // origem, como qualquer outro serviço.
-        categoria_id: form.categoria_id === "" ? null : Number(form.categoria_id),
+<// Agrupamento pro acordeão: categorias na ordem de exibição, e o grupo
+  // sintético "Sem categoria" — serviços sem categoria_id, ou apontando pra
+  // uma categoria que não existe mais (manutenção incluída, pelo mesmo
+  // categoria_id herdado do serviço-base). Cada um só aparece se tiver
+  // algum serviço.
         ocultar_preco: form.ocultarPreco,
         ocultar_duracao: form.ocultarDuracao,
         // Caixa desmarcada ou texto em branco -> null (nunca salva alerta
@@ -490,7 +547,8 @@ export default function GerenciarServicos({ estabelecimento }) {
             ? form.alertaMensagem.trim()
             : null,
         servico_origem_id: servicoOrigemId,
-        prazo_manutencao_dias: prazoManutencaoDias,
+        prazo_inicio_dias: prazoInicioDias,
+        prazo_fim_dias: prazoFimDias,
         eh_manutencao: form.ehManutencao,
       },
     };
@@ -536,8 +594,60 @@ export default function GerenciarServicos({ estabelecimento }) {
       return;
     }
 
+    // Conflito de faixa: só faz sentido checar quando a manutenção tem algum
+    // dos dois campos preenchidos (sem nenhum, não há faixa pra sobrepor).
+    // Compara contra as outras manutenções ativas do MESMO servico_origem_id
+    // (excluindo o próprio registro em edição) que também têm faixa
+    // preenchida — as que não têm (prazo_fim_dias null) usam só o campo
+    // legado prazo_manutencao_dias e ficam de fora dessa checagem, senão toda
+    // manutenção legada colidiria com qualquer faixa nova. null vira 0 (sem
+    // piso) de um lado e "sem teto" (Infinity) do outro, conforme o pedido.
+    if (payload.eh_manutencao && (payload.prazo_inicio_dias != null || payload.prazo_fim_dias != null)) {
+      const idAtual = editando === "novo" ? null : editando.id;
+      const novaFaixa = {
+        inicio: payload.prazo_inicio_dias ?? 0,
+        fim: payload.prazo_fim_dias ?? Infinity,
+      };
+      const conflito = servicos.find(
+        (s) =>
+          s.eh_manutencao &&
+          s.ativo &&
+          s.id !== idAtual &&
+          s.servico_origem_id === payload.servico_origem_id &&
+          s.prazo_fim_dias != null &&
+          novaFaixa.inicio <= (s.prazo_fim_dias ?? Infinity) &&
+          (s.prazo_inicio_dias ?? 0) <= novaFaixa.fim
+      );
+      if (conflito) {
+        setConflitoManutencao({ nome: conflito.nome, faixa: faixaManutencao(conflito) });
+        return;
+      }
+    }
+
     setSalvando(true);
     setErroForm("");
+
+    // Manutenção herda a categoria do serviço vinculado (servico_origem_id),
+    // buscada agora — no momento de salvar — pra não depender do que estava
+    // em memória nem do formulário (que não tem campo de categoria pra
+    // manutenção). Sem vínculo, fica sem categoria.
+    if (payload.eh_manutencao) {
+      if (payload.servico_origem_id != null) {
+        const { data: origem, error: erroOrigem } = await supabase
+          .from("servicos")
+          .select("categoria_id")
+          .eq("id", payload.servico_origem_id)
+          .single();
+        if (erroOrigem) {
+          setSalvando(false);
+          setErroForm(erroOrigem.message);
+          return;
+        }
+        payload.categoria_id = origem.categoria_id;
+      } else {
+        payload.categoria_id = null;
+      }
+    }
 
     if (editando === "novo") {
       // Cria já ativo, particionado pelo estabelecimento resolvido, e vai pro
@@ -552,7 +662,7 @@ export default function GerenciarServicos({ estabelecimento }) {
           ordem: proximaOrdemNoGrupo(payload.categoria_id),
         })
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao"
+          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias"
         )
         .single();
 
@@ -1222,6 +1332,9 @@ export default function GerenciarServicos({ estabelecimento }) {
                 <p className="mt-0.5 text-sm text-body">
                   {formatarPreco(servico.preco_centavos)} · {servico.duracao_min} min
                 </p>
+                {servico.eh_manutencao && faixaManutencao(servico) && (
+                  <p className="mt-0.5 text-xs text-body">{faixaManutencao(servico)}</p>
+                )}
               </div>
 
               <span className="shrink-0 rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700 ring-1 ring-green-100">
@@ -1244,9 +1357,10 @@ export default function GerenciarServicos({ estabelecimento }) {
               >
                 Desativar
               </button>
-              {/* Só em serviços "originais" (eh_manutencao false) que
-                  ainda não têm manutenção vinculada — regra um-para-um. */}
-              {!servico.eh_manutencao && !idsComManutencaoVinculada.has(servico.id) && (
+              {/* Só em serviços "originais" (eh_manutencao false). Aparece
+                  mesmo que o serviço já tenha uma ou mais manutenções
+                  vinculadas — a trava de unicidade foi removida no banco. */}
+              {!servico.eh_manutencao && (
                 <button
                   type="button"
                   onClick={() => abrirCriarManutencao(servico)}
@@ -1535,12 +1649,30 @@ export default function GerenciarServicos({ estabelecimento }) {
     );
   }
 
-  // Agrupamento pro acordeão: categorias na ordem de exibição — manutenção
-  // (eh_manutencao=true) entra pela própria categoria_id, junto do serviço de
-  // origem, igual qualquer outro serviço — e o grupo sintético "Sem
-  // categoria", com quem não tem categoria_id ou aponta pra uma que não
-  // existe mais. Cada um só aparece se tiver algum serviço.
-  const categoriasOrdenadas = ordenarCategorias(categorias);
+{/* Categoria (opcional). Não existe pra manutenção — ela herda a
+              categoria_id do serviço vinculado (servico_origem_id) na hora
+              de salvar. "Sem categoria" grava categoria_id null. */}
+          {!form.ehManutencao && (
+            <div>
+              <label htmlFor="categoria_id" className="mb-1 block text-sm font-medium text-body">
+                Categoria
+              </label>
+              <select
+                id="categoria_id"
+                name="categoria_id"
+                value={form.categoria_id}
+                onChange={handleChange}
+                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              >
+                <option value="">Sem categoria</option>
+                {categorias.map((categoria) => (
+                  <option key={categoria.id} value={String(categoria.id)}>
+                    {categoria.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
   const idsCategorias = new Set(categorias.map((c) => c.id));
   const servicosSemCategoria = servicos.filter(
     (s) =>
@@ -1554,26 +1686,6 @@ export default function GerenciarServicos({ estabelecimento }) {
   // separado (ver renderServicoDesativado). oculto=true (exclusão
   // permanente bloqueada por FK) nunca aparece aqui nem entra no contador.
   const servicosInativos = servicos.filter((s) => !s.ativo && !s.oculto);
-
-  // Serviços que já têm uma manutenção vinculada via servico_origem_id (regra
-  // um-para-um garantida pelo índice único parcial no banco) — exclui a
-  // manutenção em edição, pra ela não "bloquear" seu próprio vínculo atual no
-  // dropdown/no botão, e ignora manutenções ocultas (a exclusão permanente
-  // bloqueada por FK não deve impedir criar uma nova manutenção pro mesmo
-  // serviço). Usado tanto pro "+ Criar manutenção" (esconder se já houver
-  // vínculo) quanto pro dropdown "Serviço vinculado" do formulário.
-  const idEmEdicao = editando && editando !== "novo" ? editando.id : null;
-  const idsComManutencaoVinculada = new Set(
-    servicos
-      .filter(
-        (s) =>
-          s.eh_manutencao &&
-          !s.oculto &&
-          s.servico_origem_id != null &&
-          s.id !== idEmEdicao
-      )
-      .map((s) => s.servico_origem_id)
-  );
 
   return (
     <>
@@ -1676,67 +1788,45 @@ export default function GerenciarServicos({ estabelecimento }) {
             />
           </div>
 
-          {/* Categoria (opcional) — vale igual pra manutenção: ela agrupa na
-              própria categoria, junto do serviço de origem. "Sem categoria"
-              grava categoria_id null. */}
-          <div>
-            <label htmlFor="categoria_id" className="mb-1 block text-sm font-medium text-body">
-              Categoria
-            </label>
-            <select
-              id="categoria_id"
-              name="categoria_id"
-              value={form.categoria_id}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-            >
-              <option value="">Sem categoria</option>
-              {categorias.map((categoria) => (
-                <option key={categoria.id} value={String(categoria.id)}>
-                  {categoria.nome}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Prazo de manutenção: só existe no serviço "original" (eh_manutencao
-              false) — numa manutenção o campo não faz sentido e fica escondido. */}
+{/* Categoria (opcional). Não existe pra manutenção — ela herda a
+              categoria_id do serviço vinculado (servico_origem_id) na hora
+              de salvar. "Sem categoria" grava categoria_id null. */}
           {!form.ehManutencao && (
             <div>
-              <label
-                htmlFor="prazoManutencaoDias"
-                className="mb-1 block text-sm font-medium text-body"
-              >
-                Prazo de manutenção (dias)
+              <label htmlFor="categoria_id" className="mb-1 block text-sm font-medium text-body">
+                Categoria
               </label>
-              <input
-                id="prazoManutencaoDias"
-                name="prazoManutencaoDias"
-                type="number"
-                inputMode="numeric"
-                step="1"
-                min="0"
-                value={form.prazoManutencaoDias}
+              <select
+                id="categoria_id"
+                name="categoria_id"
+                value={form.categoria_id}
                 onChange={handleChange}
-                placeholder="Ex.: 21"
-                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-              />
+                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              >
+                <option value="">Sem categoria</option>
+                {categorias.map((categoria) => (
+                  <option key={categoria.id} value={String(categoria.id)}>
+                    {categoria.nome}
+                  </option>
+                ))}
+              </select>
             </div>
           )}
-
-          {/* Serviço vinculado (opcional): só numa manutenção (eh_manutencao
-              true). Lista os demais serviços "originais" do estabelecimento
-              que ainda não têm outra manutenção vinculada (regra
-              um-para-um garantida pelo índice único parcial no banco);
-              "Nenhum" representa manutenção sem vínculo (ex.: veio de outra
-              manicure). */}
+          {/* Serviço vinculado: obrigatório numa manutenção (eh_manutencao
+              true) — ver checagem em validarForm. Lista os serviços
+              "originais" ativos do estabelecimento — um mesmo serviço
+              original pode ter várias manutenções vinculadas (a trava de
+              unicidade foi removida no banco). Sem opção vazia: se o valor
+              não bater com nenhum serviço (ex.: manutenção legada sem
+              vínculo), o select aparece sem seleção, forçando a dona a
+              escolher antes de salvar. */}
           {form.ehManutencao && (
             <div>
               <label
                 htmlFor="servico_origem_id"
                 className="mb-1 block text-sm font-medium text-body"
               >
-                Serviço vinculado (opcional)
+                Serviço vinculado
               </label>
               <select
                 id="servico_origem_id"
@@ -1745,20 +1835,68 @@ export default function GerenciarServicos({ estabelecimento }) {
                 onChange={handleChange}
                 className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
               >
-                <option value="">Nenhum</option>
                 {servicos
-                  .filter(
-                    (s) =>
-                      s.ativo &&
-                      !s.eh_manutencao &&
-                      !idsComManutencaoVinculada.has(s.id)
-                  )
+                  .filter((s) => s.ativo && !s.eh_manutencao)
                   .map((s) => (
                     <option key={s.id} value={String(s.id)}>
                       {s.nome}
                     </option>
                   ))}
               </select>
+            </div>
+          )}
+
+          {/* Faixa de dias em que essa manutenção vale (opcional): "A partir
+              de" em branco = vale desde o início do prazo; "Até" em branco =
+              sem limite superior. Só existe numa manutenção. */}
+          {form.ehManutencao && (
+            <div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label
+                    htmlFor="prazoInicioDias"
+                    className="mb-1 block text-sm font-medium text-body"
+                  >
+                    A partir de quantos dias
+                  </label>
+                  <input
+                    id="prazoInicioDias"
+                    name="prazoInicioDias"
+                    type="number"
+                    inputMode="numeric"
+                    step="1"
+                    min="0"
+                    value={form.prazoInicioDias}
+                    onChange={handleChange}
+                    placeholder="Ex.: 20"
+                    className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label
+                    htmlFor="prazoFimDias"
+                    className="mb-1 block text-sm font-medium text-body"
+                  >
+                    Até quantos dias
+                  </label>
+                  <input
+                    id="prazoFimDias"
+                    name="prazoFimDias"
+                    type="number"
+                    inputMode="numeric"
+                    step="1"
+                    min="0"
+                    value={form.prazoFimDias}
+                    onChange={handleChange}
+                    placeholder="Ex.: 30"
+                    className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  />
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-body">
+                Deixe &quot;A partir de&quot; em branco se essa manutenção vale desde o
+                início do prazo.
+              </p>
             </div>
           )}
 
@@ -2106,6 +2244,49 @@ export default function GerenciarServicos({ estabelecimento }) {
             </div>
           )}
         </>
+      )}
+
+      {/* Aviso de conflito de faixa de dias entre manutenções do mesmo
+          servico_origem_id (ver checagem em handleSalvar). Só fecha, não
+          salva nada — o usuário precisa ajustar o prazo e tentar de novo. */}
+      {conflitoManutencao && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-conflito-manutencao"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setConflitoManutencao(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-conflito-manutencao"
+              className="text-lg font-semibold text-heading"
+            >
+              Prazo em conflito
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Esse prazo conflita com a manutenção{" "}
+              <span className="font-medium text-heading">
+                &apos;{conflitoManutencao.nome}&apos;
+              </span>
+              , que já cobre de {conflitoManutencao.faixa}. Ajuste o prazo
+              antes de salvar.
+            </p>
+
+            <div className="mt-6">
+              <button
+                type="button"
+                onClick={() => setConflitoManutencao(null)}
+                className="w-full rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Entendi
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Modal de confirmação do soft delete. Deixa claro que o histórico é

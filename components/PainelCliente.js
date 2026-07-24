@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MapPin } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { linkWhatsApp } from "@/lib/whatsapp";
 import { buscarAgendamentosAtivos, buscarHistoricoRecente } from "@/lib/agendamentosCliente";
 import { buscarManutencaoSugerida } from "@/lib/manutencaoSugerida";
-import { classificarAgendamento } from "@/lib/particao";
+import { classificarAgendamento, inicioDoAtendimento } from "@/lib/particao";
 import { formatarData } from "@/components/FormularioAgendamento";
 import AtualizarDadosCliente from "@/components/AtualizarDadosCliente";
 import ConfirmacaoSinal from "@/components/ConfirmacaoSinal";
@@ -80,15 +81,35 @@ export default function PainelCliente({
       clienteAtual.telefone.replace(/\D/g, "")
     ).then((lista) => {
       if (ativo) {
+        // "agora" fixado uma vez aqui (fora da render, que precisa ser pura) —
+        // decide, por item, se ainda dá tempo de cancelar pelo painel (ver
+        // estabelecimentos.cancelamento_prazo_horas, configurável em
+        // ConfiguracoesSalao). Ausente/zero preserva o comportamento atual
+        // (cancelamento sempre liberado).
+        const agora = new Date();
+        const prazoHoras = Number(estabelecimento.cancelamento_prazo_horas) || 0;
         setAgendamentos(
-          lista.filter((item) => classificarAgendamento(item) !== "historico")
+          lista
+            .filter((item) => classificarAgendamento(item) !== "historico")
+            .map((item) => ({
+              ...item,
+              podeCancelar:
+                prazoHoras <= 0 ||
+                (inicioDoAtendimento(item).getTime() - agora.getTime()) /
+                  (1000 * 60 * 60) >=
+                  prazoHoras,
+            }))
         );
       }
     });
     return () => {
       ativo = false;
     };
-  }, [estabelecimento.id, clienteAtual.telefone]);
+  }, [
+    estabelecimento.id,
+    estabelecimento.cancelamento_prazo_horas,
+    clienteAtual.telefone,
+  ]);
 
   // Histórico recente (concluídos/cancelados): a query já filtra por status e
   // janela de dias, mas "já terminou" depende da hora atual — reaproveita
@@ -163,7 +184,7 @@ export default function PainelCliente({
 
     const { error } = await supabase
       .from("agendamentos")
-      .update({ status: "cancelado" })
+      .update({ status: "cancelado", cancelado_por_cliente: true })
       .eq("id", item.id);
 
     setCancelandoId(null);
@@ -261,14 +282,33 @@ export default function PainelCliente({
                   </button>
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => handleCancelar(item)}
-                  disabled={cancelandoId === item.id}
-                  className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {cancelandoId === item.id ? "Cancelando..." : "Cancelar"}
-                </button>
+                {item.podeCancelar ? (
+                  <button
+                    type="button"
+                    onClick={() => handleCancelar(item)}
+                    disabled={cancelandoId === item.id}
+                    className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {cancelandoId === item.id ? "Cancelando..." : "Cancelar"}
+                  </button>
+                ) : (
+                  <span className="max-w-[10rem] text-right text-xs text-muted">
+                    O prazo para cancelamento passou. Em caso de dúvida, fale
+                    com{" "}
+                    <a
+                      href={linkWhatsApp(
+                        estabelecimento.whatsapp,
+                        `Olá! Preciso de ajuda com meu agendamento de ${formatarData(item.data)} às ${String(item.horario).slice(0, 5)}.`
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary underline-offset-2 hover:underline"
+                    >
+                      {nomeProfissionalContato}
+                    </a>
+                    .
+                  </span>
+                )}
               </span>
             </li>
           ))}
@@ -302,6 +342,18 @@ export default function PainelCliente({
             ))}
           </ul>
         </div>
+      )}
+
+      {estabelecimento.link_localizacao && (
+        <a
+          href={estabelecimento.link_localizacao}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+        >
+          <MapPin className="h-5 w-5" aria-hidden="true" />
+          Ver localização
+        </a>
       )}
 
       <button

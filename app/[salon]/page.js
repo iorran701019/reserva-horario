@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import { MapPin } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { linkWhatsApp } from "@/lib/whatsapp";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
@@ -251,6 +252,18 @@ export default function AgendarPage() {
             </div>
           </dl>
 
+          {estabelecimento.link_localizacao && (
+            <a
+              href={estabelecimento.link_localizacao}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+            >
+              <MapPin className="h-5 w-5" aria-hidden="true" />
+              Ver localização
+            </a>
+          )}
+
           <button
             type="button"
             onClick={() => {
@@ -260,7 +273,9 @@ export default function AgendarPage() {
               setAgendamentosAtivos(null);
               setAgendamentosVersao((v) => v + 1);
             }}
-            className="mt-6 w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+            className={`w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover ${
+              estabelecimento.link_localizacao ? "mt-3" : "mt-6"
+            }`}
           >
             Fazer novo agendamento
           </button>

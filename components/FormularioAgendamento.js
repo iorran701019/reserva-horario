@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { calcularVagasPorHorario } from "@/lib/disponibilidade";
 import { buscarTema } from "@/lib/temas";
+import PopupRegrasAgendamento from "@/components/PopupRegrasAgendamento";
 import {
   calcularPrecoManutencao,
   buscarVencimentoManutencao,
@@ -484,6 +485,18 @@ export default function FormularioAgendamento({
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
 
+  // Busca com autopreenchimento do campo "Nome do cliente" — SÓ no /admin
+  // (status truthy, o diferenciador de contexto usado em todo o componente;
+  // ver comentário da prop `status` acima). `clienteSelecionadoAdmin` guarda
+  // o cadastro escolhido no dropdown ({ id, nome, whatsapp }): enquanto
+  // presente, nome/telefone ficam travados nos valores do cadastro (ver JSX
+  // da etapa "dados") até a dona clicar em "Trocar". Sem seleção, o campo
+  // nome funciona como busca livre — não força cadastro pra clientes
+  // realmente novas (ver selecionarClienteAdmin/limparClienteSelecionadoAdmin).
+  const [clienteSelecionadoAdmin, setClienteSelecionadoAdmin] = useState(null);
+  const [resultadosBuscaAdmin, setResultadosBuscaAdmin] = useState([]);
+  const [buscandoClienteAdmin, setBuscandoClienteAdmin] = useState(false);
+
   // Sinal de reserva: regra do salão decide se é exigido (todos, só novos
   // clientes, ou nunca). O cliente declara (não comprovante) que já pagou via
   // Pix antes de liberar o botão de confirmar.
@@ -492,6 +505,14 @@ export default function FormularioAgendamento({
     (estabelecimento.sinal_regra === "novos" && clienteEhNovo);
   const [sinalDeclarado, setSinalDeclarado] = useState(false);
   const [chavePixCopiada, setChavePixCopiada] = useState(false);
+
+  // Regras do agendamento (estabelecimento.aviso_regras_agendamento,
+  // configurado no admin): popup bloqueante no fluxo público, mostrado uma
+  // vez por sessão de agendamento na etapa final de confirmação, sempre —
+  // com ou sem sinal a pagar (ver handleSubmit/confirmarAvisoRegras e
+  // PopupRegrasAgendamento no JSX abaixo).
+  const [avisoRegrasConfirmado, setAvisoRegrasConfirmado] = useState(false);
+  const [mostrarPopupAvisoRegras, setMostrarPopupAvisoRegras] = useState(false);
 
   async function copiarChavePix() {
     try {
@@ -674,6 +695,68 @@ export default function FormularioAgendamento({
     form.telefone,
     estabelecimento.id,
   ]);
+
+  // Debounce (~300ms) da busca de clientes cadastrados pro autopreenchimento
+  // do /admin (ver estados acima). Só roda com status (admin) e sem cliente
+  // já selecionado — senão o campo nome está travado no valor do cadastro e
+  // não faz sentido buscar de novo. Exige 2+ caracteres, senão zera a lista.
+  useEffect(() => {
+    if (!status || clienteSelecionadoAdmin) {
+      setResultadosBuscaAdmin([]);
+      setBuscandoClienteAdmin(false);
+      return;
+    }
+
+    const termo = form.nome.trim();
+    if (termo.length < 2) {
+      setResultadosBuscaAdmin([]);
+      setBuscandoClienteAdmin(false);
+      return;
+    }
+
+    let ativo = true;
+    setBuscandoClienteAdmin(true);
+
+    const timer = setTimeout(async () => {
+      const { data, error } = await supabase
+        .from("clientes")
+        .select("id, nome, whatsapp")
+        .eq("estabelecimento_id", estabelecimento.id)
+        .ilike("nome", `%${termo}%`)
+        .order("nome", { ascending: true })
+        .limit(8);
+
+      if (!ativo) return;
+      setResultadosBuscaAdmin(error ? [] : data ?? []);
+      setBuscandoClienteAdmin(false);
+    }, 300);
+
+    return () => {
+      ativo = false;
+      clearTimeout(timer);
+    };
+  }, [form.nome, status, clienteSelecionadoAdmin, estabelecimento.id]);
+
+  // Clique num resultado da busca: preenche nome/telefone com o cadastro
+  // exato e trava os campos (ver JSX). O insert continua lendo
+  // form.nome/form.telefone normalmente, sem mudança de schema.
+  function selecionarClienteAdmin(cliente) {
+    setForm((anterior) => ({
+      ...anterior,
+      nome: cliente.nome,
+      telefone: cliente.whatsapp ?? "",
+    }));
+    setClienteSelecionadoAdmin(cliente);
+    setResultadosBuscaAdmin([]);
+  }
+
+  // "Trocar"/limpar a seleção: volta a digitar nome/telefone soltos, sem
+  // herdar nada do cadastro anterior — mesmo comportamento de uma cliente
+  // nova que nunca se cadastrou.
+  function limparClienteSelecionadoAdmin() {
+    setClienteSelecionadoAdmin(null);
+    setForm((anterior) => ({ ...anterior, nome: "", telefone: "" }));
+  }
 
   const [hoje] = useState(dataDeHoje);
 
@@ -1201,6 +1284,26 @@ setRespostasPerguntas({});
       return;
     }
 
+    // Regras do agendamento (estabelecimento.aviso_regras_agendamento):
+    // popup bloqueante mostrado uma vez por sessão do wizard, na etapa final
+    // de confirmação — sempre, com ou sem sinal a pagar. Confirmado, quem
+    // libera o envio de fato é confirmarAvisoRegras, chamando
+    // finalizarAgendamento diretamente.
+    if (estabelecimento.aviso_regras_agendamento && !avisoRegrasConfirmado) {
+      setMostrarPopupAvisoRegras(true);
+      return;
+    }
+
+    await finalizarAgendamento();
+  }
+
+  async function confirmarAvisoRegras() {
+    setAvisoRegrasConfirmado(true);
+    setMostrarPopupAvisoRegras(false);
+    await finalizarAgendamento();
+  }
+
+  async function finalizarAgendamento() {
     setEnviando(true);
 
     // Fluxo público (`status` omitido) com reserva já criada em
@@ -1677,6 +1780,95 @@ setRespostasPerguntas({});
                 Agendando para{" "}
                 <span className="font-medium text-heading">{form.nome}</span>.
               </p>
+            ) : status ? (
+              <>
+                {/* /admin: busca ao vivo em `clientes` (debounce ~300ms) em vez
+                    de texto livre. Achando o cadastro, trava nome/telefone nos
+                    valores exatos (ver selecionarClienteAdmin) — "Trocar"
+                    libera os dois de novo pra digitar solto, sem forçar
+                    cadastro pra clientes realmente novas. */}
+                <div>
+                  <label htmlFor="nome" className="mb-1 block text-sm font-medium text-body">
+                    Nome do cliente
+                  </label>
+
+                  {clienteSelecionadoAdmin ? (
+                    <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2">
+                      <span className="min-w-0 flex-1 truncate text-heading">
+                        {clienteSelecionadoAdmin.nome}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={limparClienteSelecionadoAdmin}
+                        className="shrink-0 text-sm font-medium text-primary hover:underline"
+                      >
+                        Trocar
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <input
+                        id="nome"
+                        name="nome"
+                        type="text"
+                        value={form.nome}
+                        onChange={handleChange}
+                        autoComplete="off"
+                        required
+                        placeholder="Buscar cliente pelo nome"
+                        className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                      />
+
+                      {form.nome.trim().length >= 2 && (
+                        <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg bg-card shadow-lg ring-1 ring-border">
+                          {buscandoClienteAdmin && (
+                            <p className="px-3 py-2 text-sm text-body">Buscando...</p>
+                          )}
+
+                          {!buscandoClienteAdmin && resultadosBuscaAdmin.length === 0 && (
+                            <p className="px-3 py-2 text-sm text-body">
+                              Nenhum cliente encontrado. Pode preencher os dados livremente.
+                            </p>
+                          )}
+
+                          {!buscandoClienteAdmin &&
+                            resultadosBuscaAdmin.map((cliente) => (
+                              <button
+                                key={cliente.id}
+                                type="button"
+                                onClick={() => selecionarClienteAdmin(cliente)}
+                                className="block w-full px-3 py-2 text-left text-sm text-heading transition hover:bg-surface"
+                              >
+                                {cliente.nome}
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label htmlFor="telefone" className="mb-1 block text-sm font-medium text-body">
+                    WhatsApp
+                  </label>
+                  <input
+                    id="telefone"
+                    name="telefone"
+                    type="tel"
+                    inputMode="tel"
+                    value={form.telefone}
+                    onChange={handleChange}
+                    required
+                    readOnly={Boolean(clienteSelecionadoAdmin)}
+                    placeholder="(24) 99999-9999"
+                    className={[
+                      "w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10",
+                      clienteSelecionadoAdmin ? "bg-surface" : "",
+                    ].join(" ")}
+                  />
+                </div>
+              </>
             ) : (
               <>
                 <div>
@@ -1992,6 +2184,15 @@ setRespostasPerguntas({});
             </div>
           </div>
         </div>
+      )}
+
+      {/* Regras do agendamento (ver handleSubmit/confirmarAvisoRegras acima):
+          bloqueia o envio final do agendamento até a cliente confirmar. */}
+      {mostrarPopupAvisoRegras && (
+        <PopupRegrasAgendamento
+          texto={estabelecimento.aviso_regras_agendamento}
+          onConfirmar={confirmarAvisoRegras}
+        />
       )}
     </>
   );

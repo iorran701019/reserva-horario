@@ -8,6 +8,7 @@ import { buscarPerfil } from "@/lib/perfil";
 import { buscarTema } from "@/lib/temas";
 import {
   linkWhatsApp,
+  linkWhatsAppSemMensagem,
   MENSAGEM_LEMBRETE,
   MENSAGEM_CONTATO,
   MENSAGEM_CANCELAMENTO,
@@ -28,6 +29,9 @@ import {
   LogOut,
   NotebookPen,
   Settings,
+  Ban,
+  Archive,
+  AlertCircle,
 } from "lucide-react";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
@@ -36,6 +40,7 @@ import GerenciarProfissionais from "./GerenciarProfissionais";
 import GerenciarClientes from "@/components/GerenciarClientes";
 import ConfiguracoesSalao from "./ConfiguracoesSalao";
 import FormularioAgendamento from "@/components/FormularioAgendamento";
+import AtivarNotificacoes from "@/components/AtivarNotificacoes";
 
 // URL do login do salão, carregando o destino pretendido em ?next= pra reentrar
 // no MESMO salão após autenticar. Com o slug agora no PATH, tanto o login quanto
@@ -132,6 +137,55 @@ function IconeWhatsApp({ className = "h-4 w-4" }) {
   );
 }
 
+// Ação "Arquivar", comum a qualquer tipo de pendência: marca resolvido=true
+// (ver handleArquivarPendencia) e some o card. Fábrica pra não repetir o
+// objeto em cada entrada de TIPOS_PENDENCIA.
+function acaoArquivarPendencia(item, arquivar) {
+  return {
+    id: "arquivar",
+    rotulo: "Arquivar",
+    Icone: Archive,
+    classe: "bg-card text-body ring-1 ring-border hover:bg-surface",
+    onClick: () => arquivar(item.id),
+  };
+}
+
+// Config por `tipo` de pendencias_admin: ícone/cor do card + as ações
+// (botões) daquele tipo. Adicionar um tipo novo é só uma entrada nova aqui —
+// a renderização (ver aba "Pendentes" abaixo) não muda. `acoes` recebe o item
+// e o objeto `ctx` ({ arquivar }) com os handlers compartilhados.
+const TIPOS_PENDENCIA = {
+  cancelamento_cliente: {
+    Icone: Ban,
+    corCard: "bg-red-50/60 ring-red-300",
+    corIcone: "text-red-600",
+    acoes: (item, ctx) => [
+      {
+        id: "mensagem",
+        rotulo: "Enviar mensagem",
+        Icone: IconeWhatsApp,
+        classe: "bg-green-50 text-green-700 ring-1 ring-green-100 hover:bg-green-100",
+        onClick: () =>
+          window.open(
+            linkWhatsAppSemMensagem(item.agendamentos?.telefone),
+            "_blank",
+            "noopener,noreferrer"
+          ),
+      },
+      acaoArquivarPendencia(item, ctx.arquivar),
+    ],
+  },
+};
+
+// Tipo desconhecido (nenhuma entrada em TIPOS_PENDENCIA ainda): card neutro
+// com só a ação de arquivar, pra um tipo novo no banco nunca ficar sem UI.
+const TIPO_PENDENCIA_PADRAO = {
+  Icone: AlertCircle,
+  corCard: "bg-blue-50/60 ring-blue-300",
+  corIcone: "text-blue-600",
+  acoes: (item, ctx) => [acaoArquivarPendencia(item, ctx.arquivar)],
+};
+
 // Abas-pai do topo, partição DERIVADA (lib/particao) — nenhum status novo no
 // banco. "Pendentes" é o inbox (pendentes futuros que precisam de ação);
 // "Painel" mostra o calendário; "Histórico" e "Agendar" entram em breve.
@@ -189,6 +243,22 @@ async function buscarAgendamentos(estabelecimentoId) {
   return { dados, error };
 }
 
+// Helper PURO (sem setState): lê as pendências administrativas em aberto
+// (pendencias_admin.resolvido = false) do estabelecimento, mais recentes
+// primeiro. `agendamentos(telefone)` é o join pelo agendamento_id vinculado
+// (ver sql/pendencias_admin.sql) — resolve o telefone pra ação "Enviar
+// mensagem" sem uma segunda query.
+async function buscarPendenciasAdmin(estabelecimentoId) {
+  const { data, error } = await supabase
+    .from("pendencias_admin")
+    .select("id, tipo, titulo, descricao, agendamento_id, created_at, agendamentos(telefone)")
+    .eq("estabelecimento_id", estabelecimentoId)
+    .eq("resolvido", false)
+    .order("created_at", { ascending: false });
+
+  return { dados: data ?? [], error };
+}
+
 export default function AdminPage() {
   const router = useRouter();
 
@@ -213,6 +283,12 @@ export default function AdminPage() {
   const [agendamentos, setAgendamentos] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
+
+  // Pendências administrativas (tabela pendencias_admin) em aberto — hoje só
+  // cancelamentos feitos pela cliente (ver TIPOS_PENDENCIA). Renderizadas como
+  // cards à parte na aba "Pendentes", junto dos agendamentos com status
+  // 'pendente'.
+  const [pendenciasAdmin, setPendenciasAdmin] = useState([]);
 
   // Respostas do popup de perguntas (ver FormularioAgendamento), por
   // agendamento_id — Map<id, string[]> já formatado (lib/agendamentoRespostas),
@@ -466,6 +542,24 @@ export default function AdminPage() {
     setAgendamentoParaTrocar(null);
   }
 
+  // Arquiva uma pendência administrativa (botão "Arquivar" de qualquer tipo em
+  // TIPOS_PENDENCIA): grava resolvido=true e, só se der certo, some o card da
+  // tela — sem precisar recarregar a página nem refazer o fetch inteiro.
+  async function handleArquivarPendencia(id) {
+    const { error } = await supabase
+      .from("pendencias_admin")
+      .update({ resolvido: true })
+      .eq("id", id);
+
+    if (error) {
+      setErro(`Não foi possível arquivar a pendência: ${error.message}`);
+      return;
+    }
+
+    setErro("");
+    setPendenciasAdmin((atuais) => atuais.filter((item) => item.id !== id));
+  }
+
   // Verifica a sessão ao montar e fica ouvindo mudanças (login/logout em
   // outra aba também caem aqui). Sem sessão → manda pro login do MESMO salão
   // (slug no path, via urlLogin(salon)).
@@ -601,6 +695,11 @@ export default function AdminPage() {
         dados.map((item) => item.id)
       );
       if (ativo) setRespostasPorAgendamento(respostas);
+
+      const { dados: dadosPendencias } = await buscarPendenciasAdmin(
+        estabelecimento.id
+      );
+      if (ativo) setPendenciasAdmin(dadosPendencias);
     }
 
     // `carregando` já começa true, então a carga inicial mostra o indicador.
@@ -834,12 +933,56 @@ export default function AdminPage() {
             somem daqui. Confirmar/Cancelar usam os MESMOS handlers de sempre
             (incl. o modal); o refresh derivado faz o item sair do inbox sozinho. */}
         {!carregando && !erro && viewPai === "pendentes" && (
-          inbox.length === 0 ? (
+          inbox.length === 0 && pendenciasAdmin.length === 0 ? (
             <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
-              Nenhum agendamento pendente.
+              Nenhuma pendência.
             </p>
           ) : (
             <ul className="space-y-3">
+              {/* Pendências administrativas (tabela pendencias_admin, ex.:
+                  cancelamento pela cliente) — cards visualmente distintos dos
+                  agendamentos pendentes abaixo (ver TIPOS_PENDENCIA). */}
+              {pendenciasAdmin.map((item) => {
+                const config = TIPOS_PENDENCIA[item.tipo] ?? TIPO_PENDENCIA_PADRAO;
+                const acoes = config.acoes(item, { arquivar: handleArquivarPendencia });
+                return (
+                  <li
+                    key={`pendencia-${item.id}`}
+                    className={`rounded-2xl p-4 shadow-sm ring-1 transition ${config.corCard}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <config.Icone
+                        className={`h-5 w-5 shrink-0 ${config.corIcone}`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-heading">
+                          {item.titulo}
+                        </p>
+                        {item.descricao && (
+                          <p className="mt-0.5 text-sm text-body">
+                            {item.descricao}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-col gap-2">
+                      {acoes.map((acao) => (
+                        <button
+                          key={acao.id}
+                          type="button"
+                          onClick={acao.onClick}
+                          className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition ${acao.classe}`}
+                        >
+                          <acao.Icone className="h-4 w-4" />
+                          {acao.rotulo}
+                        </button>
+                      ))}
+                    </div>
+                  </li>
+                );
+              })}
+
               {inbox.map((item) => (
                 <li
                   key={item.id}
@@ -1267,6 +1410,9 @@ export default function AdminPage() {
               );
             })}
           </nav>
+
+          {/* Item fixo, visível em qualquer aba (ver componente). */}
+          <AtivarNotificacoes estabelecimento={estabelecimento} />
 
           {/* "Sair" mora no drawer (saiu do header). */}
           <div className="border-t border-border p-2">
