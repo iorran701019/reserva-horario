@@ -533,7 +533,7 @@ export default function GerenciarServicos({ estabelecimento }) {
         nome,
         preco_centavos: centavos,
         duracao_min: duracao,
-<// Agrupamento pro acordeão: categorias na ordem de exibição, e o grupo
+// Agrupamento pro acordeão: categorias na ordem de exibição, e o grupo
   // sintético "Sem categoria" — serviços sem categoria_id, ou apontando pra
   // uma categoria que não existe mais (manutenção incluída, pelo mesmo
   // categoria_id herdado do serviço-base). Cada um só aparece se tiver
