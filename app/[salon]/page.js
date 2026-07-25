@@ -283,12 +283,15 @@ export default function AgendarPage() {
           <a
             href={linkWhatsApp(
               estabelecimento.whatsapp,
-              MENSAGEM_SOLICITACAO_ENVIADA({
-                servico: servico?.nome,
-                data: formatarData(form.data),
-                horario,
-                nome: form.nome,
-              })
+              MENSAGEM_SOLICITACAO_ENVIADA(
+                {
+                  servico: servico?.nome,
+                  data: formatarData(form.data),
+                  horario,
+                  nome: form.nome,
+                },
+                estabelecimento.msg_solicitacao_enviada
+              )
             )}
             target="_blank"
             rel="noopener noreferrer"
@@ -336,6 +339,7 @@ export default function AgendarPage() {
             cadastroCompleto={Boolean(estabelecimento.cadastro_completo)}
             estabelecimentoWhatsapp={estabelecimento.whatsapp}
             nomeContato={nomeContatoExibido}
+            msgFalhaCadastro={estabelecimento.msg_falha_cadastro}
             onIdentificado={setClienteIdentificado}
           />
         ) : agendamentosAtivos === null ? (

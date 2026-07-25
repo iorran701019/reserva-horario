@@ -14,12 +14,15 @@ import { linkWhatsApp, MENSAGEM_FALHA_CADASTRO } from "@/lib/whatsapp";
 //   modalContato         – true abre o modal "fale com a gente" (3ª tentativa).
 //   estabelecimentoWhatsapp, nomeContato – pro link/texto do modal de contato
 //                          (mesmo padrão de ContatoDono.js).
+//   msgFalhaCadastro     – texto personalizado (estabelecimentos.
+//                          msg_falha_cadastro); null/undefined usa o padrão.
 //   onConfirmar, onNegar, onFecharContato – handlers do hook.
 export default function ModalConflitoWhatsapp({
   clienteConflitante,
   modalContato,
   estabelecimentoWhatsapp,
   nomeContato = "a equipe",
+  msgFalhaCadastro,
   onConfirmar,
   onNegar,
   onFecharContato,
@@ -97,7 +100,10 @@ export default function ModalConflitoWhatsapp({
             </p>
 
             <a
-              href={linkWhatsApp(estabelecimentoWhatsapp, MENSAGEM_FALHA_CADASTRO())}
+              href={linkWhatsApp(
+                estabelecimentoWhatsapp,
+                MENSAGEM_FALHA_CADASTRO(msgFalhaCadastro)
+              )}
               target="_blank"
               rel="noopener noreferrer"
               onClick={onFecharContato}

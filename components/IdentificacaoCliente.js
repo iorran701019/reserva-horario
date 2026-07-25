@@ -43,6 +43,8 @@ import { useConflitoWhatsapp } from "@/lib/checagemWhatsapp";
 //                       lib/checagemWhatsapp.js) e ao CadastroCliente, que
 //                       precisa deles pro mesmo modal na etapa
 //                       "completarEndereco".
+//   msgFalhaCadastro  – texto personalizado (estabelecimentos.
+//                       msg_falha_cadastro) repassado pro mesmo modal.
 //   onIdentificado    – recebe { id, nome, telefone, clienteNovo } pronto
 //                       pra virar clienteInicial do FormularioAgendamento.
 export default function IdentificacaoCliente({
@@ -50,6 +52,7 @@ export default function IdentificacaoCliente({
   cadastroCompleto = false,
   estabelecimentoWhatsapp,
   nomeContato,
+  msgFalhaCadastro,
   onIdentificado,
 }) {
   // "telefone" (pede WhatsApp) -> "confirmar" (achou, confirma o nome) ->
@@ -430,6 +433,7 @@ export default function IdentificacaoCliente({
           clienteNovo={clienteNovo}
           estabelecimentoWhatsapp={estabelecimentoWhatsapp}
           nomeContato={nomeContato}
+          msgFalhaCadastro={msgFalhaCadastro}
           onCadastrado={onIdentificado}
         />
       )}
@@ -440,6 +444,7 @@ export default function IdentificacaoCliente({
       modalContato={conflitoWhatsapp.modalContato}
       estabelecimentoWhatsapp={estabelecimentoWhatsapp}
       nomeContato={nomeContato}
+      msgFalhaCadastro={msgFalhaCadastro}
       onConfirmar={() => conflitoWhatsapp.confirmarConflito(onIdentificado, whatsappSimples)}
       onNegar={conflitoWhatsapp.negarConflito}
       onFecharContato={conflitoWhatsapp.fecharModalContato}

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import CampoMensagemWhatsapp from "@/components/CampoMensagemWhatsapp";
+import { MENSAGENS_WHATSAPP_CONFIG, substituirVariaveis } from "@/lib/whatsapp";
 
 // Configurações do salão (tabela `estabelecimentos`) editáveis pelo dono direto
 // no admin:
@@ -29,6 +31,17 @@ function centavosParaReais(centavos) {
   if (!centavos) return "";
   return (centavos / 100).toFixed(2);
 }
+
+// Valores fictícios pra prévia das mensagens de WhatsApp (lista retrátil
+// abaixo) — cobre todas as variáveis usadas por qualquer uma das 10
+// mensagens (ver MENSAGENS_WHATSAPP_CONFIG em lib/whatsapp.js).
+const VALORES_EXEMPLO_MENSAGENS = {
+  nome_cliente: "Maria",
+  data: "15/08",
+  horario: "14:00",
+  servico: "Manicure completa",
+  link: "https://agenda.exemplo.com/salao",
+};
 
 export default function ConfiguracoesSalao({ estabelecimento }) {
   // Valor do toggle. undefined = ainda carregando o estado atual do banco.
@@ -99,6 +112,17 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const [erroLinkLocalizacao, setErroLinkLocalizacao] = useState("");
   const [statusLinkLocalizacao, setStatusLinkLocalizacao] = useState("");
 
+  // As 10 mensagens de WhatsApp editáveis (ver MENSAGENS_WHATSAPP_CONFIG em
+  // lib/whatsapp.js). `mensagens` guarda o texto VIGENTE de cada campo
+  // (personalizado se houver, senão o padrão) — undefined = carregando.
+  // Status/erro por campo, pra cada linha ter seu próprio feedback.
+  const [mensagens, setMensagens] = useState(undefined);
+  const [statusMensagens, setStatusMensagens] = useState({});
+  const [erroMensagens, setErroMensagens] = useState({});
+  // Qual das 10 mensagens está expandida — só uma por vez, mesmo padrão do
+  // acordeão de blocos acima.
+  const [mensagemExpandida, setMensagemExpandida] = useState(null);
+
   // Carrega os valores atuais ao abrir.
   useEffect(() => {
     let ativo = true;
@@ -107,7 +131,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -162,6 +186,12 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
 
       setErroLinkLocalizacao("");
       setLinkLocalizacao(data?.link_localizacao ?? "");
+
+      const textosMensagens = {};
+      MENSAGENS_WHATSAPP_CONFIG.forEach(({ campo, padrao }) => {
+        textosMensagens[campo] = data?.[campo] ?? padrao;
+      });
+      setMensagens(textosMensagens);
     }
 
     carregar();
@@ -442,6 +472,34 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     }
 
     setStatusLinkLocalizacao("salvo");
+  }
+
+  // Grava o texto vigente de UMA mensagem (`mensagens[campo]`), literal —
+  // inclusive string vazia, quando o dono esvazia o campo de propósito (ver
+  // regra em MENSAGENS_WHATSAPP_CONFIG/lib/whatsapp.js: vazio salvo é ''
+  // ("enviar em branco"), nunca null ("nunca editado, usa o padrão")).
+  async function salvarMensagem(campo) {
+    setStatusMensagens((s) => ({ ...s, [campo]: "salvando" }));
+    setErroMensagens((s) => ({ ...s, [campo]: "" }));
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ [campo]: mensagens[campo] })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setStatusMensagens((s) => ({ ...s, [campo]: "" }));
+      setErroMensagens((s) => ({
+        ...s,
+        [campo]: `Não foi possível salvar: ${error.message}`,
+      }));
+      return;
+    }
+
+    setStatusMensagens((s) => ({ ...s, [campo]: "salvo" }));
+    setTimeout(() => {
+      setStatusMensagens((s) => (s[campo] === "salvo" ? { ...s, [campo]: "" } : s));
+    }, 2500);
   }
 
   const carregandoValor = escolhaProfissional === undefined;
@@ -807,6 +865,88 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
                 <p className="mt-2 text-xs text-red-600">{erroReservaExpira}</p>
               )}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bloco: Mensagens de WhatsApp — lista das 10 mensagens editáveis, cada
+          uma com sua própria prévia (linha truncada) e expansão individual
+          (mensagemExpandida), aninhada dentro deste bloco retrátil. */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("mensagens")}
+          aria-expanded={blocoAberto === "mensagens"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="font-semibold text-heading">Mensagens de WhatsApp</span>
+            <span className="truncate text-xs text-muted">
+              Digite &quot;/&quot; para inserir variáveis
+            </span>
+          </span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "mensagens" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "mensagens" && (
+          <div className="border-t border-border divide-y divide-border">
+            {MENSAGENS_WHATSAPP_CONFIG.map(({ campo, titulo, gatilho, variaveis, padrao }) => {
+              const textoVigente = mensagens?.[campo] ?? padrao;
+              const preview = substituirVariaveis(textoVigente, VALORES_EXEMPLO_MENSAGENS);
+              const aberta = mensagemExpandida === campo;
+
+              return (
+                <div key={campo} className="p-4">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMensagemExpandida((atual) => (atual === campo ? null : campo))
+                    }
+                    aria-expanded={aberta}
+                    className="flex w-full items-start justify-between gap-3 text-left"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-heading">
+                        {titulo}
+                      </span>
+                      <span className="mt-0.5 line-clamp-3 block text-xs text-muted">
+                        {preview}
+                      </span>
+                    </span>
+                    <span aria-hidden="true" className="mt-0.5 shrink-0 text-xs text-body">
+                      {aberta ? "▲" : "▼"}
+                    </span>
+                  </button>
+
+                  {aberta && (
+                    <div className="mt-3 space-y-2">
+                      <CampoMensagemWhatsapp
+                        value={mensagens?.[campo] ?? ""}
+                        onChange={(novo) =>
+                          setMensagens((m) => ({ ...m, [campo]: novo }))
+                        }
+                        onBlur={() => salvarMensagem(campo)}
+                        variaveisDisponiveis={variaveis}
+                      />
+
+                      <p className="text-xs text-muted">{gatilho}</p>
+
+                      {statusMensagens[campo] === "salvando" && (
+                        <p className="text-xs text-muted">Salvando…</p>
+                      )}
+                      {statusMensagens[campo] === "salvo" && !erroMensagens[campo] && (
+                        <p className="text-xs font-medium text-green-600">Salvo ✓</p>
+                      )}
+                      {erroMensagens[campo] && (
+                        <p className="text-xs text-red-600">{erroMensagens[campo]}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

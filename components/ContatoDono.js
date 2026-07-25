@@ -15,7 +15,10 @@ import { linkWhatsApp, MENSAGEM_DUVIDA_GENERICA } from "@/lib/whatsapp";
 export default function ContatoDono({ estabelecimento, nome = "a equipe" }) {
   return (
     <a
-      href={linkWhatsApp(estabelecimento.whatsapp, MENSAGEM_DUVIDA_GENERICA())}
+      href={linkWhatsApp(
+        estabelecimento.whatsapp,
+        MENSAGEM_DUVIDA_GENERICA(estabelecimento.msg_duvida_generica)
+      )}
       target="_blank"
       rel="noopener noreferrer"
       className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-full bg-green-600 px-4 py-3 font-medium text-white shadow-lg transition hover:bg-green-700"

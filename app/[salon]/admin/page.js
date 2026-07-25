@@ -397,7 +397,10 @@ export default function AdminPage() {
     setErro("");
     atualizarStatusLocal(agendamento.id, "confirmado");
 
-    abrirWhatsApp(agendamento.telefone, MENSAGEM_CONFIRMACAO(agendamento));
+    abrirWhatsApp(
+      agendamento.telefone,
+      MENSAGEM_CONFIRMACAO(agendamento, estabelecimento.msg_confirmacao)
+    );
   }
 
   // Botão B: só roda DEPOIS que o dono confirma no modal. Grava o status
@@ -426,7 +429,12 @@ export default function AdminPage() {
     const base = process.env.NEXT_PUBLIC_URL_BASE || window.location.origin;
     abrirWhatsApp(
       agendamento.telefone,
-      MENSAGEM_CANCELAMENTO(agendamento, base, estabelecimento.slug)
+      MENSAGEM_CANCELAMENTO(
+        agendamento,
+        base,
+        estabelecimento.slug,
+        estabelecimento.msg_cancelamento
+      )
     );
     setAgendamentoParaCancelar(null);
   }
@@ -437,7 +445,7 @@ export default function AdminPage() {
   // estado local pelo MESMO atualizarItemLocal dos outros handlers — o modal
   // (dados vivos) reflete na hora e o botão vira "Reenviar lembrete".
   async function handleEnviarLembrete(item) {
-    abrirWhatsApp(item.telefone, MENSAGEM_LEMBRETE(item));
+    abrirWhatsApp(item.telefone, MENSAGEM_LEMBRETE(item, estabelecimento.msg_lembrete));
 
     const lembrete_enviado_em = new Date().toISOString();
     const { error } = await supabase
@@ -1187,7 +1195,10 @@ export default function AdminPage() {
                         <button
                           type="button"
                           onClick={() =>
-                            abrirWhatsApp(item.telefone, MENSAGEM_CONTATO(item))
+                            abrirWhatsApp(
+                              item.telefone,
+                              MENSAGEM_CONTATO(item, estabelecimento.msg_reativacao)
+                            )
                           }
                           className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
                         >

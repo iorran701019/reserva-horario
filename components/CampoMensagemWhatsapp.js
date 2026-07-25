@@ -15,10 +15,13 @@ import { useEffect, useRef, useState } from "react";
 //   onChange              – recebe o novo texto (string) a cada alteração.
 //   variaveisDisponiveis  – array de strings (ex.: "nome_cliente") oferecidas
 //                           no menu. Vazio desativa o gatilho "/".
+//   onBlur                – opcional; repassado direto ao textarea (ex.:
+//                           salvar ao sair do campo).
 export default function CampoMensagemWhatsapp({
   value,
   onChange,
   variaveisDisponiveis = [],
+  onBlur,
 }) {
   const wrapperRef = useRef(null);
   const textareaRef = useRef(null);
@@ -132,6 +135,7 @@ export default function CampoMensagemWhatsapp({
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
+        onBlur={onBlur}
         rows={5}
         placeholder="Digite a mensagem... use / para inserir uma variável"
         className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"

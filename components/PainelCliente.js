@@ -200,11 +200,14 @@ export default function PainelCliente({
     window.open(
       linkWhatsApp(
         estabelecimento.whatsapp,
-        MENSAGEM_CANCELAMENTO_CLIENTE({
-          nomeCliente: clienteAtual.nome,
-          data: formatarData(item.data),
-          horario: item.horario,
-        })
+        MENSAGEM_CANCELAMENTO_CLIENTE(
+          {
+            nomeCliente: clienteAtual.nome,
+            data: formatarData(item.data),
+            horario: item.horario,
+          },
+          estabelecimento.msg_cancelamento_cliente
+        )
       ),
       "_blank",
       "noopener,noreferrer"
@@ -306,10 +309,13 @@ export default function PainelCliente({
                     <a
                       href={linkWhatsApp(
                         estabelecimento.whatsapp,
-                        MENSAGEM_AJUDA_PRAZO_EXPIRADO({
-                          data: formatarData(item.data),
-                          horario: String(item.horario).slice(0, 5),
-                        })
+                        MENSAGEM_AJUDA_PRAZO_EXPIRADO(
+                          {
+                            data: formatarData(item.data),
+                            horario: String(item.horario).slice(0, 5),
+                          },
+                          estabelecimento.msg_ajuda_prazo_expirado
+                        )
                       )}
                       target="_blank"
                       rel="noopener noreferrer"
