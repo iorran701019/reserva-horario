@@ -1,6 +1,6 @@
 "use client";
 
-import { linkWhatsApp } from "@/lib/whatsapp";
+import { linkWhatsApp, MENSAGEM_FALHA_CADASTRO } from "@/lib/whatsapp";
 
 // Os dois modais da checagem de WhatsApp já cadastrado (ver
 // lib/checagemWhatsapp.js — useConflitoWhatsapp). Componente só de
@@ -14,12 +14,15 @@ import { linkWhatsApp } from "@/lib/whatsapp";
 //   modalContato         – true abre o modal "fale com a gente" (3ª tentativa).
 //   estabelecimentoWhatsapp, nomeContato – pro link/texto do modal de contato
 //                          (mesmo padrão de ContatoDono.js).
+//   msgFalhaCadastro     – texto personalizado (estabelecimentos.
+//                          msg_falha_cadastro); null/undefined usa o padrão.
 //   onConfirmar, onNegar, onFecharContato – handlers do hook.
 export default function ModalConflitoWhatsapp({
   clienteConflitante,
   modalContato,
   estabelecimentoWhatsapp,
   nomeContato = "a equipe",
+  msgFalhaCadastro,
   onConfirmar,
   onNegar,
   onFecharContato,
@@ -99,7 +102,7 @@ export default function ModalConflitoWhatsapp({
             <a
               href={linkWhatsApp(
                 estabelecimentoWhatsapp,
-                "Olá! Estou com um problema pra me cadastrar."
+                MENSAGEM_FALHA_CADASTRO(msgFalhaCadastro)
               )}
               target="_blank"
               rel="noopener noreferrer"

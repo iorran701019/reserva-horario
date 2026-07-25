@@ -3,7 +3,11 @@
 import { useEffect, useState } from "react";
 import { MapPin } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import { linkWhatsApp } from "@/lib/whatsapp";
+import {
+  linkWhatsApp,
+  MENSAGEM_CANCELAMENTO_CLIENTE,
+  MENSAGEM_AJUDA_PRAZO_EXPIRADO,
+} from "@/lib/whatsapp";
 import { buscarAgendamentosAtivos, buscarHistoricoRecente } from "@/lib/agendamentosCliente";
 import { buscarManutencaoSugerida } from "@/lib/manutencaoSugerida";
 import { classificarAgendamento, inicioDoAtendimento } from "@/lib/particao";
@@ -196,7 +200,14 @@ export default function PainelCliente({
     window.open(
       linkWhatsApp(
         estabelecimento.whatsapp,
-        `Olá! ${clienteAtual.nome} cancelou o agendamento de ${formatarData(item.data)} às ${item.horario}.`
+        MENSAGEM_CANCELAMENTO_CLIENTE(
+          {
+            nomeCliente: clienteAtual.nome,
+            data: formatarData(item.data),
+            horario: item.horario,
+          },
+          estabelecimento.msg_cancelamento_cliente
+        )
       ),
       "_blank",
       "noopener,noreferrer"
@@ -298,7 +309,13 @@ export default function PainelCliente({
                     <a
                       href={linkWhatsApp(
                         estabelecimento.whatsapp,
-                        `Olá! Preciso de ajuda com meu agendamento de ${formatarData(item.data)} às ${String(item.horario).slice(0, 5)}.`
+                        MENSAGEM_AJUDA_PRAZO_EXPIRADO(
+                          {
+                            data: formatarData(item.data),
+                            horario: String(item.horario).slice(0, 5),
+                          },
+                          estabelecimento.msg_ajuda_prazo_expirado
+                        )
                       )}
                       target="_blank"
                       rel="noopener noreferrer"

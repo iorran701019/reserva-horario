@@ -41,6 +41,8 @@ import ModalConflitoWhatsapp from "@/components/ModalConflitoWhatsapp";
 //                            x cliente antigo só completando endereço).
 //   estabelecimentoWhatsapp, nomeContato – pro modal "fale com a gente" da
 //                            checagem de conflito (mesmo padrão ContatoDono).
+//   msgFalhaCadastro        – texto personalizado (estabelecimentos.
+//                            msg_falha_cadastro) repassado pro mesmo modal.
 //   onCadastrado           – recebe { id, nome, telefone, clienteNovo }
 //                            pronto pra virar clienteInicial do
 //                            FormularioAgendamento. Também usado (via modal
@@ -55,6 +57,7 @@ export default function CadastroCliente({
   clienteNovo,
   estabelecimentoWhatsapp,
   nomeContato,
+  msgFalhaCadastro,
   onCadastrado,
 }) {
   const [form, setForm] = useState({
@@ -407,6 +410,7 @@ export default function CadastroCliente({
       modalContato={conflitoWhatsapp.modalContato}
       estabelecimentoWhatsapp={estabelecimentoWhatsapp}
       nomeContato={nomeContato}
+      msgFalhaCadastro={msgFalhaCadastro}
       onConfirmar={() => conflitoWhatsapp.confirmarConflito(onCadastrado, form.whatsapp)}
       onNegar={conflitoWhatsapp.negarConflito}
       onFecharContato={conflitoWhatsapp.fecharModalContato}

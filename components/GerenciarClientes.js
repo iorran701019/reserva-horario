@@ -12,7 +12,7 @@ import {
   criarAnotacaoLivre,
 } from "@/lib/clientesAdmin";
 import { classificarAgendamento } from "@/lib/particao";
-import { linkWhatsApp } from "@/lib/whatsapp";
+import { linkWhatsApp, MENSAGEM_CONTATO_CLIENTE_ADMIN } from "@/lib/whatsapp";
 
 // Aba "Clientes" do /admin: lista somente-leitura dos clientes do salão
 // (tabela `clientes`, particionada por estabelecimento_id) com busca por nome
@@ -151,7 +151,7 @@ function tipoObservacao(item) {
 // (próximo agendamento, anamnese) + três seções retráteis carregadas sob
 // demanda (histórico completo, detalhe da anamnese, observações/anotações).
 // `cliente` já traz os campos cadastrais de buscarClientes.
-function DetalheCliente({ cliente, estabelecimentoId, onVoltar }) {
+function DetalheCliente({ cliente, estabelecimentoId, msgContatoAdmin, onVoltar }) {
   const [resumo, setResumo] = useState(null);
   const [carregando, setCarregando] = useState(true);
 
@@ -289,7 +289,10 @@ function DetalheCliente({ cliente, estabelecimentoId, onVoltar }) {
       <div>
         <h3 className="text-base font-semibold text-heading">{cliente.nome}</h3>
         <a
-          href={linkWhatsApp(cliente.whatsapp, `Olá ${cliente.nome}!`)}
+          href={linkWhatsApp(
+            cliente.whatsapp,
+            MENSAGEM_CONTATO_CLIENTE_ADMIN(cliente, msgContatoAdmin)
+          )}
           target="_blank"
           rel="noopener noreferrer"
           className="mt-1 inline-block text-sm text-primary underline-offset-2 hover:underline"
@@ -631,6 +634,7 @@ export default function GerenciarClientes({ estabelecimento }) {
       <DetalheCliente
         cliente={selecionado}
         estabelecimentoId={estabelecimento.id}
+        msgContatoAdmin={estabelecimento.msg_contato_admin}
         onVoltar={() => setSelecionado(null)}
       />
     );
