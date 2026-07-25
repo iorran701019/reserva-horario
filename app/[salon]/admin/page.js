@@ -12,6 +12,7 @@ import {
   MENSAGEM_LEMBRETE,
   MENSAGEM_CONTATO,
   MENSAGEM_CANCELAMENTO,
+  MENSAGEM_CONFIRMACAO,
 } from "@/lib/whatsapp";
 import { classificarAgendamento, fimDoAtendimento } from "@/lib/particao";
 import { profissionaisLivresNoHorario } from "@/lib/disponibilidade";
@@ -396,14 +397,7 @@ export default function AdminPage() {
     setErro("");
     atualizarStatusLocal(agendamento.id, "confirmado");
 
-    abrirWhatsApp(
-      agendamento.telefone,
-      `Olá ${agendamento.nome_cliente}! Seu agendamento de ${
-        agendamento.servicos?.nome ?? "serviço"
-      } no dia ${formatarData(
-        agendamento.data
-      )} às ${formatarHorario(agendamento.horario)} está confirmado. Será um prazer lhe atender! ✅`
-    );
+    abrirWhatsApp(agendamento.telefone, MENSAGEM_CONFIRMACAO(agendamento));
   }
 
   // Botão B: só roda DEPOIS que o dono confirma no modal. Grava o status

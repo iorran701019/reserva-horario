@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { MapPin } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import { linkWhatsApp } from "@/lib/whatsapp";
+import { linkWhatsApp, MENSAGEM_SOLICITACAO_ENVIADA } from "@/lib/whatsapp";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import { buscarTema } from "@/lib/temas";
 import { precisaAnamnese } from "@/lib/anamnese";
@@ -283,7 +283,12 @@ export default function AgendarPage() {
           <a
             href={linkWhatsApp(
               estabelecimento.whatsapp,
-              `Olá! Acabei de solicitar um agendamento de ${servico?.nome} para ${formatarData(form.data)} às ${horario}. Meu nome é ${form.nome}.`
+              MENSAGEM_SOLICITACAO_ENVIADA({
+                servico: servico?.nome,
+                data: formatarData(form.data),
+                horario,
+                nome: form.nome,
+              })
             )}
             target="_blank"
             rel="noopener noreferrer"

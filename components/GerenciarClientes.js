@@ -12,7 +12,7 @@ import {
   criarAnotacaoLivre,
 } from "@/lib/clientesAdmin";
 import { classificarAgendamento } from "@/lib/particao";
-import { linkWhatsApp } from "@/lib/whatsapp";
+import { linkWhatsApp, MENSAGEM_CONTATO_CLIENTE_ADMIN } from "@/lib/whatsapp";
 
 // Aba "Clientes" do /admin: lista somente-leitura dos clientes do salão
 // (tabela `clientes`, particionada por estabelecimento_id) com busca por nome
@@ -289,7 +289,7 @@ function DetalheCliente({ cliente, estabelecimentoId, onVoltar }) {
       <div>
         <h3 className="text-base font-semibold text-heading">{cliente.nome}</h3>
         <a
-          href={linkWhatsApp(cliente.whatsapp, `Olá ${cliente.nome}!`)}
+          href={linkWhatsApp(cliente.whatsapp, MENSAGEM_CONTATO_CLIENTE_ADMIN(cliente))}
           target="_blank"
           rel="noopener noreferrer"
           className="mt-1 inline-block text-sm text-primary underline-offset-2 hover:underline"

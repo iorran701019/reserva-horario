@@ -1,6 +1,6 @@
 "use client";
 
-import { linkWhatsApp } from "@/lib/whatsapp";
+import { linkWhatsApp, MENSAGEM_FALHA_CADASTRO } from "@/lib/whatsapp";
 
 // Os dois modais da checagem de WhatsApp já cadastrado (ver
 // lib/checagemWhatsapp.js — useConflitoWhatsapp). Componente só de
@@ -97,10 +97,7 @@ export default function ModalConflitoWhatsapp({
             </p>
 
             <a
-              href={linkWhatsApp(
-                estabelecimentoWhatsapp,
-                "Olá! Estou com um problema pra me cadastrar."
-              )}
+              href={linkWhatsApp(estabelecimentoWhatsapp, MENSAGEM_FALHA_CADASTRO())}
               target="_blank"
               rel="noopener noreferrer"
               onClick={onFecharContato}
