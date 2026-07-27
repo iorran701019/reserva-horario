@@ -89,13 +89,22 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
         // 'pilha-completa' (ex.: flavia) usa padding vertical reduzido: as
         // duas imagens empilhadas já preenchem mais altura que um título de
         // texto, então o mesmo py do padrão deixaria o header "grosso"
-        // demais. Os demais layouts (laysla, texto padrão) não mudam.
+        // demais. `headerCompacto` (ex.: laysla) é outro override pontual,
+        // por tenant — py bem menor que o padrão do layout 'esquerda' (dois
+        // cortes sucessivos já aplicados), com min-h reduzido junto pra não
+        // sobrar respiro (min-h só é piso; sem reduzi-lo, ele dominaria e a
+        // redução do py não apareceria). Os demais tenants (texto padrão,
+        // sem tema) não mudam.
         compacto
           ? ehPilhaCompleta
             ? "min-h-[70px] py-4 sm:min-h-[90px] sm:py-5"
+            : tema?.headerCompacto
+            ? "min-h-[92px] py-3.5 sm:min-h-[108px]"
             : "min-h-[110px] py-8 sm:min-h-[130px]"
           : ehPilhaCompleta
           ? "min-h-[120px] py-6 sm:min-h-[150px] sm:py-7"
+          : tema?.headerCompacto
+          ? "min-h-[136px] py-5 sm:min-h-[152px]"
           : "min-h-[180px] py-12 sm:min-h-[220px]",
       ].join(" ")}
       style={estiloFundo}

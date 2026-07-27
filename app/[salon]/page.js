@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { MapPin } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
@@ -17,6 +17,7 @@ import PainelCliente from "@/components/PainelCliente";
 import FormularioAgendamento, {
   formatarData,
 } from "@/components/FormularioAgendamento";
+import FotoPerfilCircular from "@/components/FotoPerfilCircular";
 
 // Página pública de agendamento. A lógica do wizard (serviço, slots, ocupados,
 // validação, insert) mora em FormularioAgendamento; aqui ficam só o layout e a
@@ -138,6 +139,23 @@ export default function AgendarPage() {
   useEffect(() => {
     if (resumo) tituloConfirmacaoRef.current?.focus();
   }, [resumo]);
+
+  // Altura ao vivo da caixa de identificação/wizard, usada como diâmetro do
+  // círculo de foto de perfil — ver FotoPerfilCircular. Ref em callback (não
+  // useRef) porque esse `div` só existe depois que o estabelecimento resolve
+  // e não há resumo — um useEffect com [] rodaria antes dele montar e nunca
+  // reconectaria o observer. ResizeObserver em vez de medir uma vez porque a
+  // altura muda de etapa pra etapa (telefone -> confirmar -> wizard...).
+  const [caixaEl, setCaixaEl] = useState(null);
+  const [alturaCaixa, setAlturaCaixa] = useState(0);
+  useLayoutEffect(() => {
+    if (!caixaEl) return;
+    const medir = () => setAlturaCaixa(caixaEl.getBoundingClientRect().height);
+    medir();
+    const observer = new ResizeObserver(medir);
+    observer.observe(caixaEl);
+    return () => observer.disconnect();
+  }, [caixaEl]);
 
   // Enquanto resolve o estabelecimento, segura a tela (evita piscar o wizard).
   if (estabelecimento === undefined) {
@@ -320,7 +338,17 @@ export default function AgendarPage() {
       style={estiloTemaRaiz}
     >
       <Hero nome={estabelecimento.nome} slug={estabelecimento.slug} />
-      <div className="mx-auto w-full max-w-md px-4 py-10 sm:py-16">
+      {/* `headerCompacto` (ex.: laysla) some com espaço em cima também aqui:
+          o topo desse wrapper é a distância entre o fim do Hero e "Agende seu
+          horário". pb fica igual ao padrão — só o pt muda, pra não mexer no
+          respiro antes do ContatoDono no fim da página. */}
+      <div
+        className={
+          temaAtivo?.headerCompacto
+            ? "mx-auto w-full max-w-md px-4 pt-3.5 pb-10 sm:pt-6 sm:pb-16"
+            : "mx-auto w-full max-w-md px-4 py-10 sm:py-16"
+        }
+      >
         <header className="mb-6 text-center">
           <h1 className="text-2xl font-bold text-heading">Agende seu horário</h1>
           <p className="mt-1 text-sm text-body">
@@ -328,51 +356,60 @@ export default function AgendarPage() {
           </p>
         </header>
 
+        <FotoPerfilCircular
+          src={estabelecimento.foto_perfil_url}
+          posicao={estabelecimento.foto_perfil_posicao}
+          diametro={alturaCaixa}
+          alt={`Foto de ${estabelecimento.nome}`}
+        />
+
         {/* Antes do wizard: identifica o cliente pelo WhatsApp e, se a
             anamnese estiver vencida (ou nunca ter sido preenchida), cobra ela
             também. Só então monta o FormularioAgendamento, já com
             clienteInicial preenchido — a etapa "dados" dele vira um resumo em
             vez de pedir nome/WhatsApp de novo. */}
-        {!clienteIdentificado ? (
-          <IdentificacaoCliente
-            estabelecimentoId={estabelecimento.id}
-            cadastroCompleto={Boolean(estabelecimento.cadastro_completo)}
-            estabelecimentoWhatsapp={estabelecimento.whatsapp}
-            nomeContato={nomeContatoExibido}
-            msgFalhaCadastro={estabelecimento.msg_falha_cadastro}
-            onIdentificado={setClienteIdentificado}
-          />
-        ) : agendamentosAtivos === null ? (
-          <p className="text-sm text-body">Carregando...</p>
-        ) : agendamentosAtivos.length > 0 && !modoNovoAgendamento ? (
-          <PainelCliente
-            estabelecimento={estabelecimento}
-            cliente={clienteIdentificado}
-            onNovoAgendamento={(servico) => {
-              setServicoManutencao(servico ?? null);
-              setModoNovoAgendamento(true);
-            }}
-            nomeProfissionalContato={nomeContatoExibido}
-          />
-        ) : anamneseNecessaria === null ? (
-          <p className="text-sm text-body">Carregando...</p>
-        ) : anamneseNecessaria ? (
-          <FormularioAnamnese
-            estabelecimentoId={estabelecimento.id}
-            clienteId={clienteIdentificado.id}
-            onConcluido={() => setAnamneseNecessaria(false)}
-          />
-        ) : (
-          // Sem prop `status`: o insert mantém o default "pendente" do banco.
-          <FormularioAgendamento
-            estabelecimento={estabelecimento}
-            clienteInicial={clienteIdentificado}
-            clienteEhNovo={clienteIdentificado?.clienteNovo ?? false}
-            nomeProfissionalContato={nomeContatoExibido}
-            servicoInicial={servicoManutencao}
-            onSucesso={(dados) => setResumo(dados)}
-          />
-        )}
+        <div ref={setCaixaEl}>
+          {!clienteIdentificado ? (
+            <IdentificacaoCliente
+              estabelecimentoId={estabelecimento.id}
+              cadastroCompleto={Boolean(estabelecimento.cadastro_completo)}
+              estabelecimentoWhatsapp={estabelecimento.whatsapp}
+              nomeContato={nomeContatoExibido}
+              msgFalhaCadastro={estabelecimento.msg_falha_cadastro}
+              onIdentificado={setClienteIdentificado}
+            />
+          ) : agendamentosAtivos === null ? (
+            <p className="text-sm text-body">Carregando...</p>
+          ) : agendamentosAtivos.length > 0 && !modoNovoAgendamento ? (
+            <PainelCliente
+              estabelecimento={estabelecimento}
+              cliente={clienteIdentificado}
+              onNovoAgendamento={(servico) => {
+                setServicoManutencao(servico ?? null);
+                setModoNovoAgendamento(true);
+              }}
+              nomeProfissionalContato={nomeContatoExibido}
+            />
+          ) : anamneseNecessaria === null ? (
+            <p className="text-sm text-body">Carregando...</p>
+          ) : anamneseNecessaria ? (
+            <FormularioAnamnese
+              estabelecimentoId={estabelecimento.id}
+              clienteId={clienteIdentificado.id}
+              onConcluido={() => setAnamneseNecessaria(false)}
+            />
+          ) : (
+            // Sem prop `status`: o insert mantém o default "pendente" do banco.
+            <FormularioAgendamento
+              estabelecimento={estabelecimento}
+              clienteInicial={clienteIdentificado}
+              clienteEhNovo={clienteIdentificado?.clienteNovo ?? false}
+              nomeProfissionalContato={nomeContatoExibido}
+              servicoInicial={servicoManutencao}
+              onSucesso={(dados) => setResumo(dados)}
+            />
+          )}
+        </div>
       </div>
       <ContatoDono estabelecimento={estabelecimento} nome={nomeContatoExibido} />
     </main>
