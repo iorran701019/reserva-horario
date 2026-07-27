@@ -54,6 +54,10 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
   const temaBruto = buscarTema(slug);
   const tema = temaBruto?.personalizado ? temaBruto : null;
   const ehPilhaCompleta = tema?.layoutMarca === "pilha-completa";
+  // achatarLogo (ex.: laysla) — imagens de marca vieram mais alongadas
+  // verticalmente do que o desejado; scaleY via CSS corrige sem reamostrar
+  // os PNGs. Genérico: qualquer tenant com o mesmo problema reaproveita.
+  const transformLogo = tema?.achatarLogo ? "scaleY(0.82)" : undefined;
 
   // Fundo do hero:
   //  - com foto (valeria/junior): a imagem cobrindo o hero; o contraste do texto
@@ -115,7 +119,7 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
             alt=""
             width={220}
             height={110}
-            style={{ width: "auto" }}
+            style={{ width: "auto", transform: transformLogo }}
             className={compacto ? "h-[70px] sm:h-[90px]" : "h-[90px] sm:h-[110px]"}
             preload
           />
@@ -124,7 +128,7 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
             alt={tema.nomeExibido || nome || NOME_LOJA}
             width={340}
             height={130}
-            style={{ width: "auto" }}
+            style={{ width: "auto", transform: transformLogo }}
             className={compacto ? "h-10 sm:h-12" : "h-12 sm:h-14"}
             preload
           />
@@ -141,6 +145,7 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
             alt=""
             width={266}
             height={338}
+            style={{ transform: transformLogo }}
             className={compacto ? "h-16 w-auto sm:h-20" : "h-24 w-auto sm:h-28"}
             preload
           />
@@ -154,7 +159,7 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
                 alt={tema.nomeExibido || nome || NOME_LOJA}
                 width={1600}
                 height={292}
-                style={{ width: "auto" }}
+                style={{ width: "auto", transform: transformLogo }}
                 className={compacto ? "h-12 sm:h-14" : "h-16 sm:h-20"}
                 preload
               />
