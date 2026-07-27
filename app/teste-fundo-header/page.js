@@ -29,9 +29,20 @@ const FILTER_CONTORNO = [
   `drop-shadow(0 -1px 0 ${CONTORNO_COR})`,
 ].join(" ");
 
+// Achatamento vertical das Variações D/E: só CSS (transform: scaleY), sem
+// reamostrar os PNGs — largura original mantida, altura visual comprimida.
+const ACHATAMENTO = "scaleY(0.82)";
+
 // Bloco do header — mesmo markup/tamanhos do ramo `layoutMarca: 'esquerda'`
-// em Hero.js, com `bgHeader` e `logoFilter` parametrizáveis por variação.
-function HeaderPreview({ bgHeader, logoFilter }) {
+// em Hero.js, com `bgHeader`/`logoFilter` (contorno, Variação C) e
+// `transformMonograma`/`transformWordmark` (achatamento, Variações D/E)
+// parametrizáveis por variação.
+function HeaderPreview({
+  bgHeader,
+  logoFilter,
+  transformMonograma,
+  transformWordmark,
+}) {
   return (
     <header
       className="relative flex min-h-[180px] flex-col items-center justify-center border-b px-4 py-12 text-center sm:min-h-[220px]"
@@ -43,7 +54,7 @@ function HeaderPreview({ bgHeader, logoFilter }) {
           alt=""
           width={266}
           height={338}
-          style={{ filter: logoFilter }}
+          style={{ filter: logoFilter, transform: transformMonograma }}
           className="h-24 w-auto sm:h-28"
         />
         <div className="flex flex-1 flex-col items-center text-center">
@@ -52,7 +63,11 @@ function HeaderPreview({ bgHeader, logoFilter }) {
             alt={tema.nomeExibido}
             width={1600}
             height={292}
-            style={{ width: "auto", filter: logoFilter }}
+            style={{
+              width: "auto",
+              filter: logoFilter,
+              transform: transformWordmark,
+            }}
             className="h-16 sm:h-20"
           />
         </div>
@@ -101,6 +116,24 @@ export default function TesteFundoHeaderPage() {
         descricao="Fundo igual ao body + contorno escuro na logo"
       >
         <HeaderPreview bgHeader={tema.bgBody} logoFilter={FILTER_CONTORNO} />
+      </Variacao>
+
+      <Variacao titulo="Variação D" descricao="Achatada em tudo">
+        <HeaderPreview
+          bgHeader={BG_LEVEMENTE_CLARO}
+          transformMonograma={ACHATAMENTO}
+          transformWordmark={ACHATAMENTO}
+        />
+      </Variacao>
+
+      <Variacao
+        titulo="Variação E"
+        descricao="Achatada só no nome/subtítulo"
+      >
+        <HeaderPreview
+          bgHeader={BG_LEVEMENTE_CLARO}
+          transformWordmark={ACHATAMENTO}
+        />
       </Variacao>
     </main>
   );
