@@ -145,26 +145,43 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
             preload
           />
           <div className="flex flex-1 flex-col items-center text-center">
-            <h1
-              className={[
-                tema.fonteDisplay,
-                "font-medium tracking-tight",
-                compacto ? "text-2xl sm:text-3xl" : "text-3xl sm:text-4xl",
-              ].join(" ")}
-              style={{ color: tema.textoSecundario }}
-            >
-              {tema.nomeExibido || nome || NOME_LOJA}
-            </h1>
-            {tema.tagline && (
-              <span
-                className={[
-                  tema.fonteDisplay,
-                  "mt-1 text-xs font-normal uppercase tracking-[0.25em] sm:text-sm",
-                ].join(" ")}
-                style={{ color: tema.textoSecundario }}
-              >
-                {tema.tagline}
-              </span>
+            {tema.marcaTexto ? (
+              // Nome + tagline já vêm prontos na imagem (fonte original da
+              // marca) — substitui o texto ao vivo, igual ao wordmark da
+              // Flávia, mas mantendo o monograma à esquerda (layout 'esquerda').
+              <Image
+                src={tema.marcaTexto}
+                alt={tema.nomeExibido || nome || NOME_LOJA}
+                width={1600}
+                height={292}
+                style={{ width: "auto" }}
+                className={compacto ? "h-12 sm:h-14" : "h-16 sm:h-20"}
+                preload
+              />
+            ) : (
+              <>
+                <h1
+                  className={[
+                    tema.fonteDisplay,
+                    "font-medium tracking-tight",
+                    compacto ? "text-2xl sm:text-3xl" : "text-3xl sm:text-4xl",
+                  ].join(" ")}
+                  style={{ color: tema.textoSecundario }}
+                >
+                  {tema.nomeExibido || nome || NOME_LOJA}
+                </h1>
+                {tema.tagline && (
+                  <span
+                    className={[
+                      tema.fonteDisplay,
+                      "mt-1 text-xs font-normal uppercase tracking-[0.25em] sm:text-sm",
+                    ].join(" ")}
+                    style={{ color: tema.textoSecundario }}
+                  >
+                    {tema.tagline}
+                  </span>
+                )}
+              </>
             )}
           </div>
         </div>
