@@ -12,7 +12,11 @@ import { linkWhatsApp, MENSAGEM_DUVIDA_GENERICA } from "@/lib/whatsapp";
 // Props:
 //   estabelecimento – { id, whatsapp } do salão resolvido pelo slug.
 //   nome            – nome já resolvido a exibir (com fallback já aplicado).
-export default function ContatoDono({ estabelecimento, nome = "a equipe" }) {
+//   style           – opcional; usado pelo RodapePagina pra elevar o `bottom`
+//                      fixed acima do RodapeSelos quando ele entra na
+//                      viewport, evitando que o botão sobreponha os selos no
+//                      fim do scroll (mobile).
+export default function ContatoDono({ estabelecimento, nome = "a equipe", style }) {
   return (
     <a
       href={linkWhatsApp(
@@ -21,6 +25,7 @@ export default function ContatoDono({ estabelecimento, nome = "a equipe" }) {
       )}
       target="_blank"
       rel="noopener noreferrer"
+      style={style}
       className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-full bg-green-600 px-4 py-3 font-medium text-white shadow-lg transition hover:bg-green-700"
     >
       <svg
