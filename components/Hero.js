@@ -173,12 +173,16 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
               // Nome + tagline já vêm prontos na imagem (fonte original da
               // marca) — substitui o texto ao vivo, igual ao wordmark da
               // Flávia, mas mantendo o monograma à esquerda (layout 'esquerda').
+              // SEM transformLogo aqui: ao contrário do monograma (tema.marca,
+              // que segue alongado por design), este wordmark (v4) já veio
+              // com a proporção correta — aplicar o scaleY(0.82) de
+              // achatarLogo de novo o deixaria achatado demais.
               <Image
                 src={tema.marcaTexto}
                 alt={tema.nomeExibido || nome || NOME_LOJA}
                 width={1600}
-                height={292}
-                style={{ width: "auto", transform: transformLogo }}
+                height={307}
+                style={{ width: "auto" }}
                 className={compacto ? "h-12 sm:h-14" : "h-16 sm:h-20"}
                 preload
               />
