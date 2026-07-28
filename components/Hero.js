@@ -158,6 +158,16 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
             className={compacto ? "h-16 w-auto sm:h-20" : "h-24 w-auto sm:h-28"}
             preload
           />
+          {tema.dividorHeader && (
+            // Linha fina separando monograma e nome/tagline — cor sempre
+            // var(--color-heading) (já tematizada por tenant), então o campo
+            // (tema.dividorHeader) é só o gatilho booleano, sem cor própria.
+            <div
+              aria-hidden="true"
+              className={compacto ? "h-10 w-px sm:h-12" : "h-14 w-px sm:h-16"}
+              style={{ backgroundColor: "var(--color-heading)" }}
+            />
+          )}
           <div className="flex flex-1 flex-col items-center text-center">
             {tema.marcaTexto ? (
               // Nome + tagline já vêm prontos na imagem (fonte original da
