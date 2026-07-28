@@ -340,17 +340,13 @@ export default function AgendarPage() {
       style={estiloTemaRaiz}
     >
       <Hero nome={estabelecimento.nome} slug={estabelecimento.slug} />
-      {/* `headerCompacto` (ex.: laysla) some com espaço em cima também aqui:
-          o topo desse wrapper é a distância entre o fim do Hero e "Agende seu
-          horário". pb fica igual ao padrão — só o pt muda, pra não mexer no
-          respiro antes do ContatoDono no fim da página. */}
-      <div
-        className={
-          temaAtivo?.headerCompacto
-            ? "mx-auto w-full max-w-md px-4 pt-3.5 pb-10 sm:pt-6 sm:pb-16"
-            : "mx-auto w-full max-w-md px-4 py-10 sm:py-16"
-        }
-      >
+      {/* pt reduzido é o padrão pra TODOS os tenants agora — distância entre
+          o fim do Hero e "Agende seu horário" enxuta por padrão, não só pra
+          quem tem headerCompacto (esse flag continua valendo pros outros
+          ajustes de padding do Hero, que são independentes). pb segue igual
+          ao original, pra não mexer no respiro antes do ContatoDono no fim
+          da página. */}
+      <div className="mx-auto w-full max-w-md px-4 pt-3.5 pb-10 sm:pt-6 sm:pb-16">
         <header className="mb-6 text-center">
           <h1 className="text-2xl font-bold text-heading">Agende seu horário</h1>
           <p className="mt-1 text-sm text-body">
