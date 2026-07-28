@@ -18,6 +18,7 @@ import FormularioAgendamento, {
   formatarData,
 } from "@/components/FormularioAgendamento";
 import FotoPerfilCircular from "@/components/FotoPerfilCircular";
+import RodapeSelos from "@/components/RodapeSelos";
 
 // Página pública de agendamento. A lógica do wizard (serviço, slots, ocupados,
 // validação, insert) mora em FormularioAgendamento; aqui ficam só o layout e a
@@ -327,6 +328,7 @@ export default function AgendarPage() {
           </a>
         </div>
         </div>
+        <RodapeSelos estabelecimento={estabelecimento} />
         <ContatoDono estabelecimento={estabelecimento} nome={nomeContatoExibido} />
       </main>
     );
@@ -411,6 +413,7 @@ export default function AgendarPage() {
           )}
         </div>
       </div>
+      <RodapeSelos estabelecimento={estabelecimento} />
       <ContatoDono estabelecimento={estabelecimento} nome={nomeContatoExibido} />
     </main>
   );
