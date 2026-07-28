@@ -188,7 +188,7 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
                 src={tema.marcaTexto}
                 alt={tema.nomeExibido || nome || NOME_LOJA}
                 width={1600}
-                height={307}
+                height={289}
                 style={{ width: "auto", transform: transformWordmark }}
                 className={compacto ? "h-12 sm:h-14" : "h-16 sm:h-20"}
                 preload
