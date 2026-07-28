@@ -58,6 +58,12 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
   // verticalmente do que o desejado; scaleY via CSS corrige sem reamostrar
   // os PNGs. Genérico: qualquer tenant com o mesmo problema reaproveita.
   const transformLogo = tema?.achatarLogo ? "scaleY(0.82)" : undefined;
+  // achatarWordmark (ex.: laysla) — achatamento ESTÉTICO do wordmark
+  // (nome), pedido pela cliente; não confundir com achatarLogo, que corrige
+  // a proporção alongada do monograma. Campo/valor separados de propósito.
+  const transformWordmark = tema?.achatarWordmark
+    ? `scaleY(${tema.achatarWordmark})`
+    : undefined;
 
   // Fundo do hero:
   //  - com foto (valeria/junior): a imagem cobrindo o hero; o contraste do texto
@@ -174,15 +180,16 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
               // marca) — substitui o texto ao vivo, igual ao wordmark da
               // Flávia, mas mantendo o monograma à esquerda (layout 'esquerda').
               // SEM transformLogo aqui: ao contrário do monograma (tema.marca,
-              // que segue alongado por design), este wordmark (v4) já veio
-              // com a proporção correta — aplicar o scaleY(0.82) de
-              // achatarLogo de novo o deixaria achatado demais.
+              // que segue alongado por design), este wordmark já vem com a
+              // proporção correta — aplicar o scaleY de achatarLogo de novo o
+              // deixaria achatado demais. transformWordmark é outro campo,
+              // achatamento estético pedido pela cliente (ver lib/temas.js).
               <Image
                 src={tema.marcaTexto}
                 alt={tema.nomeExibido || nome || NOME_LOJA}
                 width={1600}
                 height={307}
-                style={{ width: "auto" }}
+                style={{ width: "auto", transform: transformWordmark }}
                 className={compacto ? "h-12 sm:h-14" : "h-16 sm:h-20"}
                 preload
               />
