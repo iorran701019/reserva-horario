@@ -90,6 +90,20 @@ tentar recriar a tipografia em CSS. Já aconteceu duas vezes e o caminho certo n
 
 Isso mantém o header pixel-fiel ao material do cliente, sem gambiarra de "fonte parecida".
 
+### Armadilha: cache do otimizador de imagens ao trocar arquivo pelo mesmo nome
+
+Ao substituir um arquivo de imagem em `public/` mantendo o **mesmo nome** (ex.: gerar uma
+nova versão de `marcaTexto` e sobrescrever `laysla-logo-header.png`), o cache em disco do
+otimizador de imagens do Next (`.next/dev/cache/images` em dev) pode continuar servindo a
+versão antiga já transcodificada — mesmo depois de um hard-reload no navegador, porque o
+cache não é invalidado automaticamente pela sobrescrita do arquivo. Isso já causou um falso
+positivo real: uma versão nova parecia ter um "ghost box" atrás do texto, quando na verdade
+era a versão *anterior* (dimensões diferentes) ainda sendo servida do cache.
+
+Se uma mudança de imagem não aparecer (ou aparecer com o conteúdo errado) mesmo após
+hard-reload, apagar `.next/dev/cache/images` (ou reiniciar o dev server) antes de concluir
+qualquer coisa sobre o arquivo em si.
+
 ## Extração de paleta — sempre por pixel, nunca por estimativa
 
 ```python
