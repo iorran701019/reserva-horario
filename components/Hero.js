@@ -71,6 +71,17 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
   const transformBlocoMarca = tema?.escalaLogo
     ? `scale(${tema.escalaLogo})`
     : undefined;
+  // escalaMonograma (ex.: laysla) — reduz SÓ o monograma (símbolo), separado
+  // de escalaLogo (bloco inteiro) e independente do wordmark/divisor.
+  // Combinado com achatarLogo (scaleY) direto na <Image> do monograma no
+  // layout 'esquerda' — não se aplica ao layoutMarca 'pilha-completa', que
+  // não tem monograma isolado do wordmark.
+  const transformMonograma = [
+    tema?.escalaMonograma ? `scale(${tema.escalaMonograma})` : null,
+    transformLogo,
+  ]
+    .filter(Boolean)
+    .join(" ") || undefined;
 
   // Fundo do hero:
   //  - com foto (valeria/junior): a imagem cobrindo o hero; o contraste do texto
@@ -170,7 +181,7 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
             alt=""
             width={266}
             height={338}
-            style={{ transform: transformLogo }}
+            style={{ transform: transformMonograma }}
             className={compacto ? "h-16 w-auto sm:h-20" : "h-24 w-auto sm:h-28"}
             preload
           />
