@@ -84,19 +84,14 @@ const hhmm = (d) => d ? `${String(d.getHours()).padStart(2, "0")}:${String(d.get
 
 // Calendário do Painel. Recebe `agendamentos` já carregado pela página (sem
 // fetch novo) e deriva os eventos pendentes/confirmados. View inicial é
-// responsiva (mobile-first); o `key` reinicia o calendário ao virar o
-// breakpoint. Toolbar nativa desligada — navegação própria (abas + prev/
-// next/Hoje) logo acima do calendário.
+// sempre Dia, independente de mobile ou desktop — Dia/Lista/Mês só trocam
+// pelas abas manuais. Toolbar nativa desligada — navegação própria (abas +
+// prev/next/Hoje) logo acima do calendário.
 export default function PainelCalendario({
   agendamentos,
   onSelecionarConfirmado,
   estabelecimentoId,
 }) {
-  // Começa em `false` (desktop) tanto no servidor quanto no cliente para não
-  // divergir na hidratação; o efeito ajusta após montar. Nunca lemos `window`
-  // durante o render.
-  const [isMobile, setIsMobile] = useState(false);
-
   // Filtro "Ver agenda de": "todos" (padrão) ou o profissional_id (como string,
   // já que é o value do <select>). Filtra os eventos EM MEMÓRIA, sem query nova.
   const [filtroProfissional, setFiltroProfissional] = useState("todos");
@@ -108,13 +103,12 @@ export default function PainelCalendario({
   // View ativa do FullCalendar (atualizada via datesSet), usada só pra decidir
   // o que passar em `events` (Lista filtra por confirmado) e o branch de
   // eventContent. Inicializa alinhada ao `initialView` abaixo.
-  const [viewAtual, setViewAtual] = useState(
-    isMobile ? "timeGridDay" : "dayGridMonth"
-  );
+  const [viewAtual, setViewAtual] = useState("timeGridDay");
 
   // Aba própria ativa (Dia/Lista/Mês — ver ABAS_CALENDARIO), controla a view
-  // via changeView() na ref do calendário. Alinhada ao `viewAtual` inicial.
-  const [abaAtiva, setAbaAtiva] = useState(isMobile ? "dia" : "mes");
+  // via changeView() na ref do calendário. Sempre abre em Dia, independente
+  // de mobile ou desktop — a escolha de Dia/Lista/Mês é só manual (abas).
+  const [abaAtiva, setAbaAtiva] = useState("dia");
 
   // Título do período atual (ex.: "agosto de 2026"), capturado em datesSet e
   // exibido na linha de navegação própria (Dia/Mês — a Lista não pagina).
@@ -155,14 +149,6 @@ export default function PainelCalendario({
     api?.changeView("timeGridDay");
     api?.gotoDate(data);
   }
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    const aplicar = () => setIsMobile(mq.matches);
-    aplicar();
-    mq.addEventListener("change", aplicar);
-    return () => mq.removeEventListener("change", aplicar);
-  }, []);
 
   useEffect(() => {
     if (!estabelecimentoId) return;
@@ -351,11 +337,10 @@ export default function PainelCalendario({
         className={abaAtiva === "lista" ? "max-h-[70vh] overflow-y-auto" : ""}
       >
         <FullCalendar
-          key={isMobile ? "m" : "d"}
           ref={calendarRef}
           plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
           locale={ptBrLocale}
-          initialView={isMobile ? "timeGridDay" : "dayGridMonth"}
+          initialView="timeGridDay"
           views={{ listaAgenda: { type: "list", duration: { years: 1 } } }}
           headerToolbar={false}
           footerToolbar={false}
