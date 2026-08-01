@@ -28,7 +28,7 @@ export default function RodapeSelos({ estabelecimento }) {
     // é só a rede de segurança pra telas muito estreitas (~320px) onde nem
     // isso basta — rolagem horizontal em vez de quebrar linha. A partir de
     // sm, volta ao comportamento original (flex-wrap, sem scroll).
-    <div className="mx-auto flex w-full max-w-md flex-nowrap items-center justify-center gap-x-0.5 gap-y-2 overflow-x-auto px-1 pb-6 text-[10px] text-muted sm:flex-wrap sm:gap-x-6 sm:overflow-visible sm:px-4 sm:text-xs">
+    <div className="mx-auto flex w-full max-w-md flex-nowrap items-center justify-center gap-x-2 gap-y-2 overflow-x-auto px-4 pb-6 text-[10px] text-muted sm:flex-wrap sm:gap-x-6 sm:overflow-visible sm:px-4 sm:text-xs">
       {ICONES.map((Icone, i) => (
         <span key={i} className="flex shrink-0 items-center gap-0.5 whitespace-nowrap sm:gap-1.5">
           <Icone className="h-2.5 w-2.5 shrink-0 sm:h-4 sm:w-4" aria-hidden="true" />
