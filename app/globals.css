@@ -62,10 +62,6 @@ a:focus-visible, button:focus-visible {
 }
 
 @media (max-width: 767px) {
-  .fc .fc-toolbar.fc-header-toolbar { flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem; }
-  .fc .fc-footer-toolbar { margin-top: 0.6rem; }
-  .fc .fc-toolbar-title { font-size: 1rem; }
-  .fc .fc-button { padding: 0.4rem 0.65rem; font-size: 0.8rem; min-height: 40px; }
   .fc .fc-col-header-cell-cushion,
   .fc .fc-daygrid-day-number { font-size: 0.72rem; padding: 2px 4px; }
   .fc .fc-daygrid-event { font-size: 0.72rem; padding: 1px 3px; white-space: normal; }
@@ -88,3 +84,16 @@ a:focus-visible, button:focus-visible {
 }
 .ag-evento-titulo { font-weight: 600; }
 .ag-evento-hora { font-weight: 400; font-size: 0.85em; opacity: 0.85; white-space: nowrap; }
+
+/* Badge compacto dos eventos na view Mês (dayGridMonth) — cor herdada do
+   próprio evento via style inline (mesma CORES_EVENTO do status). */
+.ag-evento-mes {
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
