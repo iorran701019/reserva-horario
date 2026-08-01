@@ -386,16 +386,9 @@ export default function GerenciarServicos({ estabelecimento }) {
 
   // Atalho "+ Criar manutenção" num card de serviço original: abre o mesmo
   // formulário de criação, mas já pré-preenchido como uma manutenção daquele
-// Manutenção não tem campo de categoria no form — herda a categoria
-        // do servico_origem_id (mesmo categoria_id do serviço-base, pra
-        // aparecer agrupada com ele no acordeão), recalculada em
-        // handleSalvar logo antes de salvar. Placeholder null aqui,
-        // sobrescrito lá.
-        categoria_id: form.ehManutencao
-          ? null
-          : form.categoria_id === ""
-            ? null
-            : Number(form.categoria_id),
+  // serviço — nome sugerido, servico_origem_id fixo (sem UI pra trocar) e a
+  // categoria_id herdada do serviço de origem ao salvar (ver validarForm).
+  // Preço, duração e demais campos ficam em branco pro dono preencher.
   function abrirCriarManutencao(servicoOrigem) {
     setForm({
       ...FORM_INICIAL,
@@ -533,6 +526,16 @@ export default function GerenciarServicos({ estabelecimento }) {
         nome,
         preco_centavos: centavos,
         duracao_min: duracao,
+        // Manutenção não tem campo de categoria no form — herda a categoria
+        // do servico_origem_id (mesmo categoria_id do serviço-base, pra
+        // aparecer agrupada com ele no acordeão), recalculada em
+        // handleSalvar logo antes de salvar. Placeholder null aqui,
+        // sobrescrito lá.
+        categoria_id: form.ehManutencao
+          ? null
+          : form.categoria_id === ""
+            ? null
+            : Number(form.categoria_id),
 // Agrupamento pro acordeão: categorias na ordem de exibição, e o grupo
   // sintético "Sem categoria" — serviços sem categoria_id, ou apontando pra
   // uma categoria que não existe mais (manutenção incluída, pelo mesmo
