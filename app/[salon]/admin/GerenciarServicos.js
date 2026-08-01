@@ -563,6 +563,17 @@ export default function GerenciarServicos({ estabelecimento }) {
     return grupo.reduce((max, s) => Math.max(max, s.ordem ?? 0), 0) + 1;
   }
 
+  // Com 0 ou 1 profissional ativo no salão não há checkbox pra marcar (ver
+  // ListaProfissionais, escondida nesse caso) — o vínculo é decidido aqui:
+  // vazio com 0, ou o único ativo automaticamente com 1. Com 2+, respeita a
+  // seleção manual do form.
+  function profissionaisParaVincular() {
+    if (profissionaisSalao.length <= 1) {
+      return profissionaisSalao.map((p) => p.id);
+    }
+    return form.profissionais;
+  }
+
   // Regrava os vínculos do serviço: apaga os do servico_id e insere os marcados.
   // Mesma estratégia "substitui tudo" usada na Janela C do form de profissional.
   // Devolve o erro do Supabase ou null.
@@ -672,7 +683,7 @@ export default function GerenciarServicos({ estabelecimento }) {
         return;
       }
 
-      const erroVinculos = await salvarVinculos(data.id, form.profissionais);
+      const erroVinculos = await salvarVinculos(data.id, profissionaisParaVincular());
       setSalvando(false);
       if (erroVinculos) {
         // Serviço criado; os vínculos falharam. Mantém o form aberto na edição
@@ -708,7 +719,7 @@ export default function GerenciarServicos({ estabelecimento }) {
       return;
     }
 
-    const erroVinculos = await salvarVinculos(editando.id, form.profissionais);
+    const erroVinculos = await salvarVinculos(editando.id, profissionaisParaVincular());
     setSalvando(false);
     if (erroVinculos) {
       setErroForm(`Serviço salvo, mas os profissionais falharam: ${erroVinculos.message}`);
@@ -1993,17 +2004,21 @@ export default function GerenciarServicos({ estabelecimento }) {
 
           {/* Profissionais que atendem este serviço (tabela servico_profissional).
               Enquanto os vínculos do serviço em edição carregam, mostra o estado
-              de carregando pra não exibir checkboxes desmarcadas antes da hora. */}
-          <div>
-            <span className="mb-2 block text-sm font-medium text-body">Profissionais</span>
-            <ListaProfissionais
-              profissionais={profissionaisSalao}
-              carregando={carregandoProfissionais || carregandoForm}
-              erro={erroProfissionais}
-              selecionados={form.profissionais}
-              onToggle={alternarProfissional}
-            />
-          </div>
+              de carregando pra não exibir checkboxes desmarcadas antes da hora.
+              Com 0 ou 1 profissional ativo no salão, some — nada pra escolher;
+              o vínculo é decidido automaticamente em profissionaisParaVincular. */}
+          {profissionaisSalao.length > 1 && (
+            <div>
+              <span className="mb-2 block text-sm font-medium text-body">Profissionais</span>
+              <ListaProfissionais
+                profissionais={profissionaisSalao}
+                carregando={carregandoProfissionais || carregandoForm}
+                erro={erroProfissionais}
+                selecionados={form.profissionais}
+                onToggle={alternarProfissional}
+              />
+            </div>
+          )}
 
           {erroForm && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">

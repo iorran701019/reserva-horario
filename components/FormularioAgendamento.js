@@ -429,42 +429,20 @@ export default function FormularioAgendamento({
   // encaixa automaticamente (false). Lida do banco junto com os serviços.
   const [escolhaProfissional, setEscolhaProfissional] = useState(false);
 
-  // Flag EFETIVO usado por toda a lógica de modo: o admin força o seletor
-  // (forcarEscolhaProfissional), senão vale o toggle do salão. O state acima
-  // guarda só o valor cru do banco; daqui pra baixo tudo lê `escolherProfissional`.
-  const escolherProfissional = forcarEscolhaProfissional || escolhaProfissional;
-
-  // Resolve o pulo de etapa do servicoInicial assim que a config
-  // escolha_profissional carrega (carregandoServicos vira false). Sem exigir
-  // profissional, vai direto pra "data" — igual confirmarSelecaoServico faz
-  // pra qualquer serviço no encaixe automático. Exigindo, fica em "servico"
-  // (a lista de serviços não atrapalha: com servicoSelecionado já preenchido,
-  // os cards de profissional já aparecem logo abaixo dela). Ajuste de estado
-  // durante a renderização (não um efeito — dispara só na transição
-  // true -> false, comparando com o valor da renderização anterior).
-  const [carregandoServicosAnterior, setCarregandoServicosAnterior] = useState(
-    carregandoServicos
-  );
-  if (carregandoServicos !== carregandoServicosAnterior) {
-    setCarregandoServicosAnterior(carregandoServicos);
-    if (servicoInicialPendente && !carregandoServicos) {
-      if (!escolherProfissional) setEtapa("data");
-      setServicoInicialPendente(false);
-    }
-  }
-
   // Profissionais ATIVOS que atendem o serviço escolhido, cada um já com seus
   // dias de trabalho (horarios_trabalho.dia_semana) embutidos — carregados nos
   // dois modos: no "cliente escolhe" alimentam os cards, e sempre alimentam os
   // dias disponíveis do calendário. `profissionalSelecionado` só é usado no
-  // fluxo "cliente escolhe".
+  // fluxo "cliente escolhe". Declarados aqui, antes de `escolherProfissional`,
+  // porque a flag efetiva abaixo depende da contagem.
   const [profissionaisDoServico, setProfissionaisDoServico] = useState([]);
   const [profissionalSelecionado, setProfissionalSelecionado] = useState(null);
   const [carregandoProfissionais, setCarregandoProfissionais] = useState(false);
 
   // Refs para rolar suavemente até o bloco que surge após cada escolha, pra ele
   // não passar despercebido abaixo da dobra (salões com muitos serviços). Vale
-  // no público e no /admin, já que o componente é compartilhado.
+  // no público e no /admin, já que o componente é compartilhado. Declaradas
+  // aqui (antes dos blocos de decisão de etapa abaixo, que já usam rolarPara).
   const profissionalRef = useRef(null);
   const dataRef = useRef(null);
 
@@ -475,6 +453,72 @@ export default function FormularioAgendamento({
       ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   }
+
+  // Flag EFETIVO usado por toda a lógica de modo: o admin força o seletor
+  // (forcarEscolhaProfissional), senão vale o toggle do salão — e só faz
+  // sentido com 2+ profissionais atendendo o serviço; com 1 só (ou 0, ainda
+  // carregando), o sistema já encaixa nele automaticamente sem perguntar. O
+  // state acima guarda só o valor cru do banco; daqui pra baixo tudo lê
+  // `escolherProfissional` (cards, dias disponíveis, horários, validação e
+  // submit). ATENÇÃO: como depende de `profissionaisDoServico` (carregado sob
+  // demanda por serviço — ver efeito mais abaixo), ele só é confiável quando
+  // `carregandoProfissionais` for false pro serviço ATUAL; os dois blocos de
+  // decisão de etapa logo abaixo (`decisaoEtapaPendente`) existem só pra
+  // adiar a decisão até esse momento, em vez de usar um valor ainda do
+  // serviço anterior (ou do estado inicial vazio).
+  const escolherProfissional =
+    (forcarEscolhaProfissional || escolhaProfissional) &&
+    profissionaisDoServico.length > 1;
+
+  // Pulo(s) de etapa que dependem de `escolherProfissional` mas podem ser
+  // disparados enquanto `profissionaisDoServico` ainda carrega pro serviço
+  // atual (logo antes de `escolherProfissional` refletir a contagem certa):
+  // o do servicoInicial (assim que a config carrega) e o de avancarAposServico
+  // (assim que um serviço é tocado/confirmado). 'inicial' não rola a tela
+  // (mesmo comportamento de sempre); 'avancar' rola pro bloco certo. null =
+  // nada pendente.
+  const [decisaoEtapaPendente, setDecisaoEtapaPendente] = useState(null);
+
+  // Resolve o pulo de etapa do servicoInicial assim que a config
+  // escolha_profissional carrega (carregandoServicos vira false). Sem exigir
+  // profissional, vai direto pra "data" — igual confirmarSelecaoServico faz
+  // pra qualquer serviço no encaixe automático. Exigindo, fica em "servico"
+  // (a lista de serviços não atrapalha: com servicoSelecionado já preenchido,
+  // os cards de profissional já aparecem logo abaixo dela). Ajuste de estado
+  // durante a renderização (não um efeito — dispara só na transição
+  // true -> false, comparando com o valor da renderização anterior). Se
+  // profissionaisDoServico ainda estiver carregando nesse instante, adia a
+  // decisão via `decisaoEtapaPendente` (ver bloco seguinte).
+  const [carregandoServicosAnterior, setCarregandoServicosAnterior] = useState(
+    carregandoServicos
+  );
+  if (carregandoServicos !== carregandoServicosAnterior) {
+    setCarregandoServicosAnterior(carregandoServicos);
+    if (servicoInicialPendente && !carregandoServicos) {
+      setDecisaoEtapaPendente("inicial");
+      setServicoInicialPendente(false);
+    }
+  }
+
+  // Resolve uma decisão de etapa adiada (ver acima e avancarAposServico) assim
+  // que profissionaisDoServico está carregado pro serviço atual —
+  // `escolherProfissional` só é confiável a partir daqui. Precisa ser um
+  // efeito (não ajuste durante a renderização, como o bloco acima): rolarPara
+  // acessa refs, e refs só podem ser lidas fora do render. Reavalia sempre que
+  // qualquer uma das três dependências muda, então nunca usa valores obsoletos
+  // (diferente de avancarAposServico, chamada de dentro de uma closure
+  // assíncrona presa aos valores de QUANDO O SERVIÇO FOI TOCADO).
+  useEffect(() => {
+    if (!decisaoEtapaPendente || carregandoProfissionais) return;
+    const rolar = decisaoEtapaPendente === "avancar";
+    if (!escolherProfissional) {
+      setEtapa("data");
+      if (rolar) rolarPara(dataRef);
+    } else if (rolar) {
+      rolarPara(profissionalRef);
+    }
+    setDecisaoEtapaPendente(null);
+  }, [decisaoEtapaPendente, carregandoProfissionais, escolherProfissional]);
 
   // Mês exibido no calendário da etapa Data (sempre no dia 1 do mês).
   const [mesVisivel, setMesVisivel] = useState(() => {
@@ -1010,19 +1054,20 @@ setRespostasPerguntas({});
     avancarAposServico();
   }
 
-  // Avanço pós-seleção de serviço: no encaixe automático (toggle off) vai
-  // direto pra data; no fluxo "cliente escolhe" fica na etapa de serviço pra
-  // escolher o profissional (os cards aparecem logo abaixo), rolando até o
-  // elemento certo em cada caso. Extraído de confirmarSelecaoServico pra ser
-  // reaproveitado depois do popup de perguntas (ver confirmarModalPerguntas).
+  // Avanço pós-seleção de serviço: no encaixe automático (toggle off, ou só 1
+  // profissional pro serviço) vai direto pra data; no fluxo "cliente escolhe"
+  // fica na etapa de serviço pra escolher o profissional (os cards aparecem
+  // logo abaixo), rolando até o elemento certo em cada caso. Extraído de
+  // confirmarSelecaoServico pra ser reaproveitado depois do popup de perguntas
+  // (ver confirmarModalPerguntas). Só marca a decisão como pendente — nunca
+  // decide aqui dentro: quando chamada a partir de confirmarSelecaoServico
+  // (depois do await das perguntas), esta função é uma closure presa aos
+  // valores de QUANDO O SERVIÇO FOI TOCADO, que já podem estar obsoletos
+  // (profissionaisDoServico do novo serviço pode ainda estar carregando, ou
+  // já ter carregado, nesse meio-tempo). O bloco de `decisaoEtapaPendente`
+  // acima resolve com os valores frescos assim que renderizar.
   function avancarAposServico() {
-    if (!escolherProfissional) {
-      setEtapa("data");
-      rolarPara(dataRef);
-    } else {
-      // O seletor de profissional aparece logo abaixo dos serviços: rola até ele.
-      rolarPara(profissionalRef);
-    }
+    setDecisaoEtapaPendente("avancar");
   }
 
   // Modal do alerta — "Continuar": confirma a seleção (como se tivesse

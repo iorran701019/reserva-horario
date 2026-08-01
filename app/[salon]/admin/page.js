@@ -345,6 +345,10 @@ export default function AdminPage() {
   // ligada, respeita-se a escolha do cliente e a opção nem aparece.
   const [escolhaProfissional, setEscolhaProfissional] = useState(false);
 
+  // Contagem de profissionais ATIVOS do salão — com 1 só não há pra quem
+  // trocar, então "Trocar profissional" também some (ver efeito abaixo).
+  const [qtdProfissionaisAtivos, setQtdProfissionaisAtivos] = useState(null);
+
   // Troca de profissional: `agendamentoParaTrocar` arma o modal; a lista de
   // profissionais LIVRES no horário (que atendem o serviço) é carregada sob
   // demanda por lib/disponibilidade. null = modal fechado.
@@ -739,6 +743,26 @@ export default function AdminPage() {
     };
   }, [estabelecimento]);
 
+  // Conta os profissionais ATIVOS do salão (decide se "Trocar profissional"
+  // aparece nos cards/modal — mesmo padrão de ConfiguracoesSalao.js).
+  useEffect(() => {
+    if (!estabelecimento?.id) return;
+    let ativo = true;
+
+    (async () => {
+      const { count, error } = await supabase
+        .from("profissionais")
+        .select("id", { count: "exact", head: true })
+        .eq("estabelecimento_id", estabelecimento.id)
+        .eq("ativo", true);
+      if (ativo && !error) setQtdProfissionaisAtivos(count ?? 0);
+    })();
+
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento]);
+
   // Ao armar a troca, carrega os profissionais LIVRES no horário do agendamento
   // (que atendem o serviço), reaproveitando lib/disponibilidade. O profissional
   // atual já sai de fora (a própria reserva o ocupa), mas filtramos por garantia.
@@ -1071,8 +1095,10 @@ export default function AdminPage() {
                     </button>
 
                     {/* Troca de profissional só com o toggle DESLIGADO (o dono
-                        encaixa); ligado, respeita a escolha do cliente. */}
-                    {!escolhaProfissional && (
+                        encaixa); ligado, respeita a escolha do cliente. E só
+                        com 2+ profissionais ativos — com 1 só não há pra quem
+                        trocar. */}
+                    {!escolhaProfissional && qtdProfissionaisAtivos > 1 && (
                       <button
                         type="button"
                         onClick={() => setAgendamentoParaTrocar(item)}
@@ -1622,9 +1648,10 @@ export default function AdminPage() {
                 existente (modal de confirmação → handleCancelar). Sem empilhar
                 dois modais. */}
             <div className="mt-4 flex flex-col gap-2">
-              {/* Trocar profissional só com o toggle DESLIGADO. Fecha este modal
-                  e abre o de troca (sem empilhar). */}
-              {!escolhaProfissional && (
+              {/* Trocar profissional só com o toggle DESLIGADO e 2+
+                  profissionais ativos. Fecha este modal e abre o de troca
+                  (sem empilhar). */}
+              {!escolhaProfissional && qtdProfissionaisAtivos > 1 && (
                 <button
                   type="button"
                   onClick={() => {

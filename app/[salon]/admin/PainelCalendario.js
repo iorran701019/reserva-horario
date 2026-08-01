@@ -260,28 +260,32 @@ export default function PainelCalendario({
   return (
     <div>
       {/* Filtro "Ver agenda de": Todos + cada profissional presente nos
-          agendamentos. Filtra os eventos em memória (padrão Todos). */}
-      <div className="mb-4">
-        <label
-          htmlFor="filtro-profissional"
-          className="mb-1 block text-sm font-medium text-body"
-        >
-          Ver agenda de:
-        </label>
-        <select
-          id="filtro-profissional"
-          value={filtroProfissional}
-          onChange={(e) => setFiltroProfissional(e.target.value)}
-          className="w-full rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading shadow-sm ring-1 ring-border transition focus:outline-none focus:ring-2 focus:ring-border"
-        >
-          <option value="todos">Todos</option>
-          {profissionaisDisponiveis.map((p) => (
-            <option key={p.id} value={String(p.id)}>
-              {p.nome}
-            </option>
-          ))}
-        </select>
-      </div>
+          agendamentos. Filtra os eventos em memória (padrão Todos). Com 1 só
+          profissional ativo, não faz sentido escolher entre "Todos" e ele
+          mesmo — o painel já é implicitamente dele. */}
+      {profissionaisDisponiveis.length > 1 && (
+        <div className="mb-4">
+          <label
+            htmlFor="filtro-profissional"
+            className="mb-1 block text-sm font-medium text-body"
+          >
+            Ver agenda de:
+          </label>
+          <select
+            id="filtro-profissional"
+            value={filtroProfissional}
+            onChange={(e) => setFiltroProfissional(e.target.value)}
+            className="w-full rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading shadow-sm ring-1 ring-border transition focus:outline-none focus:ring-2 focus:ring-border"
+          >
+            <option value="todos">Todos</option>
+            {profissionaisDisponiveis.map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.nome}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Abas próprias (Dia/Lista/Mês), substituem a toolbar nativa do
           FullCalendar. Ficam antes de qualquer navegação de data. */}
