@@ -1681,6 +1681,7 @@ export default function GerenciarServicos({ estabelecimento }) {
       (s.categoria_id == null || !idsCategorias.has(s.categoria_id))
   );
   const servicosAtivos = servicos.filter((s) => s.ativo && !s.oculto);
+  const categoriasOrdenadas = ordenarCategorias(categorias);
   // Seção "Serviços desativados": listagem plana (sem agrupar por categoria)
   // dos serviços com ativo=false, manutenção incluída — sem tratamento
   // separado (ver renderServicoDesativado). oculto=true (exclusão
