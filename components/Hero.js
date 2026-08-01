@@ -64,6 +64,13 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
   const transformWordmark = tema?.achatarWordmark
     ? `scaleY(${tema.achatarWordmark})`
     : undefined;
+  // escalaLogo (ex.: laysla) — reduz o bloco de marca inteiro (monograma +
+  // wordmark + linha divisória) mantendo as proporções entre eles: um único
+  // scale() no wrapper que os agrupa, em vez de escalar cada elemento à
+  // parte. Genérico: qualquer tenant no layout 'esquerda' reaproveita.
+  const transformBlocoMarca = tema?.escalaLogo
+    ? `scale(${tema.escalaLogo})`
+    : undefined;
 
   // Fundo do hero:
   //  - com foto (valeria/junior): a imagem cobrindo o hero; o contraste do texto
@@ -154,7 +161,10 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
         // abaixo do Hero). Nome/tagline ocupam o espaço restante (flex-1) e
         // ficam centralizados NESSE espaço — respiro tanto da marca quanto
         // da borda direita, sem grudar em nenhum dos dois.
-        <div className="relative mx-auto flex w-full max-w-md items-center gap-4">
+        <div
+          className="relative mx-auto flex w-full max-w-md items-center gap-4"
+          style={{ transform: transformBlocoMarca }}
+        >
           <Image
             src={tema.marca}
             alt=""
