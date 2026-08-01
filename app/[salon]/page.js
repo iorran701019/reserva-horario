@@ -352,12 +352,16 @@ export default function AgendarPage() {
           </p>
         </header>
 
-        <FotoPerfilCircular
-          src={estabelecimento.foto_perfil_url}
-          posicao={estabelecimento.foto_perfil_posicao}
-          diametro={alturaCaixa}
-          alt={`Foto de ${estabelecimento.nome}`}
-        />
+        {/* Só na primeira etapa (identificação por WhatsApp) — nas etapas
+            seguintes (painel, anamnese, formulário) a foto some. */}
+        {!clienteIdentificado && (
+          <FotoPerfilCircular
+            src={estabelecimento.foto_perfil_url}
+            posicao={estabelecimento.foto_perfil_posicao}
+            diametro={alturaCaixa}
+            alt={`Foto de ${estabelecimento.nome}`}
+          />
+        )}
 
         {/* Antes do wizard: identifica o cliente pelo WhatsApp e, se a
             anamnese estiver vencida (ou nunca ter sido preenchida), cobra ela
