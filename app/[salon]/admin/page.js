@@ -17,7 +17,7 @@ import {
 import { classificarAgendamento, fimDoAtendimento } from "@/lib/particao";
 import { profissionaisLivresNoHorario } from "@/lib/disponibilidade";
 import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
-import { verificarFidelidadeClientes } from "@/lib/fidelidade";
+import { verificarFidelidadeClientes, buscarProgressoFidelidade } from "@/lib/fidelidade";
 import {
   Menu,
   X,
@@ -36,6 +36,7 @@ import {
   AlertCircle,
   Gift,
 } from "lucide-react";
+import BadgeFidelidade from "@/components/BadgeFidelidade";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
@@ -352,6 +353,13 @@ export default function AdminPage() {
   // textarea recolher sozinho ao fechar o modal ou trocar de agendamento.
   // `rascunhoObservacao` é o texto sendo digitado.
   const [idEditandoObservacao, setIdEditandoObservacao] = useState(null);
+
+  // Progresso do programa de fidelidade (ver lib/fidelidade.js) da cliente do
+  // modal de detalhe. Diferente de GerenciarClientes/PainelCliente, o
+  // agendamento aqui só traz `telefone` (não há cliente_id em `agendamentos`),
+  // então resolve o id na tabela `clientes` antes de buscar o progresso. null
+  // = programa desligado, cliente sem cadastro ou nada a mostrar.
+  const [progressoFidelidadeModal, setProgressoFidelidadeModal] = useState(null);
   const [rascunhoObservacao, setRascunhoObservacao] = useState("");
 
   // Feedback do salvamento da anotação: `salvandoObservacao` mostra "Salvando..."
@@ -697,6 +705,46 @@ export default function AdminPage() {
   useEffect(() => {
     setObservacaoOk(false);
   }, [idSelecionado]);
+
+  // Progresso de fidelidade do modal de detalhe (ver estado acima). Resolve o
+  // cliente pelo telefone do agendamento selecionado, já que `agendamentos`
+  // não traz cliente_id.
+  useEffect(() => {
+    let ativo = true;
+
+    if (idSelecionado == null || !estabelecimento?.fidelidade_ativa) {
+      setProgressoFidelidadeModal(null);
+      return;
+    }
+
+    const item = agendamentos.find((a) => a.id === idSelecionado);
+    if (!item?.telefone) {
+      setProgressoFidelidadeModal(null);
+      return;
+    }
+
+    (async () => {
+      const { data: cliente } = await supabase
+        .from("clientes")
+        .select("id")
+        .eq("estabelecimento_id", estabelecimento.id)
+        .eq("whatsapp", item.telefone)
+        .maybeSingle();
+
+      if (!ativo) return;
+      if (!cliente) {
+        setProgressoFidelidadeModal(null);
+        return;
+      }
+
+      const progresso = await buscarProgressoFidelidade(cliente.id, estabelecimento);
+      if (ativo) setProgressoFidelidadeModal(progresso);
+    })();
+
+    return () => {
+      ativo = false;
+    };
+  }, [idSelecionado, agendamentos, estabelecimento]);
 
   // Fecha o drawer com Esc (só enquanto aberto). Complementa o backdrop e o
   // botão X — teclado e mouse fecham do mesmo jeito.
@@ -1553,8 +1601,15 @@ export default function AdminPage() {
             <dl className="mt-4 space-y-2 text-sm">
               <div className="flex justify-between gap-3">
                 <dt className="text-body">Cliente</dt>
-                <dd className="text-right font-medium text-heading">
+                <dd className="flex items-center justify-end gap-2 text-right font-medium text-heading">
                   {selecionado.nome_cliente}
+                  {progressoFidelidadeModal && (
+                    <BadgeFidelidade
+                      variante="chip"
+                      atual={progressoFidelidadeModal.atual}
+                      meta={progressoFidelidadeModal.meta}
+                    />
+                  )}
                 </dd>
               </div>
               <div className="flex justify-between gap-3">

@@ -8,4 +8,4 @@
 -- Rode este arquivo no SQL Editor do Supabase (projeto de staging).
 
 alter table public.pendencias_admin
-  add column if not exists cliente_id bigint references public.clientes (id) on delete set null;
+  add column if not exists cliente_id uuid references public.clientes (id) on delete set null;

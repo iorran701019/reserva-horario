@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { calcularVagasPorHorario } from "@/lib/disponibilidade";
 import { buscarTema } from "@/lib/temas";
+import { buscarProgressoFidelidade } from "@/lib/fidelidade";
+import BadgeFidelidade from "@/components/BadgeFidelidade";
 import PopupRegrasAgendamento from "@/components/PopupRegrasAgendamento";
 import {
   calcularPrecoManutencao,
@@ -541,6 +543,11 @@ export default function FormularioAgendamento({
   const [resultadosBuscaAdmin, setResultadosBuscaAdmin] = useState([]);
   const [buscandoClienteAdmin, setBuscandoClienteAdmin] = useState(false);
 
+  // Progresso do programa de fidelidade (ver lib/fidelidade.js) do cliente
+  // escolhido no dropdown acima. null = programa desligado, ninguém
+  // selecionado ainda, ou nada a mostrar.
+  const [progressoFidelidadeAdmin, setProgressoFidelidadeAdmin] = useState(null);
+
   // Sinal de reserva: regra do salão decide se é exigido (todos, só novos
   // clientes, ou nunca). O cliente declara (não comprovante) que já pagou via
   // Pix antes de liberar o botão de confirmar.
@@ -780,6 +787,27 @@ export default function FormularioAgendamento({
       clearTimeout(timer);
     };
   }, [form.nome, status, clienteSelecionadoAdmin, estabelecimento.id]);
+
+  // Progresso de fidelidade do cliente selecionado no dropdown acima (ver
+  // estado no topo do componente).
+  useEffect(() => {
+    let ativo = true;
+
+    if (!clienteSelecionadoAdmin) {
+      setProgressoFidelidadeAdmin(null);
+      return;
+    }
+
+    buscarProgressoFidelidade(clienteSelecionadoAdmin.id, estabelecimento).then(
+      (resultado) => {
+        if (ativo) setProgressoFidelidadeAdmin(resultado);
+      }
+    );
+
+    return () => {
+      ativo = false;
+    };
+  }, [clienteSelecionadoAdmin, estabelecimento]);
 
   // Clique num resultado da busca: preenche nome/telefone com o cadastro
   // exato e trava os campos (ver JSX). O insert continua lendo
@@ -1842,6 +1870,13 @@ setRespostasPerguntas({});
                       <span className="min-w-0 flex-1 truncate text-heading">
                         {clienteSelecionadoAdmin.nome}
                       </span>
+                      {progressoFidelidadeAdmin && (
+                        <BadgeFidelidade
+                          variante="chip"
+                          atual={progressoFidelidadeAdmin.atual}
+                          meta={progressoFidelidadeAdmin.meta}
+                        />
+                      )}
                       <button
                         type="button"
                         onClick={limparClienteSelecionadoAdmin}

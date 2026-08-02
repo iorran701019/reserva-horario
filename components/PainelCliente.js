@@ -10,9 +10,11 @@ import {
 } from "@/lib/whatsapp";
 import { buscarAgendamentosAtivos, buscarHistoricoRecente } from "@/lib/agendamentosCliente";
 import { buscarManutencaoSugerida } from "@/lib/manutencaoSugerida";
+import { buscarProgressoFidelidade } from "@/lib/fidelidade";
 import { classificarAgendamento, inicioDoAtendimento } from "@/lib/particao";
 import { formatarData } from "@/components/FormularioAgendamento";
 import AtualizarDadosCliente from "@/components/AtualizarDadosCliente";
+import BadgeFidelidade from "@/components/BadgeFidelidade";
 import ConfirmacaoSinal from "@/components/ConfirmacaoSinal";
 
 // Selo de status dos agendamentos ATIVOS. Mesma paleta já usada no projeto
@@ -63,6 +65,11 @@ export default function PainelCliente({
   // ainda carregando — sem diferença visual entre os dois, o card só aparece
   // quando há de fato uma sugestão).
   const [manutencaoSugerida, setManutencaoSugerida] = useState(null);
+
+  // Progresso do programa de fidelidade (ver lib/fidelidade.js), exibido em
+  // banner no topo do painel. null = programa desligado ou nada a mostrar
+  // ainda.
+  const [progressoFidelidade, setProgressoFidelidade] = useState(null);
 
   // Id do agendamento em processo de confirmação de sinal (troca a exibição
   // do painel pelo ConfirmacaoSinal), igual ao padrão já usado por `editando`.
@@ -147,6 +154,16 @@ export default function PainelCliente({
     };
   }, [estabelecimento.id, clienteAtual.telefone]);
 
+  useEffect(() => {
+    let ativo = true;
+    buscarProgressoFidelidade(clienteAtual.id, estabelecimento).then((resultado) => {
+      if (ativo) setProgressoFidelidade(resultado);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [clienteAtual.id, estabelecimento]);
+
   if (editando) {
     return (
       <div className="space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border">
@@ -217,6 +234,15 @@ export default function PainelCliente({
 
   return (
     <div className="space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border">
+      {progressoFidelidade && (
+        <BadgeFidelidade
+          variante="banner"
+          atual={progressoFidelidade.atual}
+          meta={progressoFidelidade.meta}
+          descricaoBrinde={progressoFidelidade.descricaoBrinde}
+        />
+      )}
+
       {manutencaoSugerida && (
         <div className="rounded-xl bg-primary/5 p-4 ring-1 ring-primary/30">
           <p className="text-sm font-semibold text-heading">

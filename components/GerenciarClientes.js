@@ -12,7 +12,9 @@ import {
   criarAnotacaoLivre,
 } from "@/lib/clientesAdmin";
 import { classificarAgendamento } from "@/lib/particao";
+import { buscarProgressoFidelidade } from "@/lib/fidelidade";
 import { linkWhatsApp, MENSAGEM_CONTATO_CLIENTE_ADMIN } from "@/lib/whatsapp";
+import BadgeFidelidade from "@/components/BadgeFidelidade";
 
 // Aba "Clientes" do /admin: lista somente-leitura dos clientes do salão
 // (tabela `clientes`, particionada por estabelecimento_id) com busca por nome
@@ -147,13 +149,47 @@ function tipoObservacao(item) {
   return classificarAgendamento(item) === "confirmado" ? "Observação" : "Anotação";
 }
 
+// Chip de progresso de fidelidade da linha da lista (ver BadgeFidelidade).
+// Componente próprio pra isolar o fetch por cliente sem travar a montagem da
+// lista inteira num só Promise.all.
+function ChipFidelidadeLista({ clienteId, estabelecimento }) {
+  const [progresso, setProgresso] = useState(null);
+
+  useEffect(() => {
+    let ativo = true;
+    buscarProgressoFidelidade(clienteId, estabelecimento).then((resultado) => {
+      if (ativo) setProgresso(resultado);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [clienteId, estabelecimento]);
+
+  if (!progresso) return null;
+  return <BadgeFidelidade variante="chip" atual={progresso.atual} meta={progresso.meta} />;
+}
+
 // Detalhe de um cliente: dados cadastrais + resumo do relacionamento
 // (próximo agendamento, anamnese) + três seções retráteis carregadas sob
 // demanda (histórico completo, detalhe da anamnese, observações/anotações).
 // `cliente` já traz os campos cadastrais de buscarClientes.
-function DetalheCliente({ cliente, estabelecimentoId, msgContatoAdmin, onVoltar }) {
+function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContatoAdmin, onVoltar }) {
   const [resumo, setResumo] = useState(null);
   const [carregando, setCarregando] = useState(true);
+
+  // Progresso do programa de fidelidade (ver lib/fidelidade.js), banner no
+  // topo da ficha. null = programa desligado ou nada a mostrar ainda.
+  const [progressoFidelidade, setProgressoFidelidade] = useState(null);
+
+  useEffect(() => {
+    let ativo = true;
+    buscarProgressoFidelidade(cliente.id, estabelecimento).then((resultado) => {
+      if (ativo) setProgressoFidelidade(resultado);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [cliente.id, estabelecimento]);
 
   const [historicoAberto, setHistoricoAberto] = useState(false);
   const [historico, setHistorico] = useState(null);
@@ -318,6 +354,15 @@ function DetalheCliente({ cliente, estabelecimentoId, msgContatoAdmin, onVoltar 
           )}
         </div>
       </div>
+
+      {progressoFidelidade && (
+        <BadgeFidelidade
+          variante="banner"
+          atual={progressoFidelidade.atual}
+          meta={progressoFidelidade.meta}
+          descricaoBrinde={progressoFidelidade.descricaoBrinde}
+        />
+      )}
 
       <dl className="space-y-1 text-sm">
         {(cliente.endereco || cliente.bairro || cliente.cidade || cliente.estado) && (
@@ -651,6 +696,7 @@ export default function GerenciarClientes({ estabelecimento }) {
     return (
       <DetalheCliente
         cliente={selecionado}
+        estabelecimento={estabelecimento}
         estabelecimentoId={estabelecimento.id}
         msgContatoAdmin={estabelecimento.msg_contato_admin}
         onVoltar={() => setSelecionado(null)}
@@ -691,11 +737,19 @@ export default function GerenciarClientes({ estabelecimento }) {
                   <p className="min-w-0 truncate font-medium text-heading">
                     {cliente.nome}
                   </p>
-                  {ehAniversarianteDoMes(cliente.nascimento) && (
-                    <span className="shrink-0 rounded-full bg-pink-50 px-2.5 py-0.5 text-xs font-medium text-pink-700 ring-1 ring-pink-100">
-                      🎂 Aniversário
-                    </span>
-                  )}
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {estabelecimento.fidelidade_ativa && (
+                      <ChipFidelidadeLista
+                        clienteId={cliente.id}
+                        estabelecimento={estabelecimento}
+                      />
+                    )}
+                    {ehAniversarianteDoMes(cliente.nascimento) && (
+                      <span className="rounded-full bg-pink-50 px-2.5 py-0.5 text-xs font-medium text-pink-700 ring-1 ring-pink-100">
+                        🎂 Aniversário
+                      </span>
+                    )}
+                  </span>
                 </div>
                 <p className="mt-0.5 text-sm text-body">{cliente.whatsapp}</p>
               </button>
