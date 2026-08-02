@@ -50,6 +50,7 @@ import { useConflitoWhatsapp } from "@/lib/checagemWhatsapp";
 export default function IdentificacaoCliente({
   estabelecimentoId,
   cadastroCompleto = false,
+  exigirEndereco = true,
   estabelecimentoWhatsapp,
   nomeContato,
   msgFalhaCadastro,
@@ -431,6 +432,7 @@ export default function IdentificacaoCliente({
           telefoneReferencia={telefone}
           valoresIniciais={clienteEncontrado}
           clienteNovo={clienteNovo}
+          exigirEndereco={exigirEndereco}
           estabelecimentoWhatsapp={estabelecimentoWhatsapp}
           nomeContato={nomeContato}
           msgFalhaCadastro={msgFalhaCadastro}

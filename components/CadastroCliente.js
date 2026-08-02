@@ -43,6 +43,13 @@ import ModalConflitoWhatsapp from "@/components/ModalConflitoWhatsapp";
 //                            checagem de conflito (mesmo padrão ContatoDono).
 //   msgFalhaCadastro        – texto personalizado (estabelecimentos.
 //                            msg_falha_cadastro) repassado pro mesmo modal.
+//   exigirEndereco          – estabelecimentos.exigir_endereco (default
+//                            true, preserva o comportamento atual). false
+//                            oculta todo o bloco de CEP/endereço/número/
+//                            complemento/bairro/cidade/estado (não renderiza,
+//                            não valida, não chama ViaCEP) e mostra no lugar
+//                            um campo opcional "Contato de emergência
+//                            (WhatsApp)", salvo em clientes.contato_emergencia.
 //   onCadastrado           – recebe { id, nome, telefone, clienteNovo }
 //                            pronto pra virar clienteInicial do
 //                            FormularioAgendamento. Também usado (via modal
@@ -58,6 +65,7 @@ export default function CadastroCliente({
   estabelecimentoWhatsapp,
   nomeContato,
   msgFalhaCadastro,
+  exigirEndereco = true,
   onCadastrado,
 }) {
   const [form, setForm] = useState({
@@ -72,6 +80,7 @@ export default function CadastroCliente({
     estado: valoresIniciais?.estado ?? "",
     nascimento: valoresIniciais?.nascimento ?? "",
     instagram: valoresIniciais?.instagram ?? "",
+    contatoEmergencia: valoresIniciais?.contato_emergencia ?? "",
   });
   const [confirmarWhatsapp, setConfirmarWhatsapp] = useState("");
   const [buscandoCep, setBuscandoCep] = useState(false);
@@ -88,6 +97,8 @@ export default function CadastroCliente({
   // Ao CEP atingir 8 dígitos, busca o ViaCEP e preenche os campos de
   // endereço — sem sobrescrever o que o cliente já tiver digitado à mão.
   useEffect(() => {
+    if (!exigirEndereco) return;
+
     const digitos = form.cep.replace(/\D/g, "");
     if (digitos.length !== 8) return;
 
@@ -130,7 +141,7 @@ export default function CadastroCliente({
       return;
     }
 
-    if (!enderecoCompleto(form)) {
+    if (exigirEndereco && !enderecoCompleto(form)) {
       setErro("Preencha CEP, número, bairro e cidade.");
       return;
     }
@@ -154,21 +165,29 @@ export default function CadastroCliente({
       return;
     }
 
+    const dadosCliente = {
+      nome: form.nome.trim(),
+      whatsapp: digitosWhatsapp,
+      nascimento: form.nascimento || null,
+      instagram: form.instagram || null,
+    };
+
+    if (exigirEndereco) {
+      dadosCliente.cep = form.cep;
+      dadosCliente.endereco = form.endereco || null;
+      dadosCliente.numero = form.numero;
+      dadosCliente.complemento = form.complemento || null;
+      dadosCliente.bairro = form.bairro;
+      dadosCliente.cidade = form.cidade;
+      dadosCliente.estado = form.estado || null;
+    } else {
+      dadosCliente.contato_emergencia =
+        form.contatoEmergencia.replace(/\D/g, "") || null;
+    }
+
     const { data, error } = await supabase
       .from("clientes")
-      .update({
-        nome: form.nome.trim(),
-        whatsapp: digitosWhatsapp,
-        cep: form.cep,
-        endereco: form.endereco || null,
-        numero: form.numero,
-        complemento: form.complemento || null,
-        bairro: form.bairro,
-        cidade: form.cidade,
-        estado: form.estado || null,
-        nascimento: form.nascimento || null,
-        instagram: form.instagram || null,
-      })
+      .update(dadosCliente)
       .eq("id", clienteId)
       .select()
       .single();
@@ -211,117 +230,137 @@ export default function CadastroCliente({
         />
       </div>
 
-      <div>
-        <label htmlFor="cad-cep" className="mb-1 block text-sm font-medium text-body">
-          CEP
-        </label>
-        <input
-          id="cad-cep"
-          name="cep"
-          type="text"
-          inputMode="numeric"
-          value={form.cep}
-          onChange={handleChange}
-          required
-          placeholder="28000-000"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-        />
-        {buscandoCep && <p className="mt-1 text-xs text-muted">Buscando CEP...</p>}
-      </div>
+      {exigirEndereco ? (
+        <>
+          <div>
+            <label htmlFor="cad-cep" className="mb-1 block text-sm font-medium text-body">
+              CEP
+            </label>
+            <input
+              id="cad-cep"
+              name="cep"
+              type="text"
+              inputMode="numeric"
+              value={form.cep}
+              onChange={handleChange}
+              required
+              placeholder="28000-000"
+              className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+            />
+            {buscandoCep && <p className="mt-1 text-xs text-muted">Buscando CEP...</p>}
+          </div>
 
-      <div>
-        <label htmlFor="cad-endereco" className="mb-1 block text-sm font-medium text-body">
-          Endereço
-        </label>
-        <input
-          id="cad-endereco"
-          name="endereco"
-          type="text"
-          value={form.endereco}
-          onChange={handleChange}
-          placeholder="Rua"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-        />
-      </div>
+          <div>
+            <label htmlFor="cad-endereco" className="mb-1 block text-sm font-medium text-body">
+              Endereço
+            </label>
+            <input
+              id="cad-endereco"
+              name="endereco"
+              type="text"
+              value={form.endereco}
+              onChange={handleChange}
+              placeholder="Rua"
+              className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+            />
+          </div>
 
-      <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="cad-numero" className="mb-1 block text-sm font-medium text-body">
+                Número
+              </label>
+              <input
+                id="cad-numero"
+                name="numero"
+                type="text"
+                value={form.numero}
+                onChange={handleChange}
+                required
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="cad-complemento" className="mb-1 block text-sm font-medium text-body">
+                Complemento <span className="font-normal text-muted">(opcional)</span>
+              </label>
+              <input
+                id="cad-complemento"
+                name="complemento"
+                type="text"
+                value={form.complemento}
+                onChange={handleChange}
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="cad-bairro" className="mb-1 block text-sm font-medium text-body">
+                Bairro
+              </label>
+              <input
+                id="cad-bairro"
+                name="bairro"
+                type="text"
+                value={form.bairro}
+                onChange={handleChange}
+                required
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="cad-cidade" className="mb-1 block text-sm font-medium text-body">
+                Cidade
+              </label>
+              <input
+                id="cad-cidade"
+                name="cidade"
+                type="text"
+                value={form.cidade}
+                onChange={handleChange}
+                required
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="cad-estado" className="mb-1 block text-sm font-medium text-body">
+              Estado
+            </label>
+            <input
+              id="cad-estado"
+              name="estado"
+              type="text"
+              maxLength={2}
+              value={form.estado}
+              onChange={handleChange}
+              placeholder="RJ"
+              className="w-full rounded-lg border border-border px-3 py-2 text-heading uppercase outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+            />
+          </div>
+        </>
+      ) : (
         <div>
-          <label htmlFor="cad-numero" className="mb-1 block text-sm font-medium text-body">
-            Número
+          <label htmlFor="cad-contato-emergencia" className="mb-1 block text-sm font-medium text-body">
+            Contato de emergência (WhatsApp) <span className="font-normal text-muted">(opcional)</span>
           </label>
           <input
-            id="cad-numero"
-            name="numero"
-            type="text"
-            value={form.numero}
+            id="cad-contato-emergencia"
+            name="contatoEmergencia"
+            type="tel"
+            inputMode="tel"
+            value={form.contatoEmergencia}
             onChange={handleChange}
-            required
+            placeholder="(24) 99999-9999"
             className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
           />
         </div>
-
-        <div>
-          <label htmlFor="cad-complemento" className="mb-1 block text-sm font-medium text-body">
-            Complemento <span className="font-normal text-muted">(opcional)</span>
-          </label>
-          <input
-            id="cad-complemento"
-            name="complemento"
-            type="text"
-            value={form.complemento}
-            onChange={handleChange}
-            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label htmlFor="cad-bairro" className="mb-1 block text-sm font-medium text-body">
-            Bairro
-          </label>
-          <input
-            id="cad-bairro"
-            name="bairro"
-            type="text"
-            value={form.bairro}
-            onChange={handleChange}
-            required
-            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="cad-cidade" className="mb-1 block text-sm font-medium text-body">
-            Cidade
-          </label>
-          <input
-            id="cad-cidade"
-            name="cidade"
-            type="text"
-            value={form.cidade}
-            onChange={handleChange}
-            required
-            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-          />
-        </div>
-      </div>
-
-      <div>
-        <label htmlFor="cad-estado" className="mb-1 block text-sm font-medium text-body">
-          Estado
-        </label>
-        <input
-          id="cad-estado"
-          name="estado"
-          type="text"
-          maxLength={2}
-          value={form.estado}
-          onChange={handleChange}
-          placeholder="RJ"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading uppercase outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-        />
-      </div>
+      )}
 
       <div>
         <label htmlFor="cad-nascimento" className="mb-1 block text-sm font-medium text-body">

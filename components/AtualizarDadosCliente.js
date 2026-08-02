@@ -16,10 +16,21 @@ import { supabase } from "@/lib/supabaseClient";
 //
 // Props:
 //   clienteId    – id do cliente em `clientes` a ser editado/buscado.
+//   exigirEndereco – estabelecimentos.exigir_endereco (default true,
+//                  preserva o comportamento atual). false oculta todo o
+//                  bloco de CEP/endereço/bairro/cidade/estado (não renderiza,
+//                  não valida, não chama ViaCEP) e mostra no lugar um campo
+//                  opcional "Contato de emergência (WhatsApp)", salvo em
+//                  clientes.contato_emergencia.
 //   onAtualizado – recebe { id, nome, telefone } com os dados novos após o
 //                  update ter sucesso.
 //   onCancelar   – botão "Voltar": descarta a edição sem salvar.
-export default function AtualizarDadosCliente({ clienteId, onAtualizado, onCancelar }) {
+export default function AtualizarDadosCliente({
+  clienteId,
+  exigirEndereco = true,
+  onAtualizado,
+  onCancelar,
+}) {
   const [form, setForm] = useState({
     nome: "",
     whatsapp: "",
@@ -31,6 +42,7 @@ export default function AtualizarDadosCliente({ clienteId, onAtualizado, onCance
     estado: "",
     nascimento: "",
     instagram: "",
+    contatoEmergencia: "",
   });
   const [carregando, setCarregando] = useState(true);
   const [buscandoCep, setBuscandoCep] = useState(false);
@@ -48,7 +60,9 @@ export default function AtualizarDadosCliente({ clienteId, onAtualizado, onCance
     async function carregar() {
       const { data, error } = await supabase
         .from("clientes")
-        .select("id, nome, whatsapp, cep, endereco, bairro, cidade, estado, nascimento, instagram")
+        .select(
+          "id, nome, whatsapp, cep, endereco, bairro, cidade, estado, nascimento, instagram, contato_emergencia"
+        )
         .eq("id", clienteId)
         .single();
 
@@ -68,6 +82,7 @@ export default function AtualizarDadosCliente({ clienteId, onAtualizado, onCance
           estado: data.estado ?? "",
           nascimento: data.nascimento ?? "",
           instagram: data.instagram ?? "",
+          contatoEmergencia: data.contato_emergencia ?? "",
         });
       }
       setCarregando(false);
@@ -87,6 +102,8 @@ export default function AtualizarDadosCliente({ clienteId, onAtualizado, onCance
   // Ao CEP atingir 8 dígitos, busca o ViaCEP e preenche os campos de
   // endereço — sem sobrescrever o que o cliente já tiver digitado à mão.
   useEffect(() => {
+    if (!exigirEndereco) return;
+
     const digitos = form.cep.replace(/\D/g, "");
     if (digitos.length !== 8) return;
 
@@ -154,19 +171,27 @@ export default function AtualizarDadosCliente({ clienteId, onAtualizado, onCance
 
     setEnviando(true);
 
+    const dadosCliente = {
+      nome: form.nome.trim(),
+      whatsapp: numeroConfirmado.replace(/\D/g, ""),
+      nascimento: form.nascimento || null,
+      instagram: form.instagram || null,
+    };
+
+    if (exigirEndereco) {
+      dadosCliente.cep = form.cep || null;
+      dadosCliente.endereco = form.endereco || null;
+      dadosCliente.bairro = form.bairro || null;
+      dadosCliente.cidade = form.cidade || null;
+      dadosCliente.estado = form.estado || null;
+    } else {
+      dadosCliente.contato_emergencia =
+        form.contatoEmergencia.replace(/\D/g, "") || null;
+    }
+
     const { data, error } = await supabase
       .from("clientes")
-      .update({
-        nome: form.nome.trim(),
-        whatsapp: numeroConfirmado.replace(/\D/g, ""),
-        cep: form.cep || null,
-        endereco: form.endereco || null,
-        bairro: form.bairro || null,
-        cidade: form.cidade || null,
-        estado: form.estado || null,
-        nascimento: form.nascimento || null,
-        instagram: form.instagram || null,
-      })
+      .update(dadosCliente)
       .eq("id", clienteId)
       .select()
       .single();
@@ -226,83 +251,103 @@ export default function AtualizarDadosCliente({ clienteId, onAtualizado, onCance
         />
       </div>
 
-      <div>
-        <label htmlFor="atu-cep" className="mb-1 block text-sm font-medium text-body">
-          CEP
-        </label>
-        <input
-          id="atu-cep"
-          name="cep"
-          type="text"
-          inputMode="numeric"
-          value={form.cep}
-          onChange={handleChange}
-          placeholder="28000-000"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-        />
-        {buscandoCep && <p className="mt-1 text-xs text-muted">Buscando CEP...</p>}
-      </div>
+      {exigirEndereco ? (
+        <>
+          <div>
+            <label htmlFor="atu-cep" className="mb-1 block text-sm font-medium text-body">
+              CEP
+            </label>
+            <input
+              id="atu-cep"
+              name="cep"
+              type="text"
+              inputMode="numeric"
+              value={form.cep}
+              onChange={handleChange}
+              placeholder="28000-000"
+              className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+            />
+            {buscandoCep && <p className="mt-1 text-xs text-muted">Buscando CEP...</p>}
+          </div>
 
-      <div>
-        <label htmlFor="atu-endereco" className="mb-1 block text-sm font-medium text-body">
-          Endereço
-        </label>
-        <input
-          id="atu-endereco"
-          name="endereco"
-          type="text"
-          value={form.endereco}
-          onChange={handleChange}
-          placeholder="Rua, número"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-        />
-      </div>
+          <div>
+            <label htmlFor="atu-endereco" className="mb-1 block text-sm font-medium text-body">
+              Endereço
+            </label>
+            <input
+              id="atu-endereco"
+              name="endereco"
+              type="text"
+              value={form.endereco}
+              onChange={handleChange}
+              placeholder="Rua, número"
+              className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+            />
+          </div>
 
-      <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="atu-bairro" className="mb-1 block text-sm font-medium text-body">
+                Bairro
+              </label>
+              <input
+                id="atu-bairro"
+                name="bairro"
+                type="text"
+                value={form.bairro}
+                onChange={handleChange}
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="atu-cidade" className="mb-1 block text-sm font-medium text-body">
+                Cidade
+              </label>
+              <input
+                id="atu-cidade"
+                name="cidade"
+                type="text"
+                value={form.cidade}
+                onChange={handleChange}
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="atu-estado" className="mb-1 block text-sm font-medium text-body">
+              Estado
+            </label>
+            <input
+              id="atu-estado"
+              name="estado"
+              type="text"
+              maxLength={2}
+              value={form.estado}
+              onChange={handleChange}
+              placeholder="RJ"
+              className="w-full rounded-lg border border-border px-3 py-2 text-heading uppercase outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+            />
+          </div>
+        </>
+      ) : (
         <div>
-          <label htmlFor="atu-bairro" className="mb-1 block text-sm font-medium text-body">
-            Bairro
+          <label htmlFor="atu-contato-emergencia" className="mb-1 block text-sm font-medium text-body">
+            Contato de emergência (WhatsApp) <span className="font-normal text-muted">(opcional)</span>
           </label>
           <input
-            id="atu-bairro"
-            name="bairro"
-            type="text"
-            value={form.bairro}
+            id="atu-contato-emergencia"
+            name="contatoEmergencia"
+            type="tel"
+            inputMode="tel"
+            value={form.contatoEmergencia}
             onChange={handleChange}
+            placeholder="(24) 99999-9999"
             className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
           />
         </div>
-
-        <div>
-          <label htmlFor="atu-cidade" className="mb-1 block text-sm font-medium text-body">
-            Cidade
-          </label>
-          <input
-            id="atu-cidade"
-            name="cidade"
-            type="text"
-            value={form.cidade}
-            onChange={handleChange}
-            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-          />
-        </div>
-      </div>
-
-      <div>
-        <label htmlFor="atu-estado" className="mb-1 block text-sm font-medium text-body">
-          Estado
-        </label>
-        <input
-          id="atu-estado"
-          name="estado"
-          type="text"
-          maxLength={2}
-          value={form.estado}
-          onChange={handleChange}
-          placeholder="RJ"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading uppercase outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-        />
-      </div>
+      )}
 
       <div>
         <label htmlFor="atu-nascimento" className="mb-1 block text-sm font-medium text-body">

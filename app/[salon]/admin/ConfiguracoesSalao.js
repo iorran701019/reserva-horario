@@ -112,6 +112,17 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const [erroLinkLocalizacao, setErroLinkLocalizacao] = useState("");
   const [statusLinkLocalizacao, setStatusLinkLocalizacao] = useState("");
 
+  // Programa de fidelidade: brinde a cada N atendimentos concluídos (ver
+  // lib/fidelidade.js -> verificarFidelidadeClientes, chamada ao carregar a
+  // aba Pendentes do /admin). 100% derivado — nada além da config é gravado
+  // aqui. undefined = ainda carregando.
+  const [fidelidadeAtiva, setFidelidadeAtiva] = useState(undefined);
+  const [fidelidadeMetaServicos, setFidelidadeMetaServicos] = useState("");
+  const [fidelidadeContaManutencao, setFidelidadeContaManutencao] = useState(true);
+  const [fidelidadeDescricaoBrinde, setFidelidadeDescricaoBrinde] = useState("");
+  const [erroFidelidade, setErroFidelidade] = useState("");
+  const [statusFidelidade, setStatusFidelidade] = useState("");
+
   // As 10 mensagens de WhatsApp editáveis (ver MENSAGENS_WHATSAPP_CONFIG em
   // lib/whatsapp.js). `mensagens` guarda o texto VIGENTE de cada campo
   // (personalizado se houver, senão o padrão) — undefined = carregando.
@@ -131,7 +142,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -147,6 +158,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
         setErroReservaExpira(error.message);
         setErroCancelamentoPrazo(error.message);
         setErroLinkLocalizacao(error.message);
+        setErroFidelidade(error.message);
         return;
       }
       setErro("");
@@ -186,6 +198,14 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
 
       setErroLinkLocalizacao("");
       setLinkLocalizacao(data?.link_localizacao ?? "");
+
+      setErroFidelidade("");
+      setFidelidadeAtiva(Boolean(data?.fidelidade_ativa));
+      setFidelidadeMetaServicos(
+        data?.fidelidade_meta_servicos == null ? "" : String(data.fidelidade_meta_servicos)
+      );
+      setFidelidadeContaManutencao(data?.fidelidade_conta_manutencao ?? true);
+      setFidelidadeDescricaoBrinde(data?.fidelidade_descricao_brinde ?? "");
 
       const textosMensagens = {};
       MENSAGENS_WHATSAPP_CONFIG.forEach(({ campo, padrao }) => {
@@ -270,6 +290,12 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     const t = setTimeout(() => setStatusLinkLocalizacao(""), 2500);
     return () => clearTimeout(t);
   }, [statusLinkLocalizacao]);
+
+  useEffect(() => {
+    if (statusFidelidade !== "salvo") return;
+    const t = setTimeout(() => setStatusFidelidade(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusFidelidade]);
 
   // Abre/fecha um bloco retrátil — só um aberto por vez, mesmo padrão do
   // acordeão de categorias de serviço.
@@ -474,6 +500,55 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     setStatusLinkLocalizacao("salvo");
   }
 
+  // Grava os 4 campos da fidelidade juntos (mesma linha), mesmo padrão de
+  // `salvarSinal` acima — `patch` sobrepõe o state atual pra casos em que o
+  // campo que disparou o save (ex.: um dos toggles) ainda não commitou no
+  // state. Retorna o erro (ou null) pra quem chamou decidir se reverte um
+  // toggle otimista.
+  async function salvarFidelidade(patch = {}) {
+    const ativa = patch.fidelidadeAtiva ?? fidelidadeAtiva;
+    const metaServicos = patch.fidelidadeMetaServicos ?? fidelidadeMetaServicos;
+    const contaManutencao = patch.fidelidadeContaManutencao ?? fidelidadeContaManutencao;
+    const descricaoBrinde = patch.fidelidadeDescricaoBrinde ?? fidelidadeDescricaoBrinde;
+
+    setStatusFidelidade("salvando");
+    setErroFidelidade("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({
+        fidelidade_ativa: ativa,
+        fidelidade_meta_servicos: metaServicos === "" ? null : parseInt(metaServicos, 10),
+        fidelidade_conta_manutencao: contaManutencao,
+        fidelidade_descricao_brinde: descricaoBrinde || null,
+      })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setStatusFidelidade("");
+      setErroFidelidade(`Não foi possível salvar: ${error.message}`);
+      return error;
+    }
+
+    setStatusFidelidade("salvo");
+    return null;
+  }
+
+  // Alterna e grava na hora, mesmo padrão otimista de `alternarValorCheioAposPrazo`.
+  async function alternarFidelidadeAtiva() {
+    const novo = !fidelidadeAtiva;
+    setFidelidadeAtiva(novo);
+    const error = await salvarFidelidade({ fidelidadeAtiva: novo });
+    if (error) setFidelidadeAtiva(!novo);
+  }
+
+  async function alternarFidelidadeContaManutencao() {
+    const novo = !fidelidadeContaManutencao;
+    setFidelidadeContaManutencao(novo);
+    const error = await salvarFidelidade({ fidelidadeContaManutencao: novo });
+    if (error) setFidelidadeContaManutencao(!novo);
+  }
+
   // Grava o texto vigente de UMA mensagem (`mensagens[campo]`), literal —
   // inclusive string vazia, quando o dono esvazia o campo de propósito (ver
   // regra em MENSAGENS_WHATSAPP_CONFIG/lib/whatsapp.js: vazio salvo é ''
@@ -510,6 +585,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const carregandoReservaExpira = reservaExpiraHoras === undefined;
   const carregandoCancelamentoPrazo = cancelamentoPrazoHoras === undefined;
   const carregandoLinkLocalizacao = linkLocalizacao === undefined;
+  const carregandoFidelidade = fidelidadeAtiva === undefined;
   const sinalDesligado = sinalRegra === "desligado";
   // Com 1 só profissional ativo (ou enquanto a contagem ainda carrega), o
   // toggle some — não há outro profissional pro cliente escolher de qualquer
@@ -1034,6 +1110,114 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
                 <p className="mt-2 text-xs text-red-600">{erroValorCheio}</p>
               )}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bloco: Fidelidade */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("fidelidade")}
+          aria-expanded={blocoAberto === "fidelidade"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Fidelidade</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "fidelidade" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "fidelidade" && (
+          <div className="border-t border-border p-4 space-y-4">
+            <label className="flex items-start gap-2 text-sm text-body">
+              <input
+                type="checkbox"
+                checked={Boolean(fidelidadeAtiva)}
+                onChange={alternarFidelidadeAtiva}
+                disabled={carregandoFidelidade}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <span>
+                <span className="block font-medium text-heading">
+                  Programa de fidelidade ativo
+                </span>
+                <span className="mt-1 block text-xs text-muted">
+                  Cria uma pendência no admin quando a cliente completa a meta
+                  de serviços, pra você lembrar de dar o brinde.
+                </span>
+              </span>
+            </label>
+
+            <div>
+              <label
+                htmlFor="fidelidade-meta-servicos"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Quantos serviços até o brinde
+              </label>
+              <input
+                id="fidelidade-meta-servicos"
+                type="number"
+                min="1"
+                step="1"
+                inputMode="numeric"
+                value={fidelidadeMetaServicos}
+                onChange={(e) => setFidelidadeMetaServicos(e.target.value)}
+                onBlur={() => salvarFidelidade()}
+                disabled={carregandoFidelidade || !fidelidadeAtiva}
+                placeholder="10"
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </div>
+
+            <label className="flex items-start gap-2 text-sm text-body">
+              <input
+                type="checkbox"
+                checked={Boolean(fidelidadeContaManutencao)}
+                onChange={alternarFidelidadeContaManutencao}
+                disabled={carregandoFidelidade}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <span>
+                <span className="block font-medium text-heading">
+                  Manutenções contam pra meta
+                </span>
+                <span className="mt-1 block text-xs text-muted">
+                  Se desligado, agendamentos de serviços de manutenção não
+                  somam pra meta de fidelidade.
+                </span>
+              </span>
+            </label>
+
+            <div>
+              <label
+                htmlFor="fidelidade-descricao-brinde"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Descrição do brinde
+              </label>
+              <input
+                id="fidelidade-descricao-brinde"
+                type="text"
+                value={fidelidadeDescricaoBrinde}
+                onChange={(e) => setFidelidadeDescricaoBrinde(e.target.value)}
+                onBlur={() => salvarFidelidade()}
+                disabled={carregandoFidelidade}
+                placeholder="Manicure simples grátis"
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </div>
+
+            {statusFidelidade === "salvando" && (
+              <p className="text-xs text-muted">Salvando…</p>
+            )}
+            {statusFidelidade === "salvo" && !erroFidelidade && (
+              <p className="text-xs font-medium text-green-600">Salvo ✓</p>
+            )}
+            {erroFidelidade && (
+              <p className="text-xs text-red-600">{erroFidelidade}</p>
+            )}
           </div>
         )}
       </div>

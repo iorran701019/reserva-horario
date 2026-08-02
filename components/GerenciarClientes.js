@@ -288,17 +288,35 @@ function DetalheCliente({ cliente, estabelecimentoId, msgContatoAdmin, onVoltar 
 
       <div>
         <h3 className="text-base font-semibold text-heading">{cliente.nome}</h3>
-        <a
-          href={linkWhatsApp(
-            cliente.whatsapp,
-            MENSAGEM_CONTATO_CLIENTE_ADMIN(cliente, msgContatoAdmin)
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <a
+            href={linkWhatsApp(
+              cliente.whatsapp,
+              MENSAGEM_CONTATO_CLIENTE_ADMIN(cliente, msgContatoAdmin)
+            )}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-primary underline-offset-2 hover:underline"
+          >
+            {cliente.whatsapp}
+          </a>
+          {cliente.contato_emergencia && (
+            <span className="text-sm text-body">
+              Emergência:{" "}
+              <a
+                href={linkWhatsApp(
+                  cliente.contato_emergencia,
+                  MENSAGEM_CONTATO_CLIENTE_ADMIN(cliente, msgContatoAdmin)
+                )}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-primary underline-offset-2 hover:underline"
+              >
+                {cliente.contato_emergencia}
+              </a>
+            </span>
           )}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-1 inline-block text-sm text-primary underline-offset-2 hover:underline"
-        >
-          {cliente.whatsapp}
-        </a>
+        </div>
       </div>
 
       <dl className="space-y-1 text-sm">

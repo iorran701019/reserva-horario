@@ -373,6 +373,7 @@ export default function AgendarPage() {
             <IdentificacaoCliente
               estabelecimentoId={estabelecimento.id}
               cadastroCompleto={Boolean(estabelecimento.cadastro_completo)}
+              exigirEndereco={estabelecimento.exigir_endereco !== false}
               estabelecimentoWhatsapp={estabelecimento.whatsapp}
               nomeContato={nomeContatoExibido}
               msgFalhaCadastro={estabelecimento.msg_falha_cadastro}

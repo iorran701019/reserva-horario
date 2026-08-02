@@ -17,6 +17,7 @@ import {
 import { classificarAgendamento, fimDoAtendimento } from "@/lib/particao";
 import { profissionaisLivresNoHorario } from "@/lib/disponibilidade";
 import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
+import { verificarFidelidadeClientes } from "@/lib/fidelidade";
 import {
   Menu,
   X,
@@ -33,6 +34,7 @@ import {
   Ban,
   Archive,
   AlertCircle,
+  Gift,
 } from "lucide-react";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
@@ -176,6 +178,32 @@ const TIPOS_PENDENCIA = {
       acaoArquivarPendencia(item, ctx.arquivar),
     ],
   },
+  fidelidade_disponivel: {
+    Icone: Gift,
+    corCard: "bg-purple-50/60 ring-purple-300",
+    corIcone: "text-purple-600",
+    acoes: (item, ctx) => [
+      {
+        id: "mensagem",
+        rotulo: "Enviar mensagem",
+        Icone: IconeWhatsApp,
+        classe: "bg-green-50 text-green-700 ring-1 ring-green-100 hover:bg-green-100",
+        onClick: () =>
+          window.open(
+            linkWhatsAppSemMensagem(item.clientes?.whatsapp),
+            "_blank",
+            "noopener,noreferrer"
+          ),
+      },
+      {
+        id: "brinde",
+        rotulo: "Marcar brinde concedido",
+        Icone: Gift,
+        classe: "bg-card text-body ring-1 ring-border hover:bg-surface",
+        onClick: () => ctx.marcarBrinde(item),
+      },
+    ],
+  },
 };
 
 // Tipo desconhecido (nenhuma entrada em TIPOS_PENDENCIA ainda): card neutro
@@ -248,11 +276,16 @@ async function buscarAgendamentos(estabelecimentoId) {
 // (pendencias_admin.resolvido = false) do estabelecimento, mais recentes
 // primeiro. `agendamentos(telefone)` é o join pelo agendamento_id vinculado
 // (ver sql/pendencias_admin.sql) — resolve o telefone pra ação "Enviar
-// mensagem" sem uma segunda query.
+// mensagem" das pendências presas a um agendamento (cancelamento_cliente) sem
+// uma segunda query. `clientes(whatsapp)` é o mesmo, mas pelo cliente_id (ver
+// sql/pendencias_admin_cliente.sql) — usado pelas que não têm agendamento
+// (fidelidade_disponivel).
 async function buscarPendenciasAdmin(estabelecimentoId) {
   const { data, error } = await supabase
     .from("pendencias_admin")
-    .select("id, tipo, titulo, descricao, agendamento_id, created_at, agendamentos(telefone)")
+    .select(
+      "id, tipo, titulo, descricao, agendamento_id, cliente_id, created_at, agendamentos(telefone), clientes(whatsapp)"
+    )
     .eq("estabelecimento_id", estabelecimentoId)
     .eq("resolvido", false)
     .order("created_at", { ascending: false });
@@ -566,6 +599,25 @@ export default function AdminPage() {
     setPendenciasAdmin((atuais) => atuais.filter((item) => item.id !== id));
   }
 
+  // Ação "Marcar brinde concedido" do card fidelidade_disponivel (ver
+  // TIPOS_PENDENCIA): grava o resgate em fidelidade_resgates — zera a
+  // contagem da cliente pra próxima fidelidade, já que
+  // verificarFidelidadeClientes (lib/fidelidade.js) conta só a partir do
+  // último resgate — e, se der certo, arquiva a pendência pelo MESMO caminho
+  // de handleArquivarPendencia (sem repetir o update+patch local aqui).
+  async function handleMarcarBrindeConcedido(item) {
+    const { error } = await supabase
+      .from("fidelidade_resgates")
+      .insert({ cliente_id: item.cliente_id, estabelecimento_id: estabelecimento.id });
+
+    if (error) {
+      setErro(`Não foi possível registrar o resgate: ${error.message}`);
+      return;
+    }
+
+    await handleArquivarPendencia(item.id);
+  }
+
   // Verifica a sessão ao montar e fica ouvindo mudanças (login/logout em
   // outra aba também caem aqui). Sem sessão → manda pro login do MESMO salão
   // (slug no path, via urlLogin(salon)).
@@ -701,6 +753,11 @@ export default function AdminPage() {
         dados.map((item) => item.id)
       );
       if (ativo) setRespostasPorAgendamento(respostas);
+
+      // Roda ANTES de buscar as pendências: cria as novas de fidelidade (se
+      // houver) a tempo de já aparecerem nesta mesma carga.
+      await verificarFidelidadeClientes(estabelecimento.id);
+      if (!ativo) return;
 
       const { dados: dadosPendencias } = await buscarPendenciasAdmin(
         estabelecimento.id
@@ -970,7 +1027,10 @@ export default function AdminPage() {
                   agendamentos pendentes abaixo (ver TIPOS_PENDENCIA). */}
               {pendenciasAdmin.map((item) => {
                 const config = TIPOS_PENDENCIA[item.tipo] ?? TIPO_PENDENCIA_PADRAO;
-                const acoes = config.acoes(item, { arquivar: handleArquivarPendencia });
+                const acoes = config.acoes(item, {
+                  arquivar: handleArquivarPendencia,
+                  marcarBrinde: handleMarcarBrindeConcedido,
+                });
                 return (
                   <li
                     key={`pendencia-${item.id}`}
