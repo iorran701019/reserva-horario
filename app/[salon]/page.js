@@ -44,6 +44,10 @@ export default function AgendarPage() {
   // ela). Persiste entre agendamentos da mesma visita, então um novo
   // agendamento (após "Fazer novo agendamento") não pede o WhatsApp de novo.
   const [clienteIdentificado, setClienteIdentificado] = useState(null);
+  // Etapa interna do IdentificacaoCliente ("telefone" | "confirmar" |
+  // "cadastroSimples" | "completarEndereco") — só usada aqui pra decidir
+  // quando a FotoPerfilCircular deve aparecer (ver uso abaixo).
+  const [etapaIdentificacao, setEtapaIdentificacao] = useState("telefone");
 
   // null = ainda checando (ou cliente ainda não identificado); true = precisa
   // preencher a anamnese antes do wizard; false = anamnese em dia, segue
@@ -353,8 +357,11 @@ export default function AgendarPage() {
         </header>
 
         {/* Só na primeira etapa (identificação por WhatsApp) — nas etapas
-            seguintes (painel, anamnese, formulário) a foto some. */}
-        {!clienteIdentificado && (
+            seguintes (painel, anamnese, formulário) a foto some. Isso inclui
+            as 3 etapas internas do IdentificacaoCliente além de "telefone"
+            (confirmar/cadastroSimples/completarEndereco), que também não são
+            "identificado" ainda mas já não devem mostrar a foto. */}
+        {etapaIdentificacao === "telefone" && (
           <FotoPerfilCircular
             src={estabelecimento.foto_perfil_url}
             posicao={estabelecimento.foto_perfil_posicao}
@@ -378,6 +385,7 @@ export default function AgendarPage() {
               nomeContato={nomeContatoExibido}
               msgFalhaCadastro={estabelecimento.msg_falha_cadastro}
               onIdentificado={setClienteIdentificado}
+              onEtapaChange={setEtapaIdentificacao}
             />
           ) : agendamentosAtivos === null ? (
             <p className="text-sm text-body">Carregando...</p>

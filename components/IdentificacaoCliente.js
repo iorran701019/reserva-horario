@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import CadastroCliente from "@/components/CadastroCliente";
 import ModalConflitoWhatsapp from "@/components/ModalConflitoWhatsapp";
@@ -47,6 +47,9 @@ import { useConflitoWhatsapp } from "@/lib/checagemWhatsapp";
 //                       msg_falha_cadastro) repassado pro mesmo modal.
 //   onIdentificado    – recebe { id, nome, telefone, clienteNovo } pronto
 //                       pra virar clienteInicial do FormularioAgendamento.
+//   onEtapaChange     – opcional; recebe a etapa interna atual sempre que ela
+//                       mudar (inclusive no mount, com "telefone"). Permite o
+//                       pai reagir a qual das 4 telas está visível.
 export default function IdentificacaoCliente({
   estabelecimentoId,
   cadastroCompleto = false,
@@ -55,11 +58,17 @@ export default function IdentificacaoCliente({
   nomeContato,
   msgFalhaCadastro,
   onIdentificado,
+  onEtapaChange,
 }) {
   // "telefone" (pede WhatsApp) -> "confirmar" (achou, confirma o nome) ->
   // "cadastroSimples" (nome + confirmar WhatsApp, ramo false) ou
   // "completarEndereco" (ramo true).
   const [etapa, setEtapa] = useState("telefone");
+
+  useEffect(() => {
+    onEtapaChange?.(etapa);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [etapa]);
   const [telefone, setTelefone] = useState("");
   const [clienteEncontrado, setClienteEncontrado] = useState(null);
   const [clienteNovo, setClienteNovo] = useState(false);
