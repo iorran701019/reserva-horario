@@ -139,6 +139,16 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const [erroFoto, setErroFoto] = useState("");
   const [statusFotoPosicao, setStatusFotoPosicao] = useState("");
 
+  // Integração com Google Calendar (ver sql/estabelecimentos_google_calendar.sql
+  // e app/api/google-calendar/callback/route.js). Nada é gravado direto por
+  // aqui — "Conectar" só redireciona pro Google, quem grava é a rota de
+  // callback (via service role); "Desconectar" zera os campos e apaga o
+  // token. undefined = ainda carregando.
+  const [googleCalendarAtivo, setGoogleCalendarAtivo] = useState(undefined);
+  const [googleCalendarEmail, setGoogleCalendarEmail] = useState(null);
+  const [desconectandoGoogleCalendar, setDesconectandoGoogleCalendar] = useState(false);
+  const [erroGoogleCalendar, setErroGoogleCalendar] = useState("");
+
   // As 10 mensagens de WhatsApp editáveis (ver MENSAGENS_WHATSAPP_CONFIG em
   // lib/whatsapp.js). `mensagens` guarda o texto VIGENTE de cada campo
   // (personalizado se houver, senão o padrão) — undefined = carregando.
@@ -158,7 +168,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -176,6 +186,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
         setErroLinkLocalizacao(error.message);
         setErroFidelidade(error.message);
         setErroFoto(error.message);
+        setErroGoogleCalendar(error.message);
         return;
       }
       setErro("");
@@ -234,6 +245,10 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
         if (!Number.isNaN(y)) setFotoPerfilY(y);
       }
       setFotoPerfilZoom(data?.foto_perfil_zoom ?? 1);
+
+      setErroGoogleCalendar("");
+      setGoogleCalendarAtivo(Boolean(data?.google_calendar_ativo));
+      setGoogleCalendarEmail(data?.google_calendar_email ?? null);
 
       const textosMensagens = {};
       MENSAGENS_WHATSAPP_CONFIG.forEach(({ campo, padrao }) => {
@@ -654,6 +669,57 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     setStatusFotoPosicao("salvo");
   }
 
+  // Redireciona pro consentimento do Google (não é fetch — a página inteira
+  // navega pro domínio do Google e volta via app/api/google-calendar/callback).
+  // `state` carrega o estabelecimento_id, pra rota de callback saber pra qual
+  // salão gravar o token.
+  function conectarGoogleCalendar() {
+    const params = new URLSearchParams({
+      client_id: process.env.NEXT_PUBLIC_GOOGLE_CALENDAR_CLIENT_ID,
+      redirect_uri: `${process.env.NEXT_PUBLIC_URL_BASE}/api/google-calendar/callback`,
+      response_type: "code",
+      scope: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/userinfo.email",
+      access_type: "offline",
+      prompt: "consent",
+      state: estabelecimento.id,
+    });
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  }
+
+  // Zera a integração: desliga o flag, esquece o e-mail e apaga o
+  // refresh_token guardado (sql/estabelecimentos_google_calendar.sql — a
+  // tabela não tem policy de SELECT/UPDATE pro cliente, só DELETE).
+  async function desconectarGoogleCalendar() {
+    setDesconectandoGoogleCalendar(true);
+    setErroGoogleCalendar("");
+
+    const { error: erroToken } = await supabase
+      .from("google_calendar_tokens")
+      .delete()
+      .eq("estabelecimento_id", estabelecimento.id);
+
+    if (erroToken) {
+      setDesconectandoGoogleCalendar(false);
+      setErroGoogleCalendar(`Não foi possível desconectar: ${erroToken.message}`);
+      return;
+    }
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ google_calendar_ativo: false, google_calendar_email: null })
+      .eq("id", estabelecimento.id);
+
+    setDesconectandoGoogleCalendar(false);
+
+    if (error) {
+      setErroGoogleCalendar(`Não foi possível desconectar: ${error.message}`);
+      return;
+    }
+
+    setGoogleCalendarAtivo(false);
+    setGoogleCalendarEmail(null);
+  }
+
   // Grava o texto vigente de UMA mensagem (`mensagens[campo]`), literal —
   // inclusive string vazia, quando o dono esvazia o campo de propósito (ver
   // regra em MENSAGENS_WHATSAPP_CONFIG/lib/whatsapp.js: vazio salvo é ''
@@ -692,6 +758,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const carregandoLinkLocalizacao = linkLocalizacao === undefined;
   const carregandoFidelidade = fidelidadeAtiva === undefined;
   const carregandoFoto = fotoPerfilUrl === undefined;
+  const carregandoGoogleCalendar = googleCalendarAtivo === undefined;
   const sinalDesligado = sinalRegra === "desligado";
   // Com 1 só profissional ativo (ou enquanto a contagem ainda carrega), o
   // toggle some — não há outro profissional pro cliente escolher de qualquer
@@ -938,6 +1005,63 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
             )}
             {erroLinkLocalizacao && (
               <p className="mt-2 text-xs text-red-600">{erroLinkLocalizacao}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Bloco: Google Calendar */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("googleCalendar")}
+          aria-expanded={blocoAberto === "googleCalendar"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Google Calendar</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "googleCalendar" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "googleCalendar" && (
+          <div className="border-t border-border p-4">
+            {googleCalendarAtivo ? (
+              <div>
+                <p className="text-sm text-body">
+                  Conectado como{" "}
+                  <span className="font-medium text-heading">
+                    {googleCalendarEmail}
+                  </span>
+                </p>
+                <button
+                  type="button"
+                  onClick={desconectarGoogleCalendar}
+                  disabled={carregandoGoogleCalendar || desconectandoGoogleCalendar}
+                  className="mt-3 rounded-lg bg-border/60 px-3 py-2 text-sm font-medium text-heading transition disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {desconectandoGoogleCalendar ? "Desconectando…" : "Desconectar"}
+                </button>
+              </div>
+            ) : (
+              <div>
+                <p className="text-xs text-muted">
+                  Conecte sua conta Google pra sincronizar os agendamentos com
+                  o Google Calendar.
+                </p>
+                <button
+                  type="button"
+                  onClick={conectarGoogleCalendar}
+                  disabled={carregandoGoogleCalendar}
+                  className="mt-3 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Conectar Google Calendar
+                </button>
+              </div>
+            )}
+
+            {erroGoogleCalendar && (
+              <p className="mt-2 text-xs text-red-600">{erroGoogleCalendar}</p>
             )}
           </div>
         )}
