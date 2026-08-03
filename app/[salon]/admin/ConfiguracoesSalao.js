@@ -148,6 +148,21 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const [googleCalendarEmail, setGoogleCalendarEmail] = useState(null);
   const [desconectandoGoogleCalendar, setDesconectandoGoogleCalendar] = useState(false);
   const [erroGoogleCalendar, setErroGoogleCalendar] = useState("");
+  // Retorno da conexão do Google Calendar (ver
+  // app/api/google-calendar/callback/route.js), que manda a contagem de
+  // agendamentos sincronizados na primeira conexão via query string — o
+  // navegador só volta pra cá depois do redirect do Google, não tem outro
+  // jeito de passar esse dado pra tela. Lido direto no initializer (não num
+  // effect) porque é o estado inicial da tela, não uma sincronização externa.
+  const [sucessoGoogleCalendar] = useState(() => {
+    if (typeof window === "undefined") return "";
+    const total = Number(
+      new URLSearchParams(window.location.search).get("google_calendar_sincronizados")
+    );
+    return total > 0
+      ? `Conectado! ${total} agendamentos sincronizados com seu Google Calendar.`
+      : "";
+  });
 
   // As 10 mensagens de WhatsApp editáveis (ver MENSAGENS_WHATSAPP_CONFIG em
   // lib/whatsapp.js). `mensagens` guarda o texto VIGENTE de cada campo
@@ -284,6 +299,18 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       ativo = false;
     };
   }, [estabelecimento.id]);
+
+  // Limpa o parâmetro `google_calendar_sincronizados` (lido acima, no
+  // initializer de sucessoGoogleCalendar) da URL, pra não reexibir a
+  // mensagem de sucesso num refresh da página.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("google_calendar_sincronizados")) return;
+
+    params.delete("google_calendar_sincronizados");
+    const query = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  }, []);
 
   // "Salvo ✓" some sozinho depois de um instante, pra não ficar preso na tela.
   useEffect(() => {
@@ -1062,6 +1089,9 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
 
             {erroGoogleCalendar && (
               <p className="mt-2 text-xs text-red-600">{erroGoogleCalendar}</p>
+            )}
+            {sucessoGoogleCalendar && (
+              <p className="mt-2 text-xs font-medium text-green-600">{sucessoGoogleCalendar}</p>
             )}
           </div>
         )}

@@ -1,4 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
+import { sincronizarEventoComGoogle } from "@/lib/googleCalendarSync";
+
+export const maxDuration = 60;
 
 // Callback do fluxo OAuth "authorization code" do Google Calendar, disparado
 // pelo redirect que o Google faz depois do dono autorizar (ver botão
@@ -121,5 +124,39 @@ export async function GET(request) {
     })
     .eq("id", estabelecimentoId);
 
-  return Response.redirect(destinoAdmin, 302);
+  // Sincroniza de cara todo o histórico de agendamentos confirmados do salão
+  // (sem filtro de data — inclui passados, por decisão de produto), pra já
+  // popular o Google Calendar na primeira conexão. Sequencial (não em
+  // paralelo) pra não estourar limite de requisições da API do Google;
+  // reusa o MESMO accessToken já obtido na troca do code acima. Uma falha
+  // isolada só loga e segue pros próximos, não trava o resto do loop.
+  const { data: agendamentosConfirmados } = await supabaseAdmin
+    .from("agendamentos")
+    .select(
+      "id, nome_cliente, data, horario, duracao_min, status, servico_livre, google_event_id, estabelecimento_id, servicos(nome)"
+    )
+    .eq("estabelecimento_id", estabelecimentoId)
+    .eq("status", "confirmado");
+
+  let totalSincronizados = 0;
+  for (const agendamento of agendamentosConfirmados ?? []) {
+    try {
+      const { acao } = await sincronizarEventoComGoogle({
+        agendamento,
+        accessToken: tokens.access_token,
+        supabaseAdmin,
+      });
+      if (acao === "criado" || acao === "atualizado") totalSincronizados += 1;
+    } catch (erro) {
+      console.error(
+        "Falha ao sincronizar agendamento com o Google Calendar",
+        agendamento.id,
+        erro
+      );
+    }
+  }
+
+  const destinoFinal = new URL(destinoAdmin);
+  destinoFinal.searchParams.set("google_calendar_sincronizados", String(totalSincronizados));
+  return Response.redirect(destinoFinal.toString(), 302);
 }
