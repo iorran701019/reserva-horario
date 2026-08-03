@@ -365,6 +365,7 @@ export default function AgendarPage() {
           <FotoPerfilCircular
             src={estabelecimento.foto_perfil_url}
             posicao={estabelecimento.foto_perfil_posicao}
+            zoom={estabelecimento.foto_perfil_zoom ?? 1}
             diametro={alturaCaixa}
             alt={`Foto de ${estabelecimento.nome}`}
           />

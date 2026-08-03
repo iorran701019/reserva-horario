@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import FotoPerfilCircular from "@/components/FotoPerfilCircular";
 import CampoMensagemWhatsapp from "@/components/CampoMensagemWhatsapp";
 import { MENSAGENS_WHATSAPP_CONFIG, substituirVariaveis } from "@/lib/whatsapp";
 
@@ -123,6 +124,21 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const [erroFidelidade, setErroFidelidade] = useState("");
   const [statusFidelidade, setStatusFidelidade] = useState("");
 
+  // Foto de perfil (bucket 'fotos-perfil' do Supabase Storage, caminho fixo
+  // `${estabelecimento.id}/perfil.<extensao>` — sempre sobrescreve, nunca
+  // acumula lixo). foto_perfil_posicao vira x/y (0-100) pros sliders; string
+  // salva no formato "x% y%" (mesmo formato consumido por FotoPerfilCircular
+  // via object-position). foto_perfil_zoom é o multiplicador de zoom (1-3),
+  // gravado junto com x/y no mesmo save (ver salvarFotoPerfilPosicao).
+  // undefined = ainda carregando.
+  const [fotoPerfilUrl, setFotoPerfilUrl] = useState(undefined);
+  const [fotoPerfilX, setFotoPerfilX] = useState(50);
+  const [fotoPerfilY, setFotoPerfilY] = useState(50);
+  const [fotoPerfilZoom, setFotoPerfilZoom] = useState(1);
+  const [enviandoFoto, setEnviandoFoto] = useState(false);
+  const [erroFoto, setErroFoto] = useState("");
+  const [statusFotoPosicao, setStatusFotoPosicao] = useState("");
+
   // As 10 mensagens de WhatsApp editáveis (ver MENSAGENS_WHATSAPP_CONFIG em
   // lib/whatsapp.js). `mensagens` guarda o texto VIGENTE de cada campo
   // (personalizado se houver, senão o padrão) — undefined = carregando.
@@ -142,7 +158,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -159,6 +175,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
         setErroCancelamentoPrazo(error.message);
         setErroLinkLocalizacao(error.message);
         setErroFidelidade(error.message);
+        setErroFoto(error.message);
         return;
       }
       setErro("");
@@ -206,6 +223,17 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       );
       setFidelidadeContaManutencao(data?.fidelidade_conta_manutencao ?? true);
       setFidelidadeDescricaoBrinde(data?.fidelidade_descricao_brinde ?? "");
+
+      setErroFoto("");
+      setFotoPerfilUrl(data?.foto_perfil_url ?? null);
+      if (data?.foto_perfil_posicao) {
+        const [xStr, yStr] = data.foto_perfil_posicao.split(" ");
+        const x = parseInt(xStr, 10);
+        const y = parseInt(yStr, 10);
+        if (!Number.isNaN(x)) setFotoPerfilX(x);
+        if (!Number.isNaN(y)) setFotoPerfilY(y);
+      }
+      setFotoPerfilZoom(data?.foto_perfil_zoom ?? 1);
 
       const textosMensagens = {};
       MENSAGENS_WHATSAPP_CONFIG.forEach(({ campo, padrao }) => {
@@ -296,6 +324,12 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     const t = setTimeout(() => setStatusFidelidade(""), 2500);
     return () => clearTimeout(t);
   }, [statusFidelidade]);
+
+  useEffect(() => {
+    if (statusFotoPosicao !== "salvo") return;
+    const t = setTimeout(() => setStatusFotoPosicao(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusFotoPosicao]);
 
   // Abre/fecha um bloco retrátil — só um aberto por vez, mesmo padrão do
   // acordeão de categorias de serviço.
@@ -549,6 +583,77 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     if (error) setFidelidadeContaManutencao(!novo);
   }
 
+  // Sobe o arquivo pro bucket 'fotos-perfil', sempre no mesmo caminho (não
+  // acumula lixo), e grava a URL pública + ?v=<timestamp> em
+  // foto_perfil_url — o cache-buster evita que o otimizador de imagem do
+  // Next continue servindo a foto antiga depois da troca.
+  async function handleFotoPerfilChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setEnviandoFoto(true);
+    setErroFoto("");
+
+    const extensao = file.name.split(".").pop()?.toLowerCase() || "jpg";
+    const caminho = `${estabelecimento.id}/perfil.${extensao}`;
+
+    const { error: erroUpload } = await supabase.storage
+      .from("fotos-perfil")
+      .upload(caminho, file, { upsert: true, contentType: file.type });
+
+    if (erroUpload) {
+      setEnviandoFoto(false);
+      setErroFoto(`Não foi possível enviar a foto: ${erroUpload.message}`);
+      return;
+    }
+
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from("fotos-perfil").getPublicUrl(caminho);
+    const urlComCache = `${publicUrl}?v=${Date.now()}`;
+
+    const { error: erroUpdate } = await supabase
+      .from("estabelecimentos")
+      .update({ foto_perfil_url: urlComCache })
+      .eq("id", estabelecimento.id);
+
+    setEnviandoFoto(false);
+
+    if (erroUpdate) {
+      setErroFoto(`Não foi possível salvar a foto: ${erroUpdate.message}`);
+      return;
+    }
+
+    setFotoPerfilUrl(urlComCache);
+  }
+
+  // Grava posição ("x% y%") + zoom juntos ao soltar qualquer um dos 3
+  // sliders. Aceita x/y/zoom explícitos pra evitar depender do state ainda
+  // não commitado no próprio evento que disparou o save (mesmo motivo do
+  // `patch` em salvarSinal/salvarFidelidade).
+  async function salvarFotoPerfilPosicao(
+    x = fotoPerfilX,
+    y = fotoPerfilY,
+    zoom = fotoPerfilZoom
+  ) {
+    setStatusFotoPosicao("salvando");
+    setErroFoto("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ foto_perfil_posicao: `${x}% ${y}%`, foto_perfil_zoom: zoom })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setStatusFotoPosicao("");
+      setErroFoto(`Não foi possível salvar a posição: ${error.message}`);
+      return;
+    }
+
+    setStatusFotoPosicao("salvo");
+  }
+
   // Grava o texto vigente de UMA mensagem (`mensagens[campo]`), literal —
   // inclusive string vazia, quando o dono esvazia o campo de propósito (ver
   // regra em MENSAGENS_WHATSAPP_CONFIG/lib/whatsapp.js: vazio salvo é ''
@@ -586,6 +691,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const carregandoCancelamentoPrazo = cancelamentoPrazoHoras === undefined;
   const carregandoLinkLocalizacao = linkLocalizacao === undefined;
   const carregandoFidelidade = fidelidadeAtiva === undefined;
+  const carregandoFoto = fotoPerfilUrl === undefined;
   const sinalDesligado = sinalRegra === "desligado";
   // Com 1 só profissional ativo (ou enquanto a contagem ainda carrega), o
   // toggle some — não há outro profissional pro cliente escolher de qualquer
@@ -645,6 +751,143 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     )}
 
     <div className="space-y-4">
+      {/* Bloco: Foto de perfil */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("fotoPerfil")}
+          aria-expanded={blocoAberto === "fotoPerfil"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Foto de perfil</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "fotoPerfil" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "fotoPerfil" && (
+          <div className="border-t border-border p-4">
+            {fotoPerfilUrl ? (
+              <FotoPerfilCircular
+                src={fotoPerfilUrl}
+                posicao={`${fotoPerfilX}% ${fotoPerfilY}%`}
+                zoom={fotoPerfilZoom}
+                diametro={96}
+                alt="Foto de perfil"
+              />
+            ) : (
+              <div className="mb-6 flex justify-center">
+                <div
+                  className="flex items-center justify-center rounded-full bg-border/40 p-2 text-center text-xs text-muted ring-1 ring-border"
+                  style={{ width: 96, height: 96 }}
+                >
+                  Nenhuma foto enviada ainda
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label
+                  htmlFor="foto-perfil-input"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Enviar nova foto
+                </label>
+                <input
+                  id="foto-perfil-input"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFotoPerfilChange}
+                  disabled={carregandoFoto || enviandoFoto}
+                  className="block w-full text-sm text-body file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                {enviandoFoto && (
+                  <p className="mt-2 text-xs text-muted">Enviando…</p>
+                )}
+              </div>
+
+              <div>
+                <label
+                  htmlFor="foto-perfil-x"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Posição horizontal
+                </label>
+                <input
+                  id="foto-perfil-x"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={fotoPerfilX}
+                  onChange={(e) => setFotoPerfilX(Number(e.target.value))}
+                  onMouseUp={() => salvarFotoPerfilPosicao()}
+                  onTouchEnd={() => salvarFotoPerfilPosicao()}
+                  onKeyUp={() => salvarFotoPerfilPosicao()}
+                  disabled={carregandoFoto || !fotoPerfilUrl}
+                  className="w-full disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="foto-perfil-y"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Posição vertical
+                </label>
+                <input
+                  id="foto-perfil-y"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={fotoPerfilY}
+                  onChange={(e) => setFotoPerfilY(Number(e.target.value))}
+                  onMouseUp={() => salvarFotoPerfilPosicao()}
+                  onTouchEnd={() => salvarFotoPerfilPosicao()}
+                  onKeyUp={() => salvarFotoPerfilPosicao()}
+                  disabled={carregandoFoto || !fotoPerfilUrl}
+                  className="w-full disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="foto-perfil-zoom"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Zoom
+                </label>
+                <input
+                  id="foto-perfil-zoom"
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.1}
+                  value={fotoPerfilZoom}
+                  onChange={(e) => setFotoPerfilZoom(Number(e.target.value))}
+                  onMouseUp={() => salvarFotoPerfilPosicao()}
+                  onTouchEnd={() => salvarFotoPerfilPosicao()}
+                  onKeyUp={() => salvarFotoPerfilPosicao()}
+                  disabled={carregandoFoto || !fotoPerfilUrl}
+                  className="w-full disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+            </div>
+
+            {statusFotoPosicao === "salvando" && (
+              <p className="mt-2 text-xs text-muted">Salvando…</p>
+            )}
+            {statusFotoPosicao === "salvo" && !erroFoto && (
+              <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+            )}
+            {erroFoto && <p className="mt-2 text-xs text-red-600">{erroFoto}</p>}
+          </div>
+        )}
+      </div>
+
       {/* Bloco: Localização — mesmo padrão visual/comportamental do acordeão
           de categorias em GerenciarServicos.js (cabeçalho com título + seta,
           conteúdo só renderizado quando expandido). */}
