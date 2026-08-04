@@ -384,8 +384,18 @@ export default function AdminPage() {
 
   // Aba Agendar: `agendarKey` remonta o FormularioAgendamento pra zerá-lo após
   // criar; `avisoAgendar` mostra a confirmação inline do último cadastro.
+  // É estado de componente puro (sem URL/localStorage) — como o AdminPage
+  // nunca desmonta ao trocar de aba (viewPai só troca o que é renderizado),
+  // o aviso ficava preso até a próxima criação. Some sozinho após alguns
+  // segundos e também ao sair da aba (ver handler de troca de aba abaixo).
   const [agendarKey, setAgendarKey] = useState(0);
   const [avisoAgendar, setAvisoAgendar] = useState("");
+
+  useEffect(() => {
+    if (!avisoAgendar) return;
+    const id = setTimeout(() => setAvisoAgendar(""), 5500);
+    return () => clearTimeout(id);
+  }, [avisoAgendar]);
 
   // Preferência do salão (tabela estabelecimentos). Só quando DESLIGADA (o dono
   // encaixa) faz sentido oferecer a troca de profissional nos cards — com ela
@@ -1553,6 +1563,7 @@ export default function AdminPage() {
                   onClick={() => {
                     setViewPai(aba.id);
                     setDrawerAberto(false);
+                    setAvisoAgendar("");
                   }}
                   aria-current={ativa ? "page" : undefined}
                   className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition ${
