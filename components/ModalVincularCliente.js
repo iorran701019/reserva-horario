@@ -11,12 +11,17 @@ import { supabase } from "@/lib/supabaseClient";
 // componente (aquele vive dentro do wizard de agendamento, entrelaçado com o
 // resto do form), mas replica o padrão pra manter a experiência consistente.
 //
-// `agendamento` é o item vivo selecionado no Painel (precisa de id e
-// nome_cliente, usado como sugestão inicial de busca); null fecha o modal.
-// Confirmar faz um UPDATE direto em agendamentos (nome_cliente, telefone) —
-// isso dispara o gatilho pg_net normalmente, e a partir daí o sync de saída
-// (lib/googleCalendarSync.js) passa a atualizar o evento no Google, já que a
-// guarda de telefone null deixa de valer.
+// `agendamento` é o item vivo selecionado no Painel (precisa de id,
+// nome_cliente e observacao; nome_cliente aparece só como referência
+// somente-leitura em "Dados importados" — a busca nasce vazia); null fecha
+// o modal. Confirmar faz um UPDATE direto em agendamentos
+// (nome_cliente, telefone e, se um serviço foi escolhido no dropdown
+// opcional, servico_id — nunca duracao_min, que continua sendo a do evento
+// real do Calendar) — isso dispara o gatilho pg_net normalmente, e a partir
+// daí o sync de saída (lib/googleCalendarSync.js) passa a atualizar o evento
+// no Google, já que a guarda de telefone null deixa de valer. Se observacao
+// ainda estiver vazia, o UPDATE também grava ali o nome_cliente original (o
+// texto cru do Calendar), pra não perder essa referência.
 export default function ModalVincularCliente({
   agendamento,
   estabelecimentoId,
@@ -31,15 +36,43 @@ export default function ModalVincularCliente({
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
 
-  // Recomeça do zero a cada agendamento selecionado — nome do evento como
-  // ponto de partida da busca (frequentemente já é o nome da cliente).
+  const [servicos, setServicos] = useState([]);
+  const [servicoId, setServicoId] = useState("");
+
+  // Recomeça do zero a cada agendamento selecionado — o nome nasce vazio (o
+  // texto bruto do evento fica só na referência "Dados importados" acima do
+  // campo, sem pré-preencher a busca).
   useEffect(() => {
-    setNome(agendamento?.nome_cliente ?? "");
+    setNome("");
     setTelefone("");
     setClienteSelecionado(null);
     setResultados([]);
     setErro("");
+    setServicoId("");
   }, [agendamento]);
+
+  // Serviços ativos do tenant pro dropdown opcional — mesmo filtro
+  // (estabelecimento_id + ativo=true) da etapa "Serviço" do
+  // FormularioAgendamento; aqui a lista é só um select achatado (sem
+  // agrupamento por categoria), então pede só id/nome e ordena por nome.
+  useEffect(() => {
+    let ativo = true;
+
+    supabase
+      .from("servicos")
+      .select("id, nome")
+      .eq("estabelecimento_id", estabelecimentoId)
+      .eq("ativo", true)
+      .order("nome", { ascending: true })
+      .then(({ data, error }) => {
+        if (!ativo) return;
+        setServicos(error ? [] : data ?? []);
+      });
+
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimentoId]);
 
   // Debounce ~300ms da busca em `clientes`, mesmo padrão do autopreenchimento
   // admin em FormularioAgendamento. Só roda sem cliente já selecionado e com
@@ -104,9 +137,18 @@ export default function ModalVincularCliente({
     setSalvando(true);
     setErro("");
 
+    // Serviço aqui é só categorização (fidelidade/relatório) — nunca mexe em
+    // duracao_min, que continua sendo a do evento real importado do Calendar.
+    const patch = { nome_cliente: nomeLimpo, telefone: telefoneLimpo };
+    if (servicoId) patch.servico_id = servicoId;
+    // Antes de sobrescrever nome_cliente com o nome real, preserva o texto
+    // cru do Calendar em observacao (se ainda vazia) — única referência do
+    // que foi pedido, caso a dona não ache o serviço correspondente.
+    if (!agendamento.observacao) patch.observacao = agendamento.nome_cliente;
+
     const { error } = await supabase
       .from("agendamentos")
-      .update({ nome_cliente: nomeLimpo, telefone: telefoneLimpo })
+      .update(patch)
       .eq("id", agendamento.id);
 
     setSalvando(false);
@@ -115,7 +157,7 @@ export default function ModalVincularCliente({
       return;
     }
 
-    onVinculado?.({ nome_cliente: nomeLimpo, telefone: telefoneLimpo });
+    onVinculado?.(patch);
   }
 
   if (!agendamento) return null;
@@ -139,6 +181,11 @@ export default function ModalVincularCliente({
           Evento importado do Google Calendar — associe um cliente pra liberar
           WhatsApp, lembrete e a sincronização de volta pro Calendar.
         </p>
+
+        <div className="mt-4 rounded-lg border border-border bg-surface px-3 py-2">
+          <p className="text-xs font-medium text-muted">Dados importados</p>
+          <p className="mt-0.5 break-words text-sm text-body">{agendamento.nome_cliente}</p>
+        </div>
 
         <div className="mt-4">
           <label htmlFor="vincular-nome" className="mb-1 block text-sm font-medium text-body">
@@ -212,6 +259,31 @@ export default function ModalVincularCliente({
               clienteSelecionado ? "bg-surface" : "",
             ].join(" ")}
           />
+        </div>
+
+        <div className="mt-4">
+          <label htmlFor="vincular-servico" className="mb-1 block text-sm font-medium text-body">
+            Serviço <span className="font-normal text-muted">(opcional)</span>
+          </label>
+          <select
+            id="vincular-servico"
+            value={servicoId}
+            onChange={(e) => setServicoId(e.target.value)}
+            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+          >
+            <option value="" className="font-semibold">
+              Nenhum
+            </option>
+            {servicos.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.nome}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-muted">
+            Só categoriza o agendamento (fidelidade/relatório) — não muda a duração
+            nem o horário, que continuam sendo os do evento importado.
+          </p>
         </div>
 
         {erro && <p className="mt-3 text-xs text-red-600">{erro}</p>}

@@ -40,6 +40,7 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
   const [candidatos, setCandidatos] = useState(null);
   const [buscandoCandidatos, setBuscandoCandidatos] = useState(false);
   const [erroCandidatos, setErroCandidatos] = useState("");
+  const [listaExpandida, setListaExpandida] = useState(false);
 
   const [enviando, setEnviando] = useState(false);
   const [resumoImportacao, setResumoImportacao] = useState(null);
@@ -81,6 +82,12 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
       setCalendarios(lista);
       if (calendarioId && lista.some((c) => c.id === calendarioId)) {
         setCalendarioEscolha(calendarioId);
+      } else {
+        // Sem escolha salva ainda: pré-seleciona o calendário primário (já
+        // vem primeiro na lista, ver listarCalendarios) em vez de deixar
+        // "Selecione..." — é o palpite certo na maioria dos casos.
+        const primario = lista.find((c) => c.primary);
+        if (primario) setCalendarioEscolha(primario.id);
       }
     } catch (erro) {
       setErroCalendario(erro.message);
@@ -111,6 +118,7 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
     setBuscandoCandidatos(true);
     setErroCandidatos("");
     setResumoImportacao(null);
+    setListaExpandida(false);
     try {
       const headers = await cabecalhoAutorizacao();
       const resposta = await fetch(
@@ -244,7 +252,7 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
                           <option value="">Selecione...</option>
                           {calendarios.map((c) => (
                             <option key={c.id} value={c.id}>
-                              {c.summary}
+                              {c.primary ? "Sua agenda principal (email)" : c.summary}
                             </option>
                           ))}
                         </select>
@@ -290,26 +298,44 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
                     <p className="mt-3 text-sm text-body">Nenhum candidato novo encontrado.</p>
                   )}
 
-                  {/* Lista só-leitura: cada candidato vira um agendamento
-                      'confirmado' ocupando o horário, sem cliente/serviço —
-                      o vínculo com a ficha real acontece depois, pelo botão
-                      "Vincular cliente" no Painel. */}
+                  {/* Resumo retrátil: por padrão só mostra a contagem. A lista
+                      só-leitura (data/horário/título) fica escondida atrás do
+                      link "Visualizar lista detalhada" — cada candidato vira
+                      um agendamento 'confirmado' ocupando o horário, sem
+                      cliente/serviço; o vínculo com a ficha real acontece
+                      depois, pelo botão "Vincular cliente" no Painel. */}
                   {candidatos && candidatos.length > 0 && (
                     <div className="mt-3">
-                      <ul className="divide-y divide-border/60 rounded-xl bg-surface">
-                        {candidatos.map((c) => (
-                          <li key={c.google_event_id} className="flex items-start justify-between gap-3 px-3 py-2.5">
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-medium text-heading">
-                                {c.titulo_original || "(sem título)"}
-                              </p>
-                              <p className="text-xs text-muted">
-                                {formatarData(c.data)} às {c.horario} · {c.duracao_min} min
-                              </p>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
+                      <div className="flex items-center justify-between gap-3 rounded-xl bg-surface px-3 py-2.5">
+                        <p className="text-sm text-body">
+                          Foram encontrados {candidatos.length} agendamento
+                          {candidatos.length === 1 ? "" : "s"}.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setListaExpandida((v) => !v)}
+                          className="shrink-0 text-sm font-medium text-primary underline"
+                        >
+                          {listaExpandida ? "Ocultar lista" : "Visualizar lista detalhada"}
+                        </button>
+                      </div>
+
+                      {listaExpandida && (
+                        <ul className="mt-2 divide-y divide-border/60 rounded-xl bg-surface">
+                          {candidatos.map((c) => (
+                            <li key={c.google_event_id} className="flex items-start justify-between gap-3 px-3 py-2.5">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-heading">
+                                  {c.titulo_original || "(sem título)"}
+                                </p>
+                                <p className="text-xs text-muted">
+                                  {formatarData(c.data)} às {c.horario} · {c.duracao_min} min
+                                </p>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
 
                       <button
                         type="button"
