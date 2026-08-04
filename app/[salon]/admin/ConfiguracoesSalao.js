@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import FotoPerfilCircular from "@/components/FotoPerfilCircular";
 import CampoMensagemWhatsapp from "@/components/CampoMensagemWhatsapp";
+import ModalImportarGoogleCalendar from "@/components/ModalImportarGoogleCalendar";
 import { MENSAGENS_WHATSAPP_CONFIG, substituirVariaveis } from "@/lib/whatsapp";
 
 // Configurações do salão (tabela `estabelecimentos`) editáveis pelo dono direto
@@ -148,6 +149,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const [googleCalendarEmail, setGoogleCalendarEmail] = useState(null);
   const [desconectandoGoogleCalendar, setDesconectandoGoogleCalendar] = useState(false);
   const [erroGoogleCalendar, setErroGoogleCalendar] = useState("");
+  const [modalImportarAberto, setModalImportarAberto] = useState(false);
   // Retorno da conexão do Google Calendar (ver
   // app/api/google-calendar/callback/route.js), que manda a contagem de
   // agendamentos sincronizados na primeira conexão via query string — o
@@ -705,7 +707,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       client_id: process.env.NEXT_PUBLIC_GOOGLE_CALENDAR_CLIENT_ID,
       redirect_uri: `${process.env.NEXT_PUBLIC_URL_BASE}/api/google-calendar/callback`,
       response_type: "code",
-      scope: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/userinfo.email",
+      scope: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/userinfo.email",
       access_type: "offline",
       prompt: "consent",
       state: estabelecimento.id,
@@ -1061,14 +1063,23 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
                     {googleCalendarEmail}
                   </span>
                 </p>
-                <button
-                  type="button"
-                  onClick={desconectarGoogleCalendar}
-                  disabled={carregandoGoogleCalendar || desconectandoGoogleCalendar}
-                  className="mt-3 rounded-lg bg-border/60 px-3 py-2 text-sm font-medium text-heading transition disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {desconectandoGoogleCalendar ? "Desconectando…" : "Desconectar"}
-                </button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setModalImportarAberto(true)}
+                    className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+                  >
+                    Importar do Google Calendar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={desconectarGoogleCalendar}
+                    disabled={carregandoGoogleCalendar || desconectandoGoogleCalendar}
+                    className="rounded-lg bg-border/60 px-3 py-2 text-sm font-medium text-heading transition disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {desconectandoGoogleCalendar ? "Desconectando…" : "Desconectar"}
+                  </button>
+                </div>
               </div>
             ) : (
               <div>
@@ -1619,6 +1630,12 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
         )}
       </div>
     </div>
+
+    <ModalImportarGoogleCalendar
+      estabelecimento={estabelecimento}
+      aberto={modalImportarAberto}
+      onFechar={() => setModalImportarAberto(false)}
+    />
     </>
   );
 }

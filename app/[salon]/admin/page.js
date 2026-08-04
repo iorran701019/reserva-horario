@@ -45,6 +45,7 @@ import GerenciarClientes from "@/components/GerenciarClientes";
 import ConfiguracoesSalao from "./ConfiguracoesSalao";
 import FormularioAgendamento from "@/components/FormularioAgendamento";
 import AtivarNotificacoes from "@/components/AtivarNotificacoes";
+import ModalVincularCliente from "@/components/ModalVincularCliente";
 
 // URL do login do salão, carregando o destino pretendido em ?next= pra reentrar
 // no MESMO salão após autenticar. Com o slug agora no PATH, tanto o login quanto
@@ -347,6 +348,11 @@ export default function AdminPage() {
   // ações). Guardamos o id; os dados vivos saem de `agendamentos` no render,
   // pra refletir na hora o patch do lembrete. null = modal fechado.
   const [idSelecionado, setIdSelecionado] = useState(null);
+
+  // Agendamento importado sem cliente vinculado (bloco âmbar do Painel,
+  // telefone null) selecionado pra vincular. Guardamos o id, mesmo padrão de
+  // idSelecionado — dados vivos saem de `agendamentos`. null = modal fechado.
+  const [idParaVincular, setIdParaVincular] = useState(null);
 
   // Edição da observação no modal de detalhe. `idEditandoObservacao` guarda o id
   // cujo textarea está aberto — atrelar ao id (e não a um booleano) faz o
@@ -954,16 +960,21 @@ export default function AdminPage() {
   // item.finalizado exclui reserva antecipada abandonada no meio do wizard
   // (ver FormularioAgendamento): sem isso ela apareceria como pendência real
   // pra dona agir, mesmo nunca tendo sido de fato concluída pela cliente.
+  // item.telefone exclui evento importado do Google Calendar ainda sem
+  // cliente vinculado (ver POST em app/api/google-calendar/importar/route.js)
+  // — sem ficha real, não faz sentido aparecer como pendência/histórico de
+  // cliente; ele já ocupa o horário e aparece no Painel (que NÃO filtra),
+  // com o botão "Vincular cliente" pra sair desse estado.
   const agora = new Date();
   const inbox = agendamentos.filter(
-    (item) => classificarAgendamento(item, agora) === "inbox" && item.finalizado
+    (item) => classificarAgendamento(item, agora) === "inbox" && item.finalizado && item.telefone
   );
 
   // Histórico (aba "Histórico"): tudo arquivado — cancelados, pendentes
   // caducados e confirmados concluídos. Ordenado do mais recente pro mais
   // antigo (data+horário desc); a query vem asc, então invertemos a chave.
   const historico = agendamentos
-    .filter((item) => classificarAgendamento(item, agora) === "historico")
+    .filter((item) => classificarAgendamento(item, agora) === "historico" && item.telefone)
     .sort((a, b) => {
       const chaveA = `${a.data ?? ""} ${a.horario ?? ""}`;
       const chaveB = `${b.data ?? ""} ${b.horario ?? ""}`;
@@ -988,6 +999,12 @@ export default function AdminPage() {
   const selecionado =
     idSelecionado != null
       ? agendamentos.find((item) => item.id === idSelecionado) ?? null
+      : null;
+
+  // Item vivo do modal de vínculo, mesmo padrão de `selecionado` acima.
+  const paraVincular =
+    idParaVincular != null
+      ? agendamentos.find((item) => item.id === idParaVincular) ?? null
       : null;
 
   // Aba ativa (ABAS_PAI) pro título do header. Fallback pra primeira aba se o
@@ -1228,6 +1245,7 @@ export default function AdminPage() {
           <PainelCalendario
             agendamentos={agendamentos}
             onSelecionarConfirmado={(item) => setIdSelecionado(item.id)}
+            onVincularCliente={(item) => setIdParaVincular(item.id)}
             estabelecimentoId={estabelecimento.id}
           />
         )}
@@ -1920,6 +1938,21 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* Modal "Vincular cliente" (bloco âmbar do Painel — evento importado
+          do Google Calendar ainda sem telefone). Ao confirmar, patcha o
+          estado local pelo MESMO atualizarItemLocal dos outros handlers — o
+          bloco no Painel vira verde e o modal de detalhe/ações passa a
+          funcionar normalmente na próxima seleção. */}
+      <ModalVincularCliente
+        agendamento={paraVincular}
+        estabelecimentoId={estabelecimento.id}
+        onFechar={() => setIdParaVincular(null)}
+        onVinculado={(patch) => {
+          atualizarItemLocal(paraVincular.id, patch);
+          setIdParaVincular(null);
+        }}
+      />
     </main>
   );
 }

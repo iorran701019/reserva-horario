@@ -40,9 +40,14 @@ function hojeISO() {
 // - "inbox" (pendente) = OCUPAÇÃO CINZA neutra: segura o horário, mas o
 //   atendimento ainda precisa ser tratado no Inbox (aba Pendentes).
 // - "confirmado" = verde (fundo claro / texto escuro).
+// - "naoVinculado" = confirmado, mas importado do Google Calendar sem
+//   cliente vinculado ainda (telefone null — ver POST em
+//   app/api/google-calendar/importar/route.js): âmbar, pra chamar a atenção
+//   pro botão "Vincular cliente".
 const CORES_EVENTO = {
   pendente: { fundo: "#e5e7eb", borda: "#9ca3af", texto: "#374151" },
   confirmado: { fundo: "#dcfce7", borda: "#86efac", texto: "#166534" },
+  naoVinculado: { fundo: "#fef3c7", borda: "#fbbf24", texto: "#92400e" },
 };
 
 // Formato 24h compartilhado por eventTimeFormat e slotLabelFormat.
@@ -90,6 +95,7 @@ const hhmm = (d) => d ? `${String(d.getHours()).padStart(2, "0")}:${String(d.get
 export default function PainelCalendario({
   agendamentos,
   onSelecionarConfirmado,
+  onVincularCliente,
   estabelecimentoId,
 }) {
   // Filtro "Ver agenda de": "todos" (padrão) ou o profissional_id (como string,
@@ -201,15 +207,24 @@ export default function PainelCalendario({
         )
         .map((a) => {
           // "inbox" = pendente segurando o horário → bloco cinza, rótulo "Pendente"
-          // (ocupação a tratar no Inbox). Caso contrário, confirmado (verde).
+          // (ocupação a tratar no Inbox). Confirmado sem telefone (importado do
+          // Google Calendar, ainda sem cliente vinculado) → âmbar, rótulo pede
+          // pra vincular. Caso contrário, confirmado normal (verde).
           const pendente = classificarAgendamento(a) === "inbox";
-          const cor = pendente ? CORES_EVENTO.pendente : CORES_EVENTO.confirmado;
+          const naoVinculado = !pendente && !a.telefone;
+          const cor = pendente
+            ? CORES_EVENTO.pendente
+            : naoVinculado
+            ? CORES_EVENTO.naoVinculado
+            : CORES_EVENTO.confirmado;
           const inicioMin = horaParaMin(a.horario);
           const duracao = a.duracao_min ?? a.servicos?.duracao_min;
           return {
             id: String(a.id),
             title: pendente
               ? "Pendente"
+              : naoVinculado
+              ? `${a.nome_cliente} · Vincular cliente`
               : `${a.nome_cliente} · ${a.servicos?.nome ?? a.servico_livre ?? "serviço"}`,
             start: `${a.data}T${minParaHora(inicioMin)}`,
             end:
@@ -223,6 +238,10 @@ export default function PainelCalendario({
               agendamento: a,
               // Sinaliza ocupação pendente p/ o eventContent (rótulo curto cinza).
               pendente,
+              // Confirmado importado sem cliente vinculado (ver acima) — o
+              // eventContent troca o rótulo pelo pill "Vincular cliente" e o
+              // eventClick abre o modal de vínculo em vez do de detalhe.
+              naoVinculado,
               // Valores crus do mesmo par usado no `title`, p/ abreviar no rótulo.
               nome_cliente: a.nome_cliente,
               servico: a.servicos?.nome ?? a.servico_livre ?? "serviço",
@@ -380,17 +399,30 @@ export default function PainelCalendario({
             }
             // Lista: nome completo do cliente + serviço completo, sem abreviar — o
             // horário já vem na coluna nativa da view (mesmo eventTimeFormat).
+            // Não vinculado: troca o serviço pelo pill "Vincular cliente" —
+            // todo o bloco já é clicável (ver eventClick), o pill é só o
+            // rótulo/CTA visual.
             if (arg.view.type.startsWith("list")) {
-              return arg.event.extendedProps.pendente
-                ? "Pendente"
-                : `${arg.event.extendedProps.nome_cliente} - ${arg.event.extendedProps.servico}`;
+              if (arg.event.extendedProps.pendente) return "Pendente";
+              if (arg.event.extendedProps.naoVinculado) {
+                return (
+                  <span>
+                    {arg.event.extendedProps.nome_cliente}{" "}
+                    <span className="ag-pill-vincular">Vincular cliente</span>
+                  </span>
+                );
+              }
+              return `${arg.event.extendedProps.nome_cliente} - ${arg.event.extendedProps.servico}`;
             }
             // Dia (timeGrid), única view restante: mantém o rótulo abreviado de sempre.
             const hora = `${hhmm(arg.event.start)} - ${hhmm(arg.event.end)}`;
             // Ocupação pendente: rótulo curto "Pendente", sem expor o cliente —
-            // o atendimento é tratado no Inbox, não aqui.
+            // o atendimento é tratado no Inbox, não aqui. Não vinculado: nome +
+            // "Vincular cliente" no lugar do serviço (ainda não tem um).
             const titulo = arg.event.extendedProps.pendente
               ? "Pendente"
+              : arg.event.extendedProps.naoVinculado
+              ? `${abreviarNome(arg.event.extendedProps.nome_cliente)} - Vincular cliente`
               : `${abreviarNome(arg.event.extendedProps.nome_cliente)} - ${abreviarServico(
                   arg.event.extendedProps.servico
                 )}`;
@@ -409,14 +441,20 @@ export default function PainelCalendario({
               irParaAbaDiaEm(info.event.startStr);
               return;
             }
-            // Nas demais views (Dia/Lista): só o bloco CONFIRMADO abre o modal
-            // de detalhe/ações (leva B.2). O pendente (cinza) é só ocupação —
-            // tratado no Inbox, não clicável aqui. O calendário apenas sinaliza
-            // a seleção; estado/handlers ficam no /admin.
+            // Nas demais views (Dia/Lista): o pendente (cinza) é só ocupação —
+            // tratado no Inbox, não clicável aqui. Confirmado sem cliente
+            // vinculado (âmbar) abre o modal de vínculo em vez do de detalhe —
+            // o de detalhe pressupõe telefone (WhatsApp de lembrete/cancelamento)
+            // e ainda não há um. Confirmado normal abre o modal de detalhe/
+            // ações de sempre (leva B.2). O calendário apenas sinaliza a
+            // seleção; estado/handlers ficam no /admin.
             const item = info.event.extendedProps.agendamento;
-            if (classificarAgendamento(item) === "confirmado") {
-              onSelecionarConfirmado?.(item);
+            if (classificarAgendamento(item) !== "confirmado") return;
+            if (info.event.extendedProps.naoVinculado) {
+              onVincularCliente?.(item);
+              return;
             }
+            onSelecionarConfirmado?.(item);
           }}
           dateClick={(info) => {
             // Só no Mês: tocar num DIA (não num evento) leva direto pra agenda
