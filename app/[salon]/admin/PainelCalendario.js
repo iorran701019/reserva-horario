@@ -262,6 +262,25 @@ export default function PainelCalendario({
     [eventos, viewAtual]
   );
 
+  // slotMinTime/slotMaxTime (Dia/Semana) dinâmicos: começam no expediente
+  // configurado (HORA_ABERTURA/HORA_FECHAMENTO), mas expandem pra sempre
+  // incluir qualquer agendamento ATIVO já carregado fora dessa janela (ex.:
+  // evento importado do Google Calendar às 8h com abertura configurada às
+  // 9h) — não altera o expediente configurado, só garante que a grade visual
+  // mostre a ocupação real. Baseado em `eventos` (já filtrado por
+  // profissional e sem histórico), não no `agendamentos` cru.
+  const [slotMinTime, slotMaxTime] = useMemo(() => {
+    let minMin = horaParaMin(HORA_ABERTURA);
+    let maxMin = horaParaMin(HORA_FECHAMENTO);
+    for (const ev of eventos) {
+      const inicioMin = horaParaMin(ev.start.slice(11, 19));
+      if (inicioMin < minMin) minMin = inicioMin;
+      const fimMin = ev.end ? horaParaMin(ev.end.slice(11, 19)) : inicioMin;
+      if (fimMin > maxMin) maxMin = fimMin;
+    }
+    return [minParaHora(minMin), minParaHora(maxMin)];
+  }, [eventos]);
+
   return (
     <div>
       {/* Filtro "Ver agenda de": Todos + cada profissional presente nos
@@ -364,8 +383,8 @@ export default function PainelCalendario({
           headerToolbar={false}
           footerToolbar={false}
           allDaySlot={false}
-          slotMinTime={HORA_ABERTURA}
-          slotMaxTime={HORA_FECHAMENTO}
+          slotMinTime={slotMinTime}
+          slotMaxTime={slotMaxTime}
           slotDuration="00:30:00"
           nowIndicator
           expandRows

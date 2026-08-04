@@ -54,7 +54,7 @@ a:focus-visible, button:focus-visible {
 /* FullCalendar (Painel do /admin). CSS é auto-injetado pela lib v6; aqui só
    ajustamos tokens e o layout mobile pra não estourar em telas estreitas. */
 .fc {
-  --fc-border-color: #e7e5e4;
+  --fc-border-color: rgba(0, 0, 0, 0.15);
   --fc-page-bg-color: transparent;
   --fc-today-bg-color: rgba(16, 185, 129, 0.06);
   --fc-now-indicator-color: #ef4444;
