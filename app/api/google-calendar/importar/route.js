@@ -85,11 +85,15 @@ export async function GET(request) {
 // Confirma a importação DIRETA: todo candidato do lote vira um agendamento
 // 'confirmado' já ocupando o horário, sem cliente/serviço vinculado —
 // nome_cliente = título bruto do evento, telefone/servico_id nulos (o vínculo
-// com a ficha real acontece depois, ver botão "Vincular cliente" no Painel) —
-// e origem='importado' (mesma convenção da importação por PDF). O
-// google_event_id original evita duplicar no sync de saída (ver
+// com a ficha real acontece depois, ver botão "Vincular cliente" no Painel).
+// origem='importado' pra categoria 'servico' (mesma convenção da importação
+// por PDF) ou 'importado_pessoal' pra categoria 'pessoal' (ver
+// montarCandidatos em lib/googleCalendarImportacao) — PainelCalendario.js usa
+// essa origem pra renderizar o bloco pessoal sem o selo "Vincular cliente".
+// O google_event_id original evita duplicar no sync de saída (ver
 // lib/googleCalendarSync.js). Reconfere o dedup aqui dentro (não confia só no
-// que o GET calculou), evitando corrida com uma importação/sync concorrente.
+// que o GET calculou), evitando corrida com uma importação/sync concorrente —
+// o filtro é só por google_event_id, então cobre as duas origens igual.
 // Uma falha isolada (ex.: 23P01 de horário sobreposto) não derruba o resto do
 // lote.
 export async function POST(request) {
@@ -146,7 +150,7 @@ export async function POST(request) {
       profissional_id: profissionalId,
       status: "confirmado",
       finalizado: false,
-      origem: "importado",
+      origem: item.categoria === "pessoal" ? "importado_pessoal" : "importado",
       google_event_id: item.google_event_id,
     });
 

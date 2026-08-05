@@ -150,6 +150,7 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
       data: c.data,
       horario: c.horario,
       duracao_min: c.duracao_min,
+      categoria: c.categoria,
     }));
 
     try {
