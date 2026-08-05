@@ -47,7 +47,7 @@ export async function GET(request) {
     );
   }
 
-  const [profissionalRes, jaImportadosRes, ignoradosRes] = await Promise.all([
+  const [profissionalRes, jaImportadosRes, ignoradosRes, servicosRes] = await Promise.all([
     supabaseAdmin
       .from("profissionais")
       .select("id")
@@ -64,6 +64,15 @@ export async function GET(request) {
       .from("calendar_import_ignorados")
       .select("google_event_id")
       .eq("estabelecimento_id", estabelecimentoId),
+    // Catálogo ativo do tenant — sinal de categoria em montarCandidatos (ver
+    // categoriaPorTitulo em lib/googleCalendarImportacao): título do evento
+    // batendo com o nome de um serviço cadastrado vira 'servico', senão
+    // 'pessoal'.
+    supabaseAdmin
+      .from("servicos")
+      .select("nome")
+      .eq("estabelecimento_id", estabelecimentoId)
+      .eq("ativo", true),
   ]);
 
   const profissionalId = profissionalRes.data?.id ?? null;
@@ -71,11 +80,12 @@ export async function GET(request) {
     ...(jaImportadosRes.data ?? []).map((r) => r.google_event_id),
     ...(ignoradosRes.data ?? []).map((r) => r.google_event_id),
   ]);
+  const servicos = servicosRes.data ?? [];
 
   try {
     const eventos = await listarEventosFuturos(accessToken, calendarId);
-    const candidatos = montarCandidatos({ eventos, idsExcluidos });
-    return Response.json({ candidatos, profissional_id: profissionalId });
+    const { candidatos, ignoradosPorCatalogo } = montarCandidatos({ eventos, idsExcluidos, servicos });
+    return Response.json({ candidatos, ignorados_por_catalogo: ignoradosPorCatalogo, profissional_id: profissionalId });
   } catch (erro) {
     console.error("Falha ao buscar candidatos de importação do Google Calendar", estabelecimentoId, erro);
     return Response.json({ erro: "Não foi possível buscar os eventos do Google Calendar." }, { status: 502 });
@@ -86,11 +96,13 @@ export async function GET(request) {
 // 'confirmado' já ocupando o horário, sem cliente/serviço vinculado —
 // nome_cliente = título bruto do evento, telefone/servico_id nulos (o vínculo
 // com a ficha real acontece depois, ver botão "Vincular cliente" no Painel).
-// origem='importado' pra categoria 'servico' (mesma convenção da importação
-// por PDF) ou 'importado_pessoal' pra categoria 'pessoal' (ver
-// montarCandidatos em lib/googleCalendarImportacao) — PainelCalendario.js usa
-// essa origem pra renderizar o bloco pessoal sem o selo "Vincular cliente".
-// O google_event_id original evita duplicar no sync de saída (ver
+// origem='importado' sempre (mesma convenção da importação por PDF) — o GET
+// já filtra pra só devolver candidatos que bateram com o catálogo de serviços
+// (ver montarCandidatos em lib/googleCalendarImportacao), então não existe
+// mais candidato "pessoal" chegando aqui. 'importado_pessoal' continua sendo
+// tratado por PainelCalendario.js só por causa de registros antigos já
+// importados antes dessa mudança. O google_event_id original evita duplicar
+// no sync de saída (ver
 // lib/googleCalendarSync.js). Reconfere o dedup aqui dentro (não confia só no
 // que o GET calculou), evitando corrida com uma importação/sync concorrente —
 // o filtro é só por google_event_id, então cobre as duas origens igual.
@@ -150,7 +162,7 @@ export async function POST(request) {
       profissional_id: profissionalId,
       status: "confirmado",
       finalizado: false,
-      origem: item.categoria === "pessoal" ? "importado_pessoal" : "importado",
+      origem: "importado",
       google_event_id: item.google_event_id,
     });
 

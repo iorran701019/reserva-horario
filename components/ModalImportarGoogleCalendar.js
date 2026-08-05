@@ -38,6 +38,7 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
   const [erroCalendario, setErroCalendario] = useState("");
 
   const [candidatos, setCandidatos] = useState(null);
+  const [ignoradosPorCatalogo, setIgnoradosPorCatalogo] = useState(0);
   const [buscandoCandidatos, setBuscandoCandidatos] = useState(false);
   const [erroCandidatos, setErroCandidatos] = useState("");
   const [listaExpandida, setListaExpandida] = useState(false);
@@ -128,6 +129,7 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
       const corpo = await resposta.json();
       if (!resposta.ok || corpo.erro) throw new Error(corpo.erro ?? "Falha ao buscar candidatos.");
       setCandidatos(corpo.candidatos ?? []);
+      setIgnoradosPorCatalogo(corpo.ignorados_por_catalogo ?? 0);
     } catch (erro) {
       setErroCandidatos(erro.message);
     } finally {
@@ -150,7 +152,6 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
       data: c.data,
       horario: c.horario,
       duracao_min: c.duracao_min,
-      categoria: c.categoria,
     }));
 
     try {
@@ -297,6 +298,14 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
 
                   {candidatos && candidatos.length === 0 && (
                     <p className="mt-3 text-sm text-body">Nenhum candidato novo encontrado.</p>
+                  )}
+
+                  {candidatos && ignoradosPorCatalogo > 0 && (
+                    <p className="mt-1 text-xs text-muted">
+                      {ignoradosPorCatalogo === 1
+                        ? "1 evento foi ignorado por não parecer atendimento."
+                        : `${ignoradosPorCatalogo} eventos foram ignorados por não parecerem atendimento.`}
+                    </p>
                   )}
 
                   {/* Resumo retrátil: por padrão só mostra a contagem. A lista
