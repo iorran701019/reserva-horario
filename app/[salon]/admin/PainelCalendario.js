@@ -44,10 +44,15 @@ function hojeISO() {
 //   cliente vinculado ainda (telefone null — ver POST em
 //   app/api/google-calendar/importar/route.js): âmbar, pra chamar a atenção
 //   pro botão "Vincular cliente".
+// - "pessoal" = confirmado, importado do Google Calendar como bloco pessoal
+//   (origem='importado_pessoal', ver montarCandidatos em
+//   lib/googleCalendarImportacao): cinza-azulado neutro, só ocupa o
+//   horário — sem selo de vincular, nunca vira cliente de verdade.
 const CORES_EVENTO = {
   pendente: { fundo: "#e5e7eb", borda: "#9ca3af", texto: "#374151" },
   confirmado: { fundo: "#dcfce7", borda: "#86efac", texto: "#166534" },
   naoVinculado: { fundo: "#fef3c7", borda: "#fbbf24", texto: "#92400e" },
+  pessoal: { fundo: "#e2e8f0", borda: "#94a3b8", texto: "#334155" },
 };
 
 // Formato 24h compartilhado por eventTimeFormat e slotLabelFormat.
@@ -96,6 +101,7 @@ export default function PainelCalendario({
   agendamentos,
   onSelecionarConfirmado,
   onVincularCliente,
+  onMarcarComoAtendimento,
   estabelecimentoId,
 }) {
   // Filtro "Ver agenda de": "todos" (padrão) ou o profissional_id (como string,
@@ -207,13 +213,18 @@ export default function PainelCalendario({
         )
         .map((a) => {
           // "inbox" = pendente segurando o horário → bloco cinza, rótulo "Pendente"
-          // (ocupação a tratar no Inbox). Confirmado sem telefone (importado do
-          // Google Calendar, ainda sem cliente vinculado) → âmbar, rótulo pede
-          // pra vincular. Caso contrário, confirmado normal (verde).
+          // (ocupação a tratar no Inbox). Bloco pessoal importado (ver
+          // CORES_EVENTO acima) → cinza-azulado, só o título bruto, sem selo.
+          // Confirmado sem telefone (importado do Google Calendar, ainda sem
+          // cliente vinculado) → âmbar, rótulo pede pra vincular. Caso
+          // contrário, confirmado normal (verde).
           const pendente = classificarAgendamento(a) === "inbox";
-          const naoVinculado = !pendente && !a.telefone;
+          const pessoal = !pendente && a.origem === "importado_pessoal";
+          const naoVinculado = !pendente && !pessoal && !a.telefone;
           const cor = pendente
             ? CORES_EVENTO.pendente
+            : pessoal
+            ? CORES_EVENTO.pessoal
             : naoVinculado
             ? CORES_EVENTO.naoVinculado
             : CORES_EVENTO.confirmado;
@@ -223,6 +234,8 @@ export default function PainelCalendario({
             id: String(a.id),
             title: pendente
               ? "Pendente"
+              : pessoal
+              ? a.nome_cliente
               : naoVinculado
               ? `${a.nome_cliente} · Vincular cliente`
               : `${a.nome_cliente} · ${a.servicos?.nome ?? a.servico_livre ?? "serviço"}`,
@@ -238,6 +251,9 @@ export default function PainelCalendario({
               agendamento: a,
               // Sinaliza ocupação pendente p/ o eventContent (rótulo curto cinza).
               pendente,
+              // Bloco pessoal importado (ver acima) — eventContent mostra só o
+              // título bruto (sem selo) e eventClick não abre nenhum modal.
+              pessoal,
               // Confirmado importado sem cliente vinculado (ver acima) — o
               // eventContent troca o rótulo pelo pill "Vincular cliente" e o
               // eventClick abre o modal de vínculo em vez do de detalhe.
@@ -423,6 +439,7 @@ export default function PainelCalendario({
             // rótulo/CTA visual.
             if (arg.view.type.startsWith("list")) {
               if (arg.event.extendedProps.pendente) return "Pendente";
+              if (arg.event.extendedProps.pessoal) return arg.event.extendedProps.nome_cliente;
               if (arg.event.extendedProps.naoVinculado) {
                 return (
                   <span>
@@ -436,10 +453,13 @@ export default function PainelCalendario({
             // Dia (timeGrid), única view restante: mantém o rótulo abreviado de sempre.
             const hora = `${hhmm(arg.event.start)} - ${hhmm(arg.event.end)}`;
             // Ocupação pendente: rótulo curto "Pendente", sem expor o cliente —
-            // o atendimento é tratado no Inbox, não aqui. Não vinculado: nome +
+            // o atendimento é tratado no Inbox, não aqui. Bloco pessoal: só o
+            // título bruto, sem abreviar nem selo. Não vinculado: nome +
             // "Vincular cliente" no lugar do serviço (ainda não tem um).
             const titulo = arg.event.extendedProps.pendente
               ? "Pendente"
+              : arg.event.extendedProps.pessoal
+              ? arg.event.extendedProps.nome_cliente
               : arg.event.extendedProps.naoVinculado
               ? `${abreviarNome(arg.event.extendedProps.nome_cliente)} - Vincular cliente`
               : `${abreviarNome(arg.event.extendedProps.nome_cliente)} - ${abreviarServico(
@@ -461,7 +481,13 @@ export default function PainelCalendario({
               return;
             }
             // Nas demais views (Dia/Lista): o pendente (cinza) é só ocupação —
-            // tratado no Inbox, não clicável aqui. Confirmado sem cliente
+            // tratado no Inbox, não clicável aqui. Bloco pessoal (cinza-azulado)
+            // também é só ocupação, sem selo — mas continua clicável pra
+            // correção pontual (a regra por colorId erra às vezes): um
+            // window.confirm (mesmo padrão de correção pontual usado em
+            // GerenciarProfissionais) e, se confirmado, origem volta pra
+            // 'importado' — o bloco vira o pill âmbar normal de "Vincular
+            // cliente" na próxima renderização. Confirmado sem cliente
             // vinculado (âmbar) abre o modal de vínculo em vez do de detalhe —
             // o de detalhe pressupõe telefone (WhatsApp de lembrete/cancelamento)
             // e ainda não há um. Confirmado normal abre o modal de detalhe/
@@ -469,6 +495,13 @@ export default function PainelCalendario({
             // seleção; estado/handlers ficam no /admin.
             const item = info.event.extendedProps.agendamento;
             if (classificarAgendamento(item) !== "confirmado") return;
+            if (info.event.extendedProps.pessoal) {
+              const ok = window.confirm(
+                `Marcar "${item.nome_cliente}" como atendimento? O bloco passa a pedir vínculo de cliente.`
+              );
+              if (ok) onMarcarComoAtendimento?.(item);
+              return;
+            }
             if (info.event.extendedProps.naoVinculado) {
               onVincularCliente?.(item);
               return;

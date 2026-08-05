@@ -500,6 +500,27 @@ export default function AdminPage() {
     setAgendamentoParaCancelar(null);
   }
 
+  // Correção pontual do bloco "pessoal" do Painel (ver PainelCalendario.js):
+  // a regra automática por colorId (montarCandidatos em
+  // lib/googleCalendarImportacao) às vezes erra. O window.confirm já rodou lá
+  // dentro antes de chamar isto — aqui só grava origem='importado' de volta,
+  // o mesmo valor de uma importação normal de atendimento. Na próxima
+  // renderização o bloco vira o pill âmbar de "Vincular cliente" de sempre.
+  async function marcarComoAtendimento(agendamento) {
+    const { error } = await supabase
+      .from("agendamentos")
+      .update({ origem: "importado" })
+      .eq("id", agendamento.id);
+
+    if (error) {
+      setErro(`Não foi possível marcar como atendimento: ${error.message}`);
+      return;
+    }
+
+    setErro("");
+    atualizarItemLocal(agendamento.id, { origem: "importado" });
+  }
+
   // Botão Lembrete/Reenviar do modal de detalhe. PRIMEIRO abre o WhatsApp de
   // forma SÍNCRONA no clique (window.open fora do gesto do usuário é bloqueado
   // como pop-up). SÓ DEPOIS persiste o envio em lembrete_enviado_em e patcha o
@@ -1256,6 +1277,7 @@ export default function AdminPage() {
             agendamentos={agendamentos}
             onSelecionarConfirmado={(item) => setIdSelecionado(item.id)}
             onVincularCliente={(item) => setIdParaVincular(item.id)}
+            onMarcarComoAtendimento={marcarComoAtendimento}
             estabelecimentoId={estabelecimento.id}
           />
         )}
