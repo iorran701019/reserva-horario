@@ -46,8 +46,7 @@ export default function PainelGlobalPage() {
   // Aba Anamnese: modelo único do salão selecionado (no máximo 1 linha em
   // anamnese_modelos, mas sem constraint no banco — se vier mais de uma, usa
   // a primeira). id null = modelo novo, ainda não gravado (form começa
-  // vazio). `secoes` só é carregado pra não ser perdido no UPDATE do passo
-  // 5 — o editor de seções em si é o Concern 3b.
+  // vazio).
   const [modeloAnamnese, setModeloAnamnese] = useState(MODELO_ANAMNESE_VAZIO);
   const [carregandoModelo, setCarregandoModelo] = useState(false);
   const [statusModelo, setStatusModelo] = useState("");
@@ -213,11 +212,90 @@ export default function PainelGlobalPage() {
     });
   }
 
-  // Salva título/ativo/declarações do modelo. Sem id ainda (nenhuma linha
-  // veio da busca) faz INSERT, incluindo secoes: [] pro modelo novo. Com id
-  // faz UPDATE só dos campos deste formulário — `secoes` fica de fora do
-  // payload de propósito, pra não sobrescrever com vazio um modelo que já
-  // tinha seções reais (ex.: o da Flávia). O editor de seções é o Concern 3b.
+  function adicionarSecao() {
+    setModeloAnamnese((atual) => ({
+      ...atual,
+      secoes: [...atual.secoes, { titulo: "", perguntas: [] }],
+    }));
+  }
+
+  function removerSecao(indiceSecao) {
+    setModeloAnamnese((atual) => ({
+      ...atual,
+      secoes: atual.secoes.filter((_, i) => i !== indiceSecao),
+    }));
+  }
+
+  function alterarTituloSecao(indiceSecao, valor) {
+    setModeloAnamnese((atual) => ({
+      ...atual,
+      secoes: atual.secoes.map((s, i) => (i === indiceSecao ? { ...s, titulo: valor } : s)),
+    }));
+  }
+
+  function moverSecao(indiceSecao, direcao) {
+    setModeloAnamnese((atual) => {
+      const alvo = indiceSecao + direcao;
+      if (alvo < 0 || alvo >= atual.secoes.length) return atual;
+      const secoes = [...atual.secoes];
+      [secoes[indiceSecao], secoes[alvo]] = [secoes[alvo], secoes[indiceSecao]];
+      return { ...atual, secoes };
+    });
+  }
+
+  function adicionarPergunta(indiceSecao) {
+    setModeloAnamnese((atual) => ({
+      ...atual,
+      secoes: atual.secoes.map((s, i) =>
+        i === indiceSecao ? { ...s, perguntas: [...s.perguntas, ""] } : s
+      ),
+    }));
+  }
+
+  function removerPergunta(indiceSecao, indicePergunta) {
+    setModeloAnamnese((atual) => ({
+      ...atual,
+      secoes: atual.secoes.map((s, i) =>
+        i === indiceSecao
+          ? { ...s, perguntas: s.perguntas.filter((_, j) => j !== indicePergunta) }
+          : s
+      ),
+    }));
+  }
+
+  function alterarPergunta(indiceSecao, indicePergunta, valor) {
+    setModeloAnamnese((atual) => ({
+      ...atual,
+      secoes: atual.secoes.map((s, i) =>
+        i === indiceSecao
+          ? {
+              ...s,
+              perguntas: s.perguntas.map((p, j) => (j === indicePergunta ? valor : p)),
+            }
+          : s
+      ),
+    }));
+  }
+
+  function moverPergunta(indiceSecao, indicePergunta, direcao) {
+    setModeloAnamnese((atual) => {
+      const secao = atual.secoes[indiceSecao];
+      const alvo = indicePergunta + direcao;
+      if (alvo < 0 || alvo >= secao.perguntas.length) return atual;
+      const perguntas = [...secao.perguntas];
+      [perguntas[indicePergunta], perguntas[alvo]] = [perguntas[alvo], perguntas[indicePergunta]];
+      return {
+        ...atual,
+        secoes: atual.secoes.map((s, i) => (i === indiceSecao ? { ...s, perguntas } : s)),
+      };
+    });
+  }
+
+  // Salva título/ativo/declarações/seções do modelo. Sem id ainda (nenhuma
+  // linha veio da busca) faz INSERT. Com id faz UPDATE dos campos deste
+  // formulário. Seções com título vazio e zero perguntas são descartadas
+  // por inteiro; dentro das seções mantidas, perguntas em branco são
+  // filtradas (mesmo padrão de trim+filter usado em declaracoes).
   async function handleSalvarModelo() {
     setStatusModelo("salvando");
     setErroModelo("");
@@ -226,12 +304,18 @@ export default function PainelGlobalPage() {
       titulo: modeloAnamnese.titulo.trim(),
       ativo: modeloAnamnese.ativo,
       declaracoes: modeloAnamnese.declaracoes.map((d) => d.trim()).filter((d) => d !== ""),
+      secoes: modeloAnamnese.secoes
+        .map((s) => ({
+          titulo: s.titulo.trim(),
+          perguntas: s.perguntas.map((p) => p.trim()).filter((p) => p !== ""),
+        }))
+        .filter((s) => s.titulo !== "" || s.perguntas.length > 0),
     };
 
     if (modeloAnamnese.id == null) {
       const { data, error } = await supabase
         .from("anamnese_modelos")
-        .insert({ estabelecimento_id: estabelecimentoId, ...payload, secoes: [] })
+        .insert({ estabelecimento_id: estabelecimentoId, ...payload })
         .select("id")
         .single();
 
@@ -648,6 +732,119 @@ export default function PainelGlobalPage() {
                     className="mt-2 rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
                   >
                     Adicionar declaração
+                  </button>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-sm font-medium text-heading">Seções</p>
+
+                  {modeloAnamnese.secoes.length === 0 && (
+                    <p className="mb-2 text-xs text-muted">Nenhuma seção ainda.</p>
+                  )}
+
+                  <div className="space-y-4">
+                    {modeloAnamnese.secoes.map((secao, indiceSecao) => (
+                      <div key={indiceSecao} className="rounded-lg border border-border p-3">
+                        <div className="flex items-start gap-2">
+                          <div className="flex shrink-0 flex-col pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => moverSecao(indiceSecao, -1)}
+                              disabled={indiceSecao === 0}
+                              aria-label="Mover seção para cima"
+                              className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                            >
+                              ▲
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moverSecao(indiceSecao, 1)}
+                              disabled={indiceSecao === modeloAnamnese.secoes.length - 1}
+                              aria-label="Mover seção para baixo"
+                              className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                            >
+                              ▼
+                            </button>
+                          </div>
+
+                          <input
+                            type="text"
+                            value={secao.titulo}
+                            onChange={(e) => alterarTituloSecao(indiceSecao, e.target.value)}
+                            placeholder="Título da seção"
+                            className="w-full flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => removerSecao(indiceSecao)}
+                            className="shrink-0 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                          >
+                            Remover
+                          </button>
+                        </div>
+
+                        <div className="mt-2 space-y-2 border-l-2 border-border pl-4">
+                          {secao.perguntas.map((pergunta, indicePergunta) => (
+                            <div key={indicePergunta} className="flex items-start gap-2">
+                              <div className="flex shrink-0 flex-col pt-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => moverPergunta(indiceSecao, indicePergunta, -1)}
+                                  disabled={indicePergunta === 0}
+                                  aria-label="Mover pergunta para cima"
+                                  className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                                >
+                                  ▲
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => moverPergunta(indiceSecao, indicePergunta, 1)}
+                                  disabled={indicePergunta === secao.perguntas.length - 1}
+                                  aria-label="Mover pergunta para baixo"
+                                  className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                                >
+                                  ▼
+                                </button>
+                              </div>
+
+                              <input
+                                type="text"
+                                value={pergunta}
+                                onChange={(e) =>
+                                  alterarPergunta(indiceSecao, indicePergunta, e.target.value)
+                                }
+                                className="w-full flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                              />
+
+                              <button
+                                type="button"
+                                onClick={() => removerPergunta(indiceSecao, indicePergunta)}
+                                className="shrink-0 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                              >
+                                Remover
+                              </button>
+                            </div>
+                          ))}
+
+                          <button
+                            type="button"
+                            onClick={() => adicionarPergunta(indiceSecao)}
+                            className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                          >
+                            Adicionar pergunta
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={adicionarSecao}
+                    className="mt-2 rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                  >
+                    Adicionar seção
                   </button>
                 </div>
 
