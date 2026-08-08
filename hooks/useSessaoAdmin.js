@@ -21,6 +21,12 @@ function urlLogin(salon) {
 // estabelecimento do perfil; 'global' hoje resolve pelo slug do path em
 // /[salon]/admin, e vai resolver por um seletor no /painel-global).
 //
+// `salon` é OPCIONAL: com slug (uso em /[salon]/admin), sem sessão redireciona
+// pro login DESSE salão — comportamento idêntico ao de sempre. Sem slug (uso
+// em /painel-global, que não tem um salão fixo na URL), sem sessão só marca
+// autenticado=false e NÃO redireciona — quem consome decide o que renderizar
+// (ex.: um formulário de login inline na própria página).
+//
 // Retorna:
 //   - autenticado: null (verificando) | false (sem sessão) | true (logado)
 //   - perfil: undefined (sem sessão / ainda não buscado) | null (autenticado,
@@ -40,8 +46,9 @@ export function useSessaoAdmin(salon) {
   const [semPerfil, setSemPerfil] = useState(false);
 
   // Verifica a sessão ao montar e fica ouvindo mudanças (login/logout em
-  // outra aba também caem aqui). Sem sessão → manda pro login do MESMO salão
-  // (slug no path, via urlLogin(salon)).
+  // outra aba também caem aqui). Sem sessão E com salon → manda pro login
+  // DESSE salão (slug no path, via urlLogin(salon)). Sem salon, só atualiza o
+  // estado (ver comentário da função acima).
   useEffect(() => {
     let ativo = true;
 
@@ -49,7 +56,7 @@ export function useSessaoAdmin(salon) {
       if (!ativo) return;
       if (!session) {
         setAutenticado(false);
-        router.replace(urlLogin(salon));
+        if (salon) router.replace(urlLogin(salon));
         return;
       }
       setAutenticado(true);
@@ -61,7 +68,7 @@ export function useSessaoAdmin(salon) {
       if (!ativo) return;
       if (!session) {
         setAutenticado(false);
-        router.replace(urlLogin(salon));
+        if (salon) router.replace(urlLogin(salon));
         return;
       }
       setAutenticado(true);

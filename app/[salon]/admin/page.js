@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import Link from "next/link";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import { useSessaoAdmin } from "@/hooks/useSessaoAdmin";
 import { buscarTema } from "@/lib/temas";
@@ -1557,6 +1558,20 @@ export default function AdminPage() {
 
           {/* Item fixo, visível em qualquer aba (ver componente). */}
           <AtivarNotificacoes estabelecimento={estabelecimento} />
+
+          {/* Link pro /painel-global, só pra quem tem papel 'global' (dono
+              não navega entre salões). */}
+          {perfil?.papel === "global" && (
+            <div className="border-t border-border p-2">
+              <Link
+                href="/painel-global"
+                onClick={() => setDrawerAberto(false)}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold text-body transition hover:bg-surface hover:text-heading"
+              >
+                Painel Global
+              </Link>
+            </div>
+          )}
 
           {/* "Sair" mora no drawer (saiu do header). */}
           <div className="border-t border-border p-2">
