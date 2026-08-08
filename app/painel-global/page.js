@@ -12,6 +12,16 @@ const ABAS = [
   { id: "anamnese", rotulo: "Anamnese" },
 ];
 
+// Modelo novo, ainda não gravado em anamnese_modelos (id null é o sinal pro
+// handleSalvarModelo decidir entre INSERT e UPDATE).
+const MODELO_ANAMNESE_VAZIO = {
+  id: null,
+  titulo: "",
+  ativo: false,
+  secoes: [],
+  declaracoes: [],
+};
+
 export default function PainelGlobalPage() {
   // Sem `salon`: useSessaoAdmin não redireciona sozinho quando não há sessão
   // (ver hooks/useSessaoAdmin.js) — esta página decide o que renderizar em
@@ -32,6 +42,16 @@ export default function PainelGlobalPage() {
   const [cadastroCompleto, setCadastroCompleto] = useState(undefined);
   const [statusCadastro, setStatusCadastro] = useState("");
   const [erroCadastro, setErroCadastro] = useState("");
+
+  // Aba Anamnese: modelo único do salão selecionado (no máximo 1 linha em
+  // anamnese_modelos, mas sem constraint no banco — se vier mais de uma, usa
+  // a primeira). id null = modelo novo, ainda não gravado (form começa
+  // vazio). `secoes` só é carregado pra não ser perdido no UPDATE do passo
+  // 5 — o editor de seções em si é o Concern 3b.
+  const [modeloAnamnese, setModeloAnamnese] = useState(MODELO_ANAMNESE_VAZIO);
+  const [carregandoModelo, setCarregandoModelo] = useState(false);
+  const [statusModelo, setStatusModelo] = useState("");
+  const [erroModelo, setErroModelo] = useState("");
 
   const autorizado = perfil?.papel === "global";
 
@@ -96,6 +116,149 @@ export default function PainelGlobalPage() {
     const t = setTimeout(() => setStatusCadastro(""), 2500);
     return () => clearTimeout(t);
   }, [statusCadastro]);
+
+  // Busca o modelo de anamnese do salão selecionado. Limpa o form pro
+  // estado vazio ANTES de checar se há id — mesma disciplina do efeito de
+  // cadastro logo acima, cobrindo tanto "carregando" quanto "troquei de
+  // salão, esquece o formulário anterior".
+  useEffect(() => {
+    let ativo = true;
+
+    (async () => {
+      setModeloAnamnese(MODELO_ANAMNESE_VAZIO);
+      setStatusModelo("");
+      setErroModelo("");
+
+      if (!estabelecimentoId) return;
+
+      setCarregandoModelo(true);
+
+      const { data, error } = await supabase
+        .from("anamnese_modelos")
+        .select("*")
+        .eq("estabelecimento_id", estabelecimentoId);
+
+      if (!ativo) return;
+      setCarregandoModelo(false);
+
+      if (error) {
+        setErroModelo(error.message);
+        return;
+      }
+
+      // Sem constraint no banco garantindo no máximo 1 linha — usa a
+      // primeira se vier mais de uma, em vez de quebrar.
+      const linha = data?.[0];
+      if (linha) {
+        setModeloAnamnese({
+          id: linha.id,
+          titulo: linha.titulo ?? "",
+          ativo: Boolean(linha.ativo),
+          secoes: linha.secoes ?? [],
+          declaracoes: linha.declaracoes ?? [],
+        });
+      }
+    })();
+
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimentoId]);
+
+  // "Salvo ✓" some sozinho depois de um tempo — mesmo padrão de cima.
+  useEffect(() => {
+    if (statusModelo !== "salvo") return;
+    const t = setTimeout(() => setStatusModelo(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusModelo]);
+
+  function alterarTituloModelo(valor) {
+    setModeloAnamnese((atual) => ({ ...atual, titulo: valor }));
+  }
+
+  function alternarAtivoModelo() {
+    setModeloAnamnese((atual) => ({ ...atual, ativo: !atual.ativo }));
+  }
+
+  function adicionarDeclaracao() {
+    setModeloAnamnese((atual) => ({
+      ...atual,
+      declaracoes: [...atual.declaracoes, ""],
+    }));
+  }
+
+  function removerDeclaracao(indice) {
+    setModeloAnamnese((atual) => ({
+      ...atual,
+      declaracoes: atual.declaracoes.filter((_, i) => i !== indice),
+    }));
+  }
+
+  function alterarDeclaracao(indice, valor) {
+    setModeloAnamnese((atual) => ({
+      ...atual,
+      declaracoes: atual.declaracoes.map((d, i) => (i === indice ? valor : d)),
+    }));
+  }
+
+  // Reordenação local (troca de posição no array) — o array inteiro só vai
+  // pro banco no clique de "Salvar", não há `ordem` persistida por item.
+  function moverDeclaracao(indice, direcao) {
+    setModeloAnamnese((atual) => {
+      const alvo = indice + direcao;
+      if (alvo < 0 || alvo >= atual.declaracoes.length) return atual;
+      const declaracoes = [...atual.declaracoes];
+      [declaracoes[indice], declaracoes[alvo]] = [declaracoes[alvo], declaracoes[indice]];
+      return { ...atual, declaracoes };
+    });
+  }
+
+  // Salva título/ativo/declarações do modelo. Sem id ainda (nenhuma linha
+  // veio da busca) faz INSERT, incluindo secoes: [] pro modelo novo. Com id
+  // faz UPDATE só dos campos deste formulário — `secoes` fica de fora do
+  // payload de propósito, pra não sobrescrever com vazio um modelo que já
+  // tinha seções reais (ex.: o da Flávia). O editor de seções é o Concern 3b.
+  async function handleSalvarModelo() {
+    setStatusModelo("salvando");
+    setErroModelo("");
+
+    const payload = {
+      titulo: modeloAnamnese.titulo.trim(),
+      ativo: modeloAnamnese.ativo,
+      declaracoes: modeloAnamnese.declaracoes.map((d) => d.trim()).filter((d) => d !== ""),
+    };
+
+    if (modeloAnamnese.id == null) {
+      const { data, error } = await supabase
+        .from("anamnese_modelos")
+        .insert({ estabelecimento_id: estabelecimentoId, ...payload, secoes: [] })
+        .select("id")
+        .single();
+
+      if (error) {
+        setStatusModelo("");
+        setErroModelo(error.message);
+        return;
+      }
+
+      setModeloAnamnese((atual) => ({ ...atual, id: data.id }));
+      setStatusModelo("salvo");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("anamnese_modelos")
+      .update(payload)
+      .eq("id", modeloAnamnese.id);
+
+    if (error) {
+      setStatusModelo("");
+      setErroModelo(error.message);
+      return;
+    }
+
+    setStatusModelo("salvo");
+  }
 
   // Clique na opção diferente da atual grava na hora — sem botão "Salvar"
   // separado, mesma filosofia do toggle escolha_profissional. Em erro,
@@ -374,9 +537,139 @@ export default function PainelGlobalPage() {
         )}
 
         {aba === "anamnese" && (
-          <div className="rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
-            <p className="text-sm text-body">Em construção.</p>
-          </div>
+          <>
+            {!estabelecimentoId ? (
+              <div className="rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
+                <p className="text-sm text-body">Selecione um salão para configurar.</p>
+              </div>
+            ) : carregandoModelo ? (
+              <div className="rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
+                <p className="text-xs text-muted">Carregando...</p>
+              </div>
+            ) : (
+              <section className="space-y-5 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+                <div>
+                  <label htmlFor="titulo-anamnese" className="mb-1 block text-sm font-medium text-body">
+                    Título
+                  </label>
+                  <input
+                    id="titulo-anamnese"
+                    type="text"
+                    value={modeloAnamnese.titulo}
+                    onChange={(e) => alterarTituloModelo(e.target.value)}
+                    placeholder="Ex.: Ficha de anamnese"
+                    className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  />
+                </div>
+
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <label
+                      htmlFor="toggle-ativo-anamnese"
+                      className="block text-sm font-medium text-heading"
+                    >
+                      Modelo ativo
+                    </label>
+                    <p className="mt-1 text-xs text-muted">
+                      Só o modelo ativo é exibido pro cliente no fluxo público.
+                    </p>
+                  </div>
+
+                  <button
+                    id="toggle-ativo-anamnese"
+                    type="button"
+                    role="switch"
+                    aria-checked={modeloAnamnese.ativo}
+                    onClick={alternarAtivoModelo}
+                    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${
+                      modeloAnamnese.ativo ? "bg-primary" : "bg-border"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                        modeloAnamnese.ativo ? "translate-x-5" : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-sm font-medium text-heading">Declarações</p>
+
+                  {modeloAnamnese.declaracoes.length === 0 && (
+                    <p className="mb-2 text-xs text-muted">Nenhuma declaração ainda.</p>
+                  )}
+
+                  <div className="space-y-2">
+                    {modeloAnamnese.declaracoes.map((declaracao, indice) => (
+                      <div key={indice} className="flex items-start gap-2">
+                        <div className="flex shrink-0 flex-col pt-0.5">
+                          <button
+                            type="button"
+                            onClick={() => moverDeclaracao(indice, -1)}
+                            disabled={indice === 0}
+                            aria-label="Mover para cima"
+                            className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                          >
+                            ▲
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moverDeclaracao(indice, 1)}
+                            disabled={indice === modeloAnamnese.declaracoes.length - 1}
+                            aria-label="Mover para baixo"
+                            className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                          >
+                            ▼
+                          </button>
+                        </div>
+
+                        <textarea
+                          value={declaracao}
+                          onChange={(e) => alterarDeclaracao(indice, e.target.value)}
+                          rows={2}
+                          className="w-full flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                        />
+
+                        <button
+                          type="button"
+                          onClick={() => removerDeclaracao(indice)}
+                          className="shrink-0 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                        >
+                          Remover
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={adicionarDeclaracao}
+                    className="mt-2 rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                  >
+                    Adicionar declaração
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSalvarModelo}
+                  disabled={statusModelo === "salvando"}
+                  className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Salvar
+                </button>
+
+                {statusModelo === "salvando" && (
+                  <p className="text-xs text-muted">Salvando…</p>
+                )}
+                {statusModelo === "salvo" && !erroModelo && (
+                  <p className="text-xs font-medium text-green-600">Salvo ✓</p>
+                )}
+                {erroModelo && <p className="text-xs text-red-600">{erroModelo}</p>}
+              </section>
+            )}
+          </>
         )}
       </div>
     </main>
