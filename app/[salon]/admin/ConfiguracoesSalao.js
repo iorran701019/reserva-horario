@@ -35,7 +35,7 @@ function centavosParaReais(centavos) {
 }
 
 // Valores fictícios pra prévia das mensagens de WhatsApp (lista retrátil
-// abaixo) — cobre todas as variáveis usadas por qualquer uma das 10
+// abaixo) — cobre todas as variáveis usadas por qualquer uma das 7
 // mensagens (ver MENSAGENS_WHATSAPP_CONFIG em lib/whatsapp.js).
 const VALORES_EXEMPLO_MENSAGENS = {
   nome_cliente: "Maria",
@@ -166,7 +166,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       : "";
   });
 
-  // As 10 mensagens de WhatsApp editáveis (ver MENSAGENS_WHATSAPP_CONFIG em
+  // As 7 mensagens de WhatsApp editáveis (ver MENSAGENS_WHATSAPP_CONFIG em
   // lib/whatsapp.js). `mensagens` guarda o texto VIGENTE de cada campo
   // (personalizado se houver, senão o padrão) — undefined = carregando.
   // Status/erro por campo, pra cada linha ter seu próprio feedback.
@@ -268,7 +268,19 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       setGoogleCalendarEmail(data?.google_calendar_email ?? null);
 
       const textosMensagens = {};
-      MENSAGENS_WHATSAPP_CONFIG.forEach(({ campo, padrao }) => {
+      MENSAGENS_WHATSAPP_CONFIG.forEach(({ campo, padrao, camposDestino }) => {
+        // Campo unificado (ex.: msg_suporte_generico): usa a 1ª coluna não
+        // nula das N colunas de destino, na ordem declarada, ou string vazia
+        // — nunca um padrão hardcoded, já que as funções que leem essas
+        // colunas têm padrões diferentes entre si (ver MENSAGENS_WHATSAPP_CONFIG
+        // em lib/whatsapp.js).
+        if (camposDestino) {
+          textosMensagens[campo] = camposDestino.reduce(
+            (valor, coluna) => valor ?? data?.[coluna],
+            undefined
+          ) ?? "";
+          return;
+        }
         textosMensagens[campo] = data?.[campo] ?? padrao;
       });
       setMensagens(textosMensagens);
@@ -753,13 +765,20 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   // inclusive string vazia, quando o dono esvazia o campo de propósito (ver
   // regra em MENSAGENS_WHATSAPP_CONFIG/lib/whatsapp.js: vazio salvo é ''
   // ("enviar em branco"), nunca null ("nunca editado, usa o padrão")).
+  // Campo com `camposDestino` (ex.: msg_suporte_generico) grava o MESMO
+  // texto em todas as colunas de destino de uma vez, em vez de só na
+  // coluna `campo`.
   async function salvarMensagem(campo) {
     setStatusMensagens((s) => ({ ...s, [campo]: "salvando" }));
     setErroMensagens((s) => ({ ...s, [campo]: "" }));
 
+    const config = MENSAGENS_WHATSAPP_CONFIG.find((item) => item.campo === campo);
+    const colunas = config?.camposDestino ?? [campo];
+    const valores = Object.fromEntries(colunas.map((coluna) => [coluna, mensagens[campo]]));
+
     const { error } = await supabase
       .from("estabelecimentos")
-      .update({ [campo]: mensagens[campo] })
+      .update(valores)
       .eq("id", estabelecimento.id);
 
     if (error) {
