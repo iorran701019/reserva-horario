@@ -905,19 +905,19 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
 
               <div>
                 <label
-                  htmlFor="foto-perfil-x"
+                  htmlFor="foto-perfil-zoom"
                   className="mb-1 block text-sm font-medium text-body"
                 >
-                  Posição horizontal
+                  Zoom
                 </label>
                 <input
-                  id="foto-perfil-x"
+                  id="foto-perfil-zoom"
                   type="range"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={fotoPerfilX}
-                  onChange={(e) => setFotoPerfilX(Number(e.target.value))}
+                  min={1}
+                  max={3}
+                  step={0.1}
+                  value={fotoPerfilZoom}
+                  onChange={(e) => setFotoPerfilZoom(Number(e.target.value))}
                   onMouseUp={() => salvarFotoPerfilPosicao()}
                   onTouchEnd={() => salvarFotoPerfilPosicao()}
                   onKeyUp={() => salvarFotoPerfilPosicao()}
@@ -951,19 +951,19 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
 
               <div>
                 <label
-                  htmlFor="foto-perfil-zoom"
+                  htmlFor="foto-perfil-x"
                   className="mb-1 block text-sm font-medium text-body"
                 >
-                  Zoom
+                  Posição horizontal
                 </label>
                 <input
-                  id="foto-perfil-zoom"
+                  id="foto-perfil-x"
                   type="range"
-                  min={1}
-                  max={3}
-                  step={0.1}
-                  value={fotoPerfilZoom}
-                  onChange={(e) => setFotoPerfilZoom(Number(e.target.value))}
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={fotoPerfilX}
+                  onChange={(e) => setFotoPerfilX(Number(e.target.value))}
                   onMouseUp={() => salvarFotoPerfilPosicao()}
                   onTouchEnd={() => salvarFotoPerfilPosicao()}
                   onKeyUp={() => salvarFotoPerfilPosicao()}
