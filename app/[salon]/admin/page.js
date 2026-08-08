@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
-import { buscarPerfil } from "@/lib/perfil";
+import { useSessaoAdmin } from "@/hooks/useSessaoAdmin";
 import { buscarTema } from "@/lib/temas";
 import {
   linkWhatsApp,
@@ -302,19 +302,16 @@ export default function AdminPage() {
   // resolução do estabelecimento e a montagem das URLs de login/redirect.
   const { salon } = useParams();
 
-  // Estado da sessão: null = ainda verificando; false = sem login; true = logado.
-  // Enquanto for null não renderizamos a lista (evita "piscar" o conteúdo).
-  const [autenticado, setAutenticado] = useState(null);
+  // Sessão + perfil do usuário autenticado (ver hooks/useSessaoAdmin.js):
+  // autenticado (null = verificando; false = sem login; true = logado),
+  // perfil (undefined/null/{papel, estabelecimento}) e semPerfil (conta órfã).
+  const { autenticado, perfil, semPerfil } = useSessaoAdmin(salon);
 
-  // Estabelecimento resolvido pelo slug do path (seletor de teste, não
-  // isolamento de segurança nesta fase — Iorran é o único admin). undefined =
-  // resolvendo; null = slug inexistente/inativo; objeto = encontrado. Particiona
-  // o fetch de agendamentos e o insert da aba Agendar por estabelecimento_id.
+  // Estabelecimento resolvido a partir do perfil (ver efeito abaixo).
+  // undefined = resolvendo; null = slug inexistente/inativo ou FK do perfil
+  // quebrada; objeto = encontrado. Particiona o fetch de agendamentos e o
+  // insert da aba Agendar por estabelecimento_id.
   const [estabelecimento, setEstabelecimento] = useState(undefined);
-
-  // Autenticado, mas sem linha em perfis (conta órfã): não há salão a resolver.
-  // Troca todo o conteúdo pela tela "Conta sem salão vinculado".
-  const [semPerfil, setSemPerfil] = useState(false);
 
   const [agendamentos, setAgendamentos] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -663,44 +660,11 @@ export default function AdminPage() {
     await handleArquivarPendencia(item.id);
   }
 
-  // Verifica a sessão ao montar e fica ouvindo mudanças (login/logout em
-  // outra aba também caem aqui). Sem sessão → manda pro login do MESMO salão
-  // (slug no path, via urlLogin(salon)).
-  useEffect(() => {
-    let ativo = true;
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!ativo) return;
-      if (!session) {
-        setAutenticado(false);
-        router.replace(urlLogin(salon));
-        return;
-      }
-      setAutenticado(true);
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_evento, session) => {
-      if (!ativo) return;
-      if (!session) {
-        setAutenticado(false);
-        router.replace(urlLogin(salon));
-        return;
-      }
-      setAutenticado(true);
-    });
-
-    return () => {
-      ativo = false;
-      subscription.unsubscribe();
-    };
-  }, [router, salon]);
-
   // Resolve o estabelecimento a partir do PERFIL do usuário autenticado (não
-  // mais direto pelo slug do path). Espera a sessão confirmada porque a query
-  // de perfis filtra por auth.uid(). Conforme o papel:
-  //   - sem perfil → conta órfã: marca semPerfil (tela de erro).
+  // mais direto pelo slug do path). Só roda depois que useSessaoAdmin resolve
+  // o perfil (undefined enquanto verifica sessão/busca perfil, ou conta órfã
+  // → nada a resolver aqui, semPerfil já cobre a tela de erro). Conforme o
+  // papel:
   //   - 'dono'     → preso ao próprio salão: usa o estabelecimento do perfil e
   //                  IGNORA o slug do path.
   //   - 'global' (ou outro papel admin) → mantém o comportamento atual: resolve
@@ -708,20 +672,10 @@ export default function AdminPage() {
   //                  routing sempre há um slug, então não existe mais o default
   //                  'valeria' da época do ?salon=.)
   useEffect(() => {
-    if (autenticado !== true) return;
+    if (!perfil) return;
     let ativo = true;
 
     (async () => {
-      const perfil = await buscarPerfil();
-      if (!ativo) return;
-
-      if (!perfil) {
-        setSemPerfil(true);
-        return;
-      }
-
-      setSemPerfil(false);
-
       if (perfil.papel === "dono") {
         setEstabelecimento(perfil.estabelecimento ?? null);
         return;
@@ -734,7 +688,7 @@ export default function AdminPage() {
     return () => {
       ativo = false;
     };
-  }, [autenticado, salon]);
+  }, [perfil, salon]);
 
   // Zera a confirmação da anotação ao abrir/fechar/trocar o modal de detalhe
   // (o textarea já recolhe sozinho por `idEditandoObservacao` estar atrelado ao
