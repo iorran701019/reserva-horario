@@ -1411,11 +1411,6 @@ export default function FormularioAgendamento({
       return;
     }
 
-    if (precisaSinal && !sinalDeclarado) {
-      setErro("Confirme o pagamento do sinal para continuar.");
-      return;
-    }
-
     // Regras do agendamento (estabelecimento.aviso_regras_agendamento):
     // popup bloqueante mostrado uma vez por sessão do wizard, na etapa final
     // de confirmação — sempre, com ou sem sinal a pagar. Confirmado, quem
@@ -1473,7 +1468,7 @@ export default function FormularioAgendamento({
       estabelecimento_id: estabelecimento.id,
       profissional_id: profissionalId,
       status: status ?? (precisaSinal ? "aguardando_sinal" : "pendente"),
-      sinal_declarado_pago: precisaSinal ? sinalDeclarado : false,
+      sinal_declarado_pago: sinalDeclarado,
       finalizado: true,
     };
     const { data, error } = await supabase
@@ -2140,7 +2135,7 @@ export default function FormularioAgendamento({
 
             <button
               type="submit"
-              disabled={enviando || (precisaSinal && !sinalDeclarado)}
+              disabled={enviando}
               className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {enviando ? "Enviando..." : rotuloSubmit}
