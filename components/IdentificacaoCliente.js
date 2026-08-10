@@ -27,14 +27,22 @@ import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendament
 //
 // - true (ex.: Flávia): "Sim" só libera direto pro agendamento se o bloco de
 //   endereço (CEP/número/bairro/cidade) já estiver completo; senão abre
-//   CadastroCliente pra completar. "Não" ZERA a linha encontrada (nome e
-//   endereço voltam a vazio/null — não dá pra INSERIR outra com o mesmo
-//   WhatsApp, a coluna é UNIQUE por estabelecimento) e abre CadastroCliente
-//   em branco a partir dela. Não encontrar cria um registro mínimo novo
-//   (esse caso não colide com ninguém) e segue pro mesmo completar endereço.
+//   CadastroCliente pra completar (pré-preenchido com o que já existe).
+//   "Não" abre CadastroCliente em BRANCO (não herda nome/endereço da linha
+//   encontrada), mas guarda o id dela só pra excluir da checagem de
+//   conflito de WhatsApp — o registro em si só é sobrescrito de fato
+//   quando o CadastroCliente for confirmado (upsert por whatsapp, ver
+//   CadastroCliente.js). Não encontrar também abre CadastroCliente em
+//   branco, sem id nenhum (INSERT puro no submit).
 // - false (ex.: Laysla): "Sim" libera direto pro agendamento sempre (nunca
 //   checa endereço). "Não" (ou não encontrar) mostra um cadastro mínimo
-//   (nome + confirmar WhatsApp) — nunca pede endereço.
+//   (nome + confirmar WhatsApp) — nunca pede endereço. Esse caminho já só
+//   grava em `clientes` no submit (handleSubmitSimples), sem escrita
+//   antecipada.
+//
+// IMPORTANTE: esta tela (a busca por telefone e a confirmação "é você?")
+// NUNCA grava nada em `clientes` — só lê. A única gravação do fluxo
+// "cadastroCompleto=true" acontece dentro de CadastroCliente, no submit.
 //
 // Props:
 //   slug              – slug do salão (rota /[salon]), chave da persistência
@@ -93,9 +101,6 @@ export default function IdentificacaoCliente({
   );
   const [buscando, setBuscando] = useState(false);
   const [erro, setErro] = useState("");
-  // Trava os botões "Sim"/"Não" da etapa "confirmar" enquanto o "Não" do
-  // ramo cadastroCompleto=true insere o registro mínimo (evita duplo clique).
-  const [confirmando, setConfirmando] = useState(false);
 
   // Campos da etapa "cadastroSimples" (ramo cadastroCompleto=false).
   // `whatsappSimples` nasce com o telefone digitado na etapa 1, mas é
@@ -132,61 +137,6 @@ export default function IdentificacaoCliente({
     });
   }, [slug, etapa, telefone, clienteEncontrado, clienteNovo]);
 
-  // Cria um registro mínimo (nome vazio, telefone digitado na etapa 1) e abre
-  // o completarEndereco em branco a partir dele — usado quando a busca não
-  // encontra ninguém (aí sim é seguro fazer INSERT).
-  async function criarRegistroMinimoEAvancar() {
-    const digitos = telefone.replace(/\D/g, "");
-    const { data: novo, error: erroInsert } = await supabase
-      .from("clientes")
-      .insert({ estabelecimento_id: estabelecimentoId, nome: "", whatsapp: digitos })
-      .select()
-      .single();
-
-    if (erroInsert) {
-      setErro(erroInsert.message);
-      return;
-    }
-
-    setClienteEncontrado(novo);
-    setClienteNovo(true);
-    setEtapa("completarEndereco");
-  }
-
-  // "Não é meu número" no ramo cadastroCompleto=true: o WhatsApp já pertence
-  // a esse registro (UNIQUE estabelecimento_id+whatsapp impede um INSERT com
-  // o mesmo número), então reaproveita a MESMA linha, zerando nome e
-  // endereço — o efeito pro cliente é idêntico a um cadastro em branco, sem
-  // herdar dados de quem foi negado.
-  async function limparRegistroEAvancar(clienteId) {
-    const { data: limpo, error: erroUpdate } = await supabase
-      .from("clientes")
-      .update({
-        nome: "",
-        cep: null,
-        endereco: null,
-        numero: null,
-        complemento: null,
-        bairro: null,
-        cidade: null,
-        estado: null,
-        nascimento: null,
-        instagram: null,
-      })
-      .eq("id", clienteId)
-      .select()
-      .single();
-
-    if (erroUpdate) {
-      setErro(erroUpdate.message);
-      return;
-    }
-
-    setClienteEncontrado(limpo);
-    setClienteNovo(true);
-    setEtapa("completarEndereco");
-  }
-
   async function handleBuscar(e) {
     e.preventDefault();
     setErro("");
@@ -218,11 +168,14 @@ export default function IdentificacaoCliente({
       return;
     }
 
-    // Não encontrado: cadastroCompleto=true cria o registro mínimo e vai
-    // completar endereço; false mostra o cadastro simples (nome + confirmar).
+    // Não encontrado: cadastroCompleto=true abre CadastroCliente em branco
+    // (sem registro nenhum ainda — o INSERT só acontece no submit de lá);
+    // false mostra o cadastro simples (nome + confirmar).
     if (cadastroCompleto) {
-      await criarRegistroMinimoEAvancar();
       setBuscando(false);
+      setClienteEncontrado(null);
+      setClienteNovo(true);
+      setEtapa("completarEndereco");
       return;
     }
 
@@ -251,19 +204,21 @@ export default function IdentificacaoCliente({
 
   // "Não é meu número"/"Não sou eu": ramo false vai direto pro cadastro
   // simples (nome + confirmar WhatsApp), sem voltar a pedir o telefone. Ramo
-  // true zera a linha encontrada (ver limparRegistroEAvancar) e abre
-  // completarEndereco em branco — nunca herda os dados de quem foi negado.
-  async function handleConfirmarNao() {
+  // true abre completarEndereco em branco — mantém só o id da linha
+  // encontrada (descartando nome/endereço/etc.), pra CadastroCliente excluir
+  // esse id da checagem de conflito de WhatsApp sem herdar nenhum dado de
+  // quem foi negado. Nenhuma escrita acontece aqui: a linha só é sobrescrita
+  // de fato quando o CadastroCliente for confirmado (upsert por whatsapp).
+  function handleConfirmarNao() {
     if (!cadastroCompleto) {
       setWhatsappSimples(telefone);
       setEtapa("cadastroSimples");
       return;
     }
 
-    setConfirmando(true);
-    setErro("");
-    await limparRegistroEAvancar(clienteEncontrado.id);
-    setConfirmando(false);
+    setClienteEncontrado((atual) => ({ id: atual.id }));
+    setClienteNovo(true);
+    setEtapa("completarEndereco");
   }
 
   async function handleSubmitSimples(e) {
@@ -378,7 +333,6 @@ export default function IdentificacaoCliente({
             <button
               type="button"
               onClick={handleConfirmarSim}
-              disabled={confirmando}
               className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               Sim, sou eu
@@ -386,10 +340,9 @@ export default function IdentificacaoCliente({
             <button
               type="button"
               onClick={handleConfirmarNao}
-              disabled={confirmando}
               className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {confirmando ? "..." : "Não é meu número"}
+              Não é meu número
             </button>
           </div>
 
@@ -473,12 +426,12 @@ export default function IdentificacaoCliente({
         </form>
       )}
 
-      {etapa === "completarEndereco" && clienteEncontrado && (
+      {etapa === "completarEndereco" && (
         <CadastroCliente
           slug={slug}
           estabelecimentoId={estabelecimentoId}
-          clienteId={clienteEncontrado.id}
-          nomeInicial={clienteEncontrado.nome}
+          clienteId={clienteEncontrado?.id ?? null}
+          nomeInicial={clienteEncontrado?.nome}
           telefoneReferencia={telefone}
           valoresIniciais={clienteEncontrado}
           clienteNovo={clienteNovo}

@@ -14,10 +14,21 @@ import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendament
 
 // Completa o cadastro de endereço de um cliente já identificado (tenant com
 // `cadastro_completo = true`), exibido pelo IdentificacaoCliente quando o
-// bloco CEP/número/bairro/cidade está pendente — seja um registro mínimo
-// recém-criado (nome vazio) ou um cliente antigo com endereço incompleto.
-// Faz sempre UPDATE por `clienteId` — quem decide inserir o registro mínimo é
-// o IdentificacaoCliente, antes de montar este formulário.
+// bloco CEP/número/bairro/cidade está pendente — seja um cadastro novo
+// (nunca gravado ainda), um "não sou eu" sobre um número de outra pessoa, ou
+// um cliente antigo com endereço incompleto.
+//
+// NENHUMA linha é gravada em `clientes` antes deste formulário ser
+// confirmado — o IdentificacaoCliente só lê. No submit, faz UPSERT por
+// (estabelecimento_id, whatsapp): existindo já uma linha pra esse telefone
+// (a própria cliente voltando, ou "não sou eu" sobre o número de outra
+// pessoa), sobrescreve TODOS os campos do cadastro (inclusive zerando
+// endereço/contato_emergencia quando o bloco correspondente não está sendo
+// coletado agora — exigirEndereco true zera contato_emergencia, false zera o
+// bloco de endereço — pra não deixar resíduo do dono anterior do número).
+// Não existindo, insere. `clienteId` (id da linha encontrada antes, se
+// houver) só serve aqui pra excluir essa linha da checagem de conflito de
+// WhatsApp abaixo — não é mais usado como alvo do UPDATE.
 //
 // O WhatsApp já foi coletado na etapa anterior e vem em `telefoneReferencia`
 // só como valor INICIAL do campo — ele agora é editável aqui (a cliente pode
@@ -42,8 +53,11 @@ import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendament
 //                            ignorado). Limpo ao submeter com sucesso.
 //   estabelecimentoId      – dono da linha em `clientes`; também particiona a
 //                            checagem de WhatsApp já cadastrado.
-//   clienteId              – id da linha em `clientes` a ser atualizada (é o
-//                            "idAtual" excluído da checagem de conflito).
+//   clienteId              – id da linha encontrada antes deste formulário
+//                            abrir, se houver (null/undefined em cadastro
+//                            novo). Usado só como "idAtual" excluído da
+//                            checagem de conflito de WhatsApp — o upsert do
+//                            submit não depende dele.
 //   nomeInicial            – nome já existente (pode vir vazio).
 //   telefoneReferencia     – WhatsApp digitado na etapa anterior, usado como
 //                            valor INICIAL do campo editável (não mais como
@@ -209,30 +223,32 @@ export default function CadastroCliente({
       return;
     }
 
+    // Sempre grava TODOS os campos abaixo (mesmo os toggle-gated, com null
+    // quando não coletados agora) — o upsert pode estar sobrescrevendo a
+    // linha de outra pessoa ("não sou eu" sobre um número já cadastrado), e
+    // um campo simplesmente omitido do payload manteria o valor antigo dela
+    // no banco em vez de zerar.
     const dadosCliente = {
+      estabelecimento_id: estabelecimentoId,
       nome: form.nome.trim(),
       whatsapp: digitosWhatsapp,
       nascimento: nascimentoIso,
       instagram: form.instagram || null,
+      cep: exigirEndereco ? form.cep : null,
+      endereco: exigirEndereco ? form.endereco || null : null,
+      numero: exigirEndereco ? form.numero : null,
+      complemento: exigirEndereco ? form.complemento || null : null,
+      bairro: exigirEndereco ? form.bairro : null,
+      cidade: exigirEndereco ? form.cidade : null,
+      estado: exigirEndereco ? form.estado || null : null,
+      contato_emergencia: exigirEndereco
+        ? null
+        : form.contatoEmergencia.replace(/\D/g, "") || null,
     };
-
-    if (exigirEndereco) {
-      dadosCliente.cep = form.cep;
-      dadosCliente.endereco = form.endereco || null;
-      dadosCliente.numero = form.numero;
-      dadosCliente.complemento = form.complemento || null;
-      dadosCliente.bairro = form.bairro;
-      dadosCliente.cidade = form.cidade;
-      dadosCliente.estado = form.estado || null;
-    } else {
-      dadosCliente.contato_emergencia =
-        form.contatoEmergencia.replace(/\D/g, "") || null;
-    }
 
     const { data, error } = await supabase
       .from("clientes")
-      .update(dadosCliente)
-      .eq("id", clienteId)
+      .upsert(dadosCliente, { onConflict: "estabelecimento_id,whatsapp" })
       .select()
       .single();
 
