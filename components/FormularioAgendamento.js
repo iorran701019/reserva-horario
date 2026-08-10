@@ -367,13 +367,6 @@ export default function FormularioAgendamento({
   }));
   const [horarioSelecionado, setHorarioSelecionado] = useState("");
 
-  // Id da reserva criada ANTECIPADAMENTE (fluxo público, sem `status`): assim
-  // que a cliente toca num horário, já inserimos a linha em "aguardando_sinal"
-  // ou "pendente" pra travar a vaga enquanto ela preenche nome/WhatsApp. O
-  // submit final vira um UPDATE dessa linha em vez de um novo insert. Fluxo
-  // /admin (com `status`) nunca usa isso — segue com o insert único de sempre.
-  const [agendamentoId, setAgendamentoId] = useState(null);
-
   // Etapa atual do wizard. Controla só a RENDERIZAÇÃO — a lógica de dados
   // (form, ocupados, validações) permanece a mesma de quando era página única.
   const [etapa, setEtapa] = useState("servico");
@@ -948,23 +941,9 @@ export default function FormularioAgendamento({
     setMesVisivel((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1));
   }
 
-  // Cancela a reserva antecipada do fluxo público (ver `agendamentoId` acima):
-  // marca a linha como "cancelado" pra não bloquear o horário e zera o id. Não
-  // faz nada se não houver reserva antecipada em aberto.
-  async function cancelarReservaProvisoria() {
-    if (!agendamentoId) return;
-    await supabase
-      .from("agendamentos")
-      .update({ status: "cancelado" })
-      .eq("id", agendamentoId);
-    setAgendamentoId(null);
-  }
-
   // Seleção de dia no calendário: grava a data e invalida o horário anterior
-  // (o efeito de vagas recarrega a grade do novo dia). Se já havia uma reserva
-  // antecipada pro horário anterior, cancela antes de trocar de data.
-  async function selecionarData(iso) {
-    await cancelarReservaProvisoria();
+  // (o efeito de vagas recarrega a grade do novo dia).
+  function selecionarData(iso) {
     setForm((anterior) => ({ ...anterior, data: iso }));
     setHorarioSelecionado("");
   }
@@ -1230,94 +1209,17 @@ setRespostasPerguntas({});
   }
 
   // Volta para a etapa anterior preservando o que já foi escolhido —
-  // não limpa serviço, data nem horário. Se havia uma reserva antecipada
-  // (fluxo público) pro horário atual, cancela antes de voltar.
-  async function voltarEtapa() {
-    await cancelarReservaProvisoria();
+  // não limpa serviço, data nem horário.
+  function voltarEtapa() {
     const indice = ETAPAS.findIndex((e) => e.id === etapa);
     if (indice > 0) setEtapa(ETAPAS[indice - 1].id);
   }
 
-  // Clique num horário na etapa "data". Fluxo /admin (`status` fornecido):
-  // só marca o horário e avança, o insert único acontece no submit — igual
-  // sempre foi. Fluxo público (`status` omitido): já insere a reserva agora
-  // ("aguardando_sinal" ou "pendente") pra travar a vaga enquanto a cliente
-  // preenche a etapa de dados; o submit final vira um UPDATE dessa linha.
-  async function selecionarHorario(slot) {
+  // Clique num horário na etapa "data": só marca o horário e avança pra etapa
+  // "dados" — o insert (único, pros dois fluxos) só acontece no submit final,
+  // em finalizarAgendamento.
+  function selecionarHorario(slot) {
     setHorarioSelecionado(slot);
-
-    if (status) {
-      setEtapa("dados");
-      return;
-    }
-
-    setErro("");
-
-    let profissionalId;
-    if (escolherProfissional) {
-      profissionalId = profissionalSelecionado.id;
-    } else {
-      const livres = vagas[slot] ?? [];
-      if (livres.length === 0) {
-        setErro("Esse horário acabou de ser reservado. Escolha outro.");
-        setHorarioSelecionado("");
-        return;
-      }
-      profissionalId = await escolherMenosOcupado(
-        estabelecimento.id,
-        form.data,
-        livres
-      );
-    }
-
-    const { data, error } = await supabase
-      .from("agendamentos")
-      .insert({
-        nome_cliente: form.nome,
-        telefone: form.telefone,
-        data: form.data,
-        horario: slot,
-        servico_id: servicoSelecionado.id,
-        duracao_min: servicoSelecionado.duracao_min,
-        estabelecimento_id: estabelecimento.id,
-        profissional_id: profissionalId,
-        status: precisaSinal ? "aguardando_sinal" : "pendente",
-        finalizado: false,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      // 23P01 = violação da exclusion constraint agendamentos_sem_sobreposicao:
-      // outra reserva sobrepõe esse intervalo — alguém ocupou primeiro.
-      const ehHorarioOcupado =
-        error.code === "23P01" ||
-        /agendamentos_sem_sobreposicao|exclusion constraint/i.test(
-          error.message ?? ""
-        );
-
-      if (ehHorarioOcupado) {
-        setErro("Esse horário acabou de ser reservado. Escolha outro.");
-        setHorarioSelecionado("");
-        try {
-          const mapa = await calcularVagasPorHorario({
-            estabelecimentoId: estabelecimento.id,
-            servicoId: servicoSelecionado.id,
-            data: form.data,
-          });
-          setVagas(mapa);
-        } catch {
-          setVagas({});
-        }
-        return;
-      }
-
-      setErro(error.message);
-      return;
-    }
-
-    setAgendamentoId(data.id);
-    await salvarRespostasPerguntas(data.id);
     setEtapa("dados");
   }
 
@@ -1379,67 +1281,51 @@ setRespostasPerguntas({});
   async function finalizarAgendamento() {
     setEnviando(true);
 
-    // Fluxo público (`status` omitido) com reserva já criada em
-    // selecionarHorario: o profissional já foi decidido lá, então o submit
-    // vira um UPDATE dessa linha em vez de um novo insert.
-    const usaReservaExistente = !status && agendamentoId;
-
-    let error;
-    if (usaReservaExistente) {
-      ({ error } = await supabase
-        .from("agendamentos")
-        .update({
-          sinal_declarado_pago: precisaSinal ? sinalDeclarado : false,
-          status: "pendente",
-          finalizado: true,
-        })
-        .eq("id", agendamentoId));
+    // Quem fica com a reserva: o escolhido pelo cliente, ou — no encaixe
+    // automático — o menos ocupado entre os livres neste horário.
+    let profissionalId;
+    if (escolherProfissional) {
+      profissionalId = profissionalSelecionado.id;
     } else {
-      // Quem fica com a reserva: o escolhido pelo cliente, ou — no encaixe
-      // automático — o menos ocupado entre os livres neste horário.
-      let profissionalId;
-      if (escolherProfissional) {
-        profissionalId = profissionalSelecionado.id;
-      } else {
-        const livres = vagas[horarioSelecionado] ?? [];
-        if (livres.length === 0) {
-          setEnviando(false);
-          setErro("Esse horário acabou de ser reservado. Escolha outro.");
-          setHorarioSelecionado("");
-          return;
-        }
-        profissionalId = await escolherMenosOcupado(
-          estabelecimento.id,
-          form.data,
-          livres
-        );
+      const livres = vagas[horarioSelecionado] ?? [];
+      if (livres.length === 0) {
+        setEnviando(false);
+        setErro("Esse horário acabou de ser reservado. Escolha outro.");
+        setHorarioSelecionado("");
+        setEtapa("data");
+        return;
       }
+      profissionalId = await escolherMenosOcupado(
+        estabelecimento.id,
+        form.data,
+        livres
+      );
+    }
 
-      // Payload base idêntico ao do público. `status` só entra quando o
-      // consumidor o fornece (admin => "confirmado"); omitido, o banco aplica
-      // o default "pendente" — comportamento do /agendar público inalterado.
-      const payload = {
-        nome_cliente: form.nome,
-        telefone: form.telefone,
-        data: form.data,
-        horario: horarioSelecionado,
-        servico_id: servicoSelecionado.id,
-        duracao_min: servicoSelecionado.duracao_min,
-        estabelecimento_id: estabelecimento.id,
-        profissional_id: profissionalId,
-        sinal_declarado_pago: precisaSinal ? sinalDeclarado : false,
-        finalizado: true,
-      };
-      if (status) payload.status = status;
-      const resultadoInsert = await supabase
-        .from("agendamentos")
-        .insert(payload)
-        .select("id")
-        .single();
-      error = resultadoInsert.error;
-      if (!error) {
-        await salvarRespostasPerguntas(resultadoInsert.data.id);
-      }
+    // Insert único, pros dois fluxos. `status` só entra quando o consumidor o
+    // fornece (admin => "confirmado"); no público, decide pelo sinal exigido:
+    // "aguardando_sinal" trava até a dona confirmar o Pix, "pendente" segue o
+    // fluxo normal de aprovação.
+    const payload = {
+      nome_cliente: form.nome,
+      telefone: form.telefone,
+      data: form.data,
+      horario: horarioSelecionado,
+      servico_id: servicoSelecionado.id,
+      duracao_min: servicoSelecionado.duracao_min,
+      estabelecimento_id: estabelecimento.id,
+      profissional_id: profissionalId,
+      status: status ?? (precisaSinal ? "aguardando_sinal" : "pendente"),
+      sinal_declarado_pago: precisaSinal ? sinalDeclarado : false,
+      finalizado: true,
+    };
+    const { data, error } = await supabase
+      .from("agendamentos")
+      .insert(payload)
+      .select("id")
+      .single();
+    if (!error) {
+      await salvarRespostasPerguntas(data.id);
     }
 
     setEnviando(false);
@@ -1456,6 +1342,7 @@ setRespostasPerguntas({});
       if (ehHorarioOcupado) {
         setErro("Esse horário acabou de ser reservado. Escolha outro.");
         setHorarioSelecionado("");
+        setEtapa("data");
         // Recarrega as vagas pra refletir quem ainda está livre neste dia.
         try {
           const mapa = await calcularVagasPorHorario({
