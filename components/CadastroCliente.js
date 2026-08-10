@@ -5,6 +5,11 @@ import { supabase } from "@/lib/supabaseClient";
 import { enderecoCompleto, whatsappConfere } from "@/lib/clienteValidacao";
 import { useConflitoWhatsapp } from "@/lib/checagemWhatsapp";
 import ModalConflitoWhatsapp from "@/components/ModalConflitoWhatsapp";
+import {
+  aplicarMascaraNascimento,
+  paraExibicaoNascimento,
+  validarNascimento,
+} from "@/lib/nascimentoValidacao";
 
 // Completa o cadastro de endereço de um cliente já identificado (tenant com
 // `cadastro_completo = true`), exibido pelo IdentificacaoCliente quando o
@@ -78,7 +83,7 @@ export default function CadastroCliente({
     bairro: valoresIniciais?.bairro ?? "",
     cidade: valoresIniciais?.cidade ?? "",
     estado: valoresIniciais?.estado ?? "",
-    nascimento: valoresIniciais?.nascimento ?? "",
+    nascimento: paraExibicaoNascimento(valoresIniciais?.nascimento),
     instagram: valoresIniciais?.instagram ?? "",
     contatoEmergencia: valoresIniciais?.contato_emergencia ?? "",
   });
@@ -88,10 +93,17 @@ export default function CadastroCliente({
   const conflitoWhatsapp = useConflitoWhatsapp();
   const [erro, setErro] = useState("");
   const [erroWhatsapp, setErroWhatsapp] = useState("");
+  const [erroNascimento, setErroNascimento] = useState("");
 
   function handleChange(e) {
     const { name, value } = e.target;
     setForm((anterior) => ({ ...anterior, [name]: value }));
+  }
+
+  function handleChangeNascimento(e) {
+    const valor = aplicarMascaraNascimento(form.nascimento, e.target.value);
+    setForm((anterior) => ({ ...anterior, nascimento: valor }));
+    setErroNascimento("");
   }
 
   // Ao CEP atingir 8 dígitos, busca o ViaCEP e preenche os campos de
@@ -135,6 +147,7 @@ export default function CadastroCliente({
     e.preventDefault();
     setErro("");
     setErroWhatsapp("");
+    setErroNascimento("");
 
     if (!form.nome.trim()) {
       setErro("Informe seu nome.");
@@ -143,6 +156,16 @@ export default function CadastroCliente({
 
     if (exigirEndereco && !enderecoCompleto(form)) {
       setErro("Preencha CEP, número, bairro e cidade.");
+      return;
+    }
+
+    const { erro: erroData, iso: nascimentoIso } = validarNascimento(form.nascimento);
+    if (erroData) {
+      setErroNascimento(erroData);
+      return;
+    }
+    if (!nascimentoIso) {
+      setErroNascimento("Informe sua data de nascimento.");
       return;
     }
 
@@ -168,7 +191,7 @@ export default function CadastroCliente({
     const dadosCliente = {
       nome: form.nome.trim(),
       whatsapp: digitosWhatsapp,
-      nascimento: form.nascimento || null,
+      nascimento: nascimentoIso,
       instagram: form.instagram || null,
     };
 
@@ -369,12 +392,18 @@ export default function CadastroCliente({
         <input
           id="cad-nascimento"
           name="nascimento"
-          type="date"
+          type="text"
+          inputMode="numeric"
           value={form.nascimento}
-          onChange={handleChange}
+          onChange={handleChangeNascimento}
           required
+          placeholder="dd/mm/aaaa"
+          maxLength={10}
           className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
         />
+        {erroNascimento && (
+          <p className="mt-1 text-sm text-red-700">{erroNascimento}</p>
+        )}
       </div>
 
       <div>

@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import {
+  aplicarMascaraNascimento,
+  paraExibicaoNascimento,
+  validarNascimento,
+} from "@/lib/nascimentoValidacao";
 
 // Edição dos dados do cliente, reaproveitando a MESMA estrutura de campos e
 // validação do CadastroCliente (nome, whatsapp com dupla confirmação, CEP
@@ -48,6 +53,7 @@ export default function AtualizarDadosCliente({
   const [buscandoCep, setBuscandoCep] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
+  const [erroNascimento, setErroNascimento] = useState("");
   const [mostrarReconfirmacao, setMostrarReconfirmacao] = useState(false);
   const [whatsappReconfirmacao, setWhatsappReconfirmacao] = useState("");
 
@@ -80,7 +86,7 @@ export default function AtualizarDadosCliente({
           bairro: data.bairro ?? "",
           cidade: data.cidade ?? "",
           estado: data.estado ?? "",
-          nascimento: data.nascimento ?? "",
+          nascimento: paraExibicaoNascimento(data.nascimento),
           instagram: data.instagram ?? "",
           contatoEmergencia: data.contato_emergencia ?? "",
         });
@@ -97,6 +103,12 @@ export default function AtualizarDadosCliente({
   function handleChange(e) {
     const { name, value } = e.target;
     setForm((anterior) => ({ ...anterior, [name]: value }));
+  }
+
+  function handleChangeNascimento(e) {
+    const valor = aplicarMascaraNascimento(form.nascimento, e.target.value);
+    setForm((anterior) => ({ ...anterior, nascimento: valor }));
+    setErroNascimento("");
   }
 
   // Ao CEP atingir 8 dígitos, busca o ViaCEP e preenche os campos de
@@ -139,9 +151,20 @@ export default function AtualizarDadosCliente({
   async function handleSubmit(e) {
     e.preventDefault();
     setErro("");
+    setErroNascimento("");
 
     if (!form.nome.trim()) {
       setErro("Informe seu nome.");
+      return;
+    }
+
+    const { erro: erroData, iso: nascimentoIso } = validarNascimento(form.nascimento);
+    if (erroData) {
+      setErroNascimento(erroData);
+      return;
+    }
+    if (!nascimentoIso) {
+      setErroNascimento("Informe sua data de nascimento.");
       return;
     }
 
@@ -174,7 +197,7 @@ export default function AtualizarDadosCliente({
     const dadosCliente = {
       nome: form.nome.trim(),
       whatsapp: numeroConfirmado.replace(/\D/g, ""),
-      nascimento: form.nascimento || null,
+      nascimento: nascimentoIso,
       instagram: form.instagram || null,
     };
 
@@ -356,12 +379,18 @@ export default function AtualizarDadosCliente({
         <input
           id="atu-nascimento"
           name="nascimento"
-          type="date"
+          type="text"
+          inputMode="numeric"
           value={form.nascimento}
-          onChange={handleChange}
+          onChange={handleChangeNascimento}
           required
+          placeholder="dd/mm/aaaa"
+          maxLength={10}
           className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
         />
+        {erroNascimento && (
+          <p className="mt-1 text-sm text-red-700">{erroNascimento}</p>
+        )}
       </div>
 
       <div>
