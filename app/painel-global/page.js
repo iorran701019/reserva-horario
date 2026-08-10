@@ -50,6 +50,16 @@ export default function PainelGlobalPage() {
   const [statusEndereco, setStatusEndereco] = useState("");
   const [erroEndereco, setErroEndereco] = useState("");
 
+  // Mesmo padrão de exigirEndereco: sub-opções independentes de cadastro
+  // completo, cada uma com seu próprio status/erro.
+  const [exigirContatoEmergencia, setExigirContatoEmergencia] = useState(undefined);
+  const [statusContatoEmergencia, setStatusContatoEmergencia] = useState("");
+  const [erroContatoEmergencia, setErroContatoEmergencia] = useState("");
+
+  const [exigirInstagram, setExigirInstagram] = useState(undefined);
+  const [statusInstagram, setStatusInstagram] = useState("");
+  const [erroInstagram, setErroInstagram] = useState("");
+
   // Aba Anamnese: modelo único do salão selecionado (no máximo 1 linha em
   // anamnese_modelos, mas sem constraint no banco — se vier mais de uma, usa
   // a primeira). id null = modelo novo, ainda não gravado (form começa
@@ -101,12 +111,20 @@ export default function PainelGlobalPage() {
       setExigirEndereco(undefined);
       setStatusEndereco("");
       setErroEndereco("");
+      setExigirContatoEmergencia(undefined);
+      setStatusContatoEmergencia("");
+      setErroContatoEmergencia("");
+      setExigirInstagram(undefined);
+      setStatusInstagram("");
+      setErroInstagram("");
 
       if (!estabelecimentoId) return;
 
       const { data, error } = await supabase
         .from("estabelecimentos")
-        .select("cadastro_completo, exigir_endereco")
+        .select(
+          "cadastro_completo, exigir_endereco, exigir_contato_emergencia, exigir_instagram"
+        )
         .eq("id", estabelecimentoId)
         .single();
 
@@ -118,6 +136,8 @@ export default function PainelGlobalPage() {
       }
       setCadastroCompleto(Boolean(data?.cadastro_completo));
       setExigirEndereco(Boolean(data?.exigir_endereco));
+      setExigirContatoEmergencia(Boolean(data?.exigir_contato_emergencia));
+      setExigirInstagram(Boolean(data?.exigir_instagram));
     })();
 
     return () => {
@@ -139,6 +159,20 @@ export default function PainelGlobalPage() {
     const t = setTimeout(() => setStatusEndereco(""), 2500);
     return () => clearTimeout(t);
   }, [statusEndereco]);
+
+  // "Salvo ✓" some sozinho depois de um tempo — mesmo padrão de cima.
+  useEffect(() => {
+    if (statusContatoEmergencia !== "salvo") return;
+    const t = setTimeout(() => setStatusContatoEmergencia(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusContatoEmergencia]);
+
+  // "Salvo ✓" some sozinho depois de um tempo — mesmo padrão de cima.
+  useEffect(() => {
+    if (statusInstagram !== "salvo") return;
+    const t = setTimeout(() => setStatusInstagram(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusInstagram]);
 
   // Busca o modelo de anamnese do salão selecionado. Limpa o form pro
   // estado vazio ANTES de checar se há id — mesma disciplina do efeito de
@@ -459,6 +493,56 @@ export default function PainelGlobalPage() {
     setStatusEndereco("salvo");
   }
 
+  // Mesmo padrão de salvarExigirEndereco: optimistic update com rollback em
+  // erro, grava direto no clique (sem botão "Salvar" separado).
+  async function salvarExigirContatoEmergencia(novoValor) {
+    if (novoValor === exigirContatoEmergencia) return;
+
+    const anterior = exigirContatoEmergencia;
+    setExigirContatoEmergencia(novoValor);
+    setStatusContatoEmergencia("salvando");
+    setErroContatoEmergencia("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ exigir_contato_emergencia: novoValor })
+      .eq("id", estabelecimentoId);
+
+    if (error) {
+      setExigirContatoEmergencia(anterior);
+      setStatusContatoEmergencia("");
+      setErroContatoEmergencia(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setStatusContatoEmergencia("salvo");
+  }
+
+  // Mesmo padrão de salvarExigirEndereco: optimistic update com rollback em
+  // erro, grava direto no clique (sem botão "Salvar" separado).
+  async function salvarExigirInstagram(novoValor) {
+    if (novoValor === exigirInstagram) return;
+
+    const anterior = exigirInstagram;
+    setExigirInstagram(novoValor);
+    setStatusInstagram("salvando");
+    setErroInstagram("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ exigir_instagram: novoValor })
+      .eq("id", estabelecimentoId);
+
+    if (error) {
+      setExigirInstagram(anterior);
+      setStatusInstagram("");
+      setErroInstagram(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setStatusInstagram("salvo");
+  }
+
   // Mesma filosofia do toggle escolha_profissional / salvarCadastroCompleto:
   // grava direto na seleção, sem botão "Salvar", com rollback em erro.
   async function salvarGranularidadeMin(novoValor) {
@@ -729,8 +813,7 @@ export default function PainelGlobalPage() {
                             </label>
                             <p className="mt-1 text-xs text-muted">
                               Ligado: pede CEP, endereço, número, bairro,
-                              cidade, estado. Desligado: pede contato de
-                              emergência (WhatsApp) no lugar do endereço.
+                              cidade, estado.
                             </p>
                           </div>
 
@@ -765,6 +848,111 @@ export default function PainelGlobalPage() {
                         )}
                         {erroEndereco && (
                           <p className="mt-2 text-xs text-red-600">{erroEndereco}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {cadastroCompleto === true && (
+                      <div className="ml-4 rounded-lg border-l-2 border-border bg-surface p-3 pl-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <label
+                              htmlFor="toggle-exigir-contato-emergencia"
+                              className="block text-sm font-medium text-heading"
+                            >
+                              Contato de emergência
+                            </label>
+                            <p className="mt-1 text-xs text-muted">
+                              Campo opcional de WhatsApp de emergência,
+                              independente do endereço.
+                            </p>
+                          </div>
+
+                          {exigirContatoEmergencia === undefined ? (
+                            <p className="shrink-0 text-xs text-muted">Carregando...</p>
+                          ) : (
+                            <button
+                              id="toggle-exigir-contato-emergencia"
+                              type="button"
+                              role="switch"
+                              aria-checked={exigirContatoEmergencia}
+                              onClick={() =>
+                                salvarExigirContatoEmergencia(!exigirContatoEmergencia)
+                              }
+                              disabled={statusContatoEmergencia === "salvando"}
+                              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                exigirContatoEmergencia ? "bg-primary" : "bg-border"
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                                  exigirContatoEmergencia
+                                    ? "translate-x-5"
+                                    : "translate-x-0.5"
+                                }`}
+                              />
+                            </button>
+                          )}
+                        </div>
+
+                        {statusContatoEmergencia === "salvando" && (
+                          <p className="mt-2 text-xs text-muted">Salvando…</p>
+                        )}
+                        {statusContatoEmergencia === "salvo" && !erroContatoEmergencia && (
+                          <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+                        )}
+                        {erroContatoEmergencia && (
+                          <p className="mt-2 text-xs text-red-600">{erroContatoEmergencia}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {cadastroCompleto === true && (
+                      <div className="ml-4 rounded-lg border-l-2 border-border bg-surface p-3 pl-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <label
+                              htmlFor="toggle-exigir-instagram"
+                              className="block text-sm font-medium text-heading"
+                            >
+                              Instagram
+                            </label>
+                            <p className="mt-1 text-xs text-muted">
+                              Campo opcional de Instagram do cliente.
+                            </p>
+                          </div>
+
+                          {exigirInstagram === undefined ? (
+                            <p className="shrink-0 text-xs text-muted">Carregando...</p>
+                          ) : (
+                            <button
+                              id="toggle-exigir-instagram"
+                              type="button"
+                              role="switch"
+                              aria-checked={exigirInstagram}
+                              onClick={() => salvarExigirInstagram(!exigirInstagram)}
+                              disabled={statusInstagram === "salvando"}
+                              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                exigirInstagram ? "bg-primary" : "bg-border"
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                                  exigirInstagram ? "translate-x-5" : "translate-x-0.5"
+                                }`}
+                              />
+                            </button>
+                          )}
+                        </div>
+
+                        {statusInstagram === "salvando" && (
+                          <p className="mt-2 text-xs text-muted">Salvando…</p>
+                        )}
+                        {statusInstagram === "salvo" && !erroInstagram && (
+                          <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+                        )}
+                        {erroInstagram && (
+                          <p className="mt-2 text-xs text-red-600">{erroInstagram}</p>
                         )}
                       </div>
                     )}
