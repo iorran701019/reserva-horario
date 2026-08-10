@@ -170,6 +170,8 @@ export default function PainelCliente({
         <AtualizarDadosCliente
           clienteId={clienteAtual.id}
           exigirEndereco={estabelecimento.exigir_endereco !== false}
+          exigirContatoEmergencia={estabelecimento.exigir_contato_emergencia === true}
+          exigirInstagram={estabelecimento.exigir_instagram !== false}
           onAtualizado={(dados) => {
             setClienteAtual((anterior) => ({ ...anterior, ...dados }));
             setEditando(false);

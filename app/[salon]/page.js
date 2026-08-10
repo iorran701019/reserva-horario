@@ -382,6 +382,8 @@ export default function AgendarPage() {
               estabelecimentoId={estabelecimento.id}
               cadastroCompleto={Boolean(estabelecimento.cadastro_completo)}
               exigirEndereco={estabelecimento.exigir_endereco !== false}
+              exigirContatoEmergencia={estabelecimento.exigir_contato_emergencia === true}
+              exigirInstagram={estabelecimento.exigir_instagram !== false}
               estabelecimentoWhatsapp={estabelecimento.whatsapp}
               nomeContato={nomeContatoExibido}
               msgFalhaCadastro={estabelecimento.msg_falha_cadastro}

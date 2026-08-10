@@ -54,6 +54,8 @@ export default function IdentificacaoCliente({
   estabelecimentoId,
   cadastroCompleto = false,
   exigirEndereco = true,
+  exigirContatoEmergencia = false,
+  exigirInstagram = true,
   estabelecimentoWhatsapp,
   nomeContato,
   msgFalhaCadastro,
@@ -134,6 +136,7 @@ export default function IdentificacaoCliente({
         estado: null,
         nascimento: null,
         instagram: null,
+        contato_emergencia: null,
       })
       .eq("id", clienteId)
       .select()
@@ -442,6 +445,8 @@ export default function IdentificacaoCliente({
           valoresIniciais={clienteEncontrado}
           clienteNovo={clienteNovo}
           exigirEndereco={exigirEndereco}
+          exigirContatoEmergencia={exigirContatoEmergencia}
+          exigirInstagram={exigirInstagram}
           estabelecimentoWhatsapp={estabelecimentoWhatsapp}
           nomeContato={nomeContato}
           msgFalhaCadastro={msgFalhaCadastro}

@@ -19,15 +19,23 @@ import { supabase } from "@/lib/supabaseClient";
 //   exigirEndereco – estabelecimentos.exigir_endereco (default true,
 //                  preserva o comportamento atual). false oculta todo o
 //                  bloco de CEP/endereço/bairro/cidade/estado (não renderiza,
-//                  não valida, não chama ViaCEP) e mostra no lugar um campo
-//                  opcional "Contato de emergência (WhatsApp)", salvo em
-//                  clientes.contato_emergencia.
+//                  não valida, não chama ViaCEP).
+//   exigirContatoEmergencia – estabelecimentos.exigir_contato_emergencia
+//                  (default false). true mostra um campo opcional "Contato
+//                  de emergência (WhatsApp)", salvo em
+//                  clientes.contato_emergencia — independente de
+//                  exigirEndereco.
+//   exigirInstagram – estabelecimentos.exigir_instagram (default true,
+//                  preserva o comportamento atual). false oculta o campo
+//                  Instagram.
 //   onAtualizado – recebe { id, nome, telefone } com os dados novos após o
 //                  update ter sucesso.
 //   onCancelar   – botão "Voltar": descarta a edição sem salvar.
 export default function AtualizarDadosCliente({
   clienteId,
   exigirEndereco = true,
+  exigirContatoEmergencia = false,
+  exigirInstagram = true,
   onAtualizado,
   onCancelar,
 }) {
@@ -175,7 +183,6 @@ export default function AtualizarDadosCliente({
       nome: form.nome.trim(),
       whatsapp: numeroConfirmado.replace(/\D/g, ""),
       nascimento: form.nascimento || null,
-      instagram: form.instagram || null,
     };
 
     if (exigirEndereco) {
@@ -184,9 +191,15 @@ export default function AtualizarDadosCliente({
       dadosCliente.bairro = form.bairro || null;
       dadosCliente.cidade = form.cidade || null;
       dadosCliente.estado = form.estado || null;
-    } else {
+    }
+
+    if (exigirContatoEmergencia) {
       dadosCliente.contato_emergencia =
         form.contatoEmergencia.replace(/\D/g, "") || null;
+    }
+
+    if (exigirInstagram) {
+      dadosCliente.instagram = form.instagram || null;
     }
 
     const { data, error } = await supabase
@@ -251,7 +264,7 @@ export default function AtualizarDadosCliente({
         />
       </div>
 
-      {exigirEndereco ? (
+      {exigirEndereco && (
         <>
           <div>
             <label htmlFor="atu-cep" className="mb-1 block text-sm font-medium text-body">
@@ -331,7 +344,9 @@ export default function AtualizarDadosCliente({
             />
           </div>
         </>
-      ) : (
+      )}
+
+      {exigirContatoEmergencia && (
         <div>
           <label htmlFor="atu-contato-emergencia" className="mb-1 block text-sm font-medium text-body">
             Contato de emergência (WhatsApp) <span className="font-normal text-muted">(opcional)</span>
@@ -400,20 +415,22 @@ export default function AtualizarDadosCliente({
         </div>
       )}
 
-      <div>
-        <label htmlFor="atu-instagram" className="mb-1 block text-sm font-medium text-body">
-          Instagram <span className="font-normal text-muted">(opcional)</span>
-        </label>
-        <input
-          id="atu-instagram"
-          name="instagram"
-          type="text"
-          value={form.instagram}
-          onChange={handleChange}
-          placeholder="@seu.perfil"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-        />
-      </div>
+      {exigirInstagram && (
+        <div>
+          <label htmlFor="atu-instagram" className="mb-1 block text-sm font-medium text-body">
+            Instagram <span className="font-normal text-muted">(opcional)</span>
+          </label>
+          <input
+            id="atu-instagram"
+            name="instagram"
+            type="text"
+            value={form.instagram}
+            onChange={handleChange}
+            placeholder="@seu.perfil"
+            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+          />
+        </div>
+      )}
 
       <button
         type="submit"

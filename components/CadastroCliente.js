@@ -47,9 +47,15 @@ import ModalConflitoWhatsapp from "@/components/ModalConflitoWhatsapp";
 //                            true, preserva o comportamento atual). false
 //                            oculta todo o bloco de CEP/endereço/número/
 //                            complemento/bairro/cidade/estado (não renderiza,
-//                            não valida, não chama ViaCEP) e mostra no lugar
-//                            um campo opcional "Contato de emergência
-//                            (WhatsApp)", salvo em clientes.contato_emergencia.
+//                            não valida, não chama ViaCEP).
+//   exigirContatoEmergencia – estabelecimentos.exigir_contato_emergencia
+//                            (default false). true mostra um campo opcional
+//                            "Contato de emergência (WhatsApp)", salvo em
+//                            clientes.contato_emergencia — independente de
+//                            exigirEndereco.
+//   exigirInstagram         – estabelecimentos.exigir_instagram (default
+//                            true, preserva o comportamento atual). false
+//                            oculta o campo Instagram.
 //   onCadastrado           – recebe { id, nome, telefone, clienteNovo }
 //                            pronto pra virar clienteInicial do
 //                            FormularioAgendamento. Também usado (via modal
@@ -66,6 +72,8 @@ export default function CadastroCliente({
   nomeContato,
   msgFalhaCadastro,
   exigirEndereco = true,
+  exigirContatoEmergencia = false,
+  exigirInstagram = true,
   onCadastrado,
 }) {
   const [form, setForm] = useState({
@@ -169,7 +177,6 @@ export default function CadastroCliente({
       nome: form.nome.trim(),
       whatsapp: digitosWhatsapp,
       nascimento: form.nascimento || null,
-      instagram: form.instagram || null,
     };
 
     if (exigirEndereco) {
@@ -180,9 +187,15 @@ export default function CadastroCliente({
       dadosCliente.bairro = form.bairro;
       dadosCliente.cidade = form.cidade;
       dadosCliente.estado = form.estado || null;
-    } else {
+    }
+
+    if (exigirContatoEmergencia) {
       dadosCliente.contato_emergencia =
         form.contatoEmergencia.replace(/\D/g, "") || null;
+    }
+
+    if (exigirInstagram) {
+      dadosCliente.instagram = form.instagram || null;
     }
 
     const { data, error } = await supabase
@@ -230,7 +243,7 @@ export default function CadastroCliente({
         />
       </div>
 
-      {exigirEndereco ? (
+      {exigirEndereco && (
         <>
           <div>
             <label htmlFor="cad-cep" className="mb-1 block text-sm font-medium text-body">
@@ -344,7 +357,9 @@ export default function CadastroCliente({
             />
           </div>
         </>
-      ) : (
+      )}
+
+      {exigirContatoEmergencia && (
         <div>
           <label htmlFor="cad-contato-emergencia" className="mb-1 block text-sm font-medium text-body">
             Contato de emergência (WhatsApp) <span className="font-normal text-muted">(opcional)</span>
@@ -414,20 +429,22 @@ export default function CadastroCliente({
         )}
       </div>
 
-      <div>
-        <label htmlFor="cad-instagram" className="mb-1 block text-sm font-medium text-body">
-          Instagram <span className="font-normal text-muted">(opcional)</span>
-        </label>
-        <input
-          id="cad-instagram"
-          name="instagram"
-          type="text"
-          value={form.instagram}
-          onChange={handleChange}
-          placeholder="@seu.perfil"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-        />
-      </div>
+      {exigirInstagram && (
+        <div>
+          <label htmlFor="cad-instagram" className="mb-1 block text-sm font-medium text-body">
+            Instagram <span className="font-normal text-muted">(opcional)</span>
+          </label>
+          <input
+            id="cad-instagram"
+            name="instagram"
+            type="text"
+            value={form.instagram}
+            onChange={handleChange}
+            placeholder="@seu.perfil"
+            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+          />
+        </div>
+      )}
 
       <button
         type="submit"
