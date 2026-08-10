@@ -19,6 +19,7 @@ const MODELO_ANAMNESE_VAZIO = {
   id: null,
   titulo: "",
   ativo: false,
+  preenchidoPor: "cliente",
   secoes: [],
   declaracoes: [],
 };
@@ -211,6 +212,7 @@ export default function PainelGlobalPage() {
           id: linha.id,
           titulo: linha.titulo ?? "",
           ativo: Boolean(linha.ativo),
+          preenchidoPor: linha.preenchido_por ?? "cliente",
           secoes: linha.secoes ?? [],
           declaracoes: linha.declaracoes ?? [],
         });
@@ -272,8 +274,12 @@ export default function PainelGlobalPage() {
     setModeloAnamnese((atual) => ({ ...atual, titulo: valor }));
   }
 
-  function alternarAtivoModelo() {
-    setModeloAnamnese((atual) => ({ ...atual, ativo: !atual.ativo }));
+  function selecionarAtivoModelo(valor) {
+    setModeloAnamnese((atual) => ({ ...atual, ativo: valor }));
+  }
+
+  function selecionarPreenchidoPorModelo(valor) {
+    setModeloAnamnese((atual) => ({ ...atual, preenchidoPor: valor }));
   }
 
   function adicionarDeclaracao() {
@@ -400,6 +406,7 @@ export default function PainelGlobalPage() {
     const payload = {
       titulo: modeloAnamnese.titulo.trim(),
       ativo: modeloAnamnese.ativo,
+      preenchido_por: modeloAnamnese.preenchidoPor,
       declaracoes: modeloAnamnese.declaracoes.map((d) => d.trim()).filter((d) => d !== ""),
       secoes: modeloAnamnese.secoes
         .map((s) => ({
@@ -986,175 +993,181 @@ export default function PainelGlobalPage() {
             ) : (
               <section className="space-y-5 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
                 <div>
-                  <label htmlFor="titulo-anamnese" className="mb-1 block text-sm font-medium text-body">
-                    Título
-                  </label>
-                  <input
-                    id="titulo-anamnese"
-                    type="text"
-                    value={modeloAnamnese.titulo}
-                    onChange={(e) => alterarTituloModelo(e.target.value)}
-                    placeholder="Ex.: Ficha de anamnese"
-                    className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                  />
-                </div>
-
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <label
-                      htmlFor="toggle-ativo-anamnese"
-                      className="block text-sm font-medium text-heading"
-                    >
-                      Modelo ativo
-                    </label>
-                    <p className="mt-1 text-xs text-muted">
-                      Só o modelo ativo é exibido pro cliente no fluxo público.
-                    </p>
-                  </div>
-
-                  <button
-                    id="toggle-ativo-anamnese"
-                    type="button"
-                    role="switch"
-                    aria-checked={modeloAnamnese.ativo}
-                    onClick={alternarAtivoModelo}
-                    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${
-                      modeloAnamnese.ativo ? "bg-primary" : "bg-border"
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
-                        modeloAnamnese.ativo ? "translate-x-5" : "translate-x-0.5"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div>
-                  <p className="mb-2 text-sm font-medium text-heading">Declarações</p>
-
-                  {modeloAnamnese.declaracoes.length === 0 && (
-                    <p className="mb-2 text-xs text-muted">Nenhuma declaração ainda.</p>
-                  )}
+                  <p className="mb-2 text-sm font-medium text-heading">
+                    Anamnese existe nesse salão?
+                  </p>
 
                   <div className="space-y-2">
-                    {modeloAnamnese.declaracoes.map((declaracao, indice) => (
-                      <div key={indice} className="flex items-start gap-2">
-                        <div className="flex shrink-0 flex-col pt-0.5">
-                          <button
-                            type="button"
-                            onClick={() => moverDeclaracao(indice, -1)}
-                            disabled={indice === 0}
-                            aria-label="Mover para cima"
-                            className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            ▲
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => moverDeclaracao(indice, 1)}
-                            disabled={indice === modeloAnamnese.declaracoes.length - 1}
-                            aria-label="Mover para baixo"
-                            className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            ▼
-                          </button>
-                        </div>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={modeloAnamnese.ativo === true}
+                      onClick={() => selecionarAtivoModelo(true)}
+                      className={`block w-full rounded-lg px-3 py-3 text-left text-sm font-semibold transition ${
+                        modeloAnamnese.ativo === true
+                          ? "bg-primary text-white"
+                          : "bg-surface text-body ring-1 ring-border hover:text-heading"
+                      }`}
+                    >
+                      Sim, esse salão usa anamnese
+                    </button>
 
-                        <textarea
-                          value={declaracao}
-                          onChange={(e) => alterarDeclaracao(indice, e.target.value)}
-                          rows={2}
-                          className="w-full flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                        />
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={modeloAnamnese.ativo === false}
+                      onClick={() => selecionarAtivoModelo(false)}
+                      className={`block w-full rounded-lg px-3 py-3 text-left text-sm font-semibold transition ${
+                        modeloAnamnese.ativo === false
+                          ? "bg-primary text-white"
+                          : "bg-surface text-body ring-1 ring-border hover:text-heading"
+                      }`}
+                    >
+                      Não, esse salão não usa anamnese
+                    </button>
+                  </div>
+                </div>
+
+                {modeloAnamnese.ativo === true && (
+                  <div className="ml-4 space-y-5 rounded-lg border-l-2 border-border bg-surface p-3 pl-4">
+                    <div>
+                      <p className="mb-2 text-sm font-medium text-heading">Quem preenche?</p>
+
+                      <div className="space-y-2">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={modeloAnamnese.preenchidoPor === "cliente"}
+                          onClick={() => selecionarPreenchidoPorModelo("cliente")}
+                          className={`block w-full rounded-lg px-3 py-3 text-left text-sm font-semibold transition ${
+                            modeloAnamnese.preenchidoPor === "cliente"
+                              ? "bg-primary text-white"
+                              : "bg-card text-body ring-1 ring-border hover:text-heading"
+                          }`}
+                        >
+                          Cliente, no /agendar
+                        </button>
 
                         <button
                           type="button"
-                          onClick={() => removerDeclaracao(indice)}
-                          className="shrink-0 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                          role="radio"
+                          aria-checked={modeloAnamnese.preenchidoPor === "dona"}
+                          onClick={() => selecionarPreenchidoPorModelo("dona")}
+                          className={`block w-full rounded-lg px-3 py-3 text-left text-sm font-semibold transition ${
+                            modeloAnamnese.preenchidoPor === "dona"
+                              ? "bg-primary text-white"
+                              : "bg-card text-body ring-1 ring-border hover:text-heading"
+                          }`}
                         >
-                          Remover
+                          A dona, pelo /admin
                         </button>
                       </div>
-                    ))}
-                  </div>
 
-                  <button
-                    type="button"
-                    onClick={adicionarDeclaracao}
-                    className="mt-2 rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
-                  >
-                    Adicionar declaração
-                  </button>
-                </div>
+                      <p className="mt-2 text-xs text-muted">
+                        Por enquanto isso só grava a preferência — o /agendar ainda
+                        pede anamnese ao cliente sempre que vencida, e o formulário
+                        pra dona preencher no /admin ainda não existe. Em breve.
+                      </p>
+                    </div>
 
-                <div>
-                  <p className="mb-2 text-sm font-medium text-heading">Seções</p>
+                    <div>
+                      <label htmlFor="titulo-anamnese" className="mb-1 block text-sm font-medium text-body">
+                        Título
+                      </label>
+                      <input
+                        id="titulo-anamnese"
+                        type="text"
+                        value={modeloAnamnese.titulo}
+                        onChange={(e) => alterarTituloModelo(e.target.value)}
+                        placeholder="Ex.: Ficha de anamnese"
+                        className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                      />
+                    </div>
 
-                  {modeloAnamnese.secoes.length === 0 && (
-                    <p className="mb-2 text-xs text-muted">Nenhuma seção ainda.</p>
-                  )}
+                    <div>
+                      <p className="mb-2 text-sm font-medium text-heading">Declarações</p>
 
-                  <div className="space-y-4">
-                    {modeloAnamnese.secoes.map((secao, indiceSecao) => (
-                      <div key={indiceSecao} className="rounded-lg border border-border p-3">
-                        <div className="flex items-start gap-2">
-                          <div className="flex shrink-0 flex-col pt-0.5">
+                      {modeloAnamnese.declaracoes.length === 0 && (
+                        <p className="mb-2 text-xs text-muted">Nenhuma declaração ainda.</p>
+                      )}
+
+                      <div className="space-y-2">
+                        {modeloAnamnese.declaracoes.map((declaracao, indice) => (
+                          <div key={indice} className="flex items-start gap-2">
+                            <div className="flex shrink-0 flex-col pt-0.5">
+                              <button
+                                type="button"
+                                onClick={() => moverDeclaracao(indice, -1)}
+                                disabled={indice === 0}
+                                aria-label="Mover para cima"
+                                className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                              >
+                                ▲
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => moverDeclaracao(indice, 1)}
+                                disabled={indice === modeloAnamnese.declaracoes.length - 1}
+                                aria-label="Mover para baixo"
+                                className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                              >
+                                ▼
+                              </button>
+                            </div>
+
+                            <textarea
+                              value={declaracao}
+                              onChange={(e) => alterarDeclaracao(indice, e.target.value)}
+                              rows={2}
+                              className="w-full flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                            />
+
                             <button
                               type="button"
-                              onClick={() => moverSecao(indiceSecao, -1)}
-                              disabled={indiceSecao === 0}
-                              aria-label="Mover seção para cima"
-                              className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                              onClick={() => removerDeclaracao(indice)}
+                              className="shrink-0 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
                             >
-                              ▲
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => moverSecao(indiceSecao, 1)}
-                              disabled={indiceSecao === modeloAnamnese.secoes.length - 1}
-                              aria-label="Mover seção para baixo"
-                              className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
-                            >
-                              ▼
+                              Remover
                             </button>
                           </div>
+                        ))}
+                      </div>
 
-                          <input
-                            type="text"
-                            value={secao.titulo}
-                            onChange={(e) => alterarTituloSecao(indiceSecao, e.target.value)}
-                            placeholder="Título da seção"
-                            className="w-full flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                          />
+                      <button
+                        type="button"
+                        onClick={adicionarDeclaracao}
+                        className="mt-2 rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                      >
+                        Adicionar declaração
+                      </button>
+                    </div>
 
-                          <button
-                            type="button"
-                            onClick={() => removerSecao(indiceSecao)}
-                            className="shrink-0 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-                          >
-                            Remover
-                          </button>
-                        </div>
+                    <div>
+                      <p className="mb-2 text-sm font-medium text-heading">Seções</p>
 
-                        <div className="mt-2 space-y-2 border-l-2 border-border pl-4">
-                          {secao.perguntas.map((pergunta, indicePergunta) => (
-                            <div key={indicePergunta} className="flex items-start gap-2">
+                      {modeloAnamnese.secoes.length === 0 && (
+                        <p className="mb-2 text-xs text-muted">Nenhuma seção ainda.</p>
+                      )}
+
+                      <div className="space-y-4">
+                        {modeloAnamnese.secoes.map((secao, indiceSecao) => (
+                          <div key={indiceSecao} className="rounded-lg border border-border p-3">
+                            <div className="flex items-start gap-2">
                               <div className="flex shrink-0 flex-col pt-0.5">
                                 <button
                                   type="button"
-                                  onClick={() => moverPergunta(indiceSecao, indicePergunta, -1)}
-                                  disabled={indicePergunta === 0}
-                                  aria-label="Mover pergunta para cima"
+                                  onClick={() => moverSecao(indiceSecao, -1)}
+                                  disabled={indiceSecao === 0}
+                                  aria-label="Mover seção para cima"
                                   className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
                                 >
                                   ▲
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => moverPergunta(indiceSecao, indicePergunta, 1)}
-                                  disabled={indicePergunta === secao.perguntas.length - 1}
-                                  aria-label="Mover pergunta para baixo"
+                                  onClick={() => moverSecao(indiceSecao, 1)}
+                                  disabled={indiceSecao === modeloAnamnese.secoes.length - 1}
+                                  aria-label="Mover seção para baixo"
                                   className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
                                 >
                                   ▼
@@ -1163,43 +1176,86 @@ export default function PainelGlobalPage() {
 
                               <input
                                 type="text"
-                                value={pergunta}
-                                onChange={(e) =>
-                                  alterarPergunta(indiceSecao, indicePergunta, e.target.value)
-                                }
+                                value={secao.titulo}
+                                onChange={(e) => alterarTituloSecao(indiceSecao, e.target.value)}
+                                placeholder="Título da seção"
                                 className="w-full flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
                               />
 
                               <button
                                 type="button"
-                                onClick={() => removerPergunta(indiceSecao, indicePergunta)}
+                                onClick={() => removerSecao(indiceSecao)}
                                 className="shrink-0 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
                               >
                                 Remover
                               </button>
                             </div>
-                          ))}
 
-                          <button
-                            type="button"
-                            onClick={() => adicionarPergunta(indiceSecao)}
-                            className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
-                          >
-                            Adicionar pergunta
-                          </button>
-                        </div>
+                            <div className="mt-2 space-y-2 border-l-2 border-border pl-4">
+                              {secao.perguntas.map((pergunta, indicePergunta) => (
+                                <div key={indicePergunta} className="flex items-start gap-2">
+                                  <div className="flex shrink-0 flex-col pt-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => moverPergunta(indiceSecao, indicePergunta, -1)}
+                                      disabled={indicePergunta === 0}
+                                      aria-label="Mover pergunta para cima"
+                                      className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                                    >
+                                      ▲
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => moverPergunta(indiceSecao, indicePergunta, 1)}
+                                      disabled={indicePergunta === secao.perguntas.length - 1}
+                                      aria-label="Mover pergunta para baixo"
+                                      className="px-1.5 py-0.5 text-lg leading-none text-body transition hover:text-heading disabled:cursor-not-allowed disabled:opacity-30"
+                                    >
+                                      ▼
+                                    </button>
+                                  </div>
+
+                                  <input
+                                    type="text"
+                                    value={pergunta}
+                                    onChange={(e) =>
+                                      alterarPergunta(indiceSecao, indicePergunta, e.target.value)
+                                    }
+                                    className="w-full flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                                  />
+
+                                  <button
+                                    type="button"
+                                    onClick={() => removerPergunta(indiceSecao, indicePergunta)}
+                                    className="shrink-0 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                                  >
+                                    Remover
+                                  </button>
+                                </div>
+                              ))}
+
+                              <button
+                                type="button"
+                                onClick={() => adicionarPergunta(indiceSecao)}
+                                className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                              >
+                                Adicionar pergunta
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
 
-                  <button
-                    type="button"
-                    onClick={adicionarSecao}
-                    className="mt-2 rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
-                  >
-                    Adicionar seção
-                  </button>
-                </div>
+                      <button
+                        type="button"
+                        onClick={adicionarSecao}
+                        className="mt-2 rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                      >
+                        Adicionar seção
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <button
                   type="button"
