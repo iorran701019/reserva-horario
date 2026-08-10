@@ -38,17 +38,18 @@ export default function FormularioAnamnese({
     let ativo = true;
 
     async function carregar() {
-      console.log("estabelecimentoId:", estabelecimentoId, typeof estabelecimentoId);
       const { data, error } = await supabase
         .from("anamnese_modelos")
-        .select("id, titulo, secoes, declaracoes")
+        .select("id, titulo, secoes, declaracoes, preenchido_por")
         .eq("estabelecimento_id", estabelecimentoId)
         .eq("ativo", true)
         .limit(1)
         .maybeSingle();
 
       if (!ativo) return;
-      setModelo(error || !data ? null : data);
+      // preenchido_por === "dona": a anamnese é preenchida pela dona do salão,
+      // não pelo cliente. Sai em silêncio, igual ao caminho sem modelo ativo.
+      setModelo(error || !data || data.preenchido_por === "dona" ? null : data);
     }
 
     carregar();
