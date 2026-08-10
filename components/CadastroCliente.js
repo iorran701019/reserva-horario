@@ -10,6 +10,7 @@ import {
   paraExibicaoNascimento,
   validarNascimento,
 } from "@/lib/nascimentoValidacao";
+import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 
 // Completa o cadastro de endereço de um cliente já identificado (tenant com
 // `cadastro_completo = true`), exibido pelo IdentificacaoCliente quando o
@@ -32,6 +33,13 @@ import {
 // o formulário — os campos seguem editáveis manualmente.
 //
 // Props:
+//   slug                   – slug do salão (rota /[salon]), chave da
+//                            persistência em sessionStorage (ver
+//                            lib/persistenciaAgendamento) — o `form` inteiro
+//                            é salvo como rascunho a cada mudança e restaurado
+//                            direto num reload real da página, namespaced por
+//                            `clienteId` (um rascunho de OUTRO cliente é
+//                            ignorado). Limpo ao submeter com sucesso.
 //   estabelecimentoId      – dono da linha em `clientes`; também particiona a
 //                            checagem de WhatsApp já cadastrado.
 //   clienteId              – id da linha em `clientes` a ser atualizada (é o
@@ -61,6 +69,7 @@ import {
 //                            de conflito) pra pular direto pro agendamento
 //                            de OUTRO cliente, se for o caso.
 export default function CadastroCliente({
+  slug,
   estabelecimentoId,
   clienteId,
   nomeInicial,
@@ -73,19 +82,23 @@ export default function CadastroCliente({
   exigirEndereco = true,
   onCadastrado,
 }) {
-  const [form, setForm] = useState({
-    nome: nomeInicial ?? "",
-    whatsapp: telefoneReferencia ?? "",
-    cep: valoresIniciais?.cep ?? "",
-    endereco: valoresIniciais?.endereco ?? "",
-    numero: valoresIniciais?.numero ?? "",
-    complemento: valoresIniciais?.complemento ?? "",
-    bairro: valoresIniciais?.bairro ?? "",
-    cidade: valoresIniciais?.cidade ?? "",
-    estado: valoresIniciais?.estado ?? "",
-    nascimento: paraExibicaoNascimento(valoresIniciais?.nascimento),
-    instagram: valoresIniciais?.instagram ?? "",
-    contatoEmergencia: valoresIniciais?.contato_emergencia ?? "",
+  const [form, setForm] = useState(() => {
+    const rascunho = lerFatia(slug, "cadastroCliente");
+    if (rascunho?.clienteId === clienteId && rascunho?.form) return rascunho.form;
+    return {
+      nome: nomeInicial ?? "",
+      whatsapp: telefoneReferencia ?? "",
+      cep: valoresIniciais?.cep ?? "",
+      endereco: valoresIniciais?.endereco ?? "",
+      numero: valoresIniciais?.numero ?? "",
+      complemento: valoresIniciais?.complemento ?? "",
+      bairro: valoresIniciais?.bairro ?? "",
+      cidade: valoresIniciais?.cidade ?? "",
+      estado: valoresIniciais?.estado ?? "",
+      nascimento: paraExibicaoNascimento(valoresIniciais?.nascimento),
+      instagram: valoresIniciais?.instagram ?? "",
+      contatoEmergencia: valoresIniciais?.contato_emergencia ?? "",
+    };
   });
   const [confirmarWhatsapp, setConfirmarWhatsapp] = useState("");
   const [buscandoCep, setBuscandoCep] = useState(false);
@@ -99,6 +112,14 @@ export default function CadastroCliente({
     const { name, value } = e.target;
     setForm((anterior) => ({ ...anterior, [name]: value }));
   }
+
+  // Grava o rascunho do form a cada mudança, pra sobreviver a um reload real
+  // da página (ver lib/persistenciaAgendamento). Limpo ao submeter com
+  // sucesso (ou ao pular pro cliente do modal de conflito) — ver mais abaixo.
+  useEffect(() => {
+    if (!slug) return;
+    salvarFatia(slug, "cadastroCliente", { clienteId, form });
+  }, [slug, clienteId, form]);
 
   function handleChangeNascimento(e) {
     const valor = aplicarMascaraNascimento(form.nascimento, e.target.value);
@@ -222,6 +243,7 @@ export default function CadastroCliente({
       return;
     }
 
+    limparFatia(slug, "cadastroCliente");
     onCadastrado({
       id: data.id,
       nome: data.nome,
@@ -479,7 +501,10 @@ export default function CadastroCliente({
       estabelecimentoWhatsapp={estabelecimentoWhatsapp}
       nomeContato={nomeContato}
       msgFalhaCadastro={msgFalhaCadastro}
-      onConfirmar={() => conflitoWhatsapp.confirmarConflito(onCadastrado, form.whatsapp)}
+      onConfirmar={() => {
+        limparFatia(slug, "cadastroCliente");
+        conflitoWhatsapp.confirmarConflito(onCadastrado, form.whatsapp);
+      }}
       onNegar={conflitoWhatsapp.negarConflito}
       onFecharContato={conflitoWhatsapp.fecharModalContato}
     />

@@ -18,6 +18,7 @@ import FormularioAgendamento, {
   formatarData,
 } from "@/components/FormularioAgendamento";
 import FotoPerfilCircular from "@/components/FotoPerfilCircular";
+import { lerFatia, salvarFatia } from "@/lib/persistenciaAgendamento";
 
 // Página pública de agendamento. A lógica do wizard (serviço, slots, ocupados,
 // validação, insert) mora em FormularioAgendamento; aqui ficam só o layout e a
@@ -43,7 +44,17 @@ export default function AgendarPage() {
   // Cliente identificado pela IdentificacaoCliente (null = ainda não passou por
   // ela). Persiste entre agendamentos da mesma visita, então um novo
   // agendamento (após "Fazer novo agendamento") não pede o WhatsApp de novo.
-  const [clienteIdentificado, setClienteIdentificado] = useState(null);
+  // Restaurado do sessionStorage (ver lib/persistenciaAgendamento) num reload
+  // real da página — chave pelo slug da ROTA (síncrono via useParams, ao
+  // contrário de estabelecimento.id, que só resolve depois do fetch abaixo).
+  // Não precisa de revalidação especial aqui: os dois efeitos logo abaixo já
+  // rebuscam agendamentosAtivos/anamneseNecessaria ao vivo assim que
+  // clienteIdentificado (restaurado ou não) e estabelecimento.id existem —
+  // é assim que a sub-tela certa (painel/anamnese/wizard) reaparece com
+  // dado FRESCO do banco, nunca uma tela de resumo estática.
+  const [clienteIdentificado, setClienteIdentificado] = useState(() =>
+    lerFatia(salon, "clienteIdentificado")
+  );
   // Etapa interna do IdentificacaoCliente ("telefone" | "confirmar" |
   // "cadastroSimples" | "completarEndereco") — só usada aqui pra decidir
   // quando a FotoPerfilCircular deve aparecer (ver uso abaixo).
@@ -60,7 +71,26 @@ export default function AgendarPage() {
   // wizard. modoNovoAgendamento força o fluxo normal mesmo com agendamentos
   // ativos, quando o cliente escolhe "Novo agendamento" no painel.
   const [agendamentosAtivos, setAgendamentosAtivos] = useState(null);
-  const [modoNovoAgendamento, setModoNovoAgendamento] = useState(false);
+  // Nasce true se sobrou rascunho de anamnese OU de agendamento com conteúdo
+  // de verdade no sessionStorage (ver lib/persistenciaAgendamento) — sinal
+  // de que a cliente já tinha escolhido "novo agendamento" antes do reload,
+  // mesmo tendo agendamentos ativos (senão o PainelCliente reapareceria por
+  // cima do wizard em andamento). Exige CONTEÚDO (não só a fatia existir):
+  // FormularioAnamnese só grava com um modelo carregado, mas um
+  // estabelecimento sem serviço/data/resposta ainda escolhidos não deve
+  // acionar isso. FormularioAnamnese/FormularioAgendamento revalidam o
+  // próprio conteúdo restaurado contra o banco por conta própria — aqui só
+  // decidimos QUAL tela mostrar.
+  const [modoNovoAgendamento, setModoNovoAgendamento] = useState(() => {
+    const anamnese = lerFatia(salon, "anamnese");
+    const temAnamnesePendente = Boolean(
+      anamnese &&
+        (Object.keys(anamnese.respostas ?? {}).length > 0 || anamnese.aceite)
+    );
+    const agendamento = lerFatia(salon, "agendamento");
+    const temAgendamentoPendente = agendamento?.servicoId != null;
+    return temAnamnesePendente || temAgendamentoPendente;
+  });
 
   // Serviço de manutenção escolhido no card de sugestão do PainelCliente
   // (null = fluxo normal). Repassado como `servicoInicial` pro
@@ -77,6 +107,16 @@ export default function AgendarPage() {
   // query nos dois lugares. null = carregando ou nenhum ativo (cai em "a
   // equipe").
   const [nomeProfissionalContato, setNomeProfissionalContato] = useState(null);
+
+  // Grava o cliente identificado a cada mudança, pra sobreviver a um reload
+  // real da página (ver lib/persistenciaAgendamento). Nunca limpa aqui: sem
+  // um fluxo de "trocar de cliente"/logout, o único jeito de zerar
+  // clienteIdentificado seria perder o estado em memória de qualquer forma
+  // (reload), e nesse caso é exatamente isso que queremos restaurar.
+  useEffect(() => {
+    if (!salon || !clienteIdentificado) return;
+    salvarFatia(salon, "clienteIdentificado", clienteIdentificado);
+  }, [salon, clienteIdentificado]);
 
   useEffect(() => {
     if (!clienteIdentificado) return;
@@ -379,6 +419,7 @@ export default function AgendarPage() {
         <div ref={setCaixaEl}>
           {!clienteIdentificado ? (
             <IdentificacaoCliente
+              slug={salon}
               estabelecimentoId={estabelecimento.id}
               cadastroCompleto={Boolean(estabelecimento.cadastro_completo)}
               exigirEndereco={estabelecimento.exigir_endereco !== false}
@@ -404,6 +445,7 @@ export default function AgendarPage() {
             <p className="text-sm text-body">Carregando...</p>
           ) : anamneseNecessaria ? (
             <FormularioAnamnese
+              slug={salon}
               estabelecimentoId={estabelecimento.id}
               clienteId={clienteIdentificado.id}
               onConcluido={() => setAnamneseNecessaria(false)}

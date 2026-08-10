@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 
 // Roda depois do CadastroCliente no fluxo público — ou no lugar dele, quando
 // o cliente já existe mas a anamnese está vencida (ver lib/anamnese.js) —
@@ -17,20 +18,36 @@ import { supabase } from "@/lib/supabaseClient";
 // avisa `onConcluido` direto, sem travar o cliente no meio do fluxo.
 //
 // Props:
+//   slug              – slug do salão (rota /[salon]), chave da persistência
+//                       em sessionStorage (ver lib/persistenciaAgendamento) —
+//                       respostas/observacoes/aceite sobrevivem a um reload
+//                       real da página. O MODELO em si nunca é restaurado do
+//                       storage: é sempre recarregado do banco (ver efeito
+//                       abaixo), e as respostas salvas são casadas com as
+//                       perguntas do modelo ATUAL pelo TEXTO da pergunta —
+//                       perguntas que não existem mais nele têm a resposta
+//                       salva descartada silenciosamente.
 //   estabelecimentoId – filtra o modelo ativo e vai no insert de resposta.
 //   clienteId         – dono da resposta (uuid de `clientes.id`).
 //   onConcluido       – chamado após o insert (ou de cara, se não há modelo
 //                       ativo) pra o consumidor seguir pro FormularioAgendamento.
 export default function FormularioAnamnese({
+  slug,
   estabelecimentoId,
   clienteId,
   onConcluido,
 }) {
   // undefined = carregando; null = nenhum modelo ativo encontrado; objeto = ok.
   const [modelo, setModelo] = useState(undefined);
-  const [respostas, setRespostas] = useState({});
-  const [observacoes, setObservacoes] = useState({});
-  const [aceite, setAceite] = useState(false);
+  const [respostas, setRespostas] = useState(
+    () => lerFatia(slug, "anamnese")?.respostas ?? {}
+  );
+  const [observacoes, setObservacoes] = useState(
+    () => lerFatia(slug, "anamnese")?.observacoes ?? {}
+  );
+  const [aceite, setAceite] = useState(
+    () => lerFatia(slug, "anamnese")?.aceite ?? false
+  );
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
 
@@ -61,6 +78,17 @@ export default function FormularioAnamnese({
   useEffect(() => {
     if (modelo === null) onConcluido?.();
   }, [modelo, onConcluido]);
+
+  // Grava a fatia "anamnese" a cada mudança relevante, pra sobreviver a um
+  // reload real da página (ver lib/persistenciaAgendamento). Limpa ao
+  // submeter com sucesso (ver handleSubmit). Só grava com um modelo REAL
+  // carregado — sem isso, todo estabelecimento sem anamnese ativa deixaria
+  // um retalho vazio no storage a cada visita (o suficiente pra confundir a
+  // heurística de modoNovoAgendamento em app/[salon]/page.js).
+  useEffect(() => {
+    if (!slug || !modelo) return;
+    salvarFatia(slug, "anamnese", { respostas, observacoes, aceite });
+  }, [slug, modelo, respostas, observacoes, aceite]);
 
   function responder(pergunta, valor) {
     setRespostas((anterior) => ({ ...anterior, [pergunta]: valor }));
@@ -93,12 +121,25 @@ export default function FormularioAnamnese({
 
     setEnviando(true);
 
+    // Restauração de sessão pode ter trazido respostas/observacoes de um
+    // modelo antigo (ver `slug` acima) — descarta em silêncio, na hora de
+    // gravar, qualquer entrada cuja pergunta/seção não existe mais no modelo
+    // ATUAL. respostas/observacoes são keyed pelo TEXTO da pergunta/título da
+    // seção (ver responder/anotarObservacao), então a comparação é direta.
+    const secoesValidas = new Set((modelo.secoes ?? []).map((secao) => secao.titulo));
+    const respostasValidas = Object.fromEntries(
+      Object.entries(respostas).filter(([pergunta]) => todasPerguntas.includes(pergunta))
+    );
+    const observacoesValidas = Object.fromEntries(
+      Object.entries(observacoes).filter(([secao]) => secoesValidas.has(secao))
+    );
+
     const { error } = await supabase.from("anamnese_respostas").insert({
       cliente_id: clienteId,
       estabelecimento_id: estabelecimentoId,
       modelo_id: modelo.id,
-      respostas,
-      observacoes,
+      respostas: respostasValidas,
+      observacoes: observacoesValidas,
       termos_aceitos: aceite,
     });
 
@@ -109,6 +150,7 @@ export default function FormularioAnamnese({
       return;
     }
 
+    limparFatia(slug, "anamnese");
     onConcluido?.();
   }
 

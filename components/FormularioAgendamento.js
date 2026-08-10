@@ -11,6 +11,7 @@ import {
   calcularPrecoManutencao,
   buscarVencimentoManutencao,
 } from "@/lib/manutencaoSugerida";
+import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
 // "pendente") e a aba Agendar do /admin (cria "confirmado"). Toda a lógica de
@@ -165,6 +166,24 @@ async function escolherMenosOcupado(estabelecimentoId, data, candidatos) {
   }
 
   return [...contagem.entries()].sort((a, b) => a[1] - b[1] || a[0] - b[0])[0][0];
+}
+
+// Perguntas vinculadas a um serviço (servico_perguntas + suas opções) — usada
+// por confirmarSelecaoServico (toque no serviço) E pela restauração de sessão
+// (ver pendenteRestaurarRef mais abaixo), que precisa recarregar as perguntas
+// do serviço restaurado sem reabrir o popup. RLS bloqueando a leitura pro
+// público equivale, aqui, a "sem perguntas" — o fluxo segue normalmente.
+async function buscarPerguntasServico(servicoId) {
+  const { data, error } = await supabase
+    .from("servico_perguntas")
+    .select(
+      "id, texto, tipo, ordem, servico_pergunta_opcoes(id, label, ajuste_preco_centavos, ordem)"
+    )
+    .eq("servico_id", servicoId)
+    .order("ordem", { ascending: true })
+    .order("ordem", { ascending: true, referencedTable: "servico_pergunta_opcoes" });
+
+  return error ? [] : (data ?? []);
 }
 
 // Calendário mensal próprio para a etapa Data. O <input type="date"> nativo não
@@ -367,6 +386,28 @@ export default function FormularioAgendamento({
   }));
   const [horarioSelecionado, setHorarioSelecionado] = useState("");
 
+  // --- Restauração de sessão (sessionStorage) -----------------------------
+  // Sobrevive a um reload real da página (ex.: o navegador do WhatsApp
+  // recarrega a aba ao voltar de segundo plano no celular). SÓ no fluxo
+  // público (sem `status` — o /admin nunca lê nem grava aqui) e só quando
+  // `servicoInicial` não veio de um clique fresco (ex.: sugestão de
+  // manutenção do PainelCliente), que sempre vence sobre um rascunho velho.
+  // Guarda o retalho bruto lido uma única vez no mount; é um ref (não
+  // state) porque só serve de entrada pros efeitos abaixo — mudar seu valor
+  // não deve, por si só, re-renderizar nada. Cada campo é aplicado e
+  // "consumido" (setado pra null) conforme os dados dos quais depende
+  // terminam de carregar — NUNCA reaparece como selecionado sem antes ser
+  // revalidado contra o banco.
+  const pendenteRestaurarRef = useRef(
+    status || servicoInicial
+      ? null
+      : lerFatia(estabelecimento.slug, "agendamento")
+  );
+  // Aviso mostrado quando o horário restaurado da sessão anterior não está
+  // mais disponível (outra reserva ocupou o horário enquanto a página estava
+  // "fora") — ver o 3º efeito de restauração, mais abaixo.
+  const [avisoHorarioIndisponivel, setAvisoHorarioIndisponivel] = useState(false);
+
   // Etapa atual do wizard. Controla só a RENDERIZAÇÃO — a lógica de dados
   // (form, ocupados, validações) permanece a mesma de quando era página única.
   const [etapa, setEtapa] = useState("servico");
@@ -419,6 +460,10 @@ export default function FormularioAgendamento({
   const [vagas, setVagas] = useState({});
   const [carregandoSlots, setCarregandoSlots] = useState(false);
   const [erroSlots, setErroSlots] = useState("");
+  // Pra qual `data` o `vagas` atual corresponde — usado só pela restauração
+  // de sessão abaixo, pra saber com segurança quando `vagas` já reflete o dia
+  // restaurado (e não mais o de uma sincronização anterior/em andamento).
+  const [vagasData, setVagasData] = useState("");
 
   // Preferência do salão: cliente escolhe o profissional (true) ou o sistema
   // encaixa automaticamente (false). Lida do banco junto com os serviços.
@@ -946,6 +991,7 @@ export default function FormularioAgendamento({
   function selecionarData(iso) {
     setForm((anterior) => ({ ...anterior, data: iso }));
     setHorarioSelecionado("");
+    setAvisoHorarioIndisponivel(false);
   }
 
   // Horários oferecidos = chaves do mapa de vagas. No fluxo "cliente escolhe",
@@ -992,7 +1038,12 @@ export default function FormularioAgendamento({
         setErroSlots(e.message ?? String(e));
         setVagas({});
       } finally {
-        if (ativo) setCarregandoSlots(false);
+        if (ativo) {
+          setCarregandoSlots(false);
+          // Marca pra qual data o `vagas` ATUAL corresponde — ver comentário
+          // em `vagasData` e no efeito de restauração de horário abaixo.
+          setVagasData(form.data);
+        }
       }
     }
 
@@ -1001,6 +1052,118 @@ export default function FormularioAgendamento({
       ativo = false;
     };
   }, [form.data, servicoSelecionado, estabelecimento.id]);
+
+  // 1) Restaura o SERVIÇO só depois que a lista de serviços ATIVOS carrega —
+  // um id salvo que não está mais nela (desativado/excluído nesse meio-tempo)
+  // é descartado, sem nada mais a restaurar por cima dele. Recarrega também
+  // as perguntas do serviço (mesma consulta do toque manual), pra que o
+  // ajuste de preço e a gravação em agendamento_respostas no submit final
+  // continuem enxergando as respostas restauradas (ver efeito 2 abaixo).
+  useEffect(() => {
+    const pendente = pendenteRestaurarRef.current;
+    if (!pendente || carregandoServicos) return;
+
+    const servico = servicos.find((s) => s.id === pendente.servicoId) ?? null;
+    if (!servico) {
+      pendenteRestaurarRef.current = null;
+      return;
+    }
+
+    let ativo = true;
+    (async () => {
+      setServicoSelecionado(servico);
+      const perguntas = await buscarPerguntasServico(servico.id);
+      if (!ativo) return;
+      setPerguntasServico(perguntas);
+      setRespostasPerguntas(pendente.respostasPerguntas ?? {});
+    })();
+    return () => {
+      ativo = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [carregandoServicos]);
+
+  // 2) Restaura o PROFISSIONAL (só no fluxo "cliente escolhe") + a DATA, só
+  // depois que profissionaisDoServico carrega pro serviço restaurado acima —
+  // `escolherProfissional` só é confiável a partir daqui (mesmo motivo do
+  // `decisaoEtapaPendente` mais acima, que resolve o mesmo tipo de corrida
+  // pro fluxo de servicoInicial). Sem profissional válido/ativo no modo
+  // "cliente escolhe", fica na etapa "servico" (cards visíveis) pra escolher
+  // de novo — não avança pra data sem profissional.
+  useEffect(() => {
+    const pendente = pendenteRestaurarRef.current;
+    if (!pendente || !servicoSelecionado || carregandoProfissionais) return;
+
+    let profissionalRestaurado = null;
+    if (pendente.profissionalId != null) {
+      profissionalRestaurado =
+        profissionaisDoServico.find((p) => p.id === pendente.profissionalId) ??
+        null;
+      if (profissionalRestaurado) setProfissionalSelecionado(profissionalRestaurado);
+    }
+
+    if (escolherProfissional && !profissionalRestaurado) {
+      pendenteRestaurarRef.current = null;
+      return;
+    }
+
+    if (pendente.data) {
+      setForm((anterior) => ({ ...anterior, data: pendente.data }));
+      setEtapa("data");
+      // pendenteRestaurarRef segue vivo: falta o horário, resolvido no
+      // efeito 3 assim que a grade desse dia terminar de carregar.
+    } else {
+      setEtapa("data");
+      pendenteRestaurarRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [carregandoProfissionais, escolherProfissional]);
+
+  // 3) Restaura o HORÁRIO só depois que a grade (vagas) da data restaurada
+  // termina de carregar — `vagasData === form.data` garante que `vagas` já
+  // corresponde ao dia certo (não ao anterior, nem a uma sincronização ainda
+  // em andamento; ver comentário no efeito de sincronização acima).
+  // `horariosVisiveis` já filtra tanto quem ocupou o horário nesse meio-tempo
+  // quanto (pro fluxo "cliente escolhe") a agenda do profissional restaurado
+  // no efeito 2 — é a MESMA verificação de disponibilidade real usada pra
+  // exibir a grade pra qualquer cliente, não uma checagem à parte.
+  useEffect(() => {
+    const pendente = pendenteRestaurarRef.current;
+    if (!pendente?.data || form.data !== pendente.data || vagasData !== form.data) {
+      return;
+    }
+
+    if (pendente.horario && horariosVisiveis.includes(pendente.horario)) {
+      setHorarioSelecionado(pendente.horario);
+      setEtapa("dados");
+    } else if (pendente.horario) {
+      setAvisoHorarioIndisponivel(true);
+    }
+    pendenteRestaurarRef.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vagasData, form.data]);
+
+  // Grava a fatia "agendamento" a cada mudança relevante — só no público
+  // (nunca inclui `sinalDeclarado`: é só um checkbox de intenção antes do
+  // submit final, nunca deve ser restaurado como confirmado).
+  useEffect(() => {
+    if (status) return;
+    salvarFatia(estabelecimento.slug, "agendamento", {
+      servicoId: servicoSelecionado?.id ?? null,
+      profissionalId: profissionalSelecionado?.id ?? null,
+      data: form.data,
+      horario: horarioSelecionado,
+      respostasPerguntas,
+    });
+  }, [
+    status,
+    estabelecimento.slug,
+    servicoSelecionado,
+    profissionalSelecionado,
+    form.data,
+    horarioSelecionado,
+    respostasPerguntas,
+  ]);
 
   // Só os campos de texto (nome, WhatsApp) usam este handler agora — a data é
   // escolhida pelo calendário (selecionarData).
@@ -1038,20 +1201,13 @@ export default function FormularioAgendamento({
     // A troca muda os dias/horários válidos: zera a data pra não ficar uma
     // seleção antiga num dia que virou indisponível.
     setForm((anterior) => ({ ...anterior, data: "" }));
-setRespostasPerguntas({});
+    setRespostasPerguntas({});
     setErroModalPerguntas("");
-    const { data, error } = await supabase
-      .from("servico_perguntas")
-      .select(
-        "id, texto, tipo, ordem, servico_pergunta_opcoes(id, label, ajuste_preco_centavos, ordem)"
-      )
-      .eq("servico_id", servico.id)
-      .order("ordem", { ascending: true })
-      .order("ordem", { ascending: true, referencedTable: "servico_pergunta_opcoes" });
-
-    // RLS bloqueando a leitura pro público equivale, aqui, a "sem perguntas":
-    // o fluxo segue igual a hoje em vez de travar no popup.
-    const perguntas = error ? [] : (data ?? []);
+    // Seleção manual de um novo serviço cancela qualquer restauração de
+    // sessão ainda pendente (ver pendenteRestaurarRef) — a escolha fresca da
+    // cliente sempre vence sobre um rascunho antigo.
+    pendenteRestaurarRef.current = null;
+    const perguntas = await buscarPerguntasServico(servico.id);
     setPerguntasServico(perguntas);
 
     if (perguntas.length > 0) {
@@ -1221,6 +1377,7 @@ setRespostasPerguntas({});
   function selecionarHorario(slot) {
     setHorarioSelecionado(slot);
     setEtapa("dados");
+    setAvisoHorarioIndisponivel(false);
   }
 
   async function handleSubmit(e) {
@@ -1361,6 +1518,12 @@ setRespostasPerguntas({});
       setErro(error.message);
       return;
     }
+
+    // Fluxo concluído com sucesso: limpa o rascunho da sessão (sessionStorage)
+    // pra não sobrar uma seleção velha caso a mesma cliente volte pra um NOVO
+    // agendamento na mesma visita — só a fatia "agendamento" (o
+    // clienteIdentificado, gerido em app/[salon]/page.js, continua valendo).
+    if (!status) limparFatia(estabelecimento.slug, "agendamento");
 
     // Sucesso: entrega o resumo ao consumidor (tela de confirmação no público,
     // refetch + reset no admin). Não tocamos no layout ao redor daqui.
@@ -1660,6 +1823,15 @@ setRespostasPerguntas({});
                     </span>
                   )}
                 </span>
+
+                {/* Horário restaurado de uma sessão anterior (ver
+                    pendenteRestaurarRef) que já não está mais livre — outra
+                    reserva ocupou enquanto a página estava "fora". */}
+                {avisoHorarioIndisponivel && (
+                  <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200">
+                    Esse horário não está mais disponível. Escolha outro.
+                  </p>
+                )}
 
                 {carregandoSlots && (
                   <p className="text-sm text-body">Carregando horários...</p>

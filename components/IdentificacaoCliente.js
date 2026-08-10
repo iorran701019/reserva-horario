@@ -6,6 +6,7 @@ import CadastroCliente from "@/components/CadastroCliente";
 import ModalConflitoWhatsapp from "@/components/ModalConflitoWhatsapp";
 import { enderecoCompleto, whatsappConfere } from "@/lib/clienteValidacao";
 import { useConflitoWhatsapp } from "@/lib/checagemWhatsapp";
+import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 
 // Tela exibida ANTES do FormularioAgendamento no fluxo público: pede só o
 // WhatsApp, busca o cliente em `clientes` (por estabelecimento_id + telefone
@@ -36,6 +37,14 @@ import { useConflitoWhatsapp } from "@/lib/checagemWhatsapp";
 //   (nome + confirmar WhatsApp) — nunca pede endereço.
 //
 // Props:
+//   slug              – slug do salão (rota /[salon]), chave da persistência
+//                       em sessionStorage (ver lib/persistenciaAgendamento) —
+//                       restaura etapa/telefone/clienteEncontrado/clienteNovo
+//                       depois de um reload real da página (ex.: WhatsApp
+//                       recarregando a aba ao voltar de segundo plano).
+//                       Restaurado direto, sem revalidação especial: é dado
+//                       que a própria cliente digitou, recuperável do banco
+//                       se o telefone bater de qualquer jeito.
 //   estabelecimentoId – particiona a busca por salão.
 //   cadastroCompleto  – bifurca o fluxo acima (default false).
 //   estabelecimentoWhatsapp, nomeContato – repassados ao modal "fale com a
@@ -51,6 +60,7 @@ import { useConflitoWhatsapp } from "@/lib/checagemWhatsapp";
 //                       mudar (inclusive no mount, com "telefone"). Permite o
 //                       pai reagir a qual das 4 telas está visível.
 export default function IdentificacaoCliente({
+  slug,
   estabelecimentoId,
   cadastroCompleto = false,
   exigirEndereco = true,
@@ -62,16 +72,25 @@ export default function IdentificacaoCliente({
 }) {
   // "telefone" (pede WhatsApp) -> "confirmar" (achou, confirma o nome) ->
   // "cadastroSimples" (nome + confirmar WhatsApp, ramo false) ou
-  // "completarEndereco" (ramo true).
-  const [etapa, setEtapa] = useState("telefone");
+  // "completarEndereco" (ramo true). Restaurada da sessão (ver `slug`) se
+  // houver uma etapa salva ainda dentro da janela de validade.
+  const [etapa, setEtapa] = useState(
+    () => lerFatia(slug, "identificacao")?.etapa ?? "telefone"
+  );
 
   useEffect(() => {
     onEtapaChange?.(etapa);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [etapa]);
-  const [telefone, setTelefone] = useState("");
-  const [clienteEncontrado, setClienteEncontrado] = useState(null);
-  const [clienteNovo, setClienteNovo] = useState(false);
+  const [telefone, setTelefone] = useState(
+    () => lerFatia(slug, "identificacao")?.telefone ?? ""
+  );
+  const [clienteEncontrado, setClienteEncontrado] = useState(
+    () => lerFatia(slug, "identificacao")?.clienteEncontrado ?? null
+  );
+  const [clienteNovo, setClienteNovo] = useState(
+    () => lerFatia(slug, "identificacao")?.clienteNovo ?? false
+  );
   const [buscando, setBuscando] = useState(false);
   const [erro, setErro] = useState("");
   // Trava os botões "Sim"/"Não" da etapa "confirmar" enquanto o "Não" do
@@ -81,9 +100,14 @@ export default function IdentificacaoCliente({
   // Campos da etapa "cadastroSimples" (ramo cadastroCompleto=false).
   // `whatsappSimples` nasce com o telefone digitado na etapa 1, mas é
   // editável aqui — "Confirme seu WhatsApp" passa a validar contra ELE, não
-  // mais contra `telefone` bruto.
+  // mais contra `telefone` bruto. Restaurando direto na etapa "cadastroSimples",
+  // nasce com o telefone salvo — mesmo comportamento de quem acabou de
+  // chegar nela (handleBuscar/handleConfirmarNao).
   const [nomeSimples, setNomeSimples] = useState("");
-  const [whatsappSimples, setWhatsappSimples] = useState("");
+  const [whatsappSimples, setWhatsappSimples] = useState(() => {
+    const rascunho = lerFatia(slug, "identificacao");
+    return rascunho?.etapa === "cadastroSimples" ? rascunho?.telefone ?? "" : "";
+  });
   const [confirmarWhatsappSimples, setConfirmarWhatsappSimples] = useState("");
   const [enviandoSimples, setEnviandoSimples] = useState(false);
   const [erroSimples, setErroSimples] = useState("");
@@ -93,6 +117,20 @@ export default function IdentificacaoCliente({
   // cadastro simples — a mesma checagem do completarEndereco vive dentro do
   // CadastroCliente, que recebe o hook próprio dele.
   const conflitoWhatsapp = useConflitoWhatsapp();
+
+  // Grava a fatia "identificacao" a cada mudança relevante, pra sobreviver a
+  // um reload real da página (ver lib/persistenciaAgendamento). Limpa
+  // (ver os pontos de saída abaixo) assim que a cliente é identificada — a
+  // partir daí quem manda é a fatia "clienteIdentificado" do page.js.
+  useEffect(() => {
+    if (!slug) return;
+    salvarFatia(slug, "identificacao", {
+      etapa,
+      telefone,
+      clienteEncontrado,
+      clienteNovo,
+    });
+  }, [slug, etapa, telefone, clienteEncontrado, clienteNovo]);
 
   // Cria um registro mínimo (nome vazio, telefone digitado na etapa 1) e abre
   // o completarEndereco em branco a partir dele — usado quando a busca não
@@ -202,6 +240,7 @@ export default function IdentificacaoCliente({
       setEtapa("completarEndereco");
       return;
     }
+    limparFatia(slug, "identificacao");
     onIdentificado({
       id: clienteEncontrado.id,
       nome: clienteEncontrado.nome,
@@ -276,6 +315,7 @@ export default function IdentificacaoCliente({
       return;
     }
 
+    limparFatia(slug, "identificacao");
     onIdentificado({
       id: resultado.data.id,
       nome: resultado.data.nome,
@@ -435,6 +475,7 @@ export default function IdentificacaoCliente({
 
       {etapa === "completarEndereco" && clienteEncontrado && (
         <CadastroCliente
+          slug={slug}
           estabelecimentoId={estabelecimentoId}
           clienteId={clienteEncontrado.id}
           nomeInicial={clienteEncontrado.nome}
@@ -445,7 +486,10 @@ export default function IdentificacaoCliente({
           estabelecimentoWhatsapp={estabelecimentoWhatsapp}
           nomeContato={nomeContato}
           msgFalhaCadastro={msgFalhaCadastro}
-          onCadastrado={onIdentificado}
+          onCadastrado={(dados) => {
+            limparFatia(slug, "identificacao");
+            onIdentificado(dados);
+          }}
         />
       )}
     </div>
@@ -456,7 +500,10 @@ export default function IdentificacaoCliente({
       estabelecimentoWhatsapp={estabelecimentoWhatsapp}
       nomeContato={nomeContato}
       msgFalhaCadastro={msgFalhaCadastro}
-      onConfirmar={() => conflitoWhatsapp.confirmarConflito(onIdentificado, whatsappSimples)}
+      onConfirmar={() => {
+        limparFatia(slug, "identificacao");
+        conflitoWhatsapp.confirmarConflito(onIdentificado, whatsappSimples);
+      }}
       onNegar={conflitoWhatsapp.negarConflito}
       onFecharContato={conflitoWhatsapp.fecharModalContato}
     />
