@@ -44,6 +44,12 @@ export default function PainelGlobalPage() {
   const [statusCadastro, setStatusCadastro] = useState("");
   const [erroCadastro, setErroCadastro] = useState("");
 
+  // Sub-opção de cadastro completo: exigir_endereco. Só faz sentido quando
+  // cadastroCompleto === true; mesmo padrão undefined = carregando.
+  const [exigirEndereco, setExigirEndereco] = useState(undefined);
+  const [statusEndereco, setStatusEndereco] = useState("");
+  const [erroEndereco, setErroEndereco] = useState("");
+
   // Aba Anamnese: modelo único do salão selecionado (no máximo 1 linha em
   // anamnese_modelos, mas sem constraint no banco — se vier mais de uma, usa
   // a primeira). id null = modelo novo, ainda não gravado (form começa
@@ -92,12 +98,15 @@ export default function PainelGlobalPage() {
       setCadastroCompleto(undefined);
       setStatusCadastro("");
       setErroCadastro("");
+      setExigirEndereco(undefined);
+      setStatusEndereco("");
+      setErroEndereco("");
 
       if (!estabelecimentoId) return;
 
       const { data, error } = await supabase
         .from("estabelecimentos")
-        .select("cadastro_completo")
+        .select("cadastro_completo, exigir_endereco")
         .eq("id", estabelecimentoId)
         .single();
 
@@ -108,6 +117,7 @@ export default function PainelGlobalPage() {
         return;
       }
       setCadastroCompleto(Boolean(data?.cadastro_completo));
+      setExigirEndereco(Boolean(data?.exigir_endereco));
     })();
 
     return () => {
@@ -122,6 +132,13 @@ export default function PainelGlobalPage() {
     const t = setTimeout(() => setStatusCadastro(""), 2500);
     return () => clearTimeout(t);
   }, [statusCadastro]);
+
+  // "Salvo ✓" some sozinho depois de um tempo — mesmo padrão de cima.
+  useEffect(() => {
+    if (statusEndereco !== "salvo") return;
+    const t = setTimeout(() => setStatusEndereco(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusEndereco]);
 
   // Busca o modelo de anamnese do salão selecionado. Limpa o form pro
   // estado vazio ANTES de checar se há id — mesma disciplina do efeito de
@@ -417,6 +434,31 @@ export default function PainelGlobalPage() {
     setStatusCadastro("salvo");
   }
 
+  // Mesmo padrão de salvarCadastroCompleto: optimistic update com rollback
+  // em erro, grava direto no clique (sem botão "Salvar" separado).
+  async function salvarExigirEndereco(novoValor) {
+    if (novoValor === exigirEndereco) return;
+
+    const anterior = exigirEndereco;
+    setExigirEndereco(novoValor);
+    setStatusEndereco("salvando");
+    setErroEndereco("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ exigir_endereco: novoValor })
+      .eq("id", estabelecimentoId);
+
+    if (error) {
+      setExigirEndereco(anterior);
+      setStatusEndereco("");
+      setErroEndereco(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setStatusEndereco("salvo");
+  }
+
   // Mesma filosofia do toggle escolha_profissional / salvarCadastroCompleto:
   // grava direto na seleção, sem botão "Salvar", com rollback em erro.
   async function salvarGranularidadeMin(novoValor) {
@@ -674,6 +716,58 @@ export default function PainelGlobalPage() {
                     >
                       Cadastro completo (endereço, nascimento, etc.)
                     </button>
+
+                    {cadastroCompleto === true && (
+                      <div className="ml-4 rounded-lg border-l-2 border-border bg-surface p-3 pl-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <label
+                              htmlFor="toggle-exigir-endereco"
+                              className="block text-sm font-medium text-heading"
+                            >
+                              Endereço completo
+                            </label>
+                            <p className="mt-1 text-xs text-muted">
+                              Ligado: pede CEP, endereço, número, bairro,
+                              cidade, estado. Desligado: pede contato de
+                              emergência (WhatsApp) no lugar do endereço.
+                            </p>
+                          </div>
+
+                          {exigirEndereco === undefined ? (
+                            <p className="shrink-0 text-xs text-muted">Carregando...</p>
+                          ) : (
+                            <button
+                              id="toggle-exigir-endereco"
+                              type="button"
+                              role="switch"
+                              aria-checked={exigirEndereco}
+                              onClick={() => salvarExigirEndereco(!exigirEndereco)}
+                              disabled={statusEndereco === "salvando"}
+                              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                exigirEndereco ? "bg-primary" : "bg-border"
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                                  exigirEndereco ? "translate-x-5" : "translate-x-0.5"
+                                }`}
+                              />
+                            </button>
+                          )}
+                        </div>
+
+                        {statusEndereco === "salvando" && (
+                          <p className="mt-2 text-xs text-muted">Salvando…</p>
+                        )}
+                        {statusEndereco === "salvo" && !erroEndereco && (
+                          <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+                        )}
+                        {erroEndereco && (
+                          <p className="mt-2 text-xs text-red-600">{erroEndereco}</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
