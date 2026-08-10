@@ -10,6 +10,7 @@ import { useSessaoAdmin } from "@/hooks/useSessaoAdmin";
 const ABAS = [
   { id: "cadastro", rotulo: "Cadastro" },
   { id: "anamnese", rotulo: "Anamnese" },
+  { id: "horarios", rotulo: "Horários" },
 ];
 
 // Modelo novo, ainda não gravado em anamnese_modelos (id null é o sinal pro
@@ -51,6 +52,12 @@ export default function PainelGlobalPage() {
   const [carregandoModelo, setCarregandoModelo] = useState(false);
   const [statusModelo, setStatusModelo] = useState("");
   const [erroModelo, setErroModelo] = useState("");
+
+  // Aba Horários: granularidade_min do salão selecionado. undefined =
+  // carregando (ou nenhum salão selecionado ainda).
+  const [granularidadeMin, setGranularidadeMin] = useState(undefined);
+  const [statusGranularidade, setStatusGranularidade] = useState("");
+  const [erroGranularidade, setErroGranularidade] = useState("");
 
   const autorizado = perfil?.papel === "global";
 
@@ -170,6 +177,45 @@ export default function PainelGlobalPage() {
     const t = setTimeout(() => setStatusModelo(""), 2500);
     return () => clearTimeout(t);
   }, [statusModelo]);
+
+  // Busca o granularidade_min do salão selecionado — mesmo padrão do efeito
+  // de cadastro_completo acima (zera antes de checar se há id).
+  useEffect(() => {
+    let ativo = true;
+
+    (async () => {
+      setGranularidadeMin(undefined);
+      setStatusGranularidade("");
+      setErroGranularidade("");
+
+      if (!estabelecimentoId) return;
+
+      const { data, error } = await supabase
+        .from("estabelecimentos")
+        .select("granularidade_min")
+        .eq("id", estabelecimentoId)
+        .single();
+
+      if (!ativo) return;
+
+      if (error) {
+        setErroGranularidade(error.message);
+        return;
+      }
+      setGranularidadeMin(Number(data?.granularidade_min) || 30);
+    })();
+
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimentoId]);
+
+  // "Salvo ✓" some sozinho depois de um tempo — mesmo padrão de cima.
+  useEffect(() => {
+    if (statusGranularidade !== "salvo") return;
+    const t = setTimeout(() => setStatusGranularidade(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusGranularidade]);
 
   function alterarTituloModelo(valor) {
     setModeloAnamnese((atual) => ({ ...atual, titulo: valor }));
@@ -369,6 +415,31 @@ export default function PainelGlobalPage() {
     }
 
     setStatusCadastro("salvo");
+  }
+
+  // Mesma filosofia do toggle escolha_profissional / salvarCadastroCompleto:
+  // grava direto na seleção, sem botão "Salvar", com rollback em erro.
+  async function salvarGranularidadeMin(novoValor) {
+    if (novoValor === granularidadeMin) return;
+
+    const anterior = granularidadeMin;
+    setGranularidadeMin(novoValor);
+    setStatusGranularidade("salvando");
+    setErroGranularidade("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ granularidade_min: novoValor })
+      .eq("id", estabelecimentoId);
+
+    if (error) {
+      setGranularidadeMin(anterior);
+      setStatusGranularidade("");
+      setErroGranularidade(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setStatusGranularidade("salvo");
   }
 
   async function handleSubmit(e) {
@@ -864,6 +935,54 @@ export default function PainelGlobalPage() {
                   <p className="text-xs font-medium text-green-600">Salvo ✓</p>
                 )}
                 {erroModelo && <p className="text-xs text-red-600">{erroModelo}</p>}
+              </section>
+            )}
+          </>
+        )}
+
+        {aba === "horarios" && (
+          <>
+            {!estabelecimentoId ? (
+              <div className="rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
+                <p className="text-sm text-body">Selecione um salão para configurar.</p>
+              </div>
+            ) : (
+              <section className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+                <label htmlFor="granularidade" className="mb-1 block text-sm font-medium text-heading">
+                  Granularidade da agenda
+                </label>
+
+                {granularidadeMin === undefined ? (
+                  <p className="mt-3 text-xs text-muted">Carregando...</p>
+                ) : (
+                  <select
+                    id="granularidade"
+                    value={granularidadeMin}
+                    onChange={(e) => salvarGranularidadeMin(Number(e.target.value))}
+                    disabled={statusGranularidade === "salvando"}
+                    className="w-full rounded-lg bg-surface px-3 py-2 text-sm font-medium text-heading shadow-sm ring-1 ring-border transition focus:outline-none focus:ring-2 focus:ring-border disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <option value={15}>15 em 15 minutos</option>
+                    <option value={30}>30 em 30 minutos</option>
+                    <option value={60}>1 em 1 hora</option>
+                  </select>
+                )}
+
+                <p className="mt-3 text-xs text-muted">
+                  Só tem efeito para profissionais com agenda por janela
+                  contínua. Profissionais com horários fixos (ex.: Laysla)
+                  não usam essa configuração.
+                </p>
+
+                {statusGranularidade === "salvando" && (
+                  <p className="mt-2 text-xs text-muted">Salvando…</p>
+                )}
+                {statusGranularidade === "salvo" && !erroGranularidade && (
+                  <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+                )}
+                {erroGranularidade && (
+                  <p className="mt-2 text-xs text-red-600">{erroGranularidade}</p>
+                )}
               </section>
             )}
           </>
