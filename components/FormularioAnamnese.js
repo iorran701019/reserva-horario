@@ -31,11 +31,20 @@ import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendament
 //   clienteId         – dono da resposta (uuid de `clientes.id`).
 //   onConcluido       – chamado após o insert (ou de cara, se não há modelo
 //                       ativo) pra o consumidor seguir pro FormularioAgendamento.
+//   onVisivel         – opcional; chamado UMA vez, assim que `modelo` resolve
+//                       pra um objeto real (formulário de verdade prestes a
+//                       renderizar) — nunca chamado no caminho "sem modelo
+//                       ativo" (ver efeito de onConcluido acima, que nesse
+//                       caso conclui sozinho sem o usuário ver nada). Permite
+//                       o consumidor (app/[salon]/page.js) só armar o voltar
+//                       físico depois que a tela é realmente mostrada, e não
+//                       nesse flash-through de "modelo === null".
 export default function FormularioAnamnese({
   slug,
   estabelecimentoId,
   clienteId,
   onConcluido,
+  onVisivel,
 }) {
   // undefined = carregando; null = nenhum modelo ativo encontrado; objeto = ok.
   const [modelo, setModelo] = useState(undefined);
@@ -78,6 +87,13 @@ export default function FormularioAnamnese({
   useEffect(() => {
     if (modelo === null) onConcluido?.();
   }, [modelo, onConcluido]);
+
+  // Modelo real carregado: a tela está de fato prestes a aparecer pro
+  // cliente (ver comentário de `onVisivel` acima).
+  useEffect(() => {
+    if (modelo) onVisivel?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelo]);
 
   // Grava a fatia "anamnese" a cada mudança relevante, pra sobreviver a um
   // reload real da página (ver lib/persistenciaAgendamento). Limpa ao

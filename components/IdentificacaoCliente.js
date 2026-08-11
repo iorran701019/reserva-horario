@@ -7,6 +7,7 @@ import ModalConflitoWhatsapp from "@/components/ModalConflitoWhatsapp";
 import { enderecoCompleto, whatsappConfere } from "@/lib/clienteValidacao";
 import { useConflitoWhatsapp } from "@/lib/checagemWhatsapp";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
+import { useVoltarFisico } from "@/lib/voltarFisico";
 
 // Tela exibida ANTES do FormularioAgendamento no fluxo público: pede só o
 // WhatsApp, busca o cliente em `clientes` (por estabelecimento_id + telefone
@@ -99,6 +100,17 @@ export default function IdentificacaoCliente({
   const [clienteNovo, setClienteNovo] = useState(
     () => lerFatia(slug, "identificacao")?.clienteNovo ?? false
   );
+  // De qual tela veio quem está em "cadastroSimples" ou "completarEndereco"
+  // agora — "telefone" (não encontrado) ou "confirmar" (Sim c/ endereço
+  // incompleto, ou Não). Alimenta o voltar físico dessas duas sub-etapas
+  // (ver useVoltarFisico abaixo): não é uma pilha genérica, só o suficiente
+  // pra saber pra onde voltar UM passo, já que as duas só têm essas duas
+  // origens possíveis. Default "telefone" cobre com segurança tanto quem
+  // nunca passou por "confirmar" quanto uma fatia restaurada de uma sessão
+  // anterior ao campo existir (ver persistência abaixo).
+  const [origemSubEtapa, setOrigemSubEtapa] = useState(
+    () => lerFatia(slug, "identificacao")?.origemSubEtapa ?? "telefone"
+  );
   const [buscando, setBuscando] = useState(false);
   const [erro, setErro] = useState("");
 
@@ -134,8 +146,9 @@ export default function IdentificacaoCliente({
       telefone,
       clienteEncontrado,
       clienteNovo,
+      origemSubEtapa,
     });
-  }, [slug, etapa, telefone, clienteEncontrado, clienteNovo]);
+  }, [slug, etapa, telefone, clienteEncontrado, clienteNovo, origemSubEtapa]);
 
   async function handleBuscar(e) {
     e.preventDefault();
@@ -175,12 +188,14 @@ export default function IdentificacaoCliente({
       setBuscando(false);
       setClienteEncontrado(null);
       setClienteNovo(true);
+      setOrigemSubEtapa("telefone");
       setEtapa("completarEndereco");
       return;
     }
 
     setBuscando(false);
     setWhatsappSimples(telefone);
+    setOrigemSubEtapa("telefone");
     setEtapa("cadastroSimples");
   }
 
@@ -190,9 +205,16 @@ export default function IdentificacaoCliente({
   function handleConfirmarSim() {
     if (cadastroCompleto && !enderecoCompleto(clienteEncontrado)) {
       setClienteNovo(false);
+      setOrigemSubEtapa("confirmar");
       setEtapa("completarEndereco");
       return;
     }
+    // Sucesso que abandona "confirmar" sem passar pelo voltar em tela/físico
+    // — precisa consumir a entrada empurrada por ela mesma (ver
+    // lib/voltarFisico.js: "até um caminho de sucesso que também abandona a
+    // etapa"), senão fica órfã. Mesmo padrão de PainelCliente.js
+    // (onConfirmar chamando fecharConfirmandoSinal antes de seguir).
+    voltarFisicoConfirmar();
     limparFatia(slug, "identificacao");
     onIdentificado({
       id: clienteEncontrado.id,
@@ -204,22 +226,58 @@ export default function IdentificacaoCliente({
 
   // "Não é meu número"/"Não sou eu": ramo false vai direto pro cadastro
   // simples (nome + confirmar WhatsApp), sem voltar a pedir o telefone. Ramo
-  // true abre completarEndereco em branco — mantém só o id da linha
-  // encontrada (descartando nome/endereço/etc.), pra CadastroCliente excluir
-  // esse id da checagem de conflito de WhatsApp sem herdar nenhum dado de
-  // quem foi negado. Nenhuma escrita acontece aqui: a linha só é sobrescrita
-  // de fato quando o CadastroCliente for confirmado (upsert por whatsapp).
+  // true abre completarEndereco em branco (ver `clienteNovo` no render de
+  // CadastroCliente, abaixo, que decide não herdar nome/endereço). Nenhuma
+  // escrita acontece aqui: a linha só é sobrescrita de fato quando o
+  // CadastroCliente for confirmado (upsert por whatsapp). clienteEncontrado
+  // é PRESERVADO intacto (nome incluso) — precisamos dele pra reconstruir a
+  // tela "confirmar" caso o voltar físico volte pra cá (ver origemSubEtapa).
   function handleConfirmarNao() {
     if (!cadastroCompleto) {
       setWhatsappSimples(telefone);
+      setOrigemSubEtapa("confirmar");
       setEtapa("cadastroSimples");
       return;
     }
 
-    setClienteEncontrado((atual) => ({ id: atual.id }));
     setClienteNovo(true);
+    setOrigemSubEtapa("confirmar");
     setEtapa("completarEndereco");
   }
+
+  // Voltar físico (ou o botão em tela equivalente, se algum dia existir) de
+  // "confirmar": só tem UMA origem possível (handleBuscar, quando encontra),
+  // não precisa de origemSubEtapa.
+  function voltarDoConfirmar() {
+    setEtapa("telefone");
+  }
+
+  // Voltar físico de "cadastroSimples"/"completarEndereco": as duas só têm
+  // as mesmas 2 origens possíveis (ver origemSubEtapa acima), então
+  // compartilham a mesma função.
+  function voltarDoSubEtapa() {
+    setEtapa(origemSubEtapa);
+  }
+
+  // Botão físico "voltar" nas 3 sub-etapas seguintes à primeira — "telefone"
+  // (a primeira de verdade) fica de fora de propósito, mesma regra de
+  // lib/voltarFisico.js: é ali que o voltar físico ainda sai da página
+  // (volta pro WhatsApp).
+  const voltarFisicoConfirmar = useVoltarFisico(
+    voltarDoConfirmar,
+    etapa === "confirmar",
+    "confirmar"
+  );
+  const voltarFisicoCadastroSimples = useVoltarFisico(
+    voltarDoSubEtapa,
+    etapa === "cadastroSimples",
+    "cadastroSimples"
+  );
+  const voltarFisicoCompletarEndereco = useVoltarFisico(
+    voltarDoSubEtapa,
+    etapa === "completarEndereco",
+    "completarEndereco"
+  );
 
   async function handleSubmitSimples(e) {
     e.preventDefault();
@@ -270,6 +328,9 @@ export default function IdentificacaoCliente({
       return;
     }
 
+    // Sucesso que abandona "cadastroSimples" — consome a entrada empurrada
+    // por ela (ver mesmo comentário em handleConfirmarSim, acima).
+    voltarFisicoCadastroSimples();
     limparFatia(slug, "identificacao");
     onIdentificado({
       id: resultado.data.id,
@@ -431,15 +492,26 @@ export default function IdentificacaoCliente({
           slug={slug}
           estabelecimentoId={estabelecimentoId}
           clienteId={clienteEncontrado?.id ?? null}
-          nomeInicial={clienteEncontrado?.nome}
+          // clienteNovo=true ("não encontrado" ou "não sou eu"): não herda
+          // nome/endereço de ninguém, mesmo com clienteEncontrado.id
+          // preenchido (só serve pra exclusão da checagem de conflito, ver
+          // CadastroCliente). clienteEncontrado nunca é mais mutado pra
+          // simular isso (ver handleConfirmarNao) — decide aqui, na hora de
+          // renderizar, sem perder o objeto original.
+          nomeInicial={clienteNovo ? undefined : clienteEncontrado?.nome}
           telefoneReferencia={telefone}
-          valoresIniciais={clienteEncontrado}
+          valoresIniciais={clienteNovo ? undefined : clienteEncontrado}
           clienteNovo={clienteNovo}
           exigirEndereco={exigirEndereco}
           estabelecimentoWhatsapp={estabelecimentoWhatsapp}
           nomeContato={nomeContato}
           msgFalhaCadastro={msgFalhaCadastro}
           onCadastrado={(dados) => {
+            // Sucesso que abandona "completarEndereco" — cobre tanto o
+            // submit normal do CadastroCliente quanto o caminho via modal de
+            // conflito DELE (que também termina chamando onCadastrado, ver
+            // CadastroCliente.js) — os dois passam por aqui.
+            voltarFisicoCompletarEndereco();
             limparFatia(slug, "identificacao");
             onIdentificado(dados);
           }}
@@ -454,6 +526,10 @@ export default function IdentificacaoCliente({
       nomeContato={nomeContato}
       msgFalhaCadastro={msgFalhaCadastro}
       onConfirmar={() => {
+        // Este modal (conflitoWhatsapp local, distinto do de dentro de
+        // CadastroCliente) só é acionado pela checagem de handleSubmitSimples
+        // — a etapa ativa aqui é sempre "cadastroSimples".
+        voltarFisicoCadastroSimples();
         limparFatia(slug, "identificacao");
         conflitoWhatsapp.confirmarConflito(onIdentificado, whatsappSimples);
       }}

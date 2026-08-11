@@ -19,6 +19,7 @@ import FormularioAgendamento, {
 } from "@/components/FormularioAgendamento";
 import FotoPerfilCircular from "@/components/FotoPerfilCircular";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
+import { useVoltarFisico } from "@/lib/voltarFisico";
 
 // Página pública de agendamento. A lógica do wizard (serviço, slots, ocupados,
 // validação, insert) mora em FormularioAgendamento; aqui ficam só o layout e a
@@ -65,6 +66,26 @@ export default function AgendarPage() {
   // direto pro FormularioAgendamento. Verificado assim que o cliente é
   // identificado (novo cadastro OU já existente com anamnese vencida).
   const [anamneseNecessaria, setAnamneseNecessaria] = useState(null);
+  // true só depois que FormularioAnamnese avisa (via onVisivel) que carregou
+  // um modelo REAL e está de fato mostrando o formulário — nunca no
+  // flash-through de "sem modelo ativo" (anamneseNecessaria vira true,
+  // FormularioAnamnese monta, mas modelo resolve null e ele já conclui
+  // sozinho antes de mostrar qualquer coisa). Usado só pra gatear o voltar
+  // físico da anamnese (ver useVoltarFisico abaixo) — sem isso, esse
+  // flash-through empurraria uma entrada de histórico nunca consumida.
+  // Resetado a false sempre que anamneseNecessaria deixa de ser true.
+  const [anamneseVisivel, setAnamneseVisivel] = useState(false);
+  // Ajuste durante a renderização (não um efeito — mesmo padrão já usado em
+  // FormularioAgendamento.js pra `carregandoServicosAnterior`): dispara só na
+  // transição de valor de `anamneseNecessaria` entre uma renderização e a
+  // seguinte, comparando com `anamneseNecessariaAnterior`.
+  const [anamneseNecessariaAnterior, setAnamneseNecessariaAnterior] = useState(
+    anamneseNecessaria
+  );
+  if (anamneseNecessaria !== anamneseNecessariaAnterior) {
+    setAnamneseNecessariaAnterior(anamneseNecessaria);
+    if (anamneseNecessaria !== true) setAnamneseVisivel(false);
+  }
 
   // Agendamentos ativos do cliente identificado (null = ainda não checado;
   // array = carregado). Se houver algum, o PainelCliente aparece antes do
@@ -200,6 +221,26 @@ export default function AgendarPage() {
     setServicoManutencao(null);
   }
 
+  // Voltar físico (ou bubbling de onVoltarAntes do FormularioAgendamento, ver
+  // etapa "servico") de anamnese/serviço pra "o que vinha logo antes do
+  // wizard": PainelCliente, se a cliente chegou até aqui clicando "Novo
+  // agendamento" nele (agendamentosAtivos ainda reflete isso, não é resetado
+  // por modoNovoAgendamento); senão, Identificação. Não depende de
+  // anamneseNecessaria pra decidir — uma vez que a anamnese foi
+  // respondida/pulada, ela nunca reabre sozinha por aqui (ver decisão
+  // registrada na conversa: reabrir arriscaria reenviar anamnese_respostas
+  // duplicada, já que o insert não faz upsert). Por isso serve tanto pro
+  // voltar DE anamnese (ainda não submetida) quanto DE "servico" (anamnese já
+  // resolvida, se existiu) — mesmo destino nos dois casos.
+  function voltarAntesDoWizard() {
+    if (agendamentosAtivos && agendamentosAtivos.length > 0) {
+      setModoNovoAgendamento(false);
+      setServicoManutencao(null);
+    } else {
+      voltarParaIdentificacao();
+    }
+  }
+
   // Foca o título da confirmação ao montar — leitores de tela anunciam o status.
   const tituloConfirmacaoRef = useRef(null);
   useEffect(() => {
@@ -222,6 +263,30 @@ export default function AgendarPage() {
     observer.observe(caixaEl);
     return () => observer.disconnect();
   }, [caixaEl]);
+
+  // Botão físico "voltar" na etapa anamnese: só arma depois que ela está
+  // REALMENTE visível (ver anamneseVisivel acima) — evita empurrar uma
+  // entrada de histórico durante o flash-through de "sem modelo ativo".
+  // Antes dos returns condicionais abaixo — hooks não podem vir depois deles.
+  const voltarFisicoAnamnese = useVoltarFisico(
+    voltarAntesDoWizard,
+    anamneseNecessaria === true && anamneseVisivel,
+    "anamnese"
+  );
+
+  // Sucesso da anamnese (submit real): troca FormularioAnamnese pelo wizard
+  // inteiro (page.js muda de branch de renderização) — precisa consumir a
+  // entrada empurrada por ela mesma antes de sair, senão fica órfã (mesmo
+  // raciocínio de IdentificacaoCliente, ver handleConfirmarSim/
+  // handleSubmitSimples/onCadastrado). SÓ quando anamneseVisivel: no
+  // flash-through de "sem modelo ativo" nada foi empurrado (o gate acima
+  // nunca armou), então chamar a função de consumo cairia no fallback dela
+  // (chama voltarAntesDoWizard DIRETO, indo pra Painel/Identificação em vez
+  // de seguir pro wizard) — errado nesse caso.
+  function concluirAnamnese() {
+    if (anamneseVisivel) voltarFisicoAnamnese();
+    setAnamneseNecessaria(false);
+  }
 
   // Enquanto resolve o estabelecimento, segura a tela (evita piscar o wizard).
   if (estabelecimento === undefined) {
@@ -470,7 +535,8 @@ export default function AgendarPage() {
               slug={salon}
               estabelecimentoId={estabelecimento.id}
               clienteId={clienteIdentificado.id}
-              onConcluido={() => setAnamneseNecessaria(false)}
+              onConcluido={concluirAnamnese}
+              onVisivel={() => setAnamneseVisivel(true)}
             />
           ) : (
             // Sem prop `status`: o insert mantém o default "pendente" do banco.
@@ -482,6 +548,7 @@ export default function AgendarPage() {
               servicoInicial={servicoManutencao}
               onSucesso={(dados) => setResumo(dados)}
               onVoltarInicio={voltarParaIdentificacao}
+              onVoltarAntes={voltarAntesDoWizard}
             />
           )}
         </div>

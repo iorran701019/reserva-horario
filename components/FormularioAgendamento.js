@@ -386,6 +386,15 @@ function CalendarioDias({
 //                   o que "início do fluxo" significa (app/[salon]/page.js
 //                   volta pra tela de telefone) — este componente só cede o
 //                   controle, sem cancelar nem tocar na reserva.
+//   onVoltarAntes  – só fluxo público (ignorado com `status`). Botão físico
+//                   "voltar" na etapa "servico" (a primeira etapa "exposta"
+//                   do wizard): diferente de onVoltarInicio (início absoluto
+//                   do fluxo), aqui é "um passo atrás" — quem chama decide o
+//                   que isso significa (app/[salon]/page.js volta pro
+//                   PainelCliente ou pra Identificação, dependendo de qual
+//                   dos dois veio antes). Gateado por !servicoInicialPendente
+//                   (ver useVoltarFisico abaixo) pra não armar durante o
+//                   pulo automático de "servico" pra "data" (servicoInicial).
 export default function FormularioAgendamento({
   estabelecimento,
   status,
@@ -397,6 +406,7 @@ export default function FormularioAgendamento({
   nomeProfissionalContato = "a equipe",
   servicoInicial = null,
   onVoltarInicio = null,
+  onVoltarAntes = null,
 }) {
   const [form, setForm] = useState(() => ({
     ...ESTADO_INICIAL,
@@ -1457,11 +1467,10 @@ export default function FormularioAgendamento({
   // onVoltarInicio, então mantém voltarEtapa como sempre.
   const fecharDados = !status && onVoltarInicio ? onVoltarInicio : voltarEtapa;
 
-  // Botão físico "voltar" (Android/iOS) nas etapas "data" e "dados": chama o
-  // mesmo callback do botão em tela (voltarEtapa/fecharDados), em vez de
-  // deixar o navegador sair da página. "servico" (a primeira etapa do
-  // wizard) fica de fora de propósito — o voltar físico ali ainda sai da
-  // página normalmente (ver lib/voltarFisico.js). Fica pro lote 2.
+  // Botão físico "voltar" (Android/iOS) nas etapas "servico", "data" e
+  // "dados": chama o mesmo callback do botão em tela (voltarEtapa/
+  // fecharDados) ou, pra "servico", o bubbling recebido do consumidor
+  // (onVoltarAntes), em vez de deixar o navegador sair da página.
   //
   // "data" fica de fora enquanto uma restauração de sessão com horário
   // pendente ainda está em andamento (ver efeitos 2/3 de restauração acima):
@@ -1474,12 +1483,46 @@ export default function FormularioAgendamento({
   // silêncio um toque físico de voltar mais tarde, sem nenhuma mudança
   // visível na tela.
   //
+  // "servico" (lote 2) tem o MESMO tipo de risco de etapa de passagem, por
+  // DOIS caminhos independentes — os dois precisam gatear:
+  // 1) servicoInicial (sugestão de manutenção do PainelCliente):
+  //    servicoInicialPendente fica true até a decisão de pular direto pra
+  //    "data" resolver (ver decisaoEtapaPendente acima).
+  // 2) Restauração de sessão (pendenteRestaurarRef, ver efeitos 1/2 acima):
+  //    com um servicoId salvo, "servico" também é só passagem até o efeito 2
+  //    decidir pular pra "data" — mesmo raciocínio de restaurandoParaDados,
+  //    um degrau antes.
+  //    IMPORTANTE: pendenteRestaurarRef é uma REF (não state) — mutá-la
+  //    (`= null`) não dispara re-render sozinha, então gatear direto nela
+  //    (`Boolean(pendenteRestaurarRef.current)`) pode ficar presa num valor
+  //    velho indefinidamente (sem re-render, o gate nunca reavalia). Em vez
+  //    disso, usamos os dois ESTADOS reais que já orbitam esse mesmo
+  //    processo — carregandoServicos (efeito 1 só decide algo depois que
+  //    vira false) e carregandoProfissionais (fica true enquanto
+  //    servicoSelecionado, setado pela restauração, ainda carrega seus
+  //    profissionais — é exatamente esse recarregar que alimenta o efeito 2,
+  //    quem de fato decide pular ou não). Os dois já são setState de verdade
+  //    em todos os pontos relevantes, então sempre trazem um re-render fresco.
+  // Só faz sentido no público (!status) e só quando o consumidor passou
+  // onVoltarAntes (o /admin nunca passa).
+  //
   // Cada chamada retorna `voltarFisico*`: é ELA (não voltarEtapa/fecharDados
   // direto) que os botões "Voltar" em tela devem chamar — ver
   // lib/voltarFisico.js pro motivo (resolve pra window.history.back(),
   // deixando o popstate resultante disparar a mesma transição, sem deixar a
-  // entrada empurrada órfã no histórico real).
+  // entrada empurrada órfã no histórico real). "servico" não tem botão
+  // "Voltar" em tela (nunca teve) — só o físico.
   const restaurandoParaDados = pendenteRestaurarRef.current?.horario != null;
+  const voltarFisicoServico = useVoltarFisico(
+    onVoltarAntes,
+    !status &&
+      Boolean(onVoltarAntes) &&
+      etapa === "servico" &&
+      !servicoInicialPendente &&
+      !carregandoServicos &&
+      !carregandoProfissionais,
+    "servico"
+  );
   const voltarFisicoData = useVoltarFisico(voltarEtapa, etapa === "data" && !restaurandoParaDados, "data");
   const voltarFisicoDados = useVoltarFisico(fecharDados, etapa === "dados", "dados");
 
