@@ -14,11 +14,19 @@ import {
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
-// "pendente") e a aba Agendar do /admin (cria "confirmado"). Toda a lógica de
-// serviços, geração de slots, ocupados, validação e insert vive AQUI — os
-// consumidores só fornecem a diferença via props (status do insert, rótulo do
-// botão, o que fazer no sucesso) e o layout ao redor (Hero, header, tela de
-// confirmação). NÃO duplicar a lógica de slots/ocupados em outro lugar.
+// "pendente"/"aguardando_sinal") e a aba Agendar do /admin (cria
+// "confirmado"). Toda a lógica de serviços, geração de slots, ocupados,
+// validação e insert vive AQUI — os consumidores só fornecem a diferença via
+// props (status do insert, rótulo do botão, o que fazer no sucesso) e o
+// layout ao redor (Hero, header, tela de confirmação). NÃO duplicar a lógica
+// de slots/ocupados em outro lugar.
+//
+// Momento do INSERT difere entre os dois: /admin grava no submit final
+// ("Confirmar"), como sempre. O público grava mais cedo, ao ENTRAR na etapa
+// "dados" (ver selecionarHorario) — pra não perder a reserva se a cliente
+// sumir pra pagar o sinal via Pix e nunca voltar a esta tela. O submit final
+// do público só faz UPDATE (declarar sinal pago) ou nada. Ver reservaId/
+// reservaChave, mais abaixo, pro controle de quando reaproveitar/cancelar.
 
 const ESTADO_INICIAL = {
   nome: "",
@@ -595,6 +603,19 @@ export default function FormularioAgendamento({
   const [sinalDeclarado, setSinalDeclarado] = useState(false);
   const [chavePixCopiada, setChavePixCopiada] = useState(false);
 
+  // Reserva gravada ao ENTRAR na etapa "dados" (só fluxo público, ver
+  // selecionarHorario) — id da linha em `agendamentos` e a "chave" da seleção
+  // que a originou (serviço+data+horário+profissional). Ao reentrar em
+  // "dados" com a MESMA chave, reaproveita em vez de gravar de novo; com uma
+  // chave diferente (voltou e escolheu outra coisa), cancela esta antes de
+  // criar a próxima — nunca duas linhas ativas da mesma tentativa. O submit
+  // final (finalizarAgendamento) só faz UPDATE nesta linha, nunca INSERT.
+  const [reservaId, setReservaId] = useState(null);
+  const [reservaChave, setReservaChave] = useState(null);
+  // Enquanto true, a gravação/cancelamento acima está em andamento — trava os
+  // botões de horário pra evitar duplo clique.
+  const [criandoReserva, setCriandoReserva] = useState(false);
+
   // Regras do agendamento (estabelecimento.aviso_regras_agendamento,
   // configurado no admin): popup bloqueante no fluxo público, mostrado uma
   // vez por sessão de agendamento na etapa final de confirmação, sempre —
@@ -1030,6 +1051,11 @@ export default function FormularioAgendamento({
           estabelecimentoId: estabelecimento.id,
           servicoId: servicoSelecionado.id,
           data: form.data,
+          // Já tenho uma reserva própria (insert antecipado, ver
+          // selecionarHorario) pra esta tentativa: não deixa ela mesma
+          // aparecer como "ocupada" — senão, ao voltar pra "data", o próprio
+          // horário escolhido sumiria da grade.
+          excluirAgendamentoId: reservaId,
         });
         if (!ativo) return;
         setVagas(mapa);
@@ -1051,7 +1077,7 @@ export default function FormularioAgendamento({
     return () => {
       ativo = false;
     };
-  }, [form.data, servicoSelecionado, estabelecimento.id]);
+  }, [form.data, servicoSelecionado, estabelecimento.id, reservaId]);
 
   // 1) Restaura o SERVIÇO só depois que a lista de serviços ATIVOS carrega —
   // um id salvo que não está mais nela (desativado/excluído nesse meio-tempo)
@@ -1110,6 +1136,20 @@ export default function FormularioAgendamento({
     if (pendente.data) {
       setForm((anterior) => ({ ...anterior, data: pendente.data }));
       setEtapa("data");
+      // Reserva já gravada nesta sessão anterior (insert antecipado): rehidrata
+      // ANTES do efeito de vagas rodar pra `form.data`, pra ele já excluir esta
+      // linha da checagem de ocupados (ver excluirAgendamentoId acima). O
+      // efeito 3, mais abaixo, só confirma que o horário segue livre e reidrata
+      // a etapa — nunca grava de novo.
+      if (pendente.reservaId != null && pendente.horario) {
+        setReservaId(pendente.reservaId);
+        setReservaChave({
+          servicoId: servicoSelecionado.id,
+          data: pendente.data,
+          horario: pendente.horario,
+          profissionalId: escolherProfissional ? profissionalRestaurado?.id ?? null : null,
+        });
+      }
       // pendenteRestaurarRef segue vivo: falta o horário, resolvido no
       // efeito 3 assim que a grade desse dia terminar de carregar.
     } else {
@@ -1134,10 +1174,31 @@ export default function FormularioAgendamento({
     }
 
     if (pendente.horario && horariosVisiveis.includes(pendente.horario)) {
-      setHorarioSelecionado(pendente.horario);
-      setEtapa("dados");
+      if (pendente.reservaId != null) {
+        // Reserva já rehidratada no efeito 2 (reservaId/reservaChave) e
+        // revalidada como livre acima — só reidrata a etapa, sem gravar de novo.
+        setHorarioSelecionado(pendente.horario);
+        setEtapa("dados");
+      } else {
+        // Sessão perdida entre o clique no horário e a gravação terminar
+        // (raro): recria do zero, reaproveitando a mesma função da seleção
+        // manual — mesmo tratamento de erro/23P01 de sempre.
+        selecionarHorario(pendente.horario);
+      }
     } else if (pendente.horario) {
       setAvisoHorarioIndisponivel(true);
+      // Horário restaurado não está mais livre: se havia uma reserva própria
+      // pra ele, ela ficou órfã (ex.: outro processo assumiu o profissional
+      // nesse meio-tempo) — cancela e descarta a referência.
+      if (pendente.reservaId != null) {
+        supabase
+          .from("agendamentos")
+          .update({ status: "cancelado" })
+          .eq("id", pendente.reservaId)
+          .then(() => {});
+      }
+      setReservaId(null);
+      setReservaChave(null);
     }
     pendenteRestaurarRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1154,6 +1215,11 @@ export default function FormularioAgendamento({
       data: form.data,
       horario: horarioSelecionado,
       respostasPerguntas,
+      // Id da reserva já gravada (insert antecipado ao entrar em "dados") —
+      // ver reservaId/reservaChave e selecionarHorario. Permite ao efeito de
+      // restauração reidratá-la em vez de gravar de novo (ver efeitos 2 e 3
+      // de restauração acima).
+      reservaId,
     });
   }, [
     status,
@@ -1163,6 +1229,7 @@ export default function FormularioAgendamento({
     form.data,
     horarioSelecionado,
     respostasPerguntas,
+    reservaId,
   ]);
 
   // Só os campos de texto (nome, WhatsApp) usam este handler agora — a data é
@@ -1371,13 +1438,147 @@ export default function FormularioAgendamento({
     if (indice > 0) setEtapa(ETAPAS[indice - 1].id);
   }
 
-  // Clique num horário na etapa "data": só marca o horário e avança pra etapa
-  // "dados" — o insert (único, pros dois fluxos) só acontece no submit final,
-  // em finalizarAgendamento.
-  function selecionarHorario(slot) {
-    setHorarioSelecionado(slot);
-    setEtapa("dados");
+  // Duas seleções (serviço+data+horário+profissional) apontam pro mesmo
+  // agendamento? Usado só pra decidir, ao reentrar em "dados", se reaproveita
+  // a reserva já gravada ou se precisa cancelar e criar outra (ver
+  // selecionarHorario).
+  function mesmaChaveReserva(a, b) {
+    return (
+      !!a &&
+      !!b &&
+      a.servicoId === b.servicoId &&
+      a.data === b.data &&
+      a.horario === b.horario &&
+      a.profissionalId === b.profissionalId
+    );
+  }
+
+  // Clique num horário na etapa "data".
+  //
+  // /admin (status truthy): comportamento de sempre — só marca o horário e
+  // avança pra "dados"; o insert continua acontecendo no submit final, em
+  // finalizarAgendamento.
+  //
+  // Público (!status): a reserva é gravada AGORA, ao entrar em "dados" — não
+  // mais no clique de "Confirmar agendamento" (ver decisão registrada na
+  // conversa: cliente pode sumir pra pagar o Pix e nunca mais voltar). Sempre
+  // finalizado:true, então nunca depende do cron pra aparecer no painel.
+  // Reentrando em "dados" com a MESMA seleção de antes (ex.: Voltar sem
+  // trocar nada), reaproveita a reserva já gravada; com uma seleção
+  // diferente, cancela a anterior antes de criar a nova — nunca duas linhas
+  // ativas da mesma tentativa. finalizarAgendamento, no submit final, só faz
+  // UPDATE nesta linha (nunca INSERT).
+  async function selecionarHorario(slot) {
     setAvisoHorarioIndisponivel(false);
+
+    if (status) {
+      setHorarioSelecionado(slot);
+      setEtapa("dados");
+      return;
+    }
+
+    if (criandoReserva) return;
+
+    setHorarioSelecionado(slot);
+    setErro("");
+
+    const chaveAtual = {
+      servicoId: servicoSelecionado.id,
+      data: form.data,
+      horario: slot,
+      profissionalId: escolherProfissional ? profissionalSelecionado?.id ?? null : null,
+    };
+
+    // Mesma seleção de uma reserva já gravada: reaproveita sem gravar de novo.
+    if (reservaId != null && mesmaChaveReserva(reservaChave, chaveAtual)) {
+      setEtapa("dados");
+      return;
+    }
+
+    setCriandoReserva(true);
+
+    // Havia uma reserva de uma tentativa anterior (outro serviço/data/horário
+    // escolhido depois de um "Voltar"): cancela ANTES de criar a nova.
+    if (reservaId != null) {
+      await supabase.from("agendamentos").update({ status: "cancelado" }).eq("id", reservaId);
+    }
+
+    // Quem fica com a reserva: o escolhido pelo cliente, ou — no encaixe
+    // automático — o menos ocupado entre os livres neste horário. A reserva
+    // anterior (se houver) já foi cancelada acima, então não se conta mais.
+    let profissionalId = chaveAtual.profissionalId;
+    if (!escolherProfissional) {
+      const livres = vagas[slot] ?? [];
+      if (livres.length === 0) {
+        setCriandoReserva(false);
+        setErro("Esse horário acabou de ser reservado. Escolha outro.");
+        setHorarioSelecionado("");
+        setReservaId(null);
+        setReservaChave(null);
+        return;
+      }
+      profissionalId = await escolherMenosOcupado(estabelecimento.id, form.data, livres);
+    }
+
+    const payload = {
+      nome_cliente: form.nome,
+      telefone: form.telefone,
+      data: form.data,
+      horario: slot,
+      servico_id: servicoSelecionado.id,
+      duracao_min: servicoSelecionado.duracao_min,
+      estabelecimento_id: estabelecimento.id,
+      profissional_id: profissionalId,
+      status: precisaSinal ? "aguardando_sinal" : "pendente",
+      sinal_declarado_pago: false,
+      finalizado: true,
+    };
+    const { data, error } = await supabase
+      .from("agendamentos")
+      .insert(payload)
+      .select("id")
+      .single();
+
+    if (error) {
+      setCriandoReserva(false);
+      setReservaId(null);
+      setReservaChave(null);
+
+      // 23P01 = violação da exclusion constraint agendamentos_sem_sobreposicao:
+      // outra reserva sobrepõe esse intervalo — alguém ocupou primeiro.
+      // Tratado JÁ AQUI (ao entrar na etapa), não mais só no submit final.
+      const ehHorarioOcupado =
+        error.code === "23P01" ||
+        /agendamentos_sem_sobreposicao|exclusion constraint/i.test(error.message ?? "");
+
+      if (ehHorarioOcupado) {
+        setErro("Esse horário acabou de ser reservado. Escolha outro.");
+        setHorarioSelecionado("");
+        // Recarrega as vagas pra refletir quem ainda está livre neste dia.
+        try {
+          const mapa = await calcularVagasPorHorario({
+            estabelecimentoId: estabelecimento.id,
+            servicoId: servicoSelecionado.id,
+            data: form.data,
+          });
+          setVagas(mapa);
+        } catch {
+          setVagas({});
+        }
+        return;
+      }
+
+      setErro(error.message);
+      setHorarioSelecionado("");
+      return;
+    }
+
+    await salvarRespostasPerguntas(data.id);
+
+    setReservaId(data.id);
+    setReservaChave(chaveAtual);
+    setCriandoReserva(false);
+    setEtapa("dados");
   }
 
   async function handleSubmit(e) {
@@ -1411,6 +1612,16 @@ export default function FormularioAgendamento({
       return;
     }
 
+    // Público: a esta altura a reserva já deveria existir (gravada ao entrar
+    // em "dados", ver selecionarHorario). Sem ela não há o que fazer UPDATE —
+    // volta pra "data" pra recriar, em vez de seguir com um id inexistente.
+    if (!status && reservaId == null) {
+      setErro("Sua reserva expirou. Escolha o horário novamente.");
+      setHorarioSelecionado("");
+      setEtapa("data");
+      return;
+    }
+
     // Regras do agendamento (estabelecimento.aviso_regras_agendamento):
     // popup bloqueante mostrado uma vez por sessão do wizard, na etapa final
     // de confirmação — sempre, com ou sem sinal a pagar. Confirmado, quem
@@ -1430,7 +1641,47 @@ export default function FormularioAgendamento({
     await finalizarAgendamento();
   }
 
+  // Submit final ("Confirmar agendamento").
+  //
+  // /admin (status truthy): comportamento de sempre — faz o INSERT aqui, na
+  // hora. O público nunca passa por este caminho.
+  //
+  // Público (!status): a reserva JÁ FOI GRAVADA ao entrar em "dados" (ver
+  // selecionarHorario) — aqui não há mais INSERT. Só existem dois casos:
+  // exige sinal e a cliente marcou "já paguei" -> UPDATE declarando o
+  // pagamento e liberando o status; qualquer outro caso (sem sinal, ou com
+  // sinal mas caixa desmarcada) -> nada a gravar, só avança a UI, já que o
+  // registro existe do jeito certo desde que a etapa foi alcançada.
   async function finalizarAgendamento() {
+    if (!status) {
+      setEnviando(true);
+
+      if (precisaSinal && sinalDeclarado) {
+        const { error } = await supabase
+          .from("agendamentos")
+          .update({ sinal_declarado_pago: true, status: "pendente" })
+          .eq("id", reservaId);
+
+        setEnviando(false);
+        if (error) {
+          setErro(error.message);
+          return;
+        }
+      } else {
+        setEnviando(false);
+      }
+
+      limparFatia(estabelecimento.slug, "agendamento");
+
+      onSucesso?.({
+        form,
+        servico: servicoSelecionado,
+        horario: horarioSelecionado,
+        profissional: escolherProfissional ? profissionalSelecionado : null,
+      });
+      return;
+    }
+
     setEnviando(true);
 
     // Quem fica com a reserva: o escolhido pelo cliente, ou — no encaixe
@@ -1454,10 +1705,6 @@ export default function FormularioAgendamento({
       );
     }
 
-    // Insert único, pros dois fluxos. `status` só entra quando o consumidor o
-    // fornece (admin => "confirmado"); no público, decide pelo sinal exigido:
-    // "aguardando_sinal" trava até a dona confirmar o Pix, "pendente" segue o
-    // fluxo normal de aprovação.
     const payload = {
       nome_cliente: form.nome,
       telefone: form.telefone,
@@ -1467,7 +1714,7 @@ export default function FormularioAgendamento({
       duracao_min: servicoSelecionado.duracao_min,
       estabelecimento_id: estabelecimento.id,
       profissional_id: profissionalId,
-      status: status ?? (precisaSinal ? "aguardando_sinal" : "pendente"),
+      status,
       sinal_declarado_pago: sinalDeclarado,
       finalizado: true,
     };
@@ -1514,20 +1761,12 @@ export default function FormularioAgendamento({
       return;
     }
 
-    // Fluxo concluído com sucesso: limpa o rascunho da sessão (sessionStorage)
-    // pra não sobrar uma seleção velha caso a mesma cliente volte pra um NOVO
-    // agendamento na mesma visita — só a fatia "agendamento" (o
-    // clienteIdentificado, gerido em app/[salon]/page.js, continua valendo).
-    if (!status) limparFatia(estabelecimento.slug, "agendamento");
-
-    // Sucesso: entrega o resumo ao consumidor (tela de confirmação no público,
-    // refetch + reset no admin). Não tocamos no layout ao redor daqui.
+    // Sucesso: entrega o resumo ao consumidor (refetch + reset no admin — o
+    // público nunca chega aqui). Não tocamos no layout ao redor daqui.
     onSucesso?.({
       form,
       servico: servicoSelecionado,
       horario: horarioSelecionado,
-      // Só faz sentido expor quando foi o cliente quem escolheu; no encaixe
-      // automático o profissional é decidido nos bastidores.
       profissional: escolherProfissional ? profissionalSelecionado : null,
     });
   }
@@ -1870,9 +2109,10 @@ export default function FormularioAgendamento({
                           key={slot}
                           type="button"
                           onClick={() => selecionarHorario(slot)}
+                          disabled={criandoReserva}
                           aria-pressed={selecionado}
                           className={[
-                            "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition",
+                            "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
                             selecionado
                               ? "bg-primary text-white ring-primary"
                               : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
@@ -1883,6 +2123,18 @@ export default function FormularioAgendamento({
                       );
                     })}
                   </div>
+                )}
+
+                {/* Gravação (público) ou cancelamento da tentativa anterior,
+                    disparados ao tocar um horário — ver selecionarHorario. */}
+                {criandoReserva && (
+                  <p className="mt-2 text-sm text-body">Reservando horário...</p>
+                )}
+
+                {erro && (
+                  <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                    {erro}
+                  </p>
                 )}
               </div>
             )}
