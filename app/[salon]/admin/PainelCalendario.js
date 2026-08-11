@@ -411,6 +411,7 @@ export default function PainelCalendario({
           classNames: ["ag-evento-ausencia-bloco"],
           extendedProps: {
             ausencia: true,
+            ausenciaRecorrente: a.tipo === "recorrente",
             motivo: a.motivo ?? "",
             profissionalNome: nome,
             diaInteiro: Boolean(a.dia_inteiro),
@@ -430,15 +431,22 @@ export default function PainelCalendario({
   );
 
   // Lista (listaAgenda) só mostra CONFIRMADOS — pendentes ficam de fora dessa
-  // view (continuam normalmente em Dia/Mês, tratados no Inbox). Demais views
-  // usam o array cheio de `eventos`.
-  const eventosExibidos = useMemo(
-    () =>
-      viewAtual.startsWith("list")
-        ? eventos.filter((ev) => !ev.extendedProps.pendente)
-        : eventos,
-    [eventos, viewAtual]
-  );
+  // view (continuam normalmente em Dia/Mês, tratados no Inbox). Mês e Lista
+  // também ocultam ausências recorrentes (dia_semana): elas repetem o mesmo
+  // padrão em todo dia da semana correspondente e só poluiriam o badge
+  // "Ausente"/a lista sem agregar informação — só a view Dia continua
+  // mostrando normalmente. Demais casos usam o array cheio de `eventos`.
+  const eventosExibidos = useMemo(() => {
+    if (viewAtual.startsWith("list")) {
+      return eventos.filter(
+        (ev) => !ev.extendedProps.pendente && !ev.extendedProps.ausenciaRecorrente
+      );
+    }
+    if (viewAtual === "dayGridMonth") {
+      return eventos.filter((ev) => !ev.extendedProps.ausenciaRecorrente);
+    }
+    return eventos;
+  }, [eventos, viewAtual]);
 
   // slotMinTime/slotMaxTime (Dia/Semana) dinâmicos: começam no expediente
   // configurado (HORA_ABERTURA/HORA_FECHAMENTO), mas expandem pra sempre
