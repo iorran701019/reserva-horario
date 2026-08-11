@@ -7,6 +7,54 @@ function supabaseServiceRole() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
+// Mesma normalização nos dois lados da comparação (texto bruto do candidato
+// atual vs. observacao já gravada em vínculos passados): espaços repetidos
+// colapsados, trim, minúsculas, sem acento. Evita que "Dany" e "dany " (ou
+// "Dany  Teste" com espaço duplo) sejam tratados como textos diferentes.
+function normalizarTituloBruto(texto) {
+  return (texto || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
+// Vínculo automático por nome bruto já conhecido: quando a dona vincula um
+// candidato importado a um cliente real (ver ModalVincularCliente.js), o
+// texto bruto original fica preservado em `observacao` (só na primeira
+// vinculação, quando observacao ainda é null — sempre o caso pra linhas
+// recém-importadas). Isso funciona como um mapeamento "texto bruto → cliente"
+// pronto, sem precisar de tabela nova: reaproveita aqui pra já nascer
+// vinculado quando o mesmo texto bruto aparecer de novo. Só usa vínculos do
+// MESMO estabelecimento. Ambíguo (mesmo texto normalizado apontando pra
+// clientes diferentes em vinculações passadas) nunca vincula sozinho — insere
+// cru, do jeito que já era antes dessa mudança.
+async function buscarVinculosConhecidos(supabaseAdmin, estabelecimentoId) {
+  const { data } = await supabaseAdmin
+    .from("agendamentos")
+    .select("nome_cliente, telefone, observacao")
+    .eq("estabelecimento_id", estabelecimentoId)
+    .eq("origem", "importado")
+    .not("telefone", "is", null)
+    .not("observacao", "is", null);
+
+  const porTextoBruto = new Map();
+  for (const registro of data ?? []) {
+    const chaveTexto = normalizarTituloBruto(registro.observacao);
+    if (!chaveTexto) continue;
+
+    const chaveCliente = `${registro.nome_cliente}||${registro.telefone}`;
+    if (!porTextoBruto.has(chaveTexto)) porTextoBruto.set(chaveTexto, new Map());
+    porTextoBruto.get(chaveTexto).set(chaveCliente, {
+      nome_cliente: registro.nome_cliente,
+      telefone: registro.telefone,
+    });
+  }
+
+  return porTextoBruto;
+}
+
 // Candidatos a importar do calendário de atendimento escolhido (ver
 // ConfiguracoesSalao.js -> estabelecimentos.google_calendar_id_importacao):
 // importação DIRETA, sem revisão linha-a-linha — só data/horário/duração/
@@ -93,9 +141,14 @@ export async function GET(request) {
 }
 
 // Confirma a importação DIRETA: todo candidato do lote vira um agendamento
-// 'confirmado' já ocupando o horário, sem cliente/serviço vinculado —
-// nome_cliente = título bruto do evento, telefone/servico_id nulos (o vínculo
-// com a ficha real acontece depois, ver botão "Vincular cliente" no Painel).
+// 'confirmado' já ocupando o horário. Por padrão, sem cliente/serviço
+// vinculado — nome_cliente = título bruto do evento, telefone/servico_id
+// nulos (o vínculo com a ficha real acontece depois, ver botão "Vincular
+// cliente" no Painel). EXCETO quando o texto bruto bate, sem ambiguidade, com
+// a `observacao` de um vínculo anterior do mesmo estabelecimento (ver
+// buscarVinculosConhecidos acima) — nesse caso já nasce vinculado
+// (nome_cliente/telefone do cliente real, observacao = texto bruto), do
+// jeito que ModalVincularCliente.js deixaria depois de um UPDATE manual.
 // origem='importado' sempre (mesma convenção da importação por PDF) — o GET
 // já filtra pra só devolver candidatos que bateram com o catálogo de serviços
 // (ver montarCandidatos em lib/googleCalendarImportacao), então não existe
@@ -140,6 +193,8 @@ export async function POST(request) {
     .not("google_event_id", "is", null);
   const idsJaImportados = new Set((jaImportados ?? []).map((r) => r.google_event_id));
 
+  const vinculosConhecidos = await buscarVinculosConhecidos(supabaseAdmin, estabelecimentoId);
+
   let importados = 0;
   const falhas = [];
 
@@ -151,9 +206,19 @@ export async function POST(request) {
       continue;
     }
 
+    const tituloOriginal = (item.titulo_original || "Evento importado").trim() || "Evento importado";
+
+    // Zero ou mais de um cliente distinto pra esse texto bruto: insere cru
+    // (comportamento de sempre). Exatamente um: já nasce vinculado, como se a
+    // dona tivesse acabado de vincular pelo modal.
+    const candidatosVinculo = vinculosConhecidos.get(normalizarTituloBruto(tituloOriginal));
+    const vinculoUnico =
+      candidatosVinculo && candidatosVinculo.size === 1 ? [...candidatosVinculo.values()][0] : null;
+
     const { error: erroInsert } = await supabaseAdmin.from("agendamentos").insert({
-      nome_cliente: (item.titulo_original || "Evento importado").trim() || "Evento importado",
-      telefone: null,
+      nome_cliente: vinculoUnico ? vinculoUnico.nome_cliente : tituloOriginal,
+      telefone: vinculoUnico ? vinculoUnico.telefone : null,
+      observacao: vinculoUnico ? tituloOriginal : null,
       data: item.data,
       horario: item.horario,
       servico_id: null,
