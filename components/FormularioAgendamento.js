@@ -12,6 +12,7 @@ import {
   buscarVencimentoManutencao,
 } from "@/lib/manutencaoSugerida";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
+import { useVoltarFisico } from "@/lib/voltarFisico";
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
 // "pendente"/"aguardando_sinal") e a aba Agendar do /admin (cria
@@ -1437,6 +1438,26 @@ export default function FormularioAgendamento({
     const indice = ETAPAS.findIndex((e) => e.id === etapa);
     if (indice > 0) setEtapa(ETAPAS[indice - 1].id);
   }
+
+  // Botão físico "voltar" (Android/iOS) nas etapas "data" e "dados": chama a
+  // MESMA voltarEtapa do botão em tela, em vez de deixar o navegador sair da
+  // página. "servico" (a primeira etapa do wizard) fica de fora de propósito
+  // — o voltar físico ali ainda sai da página normalmente (ver
+  // lib/voltarFisico.js). Fica pro lote 2.
+  //
+  // "data" fica de fora enquanto uma restauração de sessão com horário
+  // pendente ainda está em andamento (ver efeitos 2/3 de restauração acima):
+  // nesse caminho, "data" é só uma etapa de PASSAGEM — o efeito 2 já grava
+  // etapa "data" antes mesmo de saber se o horário salvo ainda está livre, e
+  // o efeito 3 avança pra "dados" assim que a grade termina de carregar. Sem
+  // esse gate, cada reload com um horário já escolhido armaria o listener
+  // físico nessa etapa de passagem, deixando uma entrada de histórico órfã
+  // (nunca consumida) assim que "dados" assume — e essa entrada engoliria em
+  // silêncio um toque físico de voltar mais tarde, sem nenhuma mudança
+  // visível na tela.
+  const restaurandoParaDados = pendenteRestaurarRef.current?.horario != null;
+  useVoltarFisico(voltarEtapa, etapa === "data" && !restaurandoParaDados, "data");
+  useVoltarFisico(voltarEtapa, etapa === "dados", "dados");
 
   // Duas seleções (serviço+data+horário+profissional) apontam pro mesmo
   // agendamento? Usado só pra decidir, ao reentrar em "dados", se reaproveita

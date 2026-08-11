@@ -16,6 +16,7 @@ import { formatarData } from "@/components/FormularioAgendamento";
 import AtualizarDadosCliente from "@/components/AtualizarDadosCliente";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import ConfirmacaoSinal from "@/components/ConfirmacaoSinal";
+import { useVoltarFisico } from "@/lib/voltarFisico";
 
 // Selo de status dos agendamentos ATIVOS. Mesma paleta já usada no projeto
 // (âmbar do bloco "Aguardando confirmação" da tela de sucesso do público,
@@ -163,6 +164,18 @@ export default function PainelCliente({
       ativo = false;
     };
   }, [clienteAtual.id, estabelecimento]);
+
+  // Botão físico "voltar" (Android/iOS) nas duas sub-telas do painel: chama
+  // o MESMO callback que já fecha cada uma via botão em tela (onCancelar/
+  // onVoltar abaixo), em vez de deixar o navegador sair da página. Antes dos
+  // returns condicionais logo abaixo — hooks não podem ficar depois de um
+  // return condicional.
+  useVoltarFisico(() => setEditando(false), editando, "editando");
+  useVoltarFisico(
+    () => setConfirmandoSinalId(null),
+    confirmandoSinalId != null,
+    "confirmandoSinal"
+  );
 
   if (editando) {
     return (
