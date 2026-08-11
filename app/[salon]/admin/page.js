@@ -1311,16 +1311,21 @@ export default function AdminPage() {
       </button>
 
       <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:py-10">
-        {/* Banner da janela de agendamento: sempre visível, em qualquer aba
-            (acima do título da seção). Clique navega direto pro bloco
-            "Janela de agendamento" em Regras de negócio, já aberto e rolado
-            até ele (ver focarJanelaAgendamento + ConfiguracoesSalao). Visual
-            de botão de verdade (sombra, anel grosso, fonte maior/negrito) —
-            precisa ser óbvio que é clicável, não só um detalhe no canto.
-            Verde/confortável (>=30 dias) vs vermelho (<30, já existia). Sem
+        {/* Banner da janela de agendamento: só na aba Painel (viewPai ===
+            "painel", ver ABAS_PAI) — nas outras abas (Profissionais, Regras
+            de negócio, etc.) ele só poluía a tela sem contexto. O popup
+            diário (abaixo de 30 dias restantes, ver useEffect/
+            popupJanelaAberto) NÃO é afetado por essa condição: continua
+            disparando em qualquer aba, independente daqui. Clique navega
+            direto pro bloco "Janela de agendamento" em Regras de negócio, já
+            aberto e rolado até ele (ver focarJanelaAgendamento +
+            ConfiguracoesSalao). Visual de botão de verdade (sombra, anel
+            grosso, fonte maior/negrito) — precisa ser óbvio que é clicável,
+            não só um detalhe no canto. Verde/confortável (>=30 dias) vs
+            vermelho (<30, já existia). Sem
             estabelecimento.janela_agendamento_fim (salão não configurou
             ainda), não aparece nada. */}
-        {estabelecimento.janela_agendamento_fim && (
+        {viewPai === "painel" && estabelecimento.janela_agendamento_fim && (
           <button
             type="button"
             onClick={() => {
