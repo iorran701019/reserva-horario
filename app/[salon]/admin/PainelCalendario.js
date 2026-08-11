@@ -48,11 +48,16 @@ function hojeISO() {
 //   (origem='importado_pessoal', ver montarCandidatos em
 //   lib/googleCalendarImportacao): cinza-azulado neutro, só ocupa o
 //   horário — sem selo de vincular, nunca vira cliente de verdade.
+// "ausencia" (bloqueio da tabela `ausencias`, ver eventosAusencia abaixo) usa
+// o MESMO cinza neutro de "pendente" — a distinção de "cliente agendada" não
+// vem da cor, vem do padrão de listras diagonais (classe ag-evento-ausencia-
+// bloco, ver app/globals.css) somado ao rótulo "Ausência" no lugar do nome.
 const CORES_EVENTO = {
   pendente: { fundo: "#e5e7eb", borda: "#9ca3af", texto: "#374151" },
   confirmado: { fundo: "#dcfce7", borda: "#86efac", texto: "#166534" },
   naoVinculado: { fundo: "#fef3c7", borda: "#fbbf24", texto: "#92400e" },
   pessoal: { fundo: "#e2e8f0", borda: "#94a3b8", texto: "#334155" },
+  ausencia: { fundo: "#e5e7eb", borda: "#6b7280", texto: "#374151" },
 };
 
 // Formato 24h compartilhado por eventTimeFormat e slotLabelFormat.
@@ -92,6 +97,21 @@ function abreviarServico(servico) {
 }
 const hhmm = (d) => d ? `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` : "";
 
+// Date -> "YYYY-MM-DD" em horário LOCAL, componente-a-componente (evita o
+// desvio de fuso do toISOString(), que converte pra UTC) — mesma técnica
+// usada em todo o projeto (ver formatarISO em FormularioAgendamento.js).
+function paraISOLocal(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
+}
+
+// "HH:MM" ou "HH:MM:SS" -> "HH:MM:SS", pro sufixo T do ISO local do evento
+// (mesmo formato que minParaHora produz a partir de minutos).
+function paraHoraCompleta(hora) {
+  return `${String(hora).slice(0, 5)}:00`;
+}
+
 // Calendário do Painel. Recebe `agendamentos` já carregado pela página (sem
 // fetch novo) e deriva os eventos pendentes/confirmados. View inicial é
 // sempre Dia, independente de mobile ou desktop — Dia/Lista/Mês só trocam
@@ -125,6 +145,22 @@ export default function PainelCalendario({
   // Título do período atual (ex.: "agosto de 2026"), capturado em datesSet e
   // exibido na linha de navegação própria (Dia/Mês — a Lista não pagina).
   const [tituloAtual, setTituloAtual] = useState("");
+
+  // Intervalo de datas REALMENTE renderizado pela grade atual (inclui os dias
+  // de "preenchimento" do mês anterior/seguinte na view Mês), capturado em
+  // datesSet — é o que baliza a busca de ausências abaixo. `fimExclusivo`
+  // segue a mesma convenção do FullCalendar (arg.end): um dia DEPOIS do
+  // último visível. null até o primeiro datesSet (chega rápido, ainda na
+  // montagem).
+  const [rangeVisivel, setRangeVisivel] = useState(null);
+
+  // Ausências (tabela `ausencias`) dos profissionais ativos deste
+  // estabelecimento, cruas do banco — expandidas em blocos por dia em
+  // `eventosAusencia` abaixo. Buscadas de novo a cada troca de período
+  // visível (ver efeito abaixo), mesmo padrão de busca por período já usado
+  // pra agendamentos em outras telas (.gte/.lte sobre a coluna de data — ver
+  // buscarHistoricoRecente em lib/agendamentosCliente.js).
+  const [ausencias, setAusencias] = useState([]);
 
   // Botão flutuante "voltar ao início", só na aba Lista: aparece depois de
   // ~300px de scroll no container da lista (ver `listaScrollRef`).
@@ -181,6 +217,53 @@ export default function PainelCalendario({
     };
   }, [estabelecimentoId]);
 
+  // Nome por profissional (ver profissionaisDisponiveis acima) — usado só pro
+  // rótulo dos blocos de ausência (eventosAusencia), pra dona saber QUEM está
+  // ausente quando o filtro é "Todos".
+  const nomePorProfissional = useMemo(
+    () => new Map(profissionaisDisponiveis.map((p) => [p.id, p.nome])),
+    [profissionaisDisponiveis]
+  );
+
+  // Busca as ausências dos profissionais ativos que se aplicam ao período
+  // REALMENTE visível na grade (rangeVisivel, ver datesSet) — refeita a cada
+  // troca de período (prev/next/Hoje/troca de aba), não uma vez só. Registros
+  // `recorrente` (dia_semana) não têm coluna de data — valem pra QUALQUER
+  // período, então entram sempre; só os `periodo` (data_inicio/data_fim) são
+  // filtrados pelo intervalo, via .or() combinando as duas naturezas numa
+  // única query (evita duas idas ao banco). Backend só filtra por
+  // profissional + período; a expansão dia a dia (recorrente vs. periodo,
+  // dia_inteiro vs. faixa de hora) acontece em memória em eventosAusencia,
+  // abaixo — mesmo espírito de excecoesDoDia em lib/disponibilidade.js.
+  useEffect(() => {
+    // Guarda sem reset explícito de `ausencias`: só fica vazio aqui ANTES do
+    // primeiro datesSet/carga de profissionais (quando `ausencias` já nasce
+    // [] por padrão) — depois disso, estabelecimentoId/rangeVisivel não
+    // voltam a ficar vazios em condições normais de uso.
+    if (!estabelecimentoId || !rangeVisivel || profissionaisDisponiveis.length === 0) {
+      return;
+    }
+    let ativo = true;
+
+    (async () => {
+      const ids = profissionaisDisponiveis.map((p) => p.id);
+      const { data, error } = await supabase
+        .from("ausencias")
+        .select(
+          "id, profissional_id, tipo, tipo_registro, dia_semana, data_inicio, data_fim, dia_inteiro, hora_inicio, hora_fim, motivo"
+        )
+        .in("profissional_id", ids)
+        .or(
+          `tipo.eq.recorrente,and(data_inicio.lt.${rangeVisivel.fimExclusivo},data_fim.gte.${rangeVisivel.inicio})`
+        );
+      if (ativo) setAusencias(error ? [] : data ?? []);
+    })();
+
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimentoId, profissionaisDisponiveis, rangeVisivel]);
+
   // Mostra o botão flutuante "voltar ao início" só na aba Lista, depois de
   // ~300px de scroll no container próprio da lista (o reset ao trocar de aba
   // já acontece em mudarAba, direto no clique — não aqui). O scroll começa em
@@ -200,7 +283,7 @@ export default function PainelCalendario({
   // Exige data/horário antes de classificar (classificarAgendamento parseia
   // ambos). start/end em ISO LOCAL (sem "Z"); end = start + duracao_min. O
   // registro completo vai em extendedProps (usado no clique na leva B).
-  const eventos = useMemo(
+  const eventosAgendamentos = useMemo(
     () =>
       agendamentos
         .filter(
@@ -265,6 +348,85 @@ export default function PainelCalendario({
           };
         }),
     [agendamentos, filtroProfissional]
+  );
+
+  // Expande as ausências cruas (ver efeito acima) em UM BLOCO POR DIA dentro
+  // do range visível: `recorrente` casa pelo dia da semana, `periodo` pelo
+  // intervalo data_inicio..data_fim (comparação lexicográfica ISO, sem
+  // construir Date — mesmo padrão de excecoesDoDia em lib/disponibilidade.js).
+  // Só `tipo_registro === "ausencia"` entra aqui — `liberacao` é o OPOSTO de
+  // uma ausência (abre horário extra), mostrá-la como bloqueio confundiria a
+  // dona. `dia_inteiro` usa o expediente configurado (HORA_ABERTURA/
+  // HORA_FECHAMENTO) como faixa visual; senão, a faixa hora_inicio/hora_fim
+  // do próprio registro. `classNames` aplica o padrão de listras diagonais
+  // (ver .ag-evento-ausencia-bloco em app/globals.css) — visualmente distinto
+  // de qualquer agendamento real, mesmo tendo a mesma cor de base do
+  // "pendente".
+  const eventosAusencia = useMemo(() => {
+    if (!rangeVisivel) return [];
+    const relevantes = ausencias.filter(
+      (a) => (a.tipo_registro ?? "ausencia") === "ausencia"
+    );
+    if (relevantes.length === 0) return [];
+
+    const lista = [];
+    const [ai, mi, di] = rangeVisivel.inicio.split("-").map(Number);
+    const [af, mf, df] = rangeVisivel.fimExclusivo.split("-").map(Number);
+    const fim = new Date(af, mf - 1, df);
+
+    for (
+      let cursor = new Date(ai, mi - 1, di);
+      cursor < fim;
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1)
+    ) {
+      const iso = paraISOLocal(cursor);
+      const diaSemana = cursor.getDay();
+
+      for (const a of relevantes) {
+        if (
+          filtroProfissional !== "todos" &&
+          String(a.profissional_id) !== filtroProfissional
+        ) {
+          continue;
+        }
+
+        const aplica =
+          a.tipo === "recorrente"
+            ? a.dia_semana === diaSemana
+            : a.data_inicio <= iso && iso <= a.data_fim;
+        if (!aplica) continue;
+
+        const horaInicio = a.dia_inteiro ? HORA_ABERTURA : a.hora_inicio;
+        const horaFim = a.dia_inteiro ? HORA_FECHAMENTO : a.hora_fim;
+        const nome = nomePorProfissional.get(a.profissional_id) ?? "Profissional";
+
+        lista.push({
+          id: `ausencia-${a.id}-${iso}`,
+          title: a.motivo ? `Ausência · ${nome} · ${a.motivo}` : `Ausência · ${nome}`,
+          start: `${iso}T${paraHoraCompleta(horaInicio)}`,
+          end: `${iso}T${paraHoraCompleta(horaFim)}`,
+          backgroundColor: CORES_EVENTO.ausencia.fundo,
+          borderColor: CORES_EVENTO.ausencia.borda,
+          textColor: CORES_EVENTO.ausencia.texto,
+          classNames: ["ag-evento-ausencia-bloco"],
+          extendedProps: {
+            ausencia: true,
+            motivo: a.motivo ?? "",
+            profissionalNome: nome,
+            diaInteiro: Boolean(a.dia_inteiro),
+          },
+        });
+      }
+    }
+    return lista;
+  }, [ausencias, rangeVisivel, filtroProfissional, nomePorProfissional]);
+
+  // Array combinado que alimenta o calendário: agendamentos + blocos de
+  // ausência. slotMinTime/slotMaxTime (abaixo) e eventosExibidos (Lista)
+  // enxergam os dois juntos, sem duplicar lógica.
+  const eventos = useMemo(
+    () => [...eventosAgendamentos, ...eventosAusencia],
+    [eventosAgendamentos, eventosAusencia]
   );
 
   // Lista (listaAgenda) só mostra CONFIRMADOS — pendentes ficam de fora dessa
@@ -412,8 +574,45 @@ export default function PainelCalendario({
           datesSet={(arg) => {
             setViewAtual(arg.view.type);
             setTituloAtual(arg.view.title);
+            // Range REALMENTE renderizado (inclui os dias de preenchimento do
+            // mês vizinho, na view Mês) — baliza a busca de ausências acima.
+            setRangeVisivel({
+              inicio: paraISOLocal(arg.start),
+              fimExclusivo: paraISOLocal(arg.end),
+            });
           }}
           eventContent={(arg) => {
+            // Bloco de ausência (ver eventosAusencia acima): rótulo e
+            // aparência PRÓPRIOS, checados antes de qualquer ramo de
+            // agendamento — nunca tem `extendedProps.agendamento`, então não
+            // pode cair nos ramos abaixo (que leem nome_cliente/servico).
+            if (arg.event.extendedProps.ausencia) {
+              const { motivo, profissionalNome, diaInteiro } = arg.event.extendedProps;
+              if (arg.view.type === "dayGridMonth") {
+                return (
+                  <div
+                    className="ag-evento-mes ag-evento-mes-ausencia"
+                    style={{
+                      backgroundColor: arg.event.backgroundColor,
+                      color: arg.event.textColor,
+                    }}
+                  >
+                    Ausente
+                  </div>
+                );
+              }
+              const rotulo = `Ausência · ${profissionalNome}${motivo ? ` · ${motivo}` : ""}`;
+              if (arg.view.type.startsWith("list")) return rotulo;
+              const hora = diaInteiro
+                ? "Dia inteiro"
+                : `${hhmm(arg.event.start)} - ${hhmm(arg.event.end)}`;
+              return (
+                <div className="ag-evento">
+                  <span className="ag-evento-titulo">{rotulo}</span>{" "}
+                  <span className="ag-evento-hora">- {hora}</span>
+                </div>
+              );
+            }
             // Mês: só a hora (HH:MM), num badge colorido pela mesma cor de
             // status do evento (CORES_EVENTO, já aplicada em
             // backgroundColor/textColor no objeto do evento) — sem nome nem
@@ -480,6 +679,10 @@ export default function PainelCalendario({
               irParaAbaDiaEm(info.event.startStr);
               return;
             }
+            // Bloco de ausência: só ocupação visual, sem ação nenhuma — não
+            // tem `extendedProps.agendamento` (classificarAgendamento abaixo
+            // quebraria em cima de undefined).
+            if (info.event.extendedProps.ausencia) return;
             // Nas demais views (Dia/Lista): o pendente (cinza) é só ocupação —
             // tratado no Inbox, não clicável aqui. Bloco pessoal (cinza-azulado)
             // também é só ocupação, sem selo — mas continua clicável pra

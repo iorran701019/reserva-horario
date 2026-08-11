@@ -110,3 +110,32 @@ a:focus-visible, button:focus-visible {
   font-weight: 600;
   border: 1px solid currentColor;
 }
+
+/* Bloco de ausência (ausencias, ver eventosAusencia em PainelCalendario.js) —
+   listras diagonais por CIMA da cor de fundo do evento (CORES_EVENTO.ausencia,
+   aplicada via backgroundColor inline), pra ficar visualmente distinto de
+   qualquer agendamento real (a dona não pode confundir "ausência minha" com
+   "cliente agendada"), mesmo compartilhando o mesmo cinza neutro do
+   "pendente". */
+.ag-evento-ausencia-bloco {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(75, 85, 99, 0.3) 0px,
+    rgba(75, 85, 99, 0.3) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+
+/* Badge "Ausente" da view Mês — mesmas listras do bloco acima + contorno
+   tracejado, pra se distinguir do badge de hora sólido dos agendamentos. */
+.ag-evento-mes-ausencia {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(75, 85, 99, 0.3) 0px,
+    rgba(75, 85, 99, 0.3) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+  border: 1px dashed rgba(75, 85, 99, 0.6);
+}
