@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import FotoPerfilCircular from "@/components/FotoPerfilCircular";
 import CampoMensagemWhatsapp from "@/components/CampoMensagemWhatsapp";
@@ -69,6 +69,12 @@ export default function ConfiguracoesSalao({
   // o banner/popup e o calendário da aba Agendar. Opcional (no-op por
   // padrão): nada além do /admin passa isso hoje.
   onJanelaAgendamentoFimAtualizada = () => {},
+  // true quando a navegação veio do banner "Agenda aberta até" (ver page.js) —
+  // abre o bloco "Janela de agendamento" (accordion) já expandido e rola até
+  // ele. Consumido uma vez (ver useEffect abaixo) via
+  // onFocarBlocoJanelaConsumido, pra não reabrir sozinho numa visita normal.
+  focarBlocoJanela = false,
+  onFocarBlocoJanelaConsumido = () => {},
 }) {
   // Valor do toggle. undefined = ainda carregando o estado atual do banco.
   const [escolhaProfissional, setEscolhaProfissional] = useState(undefined);
@@ -138,6 +144,30 @@ export default function ConfiguracoesSalao({
   // Qual bloco retrátil está expandido — só um aberto por vez, mesmo padrão
   // do acordeão de categorias de serviço (ver GerenciarServicos.js).
   const [blocoAberto, setBlocoAberto] = useState(null);
+
+  // Wrapper do bloco "Janela de agendamento" — alvo do scroll quando a
+  // navegação chega via focarBlocoJanela (ver useEffect abaixo).
+  const blocoJanelaRef = useRef(null);
+
+  // Chegou aqui vindo do banner "Agenda aberta até": expande o bloco e rola
+  // até ele. O setTimeout espera o DOM já refletir o acordeão aberto (senão o
+  // scroll mira na altura ainda fechada, antes do conteúdo entrar) — mais
+  // confiável que requestAnimationFrame aqui, que browsers pausam quando a
+  // aba não está com foco/visível. onFocarBlocoJanelaConsumido só é chamado
+  // DEPOIS do scrollIntoView (não antes): ele muda `focarBlocoJanela` pra
+  // false no componente pai, o que re-executa este efeito e cancela o
+  // temporizador ainda pendente (cleanup) — se consumisse a flag antes de
+  // disparar o scroll, o timeout nunca chegava a rodar.
+  useEffect(() => {
+    if (!focarBlocoJanela) return;
+    setBlocoAberto("janela");
+    const temporizador = setTimeout(() => {
+      blocoJanelaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      onFocarBlocoJanelaConsumido();
+    }, 80);
+    return () => clearTimeout(temporizador);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focarBlocoJanela]);
 
   // Horas mínimas de antecedência pra cliente cancelar um agendamento pelo
   // painel público (ver PainelCliente) — abaixo disso o botão "Cancelar"
@@ -1397,7 +1427,7 @@ export default function ConfiguracoesSalao({
           além da qual nenhum dia pode ser agendado, público ou /admin (ver
           lib/janelaAgendamento.js). Campo obrigatório: sempre grava só a
           data final, não existe "modo" persistido. */}
-      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+      <div ref={blocoJanelaRef} className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
         <button
           type="button"
           onClick={() => alternarBloco("janela")}

@@ -36,6 +36,7 @@ import {
   Archive,
   AlertCircle,
   Gift,
+  ChevronRight,
 } from "lucide-react";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import Hero from "@/components/Hero";
@@ -364,6 +365,12 @@ export default function AdminPage() {
   // restantes — ver useEffect mais abaixo). "Já mostrei hoje" é controlado
   // via localStorage (chave por estabelecimento + data), sem coluna nova.
   const [popupJanelaAberto, setPopupJanelaAberto] = useState(false);
+
+  // true logo após clicar no banner "Agenda aberta até": sinaliza pro
+  // ConfiguracoesSalao (montado a seguir, quando viewPai vira "regras") abrir
+  // o bloco "Janela de agendamento" já expandido e rolar até ele. Consumida
+  // uma vez (ver onFocarBlocoJanelaConsumido) — não é "sticky".
+  const [focarJanelaAgendamento, setFocarJanelaAgendamento] = useState(false);
 
   // Agendamento aguardando confirmação de cancelamento (controla o modal).
   // null = nenhum modal aberto.
@@ -1156,27 +1163,33 @@ export default function AdminPage() {
 
       <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:py-10">
         {/* Banner da janela de agendamento: sempre visível, em qualquer aba
-            (acima do título da seção). Clique navega pra Regras de negócio.
-            Sem estabelecimento.janela_agendamento_fim (salão não configurou
+            (acima do título da seção). Clique navega direto pro bloco
+            "Janela de agendamento" em Regras de negócio, já aberto e rolado
+            até ele (ver focarJanelaAgendamento + ConfiguracoesSalao). Visual
+            de botão de verdade (sombra, anel grosso, fonte maior/negrito) —
+            precisa ser óbvio que é clicável, não só um detalhe no canto.
+            Verde/confortável (>=30 dias) vs vermelho (<30, já existia). Sem
+            estabelecimento.janela_agendamento_fim (salão não configurou
             ainda), não aparece nada. */}
         {estabelecimento.janela_agendamento_fim && (
           <button
             type="button"
             onClick={() => {
               setViewPai("regras");
+              setFocarJanelaAgendamento(true);
               setDrawerAberto(false);
             }}
-            className={`mb-4 flex w-full items-center justify-between gap-2 rounded-lg px-4 py-2.5 text-left text-sm font-medium shadow-sm ring-1 transition ${
+            className={`mb-4 flex w-full items-center justify-between gap-3 rounded-2xl px-5 py-4 text-left shadow-md ring-2 transition hover:shadow-lg ${
               diasRestantesJanela(estabelecimento.janela_agendamento_fim) < 30
-                ? "bg-red-50 text-red-700 ring-red-200 hover:bg-red-100"
-                : "bg-card text-body ring-border hover:bg-surface"
+                ? "bg-red-50 text-red-700 ring-red-300 hover:bg-red-100"
+                : "bg-green-50 text-green-700 ring-green-300 hover:bg-green-100"
             }`}
           >
-            <span>
+            <span className="text-base font-bold leading-snug sm:text-lg">
               Agenda aberta até{" "}
               {formatarDataComAno(estabelecimento.janela_agendamento_fim)}
             </span>
-            <span aria-hidden="true">→</span>
+            <ChevronRight aria-hidden="true" className="h-6 w-6 shrink-0" />
           </button>
         )}
 
@@ -1724,6 +1737,8 @@ export default function AdminPage() {
                 atual ? { ...atual, janela_agendamento_fim: novaData } : atual
               )
             }
+            focarBlocoJanela={focarJanelaAgendamento}
+            onFocarBlocoJanelaConsumido={() => setFocarJanelaAgendamento(false)}
           />
         )}
       </div>
