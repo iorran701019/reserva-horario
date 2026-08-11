@@ -377,6 +377,15 @@ function CalendarioDias({
 //                   sugestão de manutenção do PainelCliente. Pula a etapa
 //                   "servico" e cai direto em "data". Omitido (o normal), a
 //                   etapa "servico" funciona como sempre.
+//   onVoltarInicio – só fluxo público (ignorado com `status`). Chamado em vez
+//                   de voltarEtapa ao sair da etapa "dados" (voltar físico —
+//                   o botão em tela some aqui, ver JSX): a reserva já foi
+//                   gravada de verdade ao entrar em "dados" (ver
+//                   selecionarHorario), então não pode mais reabrir "data" e
+//                   arriscar cancelar/trocar essa reserva. Quem chama decide
+//                   o que "início do fluxo" significa (app/[salon]/page.js
+//                   volta pra tela de telefone) — este componente só cede o
+//                   controle, sem cancelar nem tocar na reserva.
 export default function FormularioAgendamento({
   estabelecimento,
   status,
@@ -387,6 +396,7 @@ export default function FormularioAgendamento({
   clienteEhNovo = false,
   nomeProfissionalContato = "a equipe",
   servicoInicial = null,
+  onVoltarInicio = null,
 }) {
   const [form, setForm] = useState(() => ({
     ...ESTADO_INICIAL,
@@ -1439,11 +1449,19 @@ export default function FormularioAgendamento({
     if (indice > 0) setEtapa(ETAPAS[indice - 1].id);
   }
 
-  // Botão físico "voltar" (Android/iOS) nas etapas "data" e "dados": chama a
-  // MESMA voltarEtapa do botão em tela, em vez de deixar o navegador sair da
-  // página. "servico" (a primeira etapa do wizard) fica de fora de propósito
-  // — o voltar físico ali ainda sai da página normalmente (ver
-  // lib/voltarFisico.js). Fica pro lote 2.
+  // Saída da etapa "dados": só no fluxo público (!status), com
+  // onVoltarInicio recebido do consumidor (ver comentário da prop acima), a
+  // reserva já gravada ao entrar aqui não pode mais ser reaberta via
+  // voltarEtapa (isso reabriria "data" e trocaria/cancelaria a reserva ao
+  // escolher outro horário). O /admin (status truthy) nunca recebe
+  // onVoltarInicio, então mantém voltarEtapa como sempre.
+  const fecharDados = !status && onVoltarInicio ? onVoltarInicio : voltarEtapa;
+
+  // Botão físico "voltar" (Android/iOS) nas etapas "data" e "dados": chama o
+  // mesmo callback do botão em tela (voltarEtapa/fecharDados), em vez de
+  // deixar o navegador sair da página. "servico" (a primeira etapa do
+  // wizard) fica de fora de propósito — o voltar físico ali ainda sai da
+  // página normalmente (ver lib/voltarFisico.js). Fica pro lote 2.
   //
   // "data" fica de fora enquanto uma restauração de sessão com horário
   // pendente ainda está em andamento (ver efeitos 2/3 de restauração acima):
@@ -1455,9 +1473,15 @@ export default function FormularioAgendamento({
   // (nunca consumida) assim que "dados" assume — e essa entrada engoliria em
   // silêncio um toque físico de voltar mais tarde, sem nenhuma mudança
   // visível na tela.
+  //
+  // Cada chamada retorna `voltarFisico*`: é ELA (não voltarEtapa/fecharDados
+  // direto) que os botões "Voltar" em tela devem chamar — ver
+  // lib/voltarFisico.js pro motivo (resolve pra window.history.back(),
+  // deixando o popstate resultante disparar a mesma transição, sem deixar a
+  // entrada empurrada órfã no histórico real).
   const restaurandoParaDados = pendenteRestaurarRef.current?.horario != null;
-  useVoltarFisico(voltarEtapa, etapa === "data" && !restaurandoParaDados, "data");
-  useVoltarFisico(voltarEtapa, etapa === "dados", "dados");
+  const voltarFisicoData = useVoltarFisico(voltarEtapa, etapa === "data" && !restaurandoParaDados, "data");
+  const voltarFisicoDados = useVoltarFisico(fecharDados, etapa === "dados", "dados");
 
   // Duas seleções (serviço+data+horário+profissional) apontam pro mesmo
   // agendamento? Usado só pra decidir, ao reentrar em "dados", se reaproveita
@@ -2162,7 +2186,7 @@ export default function FormularioAgendamento({
 
             <button
               type="button"
-              onClick={voltarEtapa}
+              onClick={voltarFisicoData}
               className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
             >
               Voltar
@@ -2414,13 +2438,20 @@ export default function FormularioAgendamento({
               {enviando ? "Enviando..." : rotuloSubmit}
             </button>
 
-            <button
-              type="button"
-              onClick={voltarEtapa}
-              className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
-            >
-              Voltar
-            </button>
+            {/* Só no /admin: no público a reserva já foi gravada de verdade
+                ao entrar em "dados" (ver selecionarHorario), então esta
+                etapa não permite mais navegação passo a passo pra trás — o
+                voltar físico leva pro início do fluxo (onVoltarInicio/
+                fecharDados acima), sem botão em tela equivalente. */}
+            {status && (
+              <button
+                type="button"
+                onClick={voltarFisicoDados}
+                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            )}
 
             {erro && (
               <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">

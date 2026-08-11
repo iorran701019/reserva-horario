@@ -18,7 +18,7 @@ import FormularioAgendamento, {
   formatarData,
 } from "@/components/FormularioAgendamento";
 import FotoPerfilCircular from "@/components/FotoPerfilCircular";
-import { lerFatia, salvarFatia } from "@/lib/persistenciaAgendamento";
+import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 
 // Página pública de agendamento. A lógica do wizard (serviço, slots, ocupados,
 // validação, insert) mora em FormularioAgendamento; aqui ficam só o layout e a
@@ -177,6 +177,28 @@ export default function AgendarPage() {
   }, [estabelecimento?.id]);
 
   const nomeContatoExibido = nomeProfissionalContato ?? "a equipe";
+
+  // onVoltarInicio do FormularioAgendamento (etapa "dados" do fluxo
+  // público): a reserva já foi gravada de verdade ao entrar em "dados" (ver
+  // selecionarHorario) e não pode ser cancelada/alterada por aqui — só a UI
+  // volta pro início do fluxo (IdentificacaoCliente, etapa "telefone"),
+  // remontada do zero. limparFatia evita que um reload LOGO DEPOIS deste
+  // reset restaure o clienteIdentificado antigo do sessionStorage (ver
+  // useState inicial de clienteIdentificado, acima) — a fatia "agendamento"
+  // (servico/data/horario/reservaId) continua intacta de propósito: se a
+  // cliente se identificar de novo com o MESMO WhatsApp, a restauração de
+  // sessão que já existe em FormularioAgendamento reconecta sozinha na MESMA
+  // reserva, sem duplicar. Mesmo reset de estados que "Fazer novo
+  // agendamento" já faz (ver botão na tela de resumo, abaixo), pra não
+  // flashar dado velho quando ela se identificar de novo.
+  function voltarParaIdentificacao() {
+    limparFatia(salon, "clienteIdentificado");
+    setClienteIdentificado(null);
+    setAgendamentosAtivos(null);
+    setAnamneseNecessaria(null);
+    setModoNovoAgendamento(false);
+    setServicoManutencao(null);
+  }
 
   // Foca o título da confirmação ao montar — leitores de tela anunciam o status.
   const tituloConfirmacaoRef = useRef(null);
@@ -459,6 +481,7 @@ export default function AgendarPage() {
               nomeProfissionalContato={nomeContatoExibido}
               servicoInicial={servicoManutencao}
               onSucesso={(dados) => setResumo(dados)}
+              onVoltarInicio={voltarParaIdentificacao}
             />
           )}
         </div>

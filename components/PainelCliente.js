@@ -170,8 +170,18 @@ export default function PainelCliente({
   // onVoltar abaixo), em vez de deixar o navegador sair da página. Antes dos
   // returns condicionais logo abaixo — hooks não podem ficar depois de um
   // return condicional.
-  useVoltarFisico(() => setEditando(false), editando, "editando");
-  useVoltarFisico(
+  //
+  // As duas chamadas retornam `fechar*`: é ELA (não setEditando/
+  // setConfirmandoSinalId direto) que TODO caminho que sai da sub-tela deve
+  // chamar — botão "Cancelar"/"Voltar" em tela E os caminhos de sucesso
+  // (onAtualizado/onConfirmado abaixo). Ver lib/voltarFisico.js pro motivo:
+  // resolve pra window.history.back() quando a entrada empurrada por este
+  // hook ainda é o topo do histórico, deixando o popstate resultante (não o
+  // clique) disparar a mesma transição — sem isso, a entrada empurrada ao
+  // abrir a sub-tela fica órfã no histórico real toda vez que ela fecha por
+  // um clique em tela em vez do voltar físico.
+  const fecharEditando = useVoltarFisico(() => setEditando(false), editando, "editando");
+  const fecharConfirmandoSinal = useVoltarFisico(
     () => setConfirmandoSinalId(null),
     confirmandoSinalId != null,
     "confirmandoSinal"
@@ -185,9 +195,9 @@ export default function PainelCliente({
           exigirEndereco={estabelecimento.exigir_endereco !== false}
           onAtualizado={(dados) => {
             setClienteAtual((anterior) => ({ ...anterior, ...dados }));
-            setEditando(false);
+            fecharEditando();
           }}
-          onCancelar={() => setEditando(false)}
+          onCancelar={fecharEditando}
         />
       </div>
     );
@@ -206,9 +216,9 @@ export default function PainelCliente({
                 a.id === confirmandoSinalId ? { ...a, status: "pendente" } : a
               )
             );
-            setConfirmandoSinalId(null);
+            fecharConfirmandoSinal();
           }}
-          onVoltar={() => setConfirmandoSinalId(null)}
+          onVoltar={fecharConfirmandoSinal}
         />
       </div>
     );
