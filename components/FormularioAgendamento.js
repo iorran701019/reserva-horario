@@ -220,7 +220,11 @@ async function buscarPerguntasServico(servicoId) {
 //                   fundo verde sutil, dias após ganham laranja. Um dia
 //                   desabilitado (cinza, sem profissional) mantém prioridade
 //                   visual sobre essas cores.
-function CalendarioDias({
+// Exportado pra ser reaproveitado fora do wizard (ver modal "Alterar data"
+// da seção "Fora da janela de agendamento" em app/[salon]/admin/page.js) —
+// componente puro, tudo vem por props, nenhuma dependência do resto do
+// FormularioAgendamento.
+export function CalendarioDias({
   mes,
   min,
   diasSemanaAtivos,

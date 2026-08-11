@@ -51,7 +51,7 @@ function dataMaisDias(dias) {
 const ATALHOS_JANELA_DIAS = [45, 60, 90];
 
 // Valores fictícios pra prévia das mensagens de WhatsApp (lista retrátil
-// abaixo) — cobre todas as variáveis usadas por qualquer uma das 7
+// abaixo) — cobre todas as variáveis usadas por qualquer uma das 8
 // mensagens (ver MENSAGENS_WHATSAPP_CONFIG em lib/whatsapp.js).
 const VALORES_EXEMPLO_MENSAGENS = {
   nome_cliente: "Maria",
@@ -59,6 +59,7 @@ const VALORES_EXEMPLO_MENSAGENS = {
   horario: "14:00",
   servico: "Manicure completa",
   link: "https://agenda.exemplo.com/salao",
+  janela_fim: "30/09/2026",
 };
 
 export default function ConfiguracoesSalao({
@@ -237,14 +238,14 @@ export default function ConfiguracoesSalao({
       : "";
   });
 
-  // As 7 mensagens de WhatsApp editáveis (ver MENSAGENS_WHATSAPP_CONFIG em
+  // As 8 mensagens de WhatsApp editáveis (ver MENSAGENS_WHATSAPP_CONFIG em
   // lib/whatsapp.js). `mensagens` guarda o texto VIGENTE de cada campo
   // (personalizado se houver, senão o padrão) — undefined = carregando.
   // Status/erro por campo, pra cada linha ter seu próprio feedback.
   const [mensagens, setMensagens] = useState(undefined);
   const [statusMensagens, setStatusMensagens] = useState({});
   const [erroMensagens, setErroMensagens] = useState({});
-  // Qual das 10 mensagens está expandida — só uma por vez, mesmo padrão do
+  // Qual das 8 mensagens está expandida — só uma por vez, mesmo padrão do
   // acordeão de blocos acima.
   const [mensagemExpandida, setMensagemExpandida] = useState(null);
 
@@ -256,7 +257,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -1584,7 +1585,7 @@ export default function ConfiguracoesSalao({
         )}
       </div>
 
-      {/* Bloco: Mensagens de WhatsApp — lista das 10 mensagens editáveis, cada
+      {/* Bloco: Mensagens de WhatsApp — lista das 8 mensagens editáveis, cada
           uma com sua própria prévia (linha truncada) e expansão individual
           (mensagemExpandida), aninhada dentro deste bloco retrátil. */}
       <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
