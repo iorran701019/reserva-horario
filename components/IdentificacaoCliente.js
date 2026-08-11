@@ -499,7 +499,15 @@ export default function IdentificacaoCliente({
           // simular isso (ver handleConfirmarNao) — decide aqui, na hora de
           // renderizar, sem perder o objeto original.
           nomeInicial={clienteNovo ? undefined : clienteEncontrado?.nome}
-          telefoneReferencia={telefone}
+          // "Não sou eu" (clienteNovo=true vindo de "confirmar"): o número
+          // pesquisado pertence a outra pessoa, então o campo WhatsApp some
+          // e obriga redigitar — evita reenviar sem querer o número antigo.
+          // "Telefone não encontrado" (clienteNovo=true vindo de "telefone")
+          // continua preenchendo normal, é a primeira vez que esse número
+          // aparece.
+          telefoneReferencia={
+            clienteNovo && origemSubEtapa === "confirmar" ? "" : telefone
+          }
           valoresIniciais={clienteNovo ? undefined : clienteEncontrado}
           clienteNovo={clienteNovo}
           exigirEndereco={exigirEndereco}
