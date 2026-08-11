@@ -13,6 +13,7 @@ import {
 } from "@/lib/manutencaoSugerida";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 import { useVoltarFisico } from "@/lib/voltarFisico";
+import { dentroDaJanelaAgendamento } from "@/lib/janelaAgendamento";
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
 // "pendente"/"aguardando_sinal") e a aba Agendar do /admin (cria
@@ -197,9 +198,12 @@ async function buscarPerguntasServico(servicoId) {
 
 // Calendário mensal próprio para a etapa Data. O <input type="date"> nativo não
 // permite cinzar dias específicos por dia da semana, então montamos a grade à
-// mão. Um dia nasce DESABILITADO (cinza, não clicável) quando é passado (< min)
-// ou quando o seu dia da semana não está em `diasSemanaAtivos` — o conjunto de
-// dias em que há profissional elegível trabalhando (calculado por quem chama).
+// mão. Um dia nasce DESABILITADO (cinza, não clicável) quando é passado (< min),
+// quando o seu dia da semana não está em `diasSemanaAtivos` — o conjunto de
+// dias em que há profissional elegível trabalhando (calculado por quem chama)
+// — ou quando está além de estabelecimentos.janela_agendamento_fim (ver
+// dentroDaJanelaAgendamento em lib/janelaAgendamento.js, a MESMA checagem
+// usada em lib/disponibilidade.js pro fluxo público e o /admin nunca divergirem).
 //
 // Props:
 //   mes              – Date no primeiro dia do mês exibido.
@@ -208,6 +212,8 @@ async function buscarPerguntasServico(servicoId) {
 //   selecionado      – "YYYY-MM-DD" atualmente escolhido (destaca a célula).
 //   onSelecionar     – recebe o "YYYY-MM-DD" do dia clicado (só dias válidos).
 //   onPrev/onNext    – navegação de mês. podeVoltar trava o passado.
+//   estabelecimento  – salão atual, lido só por janela_agendamento_fim (ver
+//                   dentroDaJanelaAgendamento acima).
 //   vencimentoManutencao – Date (meia-noite local) do vencimento da manutenção
 //                   selecionada, ou null. Quando presente, só INFORMA (não
 //                   bloqueia): dias até e incluindo o vencimento ganham um
@@ -223,6 +229,7 @@ function CalendarioDias({
   onPrev,
   onNext,
   podeVoltar,
+  estabelecimento,
   vencimentoManutencao,
 }) {
   const ano = mes.getFullYear();
@@ -305,7 +312,8 @@ function CalendarioDias({
           const iso = formatarISO(date);
           const passado = iso < min;
           const fechado = !diasSemanaAtivos.has(date.getDay());
-          const desabilitado = passado || fechado;
+          const foraDaJanela = !dentroDaJanelaAgendamento(iso, estabelecimento);
+          const desabilitado = passado || fechado || foraDaJanela;
           const sel = iso === selecionado;
           const dentroDoPrazo =
             vencimentoManutencao != null && date <= vencimentoManutencao;
@@ -2129,6 +2137,7 @@ export default function FormularioAgendamento({
                   onPrev={mesAnterior}
                   onNext={proximoMes}
                   podeVoltar={podeVoltarMes}
+                  estabelecimento={estabelecimento}
                   vencimentoManutencao={vencimentoManutencao}
                 />
               )}

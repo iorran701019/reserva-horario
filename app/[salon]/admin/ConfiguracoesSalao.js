@@ -34,6 +34,22 @@ function centavosParaReais(centavos) {
   return (centavos / 100).toFixed(2);
 }
 
+// hoje + N dias -> "YYYY-MM-DD", pros 3 botões de atalho da janela de
+// agendamento (ver bloco "Janela de agendamento"). Componente-a-componente
+// (nunca toISOString, que despeja em UTC e pode voltar um dia).
+function dataMaisDias(dias) {
+  const d = new Date();
+  d.setDate(d.getDate() + dias);
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
+// Atalhos de dias pro campo de janela de agendamento (ver bloco "Janela de
+// agendamento"): cada um calcula hoje + N e preenche o campo.
+const ATALHOS_JANELA_DIAS = [45, 60, 90];
+
 // Valores fictícios pra prévia das mensagens de WhatsApp (lista retrátil
 // abaixo) — cobre todas as variáveis usadas por qualquer uma das 7
 // mensagens (ver MENSAGENS_WHATSAPP_CONFIG em lib/whatsapp.js).
@@ -45,7 +61,15 @@ const VALORES_EXEMPLO_MENSAGENS = {
   link: "https://agenda.exemplo.com/salao",
 };
 
-export default function ConfiguracoesSalao({ estabelecimento }) {
+export default function ConfiguracoesSalao({
+  estabelecimento,
+  // Chamado com a nova data logo após salvar a janela de agendamento (ver
+  // aplicarJanela) — deixa quem chama (AdminPage) patchar sua PRÓPRIA cópia
+  // de `estabelecimento`, já que ela só é buscada uma vez no mount e alimenta
+  // o banner/popup e o calendário da aba Agendar. Opcional (no-op por
+  // padrão): nada além do /admin passa isso hoje.
+  onJanelaAgendamentoFimAtualizada = () => {},
+}) {
   // Valor do toggle. undefined = ainda carregando o estado atual do banco.
   const [escolhaProfissional, setEscolhaProfissional] = useState(undefined);
   const [erro, setErro] = useState("");
@@ -64,6 +88,23 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const [sinalChavePix, setSinalChavePix] = useState("");
   const [erroSinal, setErroSinal] = useState("");
   const [statusSinal, setStatusSinal] = useState("");
+
+  // Data final da janela de agendamento (estabelecimentos.janela_agendamento_fim,
+  // "YYYY-MM-DD") — além dela, nenhum dia pode ser agendado, público ou
+  // /admin (ver lib/janelaAgendamento.js -> dentroDaJanelaAgendamento, a
+  // checagem única reaproveitada no calendário do wizard e em
+  // lib/disponibilidade.js). Campo obrigatório pra SALVAR (não existe "sem
+  // janela" como opção aqui), mas o state nasce "" até carregar — string
+  // vazia só means "ainda não configurado", não é um valor válido de salvar.
+  // undefined = ainda carregando.
+  const [janelaAgendamentoFim, setJanelaAgendamentoFim] = useState(undefined);
+  const [erroJanela, setErroJanela] = useState("");
+  const [statusJanela, setStatusJanela] = useState("");
+  // Popup de confirmação ao REDUZIR a janela com agendamentos reais além da
+  // nova data (ver aplicarJanela). null = nenhum popup aberto. Guarda a nova
+  // data + a contagem encontrada, pro botão "Confirmar" gravar sem repetir a
+  // consulta.
+  const [confirmandoReducaoJanela, setConfirmandoReducaoJanela] = useState(null);
 
   // Texto das regras do agendamento, mostrado num popup pra cliente, no
   // fluxo público, na etapa final de confirmação — sempre, com ou sem sinal
@@ -185,7 +226,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -204,6 +245,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
         setErroFidelidade(error.message);
         setErroFoto(error.message);
         setErroGoogleCalendar(error.message);
+        setErroJanela(error.message);
         return;
       }
       setErro("");
@@ -266,6 +308,9 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       setErroGoogleCalendar("");
       setGoogleCalendarAtivo(Boolean(data?.google_calendar_ativo));
       setGoogleCalendarEmail(data?.google_calendar_email ?? null);
+
+      setErroJanela("");
+      setJanelaAgendamentoFim(data?.janela_agendamento_fim ?? "");
 
       const textosMensagens = {};
       MENSAGENS_WHATSAPP_CONFIG.forEach(({ campo, padrao, camposDestino }) => {
@@ -386,6 +431,12 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     const t = setTimeout(() => setStatusFotoPosicao(""), 2500);
     return () => clearTimeout(t);
   }, [statusFotoPosicao]);
+
+  useEffect(() => {
+    if (statusJanela !== "salvo") return;
+    const t = setTimeout(() => setStatusJanela(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusJanela]);
 
   // Abre/fecha um bloco retrátil — só um aberto por vez, mesmo padrão do
   // acordeão de categorias de serviço.
@@ -761,6 +812,67 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
     setGoogleCalendarEmail(null);
   }
 
+  // Grava janela_agendamento_fim. Campo obrigatório: novaData vazia não salva
+  // (mesmo padrão de validação-sem-revert de salvarReservaExpira/salvarCancelamentoPrazo
+  // acima — só mostra o erro e devolve).
+  //
+  // Se novaData REDUZ a janela atual (novaData < janelaAgendamentoFim já
+  // salvo) e existe pelo menos um agendamento com data > novaData e status
+  // <> 'cancelado' pra este salão, abre o popup de confirmação
+  // (confirmandoReducaoJanela) em vez de gravar direto — quem confirma o
+  // popup chama de novo com `pulaConfirmacao: true`. Aumentar/manter a
+  // janela, ou reduzir sem nenhum agendamento afetado, grava direto.
+  async function aplicarJanela(novaData, { pulaConfirmacao = false } = {}) {
+    if (!novaData) {
+      setErroJanela("Selecione uma data.");
+      return;
+    }
+    setErroJanela("");
+
+    const reduzindo = janelaAgendamentoFim && novaData < janelaAgendamentoFim;
+
+    if (reduzindo && !pulaConfirmacao) {
+      setStatusJanela("verificando");
+
+      const { count, error } = await supabase
+        .from("agendamentos")
+        .select("id", { count: "exact", head: true })
+        .eq("estabelecimento_id", estabelecimento.id)
+        .gt("data", novaData)
+        .neq("status", "cancelado");
+
+      setStatusJanela("");
+
+      if (error) {
+        setErroJanela(`Não foi possível verificar: ${error.message}`);
+        return;
+      }
+
+      if ((count ?? 0) > 0) {
+        setConfirmandoReducaoJanela({ novaData, contagem: count });
+        return;
+      }
+    }
+
+    setStatusJanela("salvando");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ janela_agendamento_fim: novaData })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setStatusJanela("");
+      setErroJanela(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setJanelaAgendamentoFim(novaData);
+    setStatusJanela("salvo");
+    setConfirmandoReducaoJanela(null);
+    onJanelaAgendamentoFimAtualizada(novaData);
+  }
+
   // Grava o texto vigente de UMA mensagem (`mensagens[campo]`), literal —
   // inclusive string vazia, quando o dono esvazia o campo de propósito (ver
   // regra em MENSAGENS_WHATSAPP_CONFIG/lib/whatsapp.js: vazio salvo é ''
@@ -807,6 +919,7 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
   const carregandoFidelidade = fidelidadeAtiva === undefined;
   const carregandoFoto = fotoPerfilUrl === undefined;
   const carregandoGoogleCalendar = googleCalendarAtivo === undefined;
+  const carregandoJanela = janelaAgendamentoFim === undefined;
   const sinalDesligado = sinalRegra === "desligado";
   // Com 1 só profissional ativo (ou enquanto a contagem ainda carrega), o
   // toggle some — não há outro profissional pro cliente escolher de qualquer
@@ -1280,6 +1393,75 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
         )}
       </div>
 
+      {/* Bloco: Janela de agendamento — data final (janela_agendamento_fim)
+          além da qual nenhum dia pode ser agendado, público ou /admin (ver
+          lib/janelaAgendamento.js). Campo obrigatório: sempre grava só a
+          data final, não existe "modo" persistido. */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("janela")}
+          aria-expanded={blocoAberto === "janela"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Janela de agendamento</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "janela" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "janela" && (
+          <div className="border-t border-border p-4 space-y-4">
+            <p className="text-xs text-muted">
+              Nenhum cliente consegue agendar (nem você, pelo /admin) além
+              desta data. Escolha um atalho ou uma data manual.
+            </p>
+
+            <div className="flex flex-wrap gap-2">
+              {ATALHOS_JANELA_DIAS.map((dias) => (
+                <button
+                  key={dias}
+                  type="button"
+                  onClick={() => aplicarJanela(dataMaisDias(dias))}
+                  disabled={carregandoJanela}
+                  className="rounded-lg bg-surface px-3 py-2 text-sm font-medium text-heading ring-1 ring-border transition hover:bg-border/40 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  +{dias} dias
+                </button>
+              ))}
+            </div>
+
+            <div>
+              <label
+                htmlFor="janela-agendamento-fim"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Agenda aberta até
+              </label>
+              <input
+                id="janela-agendamento-fim"
+                type="date"
+                value={janelaAgendamentoFim || ""}
+                onChange={(e) => aplicarJanela(e.target.value)}
+                disabled={carregandoJanela}
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </div>
+
+            {statusJanela === "verificando" && (
+              <p className="text-xs text-muted">Verificando agendamentos afetados…</p>
+            )}
+            {statusJanela === "salvando" && (
+              <p className="text-xs text-muted">Salvando…</p>
+            )}
+            {statusJanela === "salvo" && !erroJanela && (
+              <p className="text-xs font-medium text-green-600">Salvo ✓</p>
+            )}
+            {erroJanela && <p className="text-xs text-red-600">{erroJanela}</p>}
+          </div>
+        )}
+      </div>
+
       {/* Bloco: Cancelamento e prazos */}
       <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
         <button
@@ -1655,6 +1837,62 @@ export default function ConfiguracoesSalao({ estabelecimento }) {
       aberto={modalImportarAberto}
       onFechar={() => setModalImportarAberto(false)}
     />
+
+    {/* Popup de confirmação ao reduzir a janela de agendamento com
+        agendamentos reais além da nova data (ver aplicarJanela). "Voltar"
+        fecha sem gravar nada. */}
+    {confirmandoReducaoJanela && (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="titulo-reduzir-janela"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+        onClick={() => setConfirmandoReducaoJanela(null)}
+      >
+        <div
+          className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h2
+            id="titulo-reduzir-janela"
+            className="text-lg font-semibold text-heading"
+          >
+            Reduzir janela de agendamento
+          </h2>
+          <p className="mt-2 text-sm text-body">
+            Existem{" "}
+            <span className="font-medium text-heading">
+              {confirmandoReducaoJanela.contagem}
+            </span>{" "}
+            agendamento{confirmandoReducaoJanela.contagem === 1 ? "" : "s"}{" "}
+            confirmado{confirmandoReducaoJanela.contagem === 1 ? "" : "s"} além
+            dessa nova data — eles não serão cancelados automaticamente, mas
+            você vai precisar tratá-los manualmente. Deseja continuar?
+          </p>
+
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+            <button
+              type="button"
+              onClick={() =>
+                aplicarJanela(confirmandoReducaoJanela.novaData, {
+                  pulaConfirmacao: true,
+                })
+              }
+              className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+            >
+              Continuar
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmandoReducaoJanela(null)}
+              className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+            >
+              Voltar
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 }

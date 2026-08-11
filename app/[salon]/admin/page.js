@@ -16,6 +16,7 @@ import {
 } from "@/lib/whatsapp";
 import { classificarAgendamento, fimDoAtendimento } from "@/lib/particao";
 import { profissionaisLivresNoHorario } from "@/lib/disponibilidade";
+import { dentroDaJanelaAgendamento, diasRestantesJanela } from "@/lib/janelaAgendamento";
 import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
 import { verificarFidelidadeClientes, buscarProgressoFidelidade } from "@/lib/fidelidade";
 import {
@@ -61,6 +62,25 @@ function formatarData(data) {
   if (!data) return "—";
   const [ano, mes, dia] = data.split("-");
   return `${dia}/${mes}`;
+}
+
+// Formata "2026-06-25" como "25/06/2026" — usado no banner/popup da janela de
+// agendamento, onde o ano importa (diferente de formatarData acima).
+function formatarDataComAno(data) {
+  if (!data) return "—";
+  const [ano, mes, dia] = data.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
+
+// "YYYY-MM-DD" de hoje em horário LOCAL — usado só pra chave do localStorage
+// do popup diário da janela de agendamento (ver useEffect mais abaixo).
+// Componente-a-componente, nunca toISOString (UTC, pode voltar um dia).
+function hojeISOLocal() {
+  const d = new Date();
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
 }
 
 // Formata "14:30:00" (time do Postgres) como "14:30".
@@ -339,6 +359,11 @@ export default function AdminPage() {
   // Drawer lateral de navegação (mobile-first): substitui a antiga barra de abas
   // fixa. `true` = aberto. Selecionar uma aba troca `viewPai` e fecha o drawer.
   const [drawerAberto, setDrawerAberto] = useState(false);
+
+  // Popup diário de aviso da janela de agendamento (abaixo de 30 dias
+  // restantes — ver useEffect mais abaixo). "Já mostrei hoje" é controlado
+  // via localStorage (chave por estabelecimento + data), sem coluna nova.
+  const [popupJanelaAberto, setPopupJanelaAberto] = useState(false);
 
   // Agendamento aguardando confirmação de cancelamento (controla o modal).
   // null = nenhum modal aberto.
@@ -736,6 +761,26 @@ export default function AdminPage() {
     };
   }, [autenticado, salon]);
 
+  // Popup diário da janela de agendamento: dispara uma vez, quando o
+  // estabelecimento resolve e faltam menos de 30 dias pro fim da janela
+  // configurada (ver diasRestantesJanela). "Já mostrei hoje" via localStorage
+  // — chave por estabelecimento + data de hoje, sem precisar de coluna nova
+  // nem de zerar nada à meia-noite (a chave de ontem simplesmente nunca mais
+  // bate). Sem estabelecimento.janela_agendamento_fim (salão não configurou
+  // ainda), não há o que avisar.
+  useEffect(() => {
+    if (!estabelecimento?.id || !estabelecimento?.janela_agendamento_fim) return;
+
+    const dias = diasRestantesJanela(estabelecimento.janela_agendamento_fim);
+    if (dias == null || dias >= 30) return;
+
+    const chave = `janela_popup_mostrado_${estabelecimento.id}_${hojeISOLocal()}`;
+    if (window.localStorage.getItem(chave)) return;
+
+    window.localStorage.setItem(chave, "1");
+    setPopupJanelaAberto(true);
+  }, [estabelecimento]);
+
   // Zera a confirmação da anotação ao abrir/fechar/trocar o modal de detalhe
   // (o textarea já recolhe sozinho por `idEditandoObservacao` estar atrelado ao
   // id) — a mensagem "Anotação salva." não vaza entre agendamentos.
@@ -1001,6 +1046,28 @@ export default function AdminPage() {
     (item) => classificarAgendamento(item, agora) === "inbox" && item.finalizado && item.telefone
   );
 
+  // Seção "Fora da janela de agendamento" (aba Pendentes): DERIVADA, mesmo
+  // padrão de `inbox`/`historico` — nenhum status novo, nenhuma query extra.
+  // data além de estabelecimentos.janela_agendamento_fim (ver
+  // dentroDaJanelaAgendamento) e status <> cancelado, incluindo confirmados
+  // (não só pendentes) — a janela pode ter sido reduzida depois de o
+  // agendamento já estar confirmado. Mesmos guards de finalizado/telefone do
+  // inbox, pra não misturar reserva abandonada ou evento importado sem
+  // cliente. Ordenado por data+horário asc (mais próximo primeiro).
+  const foraDaJanela = agendamentos
+    .filter(
+      (item) =>
+        item.finalizado &&
+        item.telefone &&
+        item.status !== "cancelado" &&
+        !dentroDaJanelaAgendamento(item.data, estabelecimento)
+    )
+    .sort((a, b) => {
+      const chaveA = `${a.data ?? ""} ${a.horario ?? ""}`;
+      const chaveB = `${b.data ?? ""} ${b.horario ?? ""}`;
+      return chaveA.localeCompare(chaveB);
+    });
+
   // Histórico (aba "Histórico"): tudo arquivado — cancelados, pendentes
   // caducados e confirmados concluídos. Ordenado do mais recente pro mais
   // antigo (data+horário desc); a query vem asc, então invertemos a chave.
@@ -1088,6 +1155,31 @@ export default function AdminPage() {
       </button>
 
       <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:py-10">
+        {/* Banner da janela de agendamento: sempre visível, em qualquer aba
+            (acima do título da seção). Clique navega pra Regras de negócio.
+            Sem estabelecimento.janela_agendamento_fim (salão não configurou
+            ainda), não aparece nada. */}
+        {estabelecimento.janela_agendamento_fim && (
+          <button
+            type="button"
+            onClick={() => {
+              setViewPai("regras");
+              setDrawerAberto(false);
+            }}
+            className={`mb-4 flex w-full items-center justify-between gap-2 rounded-lg px-4 py-2.5 text-left text-sm font-medium shadow-sm ring-1 transition ${
+              diasRestantesJanela(estabelecimento.janela_agendamento_fim) < 30
+                ? "bg-red-50 text-red-700 ring-red-200 hover:bg-red-100"
+                : "bg-card text-body ring-border hover:bg-surface"
+            }`}
+          >
+            <span>
+              Agenda aberta até{" "}
+              {formatarDataComAno(estabelecimento.janela_agendamento_fim)}
+            </span>
+            <span aria-hidden="true">→</span>
+          </button>
+        )}
+
         {/* Título da seção ativa (a barra de abas virou drawer). O ícone espelha
             o da aba correspondente no drawer. */}
         <div className="mb-4 flex items-center gap-2 text-heading">
@@ -1112,11 +1204,13 @@ export default function AdminPage() {
             somem daqui. Confirmar/Cancelar usam os MESMOS handlers de sempre
             (incl. o modal); o refresh derivado faz o item sair do inbox sozinho. */}
         {!carregando && !erro && viewPai === "pendentes" && (
-          inbox.length === 0 && pendenciasAdmin.length === 0 ? (
+          inbox.length === 0 && pendenciasAdmin.length === 0 && foraDaJanela.length === 0 ? (
             <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
               Nenhuma pendência.
             </p>
           ) : (
+            <>
+            {(inbox.length > 0 || pendenciasAdmin.length > 0) && (
             <ul className="space-y-3">
               {/* Pendências administrativas (tabela pendencias_admin, ex.:
                   cancelamento pela cliente) — cards visualmente distintos dos
@@ -1267,6 +1361,90 @@ export default function AdminPage() {
                 </li>
               ))}
             </ul>
+            )}
+
+            {/* Fora da janela de agendamento: consulta adicional (data além
+                de estabelecimentos.janela_agendamento_fim, status <>
+                cancelado), derivada de `agendamentos` já carregado — NÃO
+                altera nenhum status. Reaproveita o mesmo card de
+                data/horário/serviço e o botão "Cancelar agendamento" (modal
+                já existente) do inbox acima; sem ação de confirmar/trocar,
+                que não fazem sentido aqui. Automaticamente reversível: se a
+                dona aumentar a janela depois, o item sai sozinho daqui —
+                nenhuma lógica extra, é só o mesmo filtro reagindo ao novo
+                valor de estabelecimento.janela_agendamento_fim. */}
+            {foraDaJanela.length > 0 && (
+              <div className={inbox.length > 0 || pendenciasAdmin.length > 0 ? "mt-6" : ""}>
+                <h3 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-heading">
+                  <AlertCircle className="h-4 w-4 text-blue-600" />
+                  Fora da janela de agendamento
+                </h3>
+                <ul className="space-y-3">
+                  {foraDaJanela.map((item) => (
+                    <li
+                      key={item.id}
+                      className="rounded-2xl bg-blue-50/60 p-4 shadow-sm ring-1 ring-blue-200 transition"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-heading">
+                            {item.nome_cliente}
+                          </p>
+                          <p className="mt-0.5 text-sm text-body">{item.telefone}</p>
+                        </div>
+
+                        <span
+                          className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classesStatus(
+                            item.status
+                          )}`}
+                        >
+                          {item.status ?? "—"}
+                        </span>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-body">
+                        <span className="inline-flex min-w-0 items-center gap-1.5">
+                          <span className="text-body">Data</span>
+                          <span className="font-medium">{formatarData(item.data)}</span>
+                        </span>
+                        <span className="inline-flex min-w-0 items-center gap-1.5">
+                          <span className="text-body">Horário</span>
+                          <span className="font-medium">
+                            {formatarHorario(item.horario)}
+                          </span>
+                        </span>
+                        <span className="flex min-w-0 basis-full flex-col items-start gap-0.5 sm:basis-auto sm:flex-row sm:items-center sm:gap-1.5">
+                          <span className="text-body">Serviço</span>
+                          <span className="min-w-0 break-words font-medium">
+                            {item.servicos?.nome ?? "—"}
+                          </span>
+                        </span>
+                        {item.profissional_nome && (
+                          <span className="inline-flex min-w-0 items-center gap-1.5">
+                            <span className="text-body">Profissional</span>
+                            <span className="min-w-0 break-words font-medium">
+                              {item.profissional_nome}
+                            </span>
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="mt-4">
+                        <button
+                          type="button"
+                          onClick={() => setAgendamentoParaCancelar(item)}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                        >
+                          <IconeWhatsApp />
+                          Cancelar agendamento
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            </>
           )
         )}
 
@@ -1532,7 +1710,21 @@ export default function AdminPage() {
             e prazo de vencimento da manutenção), particionado pelo
             estabelecimento resolvido. */}
         {!carregando && !erro && viewPai === "regras" && (
-          <ConfiguracoesSalao estabelecimento={estabelecimento} />
+          <ConfiguracoesSalao
+            estabelecimento={estabelecimento}
+            // `estabelecimento` (state deste componente) só é buscado uma vez
+            // no mount — ConfiguracoesSalao lê/grava sua PRÓPRIA cópia dos
+            // campos (ver comentário no topo daquele arquivo). Sem este patch,
+            // o banner/popup da janela de agendamento (que leem
+            // estabelecimento.janela_agendamento_fim aqui) e o calendário da
+            // aba Agendar (que recebe este MESMO objeto) ficariam presos no
+            // valor antigo até um reload da página.
+            onJanelaAgendamentoFimAtualizada={(novaData) =>
+              setEstabelecimento((atual) =>
+                atual ? { ...atual, janela_agendamento_fim: novaData } : atual
+              )
+            }
+          />
         )}
       </div>
 
@@ -1986,6 +2178,58 @@ export default function AdminPage() {
           setIdParaVincular(null);
         }}
       />
+
+      {/* Popup diário da janela de agendamento (ver useEffect que abre
+          popupJanelaAberto) — abaixo de 30 dias restantes, uma vez por dia. */}
+      {popupJanelaAberto && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-popup-janela"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setPopupJanelaAberto(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-popup-janela"
+              className="text-lg font-semibold text-heading"
+            >
+              Sua agenda está perto do fim
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              A agenda está aberta só até{" "}
+              <span className="font-medium text-heading">
+                {formatarDataComAno(estabelecimento.janela_agendamento_fim)}
+              </span>
+              . Configure uma nova data em Regras de negócio pra continuar
+              recebendo agendamentos.
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={() => {
+                  setPopupJanelaAberto(false);
+                  setViewPai("regras");
+                }}
+                className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+              >
+                Ir para Regras de negócio
+              </button>
+              <button
+                type="button"
+                onClick={() => setPopupJanelaAberto(false)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
