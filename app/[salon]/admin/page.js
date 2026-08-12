@@ -47,6 +47,7 @@ import GerenciarProfissionais from "./GerenciarProfissionais";
 import GerenciarClientes from "@/components/GerenciarClientes";
 import ConfiguracoesSalao from "./ConfiguracoesSalao";
 import FormularioAgendamento, { CalendarioDias } from "@/components/FormularioAgendamento";
+import IdentificacaoClienteAdmin from "@/components/IdentificacaoClienteAdmin";
 import AtivarNotificacoes from "@/components/AtivarNotificacoes";
 import ModalVincularCliente from "@/components/ModalVincularCliente";
 
@@ -433,6 +434,12 @@ export default function AdminPage() {
   // segundos e também ao sair da aba (ver handler de troca de aba abaixo).
   const [agendarKey, setAgendarKey] = useState(0);
   const [avisoAgendar, setAvisoAgendar] = useState("");
+  // Cliente resolvido pelo pré-passo IdentificacaoClienteAdmin (busca por
+  // nome, ver componente) — null = ainda não passou pela identificação,
+  // então mostra o pré-passo em vez do FormularioAgendamento. Vira
+  // clienteInicial do wizard assim que preenchido; zerado ao concluir um
+  // agendamento (próximo cadastro recomeça do zero) e ao sair da aba.
+  const [clienteParaAgendar, setClienteParaAgendar] = useState(null);
 
   useEffect(() => {
     if (!avisoAgendar) return;
@@ -1919,10 +1926,14 @@ export default function AdminPage() {
           </>
         )}
 
-        {/* Agendar: o admin cria direto como "confirmado". Reaproveita o wizard
-            do /agendar (FormularioAgendamento). Ao concluir, refaz o fetch pro
-            novo confirmado aparecer no Painel; o WhatsApp é opcional (lembrete
-            depois, pelo modal do Painel) — nada é forçado aqui. */}
+        {/* Agendar: o admin cria direto como "confirmado". Antes do wizard
+            (FormularioAgendamento, reaproveitado do /agendar), passa por
+            IdentificacaoClienteAdmin — busca o cliente por NOME (a dona sabe
+            o nome de quem está atendendo, diferente do público que busca por
+            WhatsApp) e, se não achar, cadastra (nome + WhatsApp obrigatório)
+            antes de liberar o wizard. Sem isso, agendamentos criados aqui
+            nunca tinham uma linha correspondente em `clientes`. Ao concluir,
+            refaz o fetch pro novo confirmado aparecer no Painel. */}
         {!carregando && !erro && viewPai === "agendar" && (
           <div className="mx-auto w-full max-w-md">
             {avisoAgendar && (
@@ -1931,25 +1942,48 @@ export default function AdminPage() {
               </p>
             )}
 
-            <FormularioAgendamento
-              key={agendarKey}
-              estabelecimento={estabelecimento}
-              status="confirmado"
-              rotuloSubmit="Criar agendamento confirmado"
-              // No admin o dono SEMPRE escolhe o profissional ao marcar,
-              // independente do toggle escolha_profissional do salão.
-              forcarEscolhaProfissional
-              onSucesso={async ({ form, horario }) => {
-                setAvisoAgendar(
-                  `Agendamento de ${form.nome} criado para ${formatarData(
-                    form.data
-                  )} às ${horario}.`
-                );
-                // Remonta o formulário limpo pro próximo cadastro.
-                setAgendarKey((k) => k + 1);
-                await recarregarAgendamentos();
-              }}
-            />
+            {!clienteParaAgendar ? (
+              <IdentificacaoClienteAdmin
+                key={agendarKey}
+                estabelecimentoId={estabelecimento.id}
+                onIdentificado={setClienteParaAgendar}
+              />
+            ) : (
+              <>
+                <div className="mb-4 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setClienteParaAgendar(null)}
+                    className="rounded-lg border border-primary bg-primary/10 px-3 py-1.5 text-base font-semibold text-primary transition hover:bg-primary/20"
+                  >
+                    Trocar cliente
+                  </button>
+                </div>
+
+                <FormularioAgendamento
+                  key={`${agendarKey}-wizard`}
+                  estabelecimento={estabelecimento}
+                  status="confirmado"
+                  clienteInicial={clienteParaAgendar}
+                  rotuloSubmit="Criar agendamento confirmado"
+                  // No admin o dono SEMPRE escolhe o profissional ao marcar,
+                  // independente do toggle escolha_profissional do salão.
+                  forcarEscolhaProfissional
+                  onSucesso={async ({ form, horario }) => {
+                    setAvisoAgendar(
+                      `Agendamento de ${form.nome} criado para ${formatarData(
+                        form.data
+                      )} às ${horario}.`
+                    );
+                    // Remonta a identificação + o formulário limpos pro
+                    // próximo cadastro.
+                    setClienteParaAgendar(null);
+                    setAgendarKey((k) => k + 1);
+                    await recarregarAgendamentos();
+                  }}
+                />
+              </>
+            )}
           </div>
         )}
 
@@ -2048,6 +2082,7 @@ export default function AdminPage() {
                     setViewPai(aba.id);
                     setDrawerAberto(false);
                     setAvisoAgendar("");
+                    setClienteParaAgendar(null);
                     router.push(`${pathname}?aba=${aba.id}`, { scroll: false });
                   }}
                   aria-current={ativa ? "page" : undefined}

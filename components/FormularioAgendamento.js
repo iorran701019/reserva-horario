@@ -4,8 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { calcularVagasPorHorario, filtrarPorAntecedenciaMinima } from "@/lib/disponibilidade";
 import { buscarTema } from "@/lib/temas";
-import { buscarProgressoFidelidade } from "@/lib/fidelidade";
-import BadgeFidelidade from "@/components/BadgeFidelidade";
 import PopupRegrasAgendamento from "@/components/PopupRegrasAgendamento";
 import {
   calcularPrecoManutencao,
@@ -382,15 +380,19 @@ export function CalendarioDias({
 //                   dono sempre escolhe o profissional ao marcar. No público fica
 //                   false, então lá o modo continua vindo só do banco.
 //   clienteInicial – { id, nome, telefone } de um cliente já identificado antes
-//                   do formulário (ex.: IdentificacaoCliente no público). Quando
-//                   presente, pré-preenche nome/telefone e a etapa "dados" troca
-//                   os inputs por um resumo de confirmação — o insert continua
-//                   lendo form.nome/form.telefone normalmente. Omitido (o /admin
-//                   não passa), a etapa pede nome/WhatsApp como sempre.
+//                   do formulário (público: IdentificacaoCliente, busca por
+//                   WhatsApp; admin: IdentificacaoClienteAdmin, busca por
+//                   nome — ver app/[salon]/admin/page.js). Sempre presente nos
+//                   dois consumidores atuais — pré-preenche nome/telefone e a
+//                   etapa "dados" troca os inputs por um resumo de
+//                   confirmação; o insert continua lendo form.nome/
+//                   form.telefone normalmente. Omitido, a etapa pede
+//                   nome/WhatsApp como formulário livre (sem consumidor atual).
 //   clienteEhNovo – true quando o cliente identificado acabou de se cadastrar
 //                   agora (veio do CadastroCliente, não de um número já
-//                   conhecido). Alimenta precisaSinal (sinal_regra === 'novos').
-//                   Default false — o /admin não passa.
+//                   conhecido). Alimenta precisaSinal (sinal_regra === 'novos'),
+//                   que só se aplica ao público — o /admin não passa (nem
+//                   precisaria: precisaSinal é sempre false com `status`).
 //   nomeProfissionalContato – mesmo nome exibido no botão fixo ContatoDono
 //                   (menor id ativo, ou "a equipe"). Usado só no texto do
 //                   bloco do sinal; buscado uma vez em app/[salon]/page.js e
@@ -621,29 +623,16 @@ export default function FormularioAgendamento({
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
 
-  // Busca com autopreenchimento do campo "Nome do cliente" — SÓ no /admin
-  // (status truthy, o diferenciador de contexto usado em todo o componente;
-  // ver comentário da prop `status` acima). `clienteSelecionadoAdmin` guarda
-  // o cadastro escolhido no dropdown ({ id, nome, whatsapp }): enquanto
-  // presente, nome/telefone ficam travados nos valores do cadastro (ver JSX
-  // da etapa "dados") até a dona clicar em "Trocar". Sem seleção, o campo
-  // nome funciona como busca livre — não força cadastro pra clientes
-  // realmente novas (ver selecionarClienteAdmin/limparClienteSelecionadoAdmin).
-  const [clienteSelecionadoAdmin, setClienteSelecionadoAdmin] = useState(null);
-  const [resultadosBuscaAdmin, setResultadosBuscaAdmin] = useState([]);
-  const [buscandoClienteAdmin, setBuscandoClienteAdmin] = useState(false);
-
-  // Progresso do programa de fidelidade (ver lib/fidelidade.js) do cliente
-  // escolhido no dropdown acima. null = programa desligado, ninguém
-  // selecionado ainda, ou nada a mostrar.
-  const [progressoFidelidadeAdmin, setProgressoFidelidadeAdmin] = useState(null);
-
   // Sinal de reserva: regra do salão decide se é exigido (todos, só novos
   // clientes, ou nunca). O cliente declara (não comprovante) que já pagou via
-  // Pix antes de liberar o botão de confirmar.
+  // Pix antes de liberar o botão de confirmar. SÓ no público — o admin
+  // (status truthy) já sabe se cobrou o cliente por fora e nunca deve ver
+  // essa etapa, independente de sinal_regra (ver IdentificacaoClienteAdmin,
+  // que resolve o cliente ANTES do wizard no /admin).
   const precisaSinal =
-    estabelecimento.sinal_regra === "todos" ||
-    (estabelecimento.sinal_regra === "novos" && clienteEhNovo);
+    !status &&
+    (estabelecimento.sinal_regra === "todos" ||
+      (estabelecimento.sinal_regra === "novos" && clienteEhNovo));
   const [sinalDeclarado, setSinalDeclarado] = useState(false);
   const [chavePixCopiada, setChavePixCopiada] = useState(false);
 
@@ -849,89 +838,6 @@ export default function FormularioAgendamento({
     form.telefone,
     estabelecimento.id,
   ]);
-
-  // Debounce (~300ms) da busca de clientes cadastrados pro autopreenchimento
-  // do /admin (ver estados acima). Só roda com status (admin) e sem cliente
-  // já selecionado — senão o campo nome está travado no valor do cadastro e
-  // não faz sentido buscar de novo. Exige 2+ caracteres, senão zera a lista.
-  useEffect(() => {
-    if (!status || clienteSelecionadoAdmin) {
-      setResultadosBuscaAdmin([]);
-      setBuscandoClienteAdmin(false);
-      return;
-    }
-
-    const termo = form.nome.trim();
-    if (termo.length < 2) {
-      setResultadosBuscaAdmin([]);
-      setBuscandoClienteAdmin(false);
-      return;
-    }
-
-    let ativo = true;
-    setBuscandoClienteAdmin(true);
-
-    const timer = setTimeout(async () => {
-      const { data, error } = await supabase
-        .from("clientes")
-        .select("id, nome, whatsapp")
-        .eq("estabelecimento_id", estabelecimento.id)
-        .ilike("nome", `%${termo}%`)
-        .order("nome", { ascending: true })
-        .limit(8);
-
-      if (!ativo) return;
-      setResultadosBuscaAdmin(error ? [] : data ?? []);
-      setBuscandoClienteAdmin(false);
-    }, 300);
-
-    return () => {
-      ativo = false;
-      clearTimeout(timer);
-    };
-  }, [form.nome, status, clienteSelecionadoAdmin, estabelecimento.id]);
-
-  // Progresso de fidelidade do cliente selecionado no dropdown acima (ver
-  // estado no topo do componente).
-  useEffect(() => {
-    let ativo = true;
-
-    if (!clienteSelecionadoAdmin) {
-      setProgressoFidelidadeAdmin(null);
-      return;
-    }
-
-    buscarProgressoFidelidade(clienteSelecionadoAdmin.id, estabelecimento).then(
-      (resultado) => {
-        if (ativo) setProgressoFidelidadeAdmin(resultado);
-      }
-    );
-
-    return () => {
-      ativo = false;
-    };
-  }, [clienteSelecionadoAdmin, estabelecimento]);
-
-  // Clique num resultado da busca: preenche nome/telefone com o cadastro
-  // exato e trava os campos (ver JSX). O insert continua lendo
-  // form.nome/form.telefone normalmente, sem mudança de schema.
-  function selecionarClienteAdmin(cliente) {
-    setForm((anterior) => ({
-      ...anterior,
-      nome: cliente.nome,
-      telefone: cliente.whatsapp ?? "",
-    }));
-    setClienteSelecionadoAdmin(cliente);
-    setResultadosBuscaAdmin([]);
-  }
-
-  // "Trocar"/limpar a seleção: volta a digitar nome/telefone soltos, sem
-  // herdar nada do cadastro anterior — mesmo comportamento de uma cliente
-  // nova que nunca se cadastrou.
-  function limparClienteSelecionadoAdmin() {
-    setClienteSelecionadoAdmin(null);
-    setForm((anterior) => ({ ...anterior, nome: "", telefone: "" }));
-  }
 
   const [hoje] = useState(dataDeHoje);
 
@@ -1762,8 +1668,11 @@ export default function FormularioAgendamento({
     // popup bloqueante mostrado uma vez por sessão do wizard, na etapa final
     // de confirmação — sempre, com ou sem sinal a pagar. Confirmado, quem
     // libera o envio de fato é confirmarAvisoRegras, chamando
-    // finalizarAgendamento diretamente.
-    if (estabelecimento.aviso_regras_agendamento && !avisoRegrasConfirmado) {
+    // finalizarAgendamento diretamente. SÓ no público — o admin (status
+    // truthy) escreveu essas regras pros PRÓPRIOS clientes lerem, não faz
+    // sentido bloqueá-lo com o próprio aviso (mesmo raciocínio de
+    // precisaSinal).
+    if (!status && estabelecimento.aviso_regras_agendamento && !avisoRegrasConfirmado) {
       setMostrarPopupAvisoRegras(true);
       return;
     }
@@ -2313,104 +2222,13 @@ export default function FormularioAgendamento({
                 Agendando para{" "}
                 <span className="font-medium text-heading">{form.nome}</span>.
               </p>
-            ) : status ? (
-              <>
-                {/* /admin: busca ao vivo em `clientes` (debounce ~300ms) em vez
-                    de texto livre. Achando o cadastro, trava nome/telefone nos
-                    valores exatos (ver selecionarClienteAdmin) — "Trocar"
-                    libera os dois de novo pra digitar solto, sem forçar
-                    cadastro pra clientes realmente novas. */}
-                <div>
-                  <label htmlFor="nome" className="mb-1 block text-sm font-medium text-body">
-                    Nome do cliente
-                  </label>
-
-                  {clienteSelecionadoAdmin ? (
-                    <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2">
-                      <span className="min-w-0 flex-1 truncate text-heading">
-                        {clienteSelecionadoAdmin.nome}
-                      </span>
-                      {progressoFidelidadeAdmin && (
-                        <BadgeFidelidade
-                          variante="chip"
-                          atual={progressoFidelidadeAdmin.atual}
-                          meta={progressoFidelidadeAdmin.meta}
-                        />
-                      )}
-                      <button
-                        type="button"
-                        onClick={limparClienteSelecionadoAdmin}
-                        className="shrink-0 text-sm font-medium text-primary hover:underline"
-                      >
-                        Trocar
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="relative">
-                      <input
-                        id="nome"
-                        name="nome"
-                        type="text"
-                        value={form.nome}
-                        onChange={handleChange}
-                        autoComplete="off"
-                        required
-                        placeholder="Buscar cliente pelo nome"
-                        className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                      />
-
-                      {form.nome.trim().length >= 2 && (
-                        <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg bg-card shadow-lg ring-1 ring-border">
-                          {buscandoClienteAdmin && (
-                            <p className="px-3 py-2 text-sm text-body">Buscando...</p>
-                          )}
-
-                          {!buscandoClienteAdmin && resultadosBuscaAdmin.length === 0 && (
-                            <p className="px-3 py-2 text-sm text-body">
-                              Nenhum cliente encontrado. Pode preencher os dados livremente.
-                            </p>
-                          )}
-
-                          {!buscandoClienteAdmin &&
-                            resultadosBuscaAdmin.map((cliente) => (
-                              <button
-                                key={cliente.id}
-                                type="button"
-                                onClick={() => selecionarClienteAdmin(cliente)}
-                                className="block w-full px-3 py-2 text-left text-sm text-heading transition hover:bg-surface"
-                              >
-                                {cliente.nome}
-                              </button>
-                            ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label htmlFor="telefone" className="mb-1 block text-sm font-medium text-body">
-                    WhatsApp
-                  </label>
-                  <input
-                    id="telefone"
-                    name="telefone"
-                    type="tel"
-                    inputMode="tel"
-                    value={form.telefone}
-                    onChange={handleChange}
-                    required
-                    readOnly={Boolean(clienteSelecionadoAdmin)}
-                    placeholder="(24) 99999-9999"
-                    className={[
-                      "w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10",
-                      clienteSelecionadoAdmin ? "bg-surface" : "",
-                    ].join(" ")}
-                  />
-                </div>
-              </>
             ) : (
               <>
+                {/* /admin nunca chega aqui: o /admin sempre monta este wizard
+                    com clienteInicial já preenchido (ver
+                    IdentificacaoClienteAdmin em app/[salon]/admin/page.js, que
+                    resolve o cliente por nome ANTES do wizard existir). Este
+                    formulário livre é só o caminho público sem clienteInicial. */}
                 <div>
                   <label htmlFor="nome" className="mb-1 block text-sm font-medium text-body">
                     Nome
