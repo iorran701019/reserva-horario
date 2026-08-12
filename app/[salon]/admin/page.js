@@ -1436,7 +1436,23 @@ export default function AdminPage() {
                 );
               })}
 
-              {inbox.map((item) => (
+              {inbox.map((item) => {
+                // Outros agendamentos CONFIRMADOS do MESMO telefone, ainda no
+                // futuro (exclui o próprio item) — pequeno relatório inline
+                // pra dona ver de cara se a cliente já tem outro horário
+                // confirmado, sem precisar abrir modal. `agora` e
+                // `agendamentos` (lista completa, já carregada) vêm do escopo
+                // do render acima; fimDoAtendimento é o mesmo critério de
+                // "futuro" usado por classificarAgendamento (lib/particao).
+                const outrosAgendamentos = agendamentos.filter(
+                  (a) =>
+                    a.id !== item.id &&
+                    a.telefone === item.telefone &&
+                    a.status === "confirmado" &&
+                    fimDoAtendimento(a) >= agora
+                );
+
+                return (
                 <li
                   key={item.id}
                   // Todo item do inbox precisa de ação: destaque âmbar fixo.
@@ -1502,6 +1518,26 @@ export default function AdminPage() {
                     </ul>
                   )}
 
+                  {/* Relatório inline: outros agendamentos CONFIRMADOS do
+                      mesmo telefone, ainda no futuro. Só data+horário, sem
+                      abrir modal — some sozinho quando não há nenhum, pra não
+                      poluir o card na maioria dos casos. */}
+                  {outrosAgendamentos.length > 0 && (
+                    <div className="mt-3 rounded-lg bg-amber-100/60 px-3 py-2 text-xs text-body">
+                      <p className="font-bold text-heading">
+                        Outros agendamentos CONFIRMADOS deste cliente:
+                      </p>
+                      <ul className="mt-1 space-y-0.5">
+                        {outrosAgendamentos.map((outro) => (
+                          <li key={outro.id}>
+                            {formatarData(outro.data)} às{" "}
+                            {formatarHorario(outro.horario)}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
                   <div className="mt-4 flex flex-col gap-2">
                     <button
                       type="button"
@@ -1521,6 +1557,31 @@ export default function AdminPage() {
                       Cancelar agendamento
                     </button>
 
+                    {/* Contato livre (sem mensagem pré-preenchida), mesmo
+                        padrão dos cards de pendência administrativa acima
+                        (TIPOS_PENDENCIA) — diferente do "Entrar em contato"
+                        do Histórico, que reaproveita msg_reativacao (texto
+                        pensado pra cliente SEM agendamento ativo, não se
+                        aplica aqui). Sem telefone (não deveria ocorrer no
+                        inbox, que já filtra por item.telefone, mas fica
+                        defensivo) o botão fica desabilitado com tooltip. */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        window.open(
+                          linkWhatsAppSemMensagem(item.telefone),
+                          "_blank",
+                          "noopener,noreferrer"
+                        )
+                      }
+                      disabled={!item.telefone}
+                      title={!item.telefone ? "Telefone não cadastrado" : undefined}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 ring-1 ring-blue-100 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-50"
+                    >
+                      <IconeWhatsApp />
+                      Entrar em contato
+                    </button>
+
                     {/* Troca de profissional só com o toggle DESLIGADO (o dono
                         encaixa); ligado, respeita a escolha do cliente. E só
                         com 2+ profissionais ativos — com 1 só não há pra quem
@@ -1536,7 +1597,8 @@ export default function AdminPage() {
                     )}
                   </div>
                 </li>
-              ))}
+                );
+              })}
             </ul>
             )}
 
