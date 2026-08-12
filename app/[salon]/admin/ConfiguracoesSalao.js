@@ -1111,419 +1111,6 @@ export default function ConfiguracoesSalao({
     )}
 
     <div className="space-y-4">
-      {/* Bloco: Foto de perfil */}
-      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
-        <button
-          type="button"
-          onClick={() => alternarBloco("fotoPerfil")}
-          aria-expanded={blocoAberto === "fotoPerfil"}
-          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
-        >
-          <span className="font-semibold text-heading">Foto de perfil</span>
-          <span aria-hidden="true" className="shrink-0 text-xs text-body">
-            {blocoAberto === "fotoPerfil" ? "▲" : "▼"}
-          </span>
-        </button>
-
-        {blocoAberto === "fotoPerfil" && (
-          <div className="border-t border-border p-4">
-            {fotoPerfilUrl ? (
-              <FotoPerfilCircular
-                src={fotoPerfilUrl}
-                posicao={`${fotoPerfilX}% ${fotoPerfilY}%`}
-                zoom={fotoPerfilZoom}
-                diametro={96}
-                alt="Foto de perfil"
-              />
-            ) : (
-              <div className="mb-6 flex justify-center">
-                <div
-                  className="flex items-center justify-center rounded-full bg-border/40 p-2 text-center text-xs text-muted ring-1 ring-border"
-                  style={{ width: 96, height: 96 }}
-                >
-                  Nenhuma foto enviada ainda
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-4">
-              <div>
-                <label
-                  htmlFor="foto-perfil-input"
-                  className="mb-1 block text-sm font-medium text-body"
-                >
-                  Enviar nova foto
-                </label>
-                <input
-                  id="foto-perfil-input"
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFotoPerfilChange}
-                  disabled={carregandoFoto || enviandoFoto}
-                  className="block w-full text-sm text-body file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                />
-                {enviandoFoto && (
-                  <p className="mt-2 text-xs text-muted">Enviando…</p>
-                )}
-              </div>
-
-              <div>
-                <label
-                  htmlFor="foto-perfil-x"
-                  className="mb-1 block text-sm font-medium text-body"
-                >
-                  Posição horizontal
-                </label>
-                <input
-                  id="foto-perfil-x"
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={fotoPerfilX}
-                  onChange={(e) => setFotoPerfilX(Number(e.target.value))}
-                  onMouseUp={() => salvarFotoPerfilPosicao()}
-                  onTouchEnd={() => salvarFotoPerfilPosicao()}
-                  onKeyUp={() => salvarFotoPerfilPosicao()}
-                  disabled={carregandoFoto || !fotoPerfilUrl}
-                  className="w-full disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="foto-perfil-y"
-                  className="mb-1 block text-sm font-medium text-body"
-                >
-                  Posição vertical
-                </label>
-                <input
-                  id="foto-perfil-y"
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={fotoPerfilY}
-                  onChange={(e) => setFotoPerfilY(Number(e.target.value))}
-                  onMouseUp={() => salvarFotoPerfilPosicao()}
-                  onTouchEnd={() => salvarFotoPerfilPosicao()}
-                  onKeyUp={() => salvarFotoPerfilPosicao()}
-                  disabled={carregandoFoto || !fotoPerfilUrl}
-                  className="w-full disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="foto-perfil-zoom"
-                  className="mb-1 block text-sm font-medium text-body"
-                >
-                  Zoom
-                </label>
-                <input
-                  id="foto-perfil-zoom"
-                  type="range"
-                  min={1}
-                  max={3}
-                  step={0.1}
-                  value={fotoPerfilZoom}
-                  onChange={(e) => setFotoPerfilZoom(Number(e.target.value))}
-                  onMouseUp={() => salvarFotoPerfilPosicao()}
-                  onTouchEnd={() => salvarFotoPerfilPosicao()}
-                  onKeyUp={() => salvarFotoPerfilPosicao()}
-                  disabled={carregandoFoto || !fotoPerfilUrl}
-                  className="w-full disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </div>
-            </div>
-
-            {statusFotoPosicao === "salvando" && (
-              <p className="mt-2 text-xs text-muted">Salvando…</p>
-            )}
-            {statusFotoPosicao === "salvo" && !erroFoto && (
-              <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
-            )}
-            {erroFoto && <p className="mt-2 text-xs text-red-600">{erroFoto}</p>}
-          </div>
-        )}
-      </div>
-
-      {/* Bloco: Localização — mesmo padrão visual/comportamental do acordeão
-          de categorias em GerenciarServicos.js (cabeçalho com título + seta,
-          conteúdo só renderizado quando expandido). */}
-      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
-        <button
-          type="button"
-          onClick={() => alternarBloco("localizacao")}
-          aria-expanded={blocoAberto === "localizacao"}
-          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
-        >
-          <span className="font-semibold text-heading">Localização</span>
-          <span aria-hidden="true" className="shrink-0 text-xs text-body">
-            {blocoAberto === "localizacao" ? "▲" : "▼"}
-          </span>
-        </button>
-
-        {blocoAberto === "localizacao" && (
-          <div className="border-t border-border p-4">
-            <div>
-              <label
-                htmlFor="link-localizacao"
-                className="mb-1 block text-sm font-medium text-body"
-              >
-                Link do Google Maps
-              </label>
-              <input
-                id="link-localizacao"
-                type="text"
-                value={linkLocalizacao ?? ""}
-                onChange={(e) => setLinkLocalizacao(e.target.value)}
-                onBlur={salvarLinkLocalizacao}
-                disabled={carregandoLinkLocalizacao}
-                placeholder="https://maps.app.goo.gl/..."
-                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-              />
-              <p className="mt-1 text-xs text-muted">
-                Cole o link de compartilhamento do Google Maps (ex:
-                maps.app.goo.gl/...). Se vazio, o card de localização não
-                aparece pra cliente.
-              </p>
-            </div>
-
-            {statusLinkLocalizacao === "salvando" && (
-              <p className="mt-2 text-xs text-muted">Salvando…</p>
-            )}
-            {statusLinkLocalizacao === "salvo" && !erroLinkLocalizacao && (
-              <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
-            )}
-            {erroLinkLocalizacao && (
-              <p className="mt-2 text-xs text-red-600">{erroLinkLocalizacao}</p>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Bloco: Google Calendar */}
-      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
-        <button
-          type="button"
-          onClick={() => alternarBloco("googleCalendar")}
-          aria-expanded={blocoAberto === "googleCalendar"}
-          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
-        >
-          <span className="font-semibold text-heading">Google Calendar</span>
-          <span aria-hidden="true" className="shrink-0 text-xs text-body">
-            {blocoAberto === "googleCalendar" ? "▲" : "▼"}
-          </span>
-        </button>
-
-        {blocoAberto === "googleCalendar" && (
-          <div className="border-t border-border p-4">
-            {googleCalendarAtivo ? (
-              <div>
-                <p className="text-sm text-body">
-                  Conectado como{" "}
-                  <span className="font-medium text-heading">
-                    {googleCalendarEmail}
-                  </span>
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setModalImportarAberto(true)}
-                    className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
-                  >
-                    Importar do Google Calendar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={desconectarGoogleCalendar}
-                    disabled={carregandoGoogleCalendar || desconectandoGoogleCalendar}
-                    className="rounded-lg bg-border/60 px-3 py-2 text-sm font-medium text-heading transition disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {desconectandoGoogleCalendar ? "Desconectando…" : "Desconectar"}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div>
-                <p className="text-xs text-muted">
-                  Conecte sua conta Google pra sincronizar os agendamentos com
-                  o Google Calendar.
-                </p>
-                <button
-                  type="button"
-                  onClick={conectarGoogleCalendar}
-                  disabled={carregandoGoogleCalendar}
-                  className="mt-3 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Conectar Google Calendar
-                </button>
-              </div>
-            )}
-
-            {erroGoogleCalendar && (
-              <p className="mt-2 text-xs text-red-600">{erroGoogleCalendar}</p>
-            )}
-            {sucessoGoogleCalendar && (
-              <p className="mt-2 text-xs font-medium text-green-600">{sucessoGoogleCalendar}</p>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Bloco: Sinal de reserva */}
-      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
-        <button
-          type="button"
-          onClick={() => alternarBloco("sinal")}
-          aria-expanded={blocoAberto === "sinal"}
-          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
-        >
-          <span className="font-semibold text-heading">Sinal de reserva</span>
-          <span aria-hidden="true" className="shrink-0 text-xs text-body">
-            {blocoAberto === "sinal" ? "▲" : "▼"}
-          </span>
-        </button>
-
-        {blocoAberto === "sinal" && (
-          <div className="border-t border-border p-4">
-            <p className="text-xs text-muted">
-              Exige que o cliente declare o pagamento de um sinal via Pix
-              antes de confirmar o agendamento.
-            </p>
-
-            <div className="mt-3 space-y-3">
-              <div>
-                <label
-                  htmlFor="sinal-regra"
-                  className="mb-1 block text-sm font-medium text-body"
-                >
-                  Regra
-                </label>
-                <select
-                  id="sinal-regra"
-                  value={sinalRegra ?? "desligado"}
-                  onChange={handleSinalRegraChange}
-                  disabled={carregandoSinal}
-                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <option value="desligado">Desligado</option>
-                  <option value="novos">Obrigatório para clientes novos</option>
-                  <option value="todos">Obrigatório para todos</option>
-                </select>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="sinal-valor"
-                  className="mb-1 block text-sm font-medium text-body"
-                >
-                  Valor do sinal (R$)
-                </label>
-                <input
-                  id="sinal-valor"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  inputMode="decimal"
-                  value={sinalValor}
-                  onChange={(e) => setSinalValor(e.target.value)}
-                  onBlur={() => salvarSinal()}
-                  disabled={carregandoSinal || sinalDesligado}
-                  placeholder="0,00"
-                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="sinal-chave-pix"
-                  className="mb-1 block text-sm font-medium text-body"
-                >
-                  Chave Pix
-                </label>
-                <input
-                  id="sinal-chave-pix"
-                  type="text"
-                  value={sinalChavePix}
-                  onChange={(e) => setSinalChavePix(e.target.value)}
-                  onBlur={() => salvarSinal()}
-                  disabled={carregandoSinal || sinalDesligado}
-                  placeholder="CPF, e-mail, telefone ou chave aleatória"
-                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </div>
-            </div>
-
-            {statusSinal === "salvando" && (
-              <p className="mt-2 text-xs text-muted">Salvando…</p>
-            )}
-            {statusSinal === "salvo" && !erroSinal && (
-              <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
-            )}
-            {erroSinal && (
-              <p className="mt-2 text-xs text-red-600">{erroSinal}</p>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Bloco: Regras do agendamento */}
-      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
-        <button
-          type="button"
-          onClick={() => alternarBloco("regras")}
-          aria-expanded={blocoAberto === "regras"}
-          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
-        >
-          <span className="font-semibold text-heading">Regras do agendamento</span>
-          <span aria-hidden="true" className="shrink-0 text-xs text-body">
-            {blocoAberto === "regras" ? "▲" : "▼"}
-          </span>
-        </button>
-
-        {blocoAberto === "regras" && (
-          <div className="border-t border-border p-4">
-            <div>
-              <label
-                htmlFor="regras-agendamento"
-                className="mb-1 block text-sm font-medium text-body"
-              >
-                Texto das regras
-              </label>
-              <textarea
-                id="regras-agendamento"
-                rows={4}
-                value={avisoRegrasAgendamento ?? ""}
-                onChange={(e) => setAvisoRegrasAgendamento(e.target.value)}
-                onBlur={salvarRegrasAgendamento}
-                disabled={carregandoRegrasAgendamento}
-                placeholder="Deixe em branco para não mostrar nenhum aviso"
-                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-              />
-              <p className="mt-1 text-xs text-muted">
-                Um texto com as regras do seu atendimento — política de
-                atraso, tolerância, e outras informações importantes. Aparece
-                pra cliente confirmar que leu antes de fechar qualquer
-                agendamento, com ou sem sinal. Use *asterisco* pra deixar
-                palavras em negrito, como no WhatsApp. Deixe em branco se não
-                quiser mostrar nada.
-              </p>
-            </div>
-
-            {statusRegrasAgendamento === "salvando" && (
-              <p className="mt-2 text-xs text-muted">Salvando…</p>
-            )}
-            {statusRegrasAgendamento === "salvo" && !erroRegrasAgendamento && (
-              <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
-            )}
-            {erroRegrasAgendamento && (
-              <p className="mt-2 text-xs text-red-600">{erroRegrasAgendamento}</p>
-            )}
-          </div>
-        )}
-      </div>
 
       {/* Bloco: Janela de agendamento — data final (janela_agendamento_fim)
           além da qual nenhum dia pode ser agendado, público ou /admin (ver
@@ -1751,88 +1338,6 @@ export default function ConfiguracoesSalao({
         )}
       </div>
 
-      {/* Bloco: Mensagens de WhatsApp — lista das 8 mensagens editáveis, cada
-          uma com sua própria prévia (linha truncada) e expansão individual
-          (mensagemExpandida), aninhada dentro deste bloco retrátil. */}
-      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
-        <button
-          type="button"
-          onClick={() => alternarBloco("mensagens")}
-          aria-expanded={blocoAberto === "mensagens"}
-          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
-        >
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span className="font-semibold text-heading">Mensagens de WhatsApp</span>
-            <span className="truncate text-xs text-muted">
-              Digite &quot;/&quot; para inserir variáveis
-            </span>
-          </span>
-          <span aria-hidden="true" className="shrink-0 text-xs text-body">
-            {blocoAberto === "mensagens" ? "▲" : "▼"}
-          </span>
-        </button>
-
-        {blocoAberto === "mensagens" && (
-          <div className="border-t border-border divide-y divide-border">
-            {MENSAGENS_WHATSAPP_CONFIG.map(({ campo, titulo, gatilho, variaveis, padrao }) => {
-              const textoVigente = mensagens?.[campo] ?? padrao;
-              const preview = substituirVariaveis(textoVigente, VALORES_EXEMPLO_MENSAGENS);
-              const aberta = mensagemExpandida === campo;
-
-              return (
-                <div key={campo} className="p-4">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setMensagemExpandida((atual) => (atual === campo ? null : campo))
-                    }
-                    aria-expanded={aberta}
-                    className="flex w-full items-start justify-between gap-3 text-left"
-                  >
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium text-heading">
-                        {titulo}
-                      </span>
-                      <span className="mt-0.5 line-clamp-3 block text-xs text-muted">
-                        {preview}
-                      </span>
-                    </span>
-                    <span aria-hidden="true" className="mt-0.5 shrink-0 text-xs text-body">
-                      {aberta ? "▲" : "▼"}
-                    </span>
-                  </button>
-
-                  {aberta && (
-                    <div className="mt-3 space-y-2">
-                      <CampoMensagemWhatsapp
-                        value={mensagens?.[campo] ?? ""}
-                        onChange={(novo) =>
-                          setMensagens((m) => ({ ...m, [campo]: novo }))
-                        }
-                        onBlur={() => salvarMensagem(campo)}
-                        variaveisDisponiveis={variaveis}
-                      />
-
-                      <p className="text-xs text-muted">{gatilho}</p>
-
-                      {statusMensagens[campo] === "salvando" && (
-                        <p className="text-xs text-muted">Salvando…</p>
-                      )}
-                      {statusMensagens[campo] === "salvo" && !erroMensagens[campo] && (
-                        <p className="text-xs font-medium text-green-600">Salvo ✓</p>
-                      )}
-                      {erroMensagens[campo] && (
-                        <p className="text-xs text-red-600">{erroMensagens[campo]}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
       {/* Bloco: Manutenção */}
       <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
         <button
@@ -1916,6 +1421,241 @@ export default function ConfiguracoesSalao({
                 <p className="mt-2 text-xs text-red-600">{erroValorCheio}</p>
               )}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bloco: Sinal de reserva */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("sinal")}
+          aria-expanded={blocoAberto === "sinal"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Sinal de reserva</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "sinal" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "sinal" && (
+          <div className="border-t border-border p-4">
+            <p className="text-xs text-muted">
+              Exige que o cliente declare o pagamento de um sinal via Pix
+              antes de confirmar o agendamento.
+            </p>
+
+            <div className="mt-3 space-y-3">
+              <div>
+                <label
+                  htmlFor="sinal-regra"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Regra
+                </label>
+                <select
+                  id="sinal-regra"
+                  value={sinalRegra ?? "desligado"}
+                  onChange={handleSinalRegraChange}
+                  disabled={carregandoSinal}
+                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <option value="desligado">Desligado</option>
+                  <option value="novos">Obrigatório para clientes novos</option>
+                  <option value="todos">Obrigatório para todos</option>
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="sinal-valor"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Valor do sinal (R$)
+                </label>
+                <input
+                  id="sinal-valor"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={sinalValor}
+                  onChange={(e) => setSinalValor(e.target.value)}
+                  onBlur={() => salvarSinal()}
+                  disabled={carregandoSinal || sinalDesligado}
+                  placeholder="0,00"
+                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="sinal-chave-pix"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Chave Pix
+                </label>
+                <input
+                  id="sinal-chave-pix"
+                  type="text"
+                  value={sinalChavePix}
+                  onChange={(e) => setSinalChavePix(e.target.value)}
+                  onBlur={() => salvarSinal()}
+                  disabled={carregandoSinal || sinalDesligado}
+                  placeholder="CPF, e-mail, telefone ou chave aleatória"
+                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+            </div>
+
+            {statusSinal === "salvando" && (
+              <p className="mt-2 text-xs text-muted">Salvando…</p>
+            )}
+            {statusSinal === "salvo" && !erroSinal && (
+              <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+            )}
+            {erroSinal && (
+              <p className="mt-2 text-xs text-red-600">{erroSinal}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Bloco: Regras do agendamento */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("regras")}
+          aria-expanded={blocoAberto === "regras"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Texto com regras de agendamento</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "regras" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "regras" && (
+          <div className="border-t border-border p-4">
+            <div>
+              <label
+                htmlFor="regras-agendamento"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Texto das regras
+              </label>
+              <textarea
+                id="regras-agendamento"
+                rows={4}
+                value={avisoRegrasAgendamento ?? ""}
+                onChange={(e) => setAvisoRegrasAgendamento(e.target.value)}
+                onBlur={salvarRegrasAgendamento}
+                disabled={carregandoRegrasAgendamento}
+                placeholder="Deixe em branco para não mostrar nenhum aviso"
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <p className="mt-1 text-xs text-muted">
+                Um texto com as regras do seu atendimento — política de
+                atraso, tolerância, e outras informações importantes. Aparece
+                pra cliente confirmar que leu antes de fechar qualquer
+                agendamento, com ou sem sinal. Use *asterisco* pra deixar
+                palavras em negrito, como no WhatsApp. Deixe em branco se não
+                quiser mostrar nada.
+              </p>
+            </div>
+
+            {statusRegrasAgendamento === "salvando" && (
+              <p className="mt-2 text-xs text-muted">Salvando…</p>
+            )}
+            {statusRegrasAgendamento === "salvo" && !erroRegrasAgendamento && (
+              <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+            )}
+            {erroRegrasAgendamento && (
+              <p className="mt-2 text-xs text-red-600">{erroRegrasAgendamento}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Bloco: Mensagens de WhatsApp — lista das 8 mensagens editáveis, cada
+          uma com sua própria prévia (linha truncada) e expansão individual
+          (mensagemExpandida), aninhada dentro deste bloco retrátil. */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("mensagens")}
+          aria-expanded={blocoAberto === "mensagens"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="font-semibold text-heading">Mensagens de WhatsApp</span>
+            <span className="truncate text-xs text-muted">
+              Digite &quot;/&quot; para inserir variáveis
+            </span>
+          </span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "mensagens" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "mensagens" && (
+          <div className="border-t border-border divide-y divide-border">
+            {MENSAGENS_WHATSAPP_CONFIG.map(({ campo, titulo, gatilho, variaveis, padrao }) => {
+              const textoVigente = mensagens?.[campo] ?? padrao;
+              const preview = substituirVariaveis(textoVigente, VALORES_EXEMPLO_MENSAGENS);
+              const aberta = mensagemExpandida === campo;
+
+              return (
+                <div key={campo} className="p-4">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMensagemExpandida((atual) => (atual === campo ? null : campo))
+                    }
+                    aria-expanded={aberta}
+                    className="flex w-full items-start justify-between gap-3 text-left"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-heading">
+                        {titulo}
+                      </span>
+                      <span className="mt-0.5 line-clamp-3 block text-xs text-muted">
+                        {preview}
+                      </span>
+                    </span>
+                    <span aria-hidden="true" className="mt-0.5 shrink-0 text-xs text-body">
+                      {aberta ? "▲" : "▼"}
+                    </span>
+                  </button>
+
+                  {aberta && (
+                    <div className="mt-3 space-y-2">
+                      <CampoMensagemWhatsapp
+                        value={mensagens?.[campo] ?? ""}
+                        onChange={(novo) =>
+                          setMensagens((m) => ({ ...m, [campo]: novo }))
+                        }
+                        onBlur={() => salvarMensagem(campo)}
+                        variaveisDisponiveis={variaveis}
+                      />
+
+                      <p className="text-xs text-muted">{gatilho}</p>
+
+                      {statusMensagens[campo] === "salvando" && (
+                        <p className="text-xs text-muted">Salvando…</p>
+                      )}
+                      {statusMensagens[campo] === "salvo" && !erroMensagens[campo] && (
+                        <p className="text-xs font-medium text-green-600">Salvo ✓</p>
+                      )}
+                      {erroMensagens[campo] && (
+                        <p className="text-xs text-red-600">{erroMensagens[campo]}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -2027,6 +1767,275 @@ export default function ConfiguracoesSalao({
           </div>
         )}
       </div>
+
+      {/* Subtítulo: Configurações — separa os blocos de regras de negócio
+          (acima) dos blocos de identidade/integração do salão (abaixo).
+          Primeiro divisor de seção da tela. */}
+      <h2 className="pt-4 text-lg font-semibold text-heading">
+        Configurações
+      </h2>
+
+      {/* Bloco: Google Calendar */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("googleCalendar")}
+          aria-expanded={blocoAberto === "googleCalendar"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Google Calendar</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "googleCalendar" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "googleCalendar" && (
+          <div className="border-t border-border p-4">
+            {googleCalendarAtivo ? (
+              <div>
+                <p className="text-sm text-body">
+                  Conectado como{" "}
+                  <span className="font-medium text-heading">
+                    {googleCalendarEmail}
+                  </span>
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setModalImportarAberto(true)}
+                    className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+                  >
+                    Importar do Google Calendar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={desconectarGoogleCalendar}
+                    disabled={carregandoGoogleCalendar || desconectandoGoogleCalendar}
+                    className="rounded-lg bg-border/60 px-3 py-2 text-sm font-medium text-heading transition disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {desconectandoGoogleCalendar ? "Desconectando…" : "Desconectar"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <p className="text-xs text-muted">
+                  Conecte sua conta Google pra sincronizar os agendamentos com
+                  o Google Calendar.
+                </p>
+                <button
+                  type="button"
+                  onClick={conectarGoogleCalendar}
+                  disabled={carregandoGoogleCalendar}
+                  className="mt-3 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Conectar Google Calendar
+                </button>
+              </div>
+            )}
+
+            {erroGoogleCalendar && (
+              <p className="mt-2 text-xs text-red-600">{erroGoogleCalendar}</p>
+            )}
+            {sucessoGoogleCalendar && (
+              <p className="mt-2 text-xs font-medium text-green-600">{sucessoGoogleCalendar}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Bloco: Localização — mesmo padrão visual/comportamental do acordeão
+          de categorias em GerenciarServicos.js (cabeçalho com título + seta,
+          conteúdo só renderizado quando expandido). */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("localizacao")}
+          aria-expanded={blocoAberto === "localizacao"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Localização</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "localizacao" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "localizacao" && (
+          <div className="border-t border-border p-4">
+            <div>
+              <label
+                htmlFor="link-localizacao"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Link do Google Maps
+              </label>
+              <input
+                id="link-localizacao"
+                type="text"
+                value={linkLocalizacao ?? ""}
+                onChange={(e) => setLinkLocalizacao(e.target.value)}
+                onBlur={salvarLinkLocalizacao}
+                disabled={carregandoLinkLocalizacao}
+                placeholder="https://maps.app.goo.gl/..."
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <p className="mt-1 text-xs text-muted">
+                Cole o link de compartilhamento do Google Maps (ex:
+                maps.app.goo.gl/...). Se vazio, o card de localização não
+                aparece pra cliente.
+              </p>
+            </div>
+
+            {statusLinkLocalizacao === "salvando" && (
+              <p className="mt-2 text-xs text-muted">Salvando…</p>
+            )}
+            {statusLinkLocalizacao === "salvo" && !erroLinkLocalizacao && (
+              <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+            )}
+            {erroLinkLocalizacao && (
+              <p className="mt-2 text-xs text-red-600">{erroLinkLocalizacao}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Bloco: Foto de perfil */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("fotoPerfil")}
+          aria-expanded={blocoAberto === "fotoPerfil"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Foto de perfil</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "fotoPerfil" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "fotoPerfil" && (
+          <div className="border-t border-border p-4">
+            {fotoPerfilUrl ? (
+              <FotoPerfilCircular
+                src={fotoPerfilUrl}
+                posicao={`${fotoPerfilX}% ${fotoPerfilY}%`}
+                zoom={fotoPerfilZoom}
+                diametro={96}
+                alt="Foto de perfil"
+              />
+            ) : (
+              <div className="mb-6 flex justify-center">
+                <div
+                  className="flex items-center justify-center rounded-full bg-border/40 p-2 text-center text-xs text-muted ring-1 ring-border"
+                  style={{ width: 96, height: 96 }}
+                >
+                  Nenhuma foto enviada ainda
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label
+                  htmlFor="foto-perfil-input"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Enviar nova foto
+                </label>
+                <input
+                  id="foto-perfil-input"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFotoPerfilChange}
+                  disabled={carregandoFoto || enviandoFoto}
+                  className="block w-full text-sm text-body file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                {enviandoFoto && (
+                  <p className="mt-2 text-xs text-muted">Enviando…</p>
+                )}
+              </div>
+
+              <div>
+                <label
+                  htmlFor="foto-perfil-x"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Posição horizontal
+                </label>
+                <input
+                  id="foto-perfil-x"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={fotoPerfilX}
+                  onChange={(e) => setFotoPerfilX(Number(e.target.value))}
+                  onMouseUp={() => salvarFotoPerfilPosicao()}
+                  onTouchEnd={() => salvarFotoPerfilPosicao()}
+                  onKeyUp={() => salvarFotoPerfilPosicao()}
+                  disabled={carregandoFoto || !fotoPerfilUrl}
+                  className="w-full disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="foto-perfil-y"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Posição vertical
+                </label>
+                <input
+                  id="foto-perfil-y"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={fotoPerfilY}
+                  onChange={(e) => setFotoPerfilY(Number(e.target.value))}
+                  onMouseUp={() => salvarFotoPerfilPosicao()}
+                  onTouchEnd={() => salvarFotoPerfilPosicao()}
+                  onKeyUp={() => salvarFotoPerfilPosicao()}
+                  disabled={carregandoFoto || !fotoPerfilUrl}
+                  className="w-full disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="foto-perfil-zoom"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Zoom
+                </label>
+                <input
+                  id="foto-perfil-zoom"
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.1}
+                  value={fotoPerfilZoom}
+                  onChange={(e) => setFotoPerfilZoom(Number(e.target.value))}
+                  onMouseUp={() => salvarFotoPerfilPosicao()}
+                  onTouchEnd={() => salvarFotoPerfilPosicao()}
+                  onKeyUp={() => salvarFotoPerfilPosicao()}
+                  disabled={carregandoFoto || !fotoPerfilUrl}
+                  className="w-full disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+            </div>
+
+            {statusFotoPosicao === "salvando" && (
+              <p className="mt-2 text-xs text-muted">Salvando…</p>
+            )}
+            {statusFotoPosicao === "salvo" && !erroFoto && (
+              <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+            )}
+            {erroFoto && <p className="mt-2 text-xs text-red-600">{erroFoto}</p>}
+          </div>
+        )}
+      </div>
+
     </div>
 
     <ModalImportarGoogleCalendar
