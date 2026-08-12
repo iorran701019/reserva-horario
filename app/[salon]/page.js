@@ -58,8 +58,18 @@ export default function AgendarPage() {
   );
   // Etapa interna do IdentificacaoCliente ("telefone" | "confirmar" |
   // "cadastroSimples" | "completarEndereco") — só usada aqui pra decidir
-  // quando a FotoPerfilCircular deve aparecer (ver uso abaixo).
-  const [etapaIdentificacao, setEtapaIdentificacao] = useState("telefone");
+  // quando a FotoPerfilCircular deve aparecer (ver uso abaixo). Só é
+  // atualizada pelo onEtapaChange de IdentificacaoCliente — que só monta
+  // enquanto !clienteIdentificado. Com o cliente restaurado já identificado
+  // do sessionStorage (reload real, ver clienteIdentificado acima),
+  // IdentificacaoCliente nunca monta e esse sync nunca dispara: sem nascer
+  // resolvido aqui, o default "telefone" ficaria preso pro resto da sessão,
+  // vazando a foto (com o diametro da caixa do PASSO ATUAL, não da tela de
+  // telefone) pro Painel/Anamnese/wizard. null nasce != "telefone", então a
+  // condição da linha abaixo já resolve sem precisar tocar nela.
+  const [etapaIdentificacao, setEtapaIdentificacao] = useState(() =>
+    lerFatia(salon, "clienteIdentificado") ? null : "telefone"
+  );
 
   // null = ainda checando (ou cliente ainda não identificado); true = precisa
   // preencher a anamnese antes do wizard; false = anamnese em dia, segue
