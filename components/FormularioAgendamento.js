@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { calcularVagasPorHorario } from "@/lib/disponibilidade";
+import { calcularVagasPorHorario, filtrarPorAntecedenciaMinima } from "@/lib/disponibilidade";
 import { buscarTema } from "@/lib/temas";
 import { buscarProgressoFidelidade } from "@/lib/fidelidade";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
@@ -61,16 +61,6 @@ function dataDeHoje() {
   const mes = String(agora.getMonth() + 1).padStart(2, "0");
   const dia = String(agora.getDate()).padStart(2, "0");
   return `${ano}-${mes}-${dia}`;
-}
-
-// "HH:MM" da hora atual em horário local — usado pra esconder, na data de
-// hoje, os slots que já passaram. Zero-padded de tamanho fixo, igual aos
-// slots gerados, pra que a comparação de string ("HH:MM" <= "HH:MM") bata.
-function horaDeAgora() {
-  const agora = new Date();
-  const hora = String(agora.getHours()).padStart(2, "0");
-  const min = String(agora.getMinutes()).padStart(2, "0");
-  return `${hora}:${min}`;
 }
 
 // Date -> "YYYY-MM-DD" em horário LOCAL (a mesma chave usada nas queries e na
@@ -176,6 +166,27 @@ async function escolherMenosOcupado(estabelecimentoId, data, candidatos) {
   }
 
   return [...contagem.entries()].sort((a, b) => a[1] - b[1] || a[0] - b[0])[0][0];
+}
+
+// Revalida (data, horario) contra a antecedência mínima do salão no relógio
+// do SERVIDOR (rota /api/agendamentos/validar-antecedencia), chamada logo
+// antes de QUALQUER insert em `agendamentos` (ver selecionarHorario e o ramo
+// /admin de finalizarAgendamento) — o filtro em horariosVisiveis já usa o
+// mesmo cálculo, mas com o relógio do NAVEGADOR, que dá pra manipular. Falha
+// de rede conta como bloqueado: mais seguro que deixar passar sem checar.
+async function validarAntecedenciaNoServidor({ estabelecimentoId, data, horario }) {
+  try {
+    const resposta = await fetch("/api/agendamentos/validar-antecedencia", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ estabelecimentoId, data, horario }),
+    });
+    if (!resposta.ok) return false;
+    const resultado = await resposta.json();
+    return resultado.permitido === true;
+  } catch {
+    return false;
+  }
 }
 
 // Perguntas vinculadas a um serviço (servico_perguntas + suas opções) — usada
@@ -1051,6 +1062,9 @@ export default function FormularioAgendamento({
   // Horários oferecidos = chaves do mapa de vagas. No fluxo "cliente escolhe",
   // filtra só os horários em que o profissional selecionado está livre; no
   // encaixe automático basta existir >=1 profissional livre (a chave existe).
+  // `horariosBase` NÃO passa pela antecedência mínima — só existe pra
+  // distinguir, na mensagem da UI, "não tem vaga nenhuma" de "tinha vaga, mas
+  // nada respeita mais a antecedência" (ver JSX da etapa "data").
   const horariosBase = Object.keys(vagas)
     .filter((h) =>
       escolherProfissional
@@ -1060,12 +1074,19 @@ export default function FormularioAgendamento({
     )
     .sort();
 
-  // Na data de hoje, esconde o que já passou (comparação por string "HH:MM").
-  // Data futura: nada é filtrado.
-  const horariosVisiveis =
-    form.data === hoje
-      ? horariosBase.filter((h) => h > horaDeAgora())
-      : horariosBase;
+  // Remove os horários que ferem a antecedência mínima do salão ou o corte do
+  // dia seguinte (ver filtrarPorAntecedenciaMinima em lib/disponibilidade.js)
+  // — aplicado em QUALQUER data, não só hoje: com antecedência configurada,
+  // um dia inteiro pode ficar sem horários mesmo sendo amanhã ou depois. Sem
+  // antecedência configurada, o resultado ainda esconde horários já passados
+  // de hoje (mesmo efeito do antigo filtro por horaDeAgora()). Client-side
+  // só: é filtro de UX, não a proteção real (ver validarAntecedenciaNoServidor).
+  const vagasDentroDaAntecedencia = filtrarPorAntecedenciaMinima(
+    vagas,
+    form.data,
+    estabelecimento
+  );
+  const horariosVisiveis = horariosBase.filter((h) => vagasDentroDaAntecedencia[h] != null);
 
   // Mantém `vagas` (mapa horário -> profissionais livres) sincronizado com a
   // data/serviço selecionados. A flag `ativo` cancela corridas entre datas e
@@ -1597,6 +1618,21 @@ export default function FormularioAgendamento({
 
     setCriandoReserva(true);
 
+    // Revalida no servidor ANTES de mexer em qualquer reserva existente —
+    // se rejeitado, a reserva anterior (se houver) continua intacta (ver
+    // validarAntecedenciaNoServidor).
+    const antecedenciaOk = await validarAntecedenciaNoServidor({
+      estabelecimentoId: estabelecimento.id,
+      data: form.data,
+      horario: slot,
+    });
+    if (!antecedenciaOk) {
+      setCriandoReserva(false);
+      setErro("Esse horário não respeita mais a antecedência mínima do salão. Escolha outro.");
+      setHorarioSelecionado("");
+      return;
+    }
+
     // Havia uma reserva de uma tentativa anterior (outro serviço/data/horário
     // escolhido depois de um "Voltar"): cancela ANTES de criar a nova.
     if (reservaId != null) {
@@ -1783,6 +1819,22 @@ export default function FormularioAgendamento({
     }
 
     setEnviando(true);
+
+    // Revalida no servidor ANTES de inserir (ver validarAntecedenciaNoServidor
+    // — mesma checagem do fluxo público, aplicada aqui também pra manter as
+    // duas telas consistentes com o filtro já usado em horariosVisiveis).
+    const antecedenciaOk = await validarAntecedenciaNoServidor({
+      estabelecimentoId: estabelecimento.id,
+      data: form.data,
+      horario: horarioSelecionado,
+    });
+    if (!antecedenciaOk) {
+      setEnviando(false);
+      setErro("Esse horário não respeita mais a antecedência mínima do salão. Escolha outro.");
+      setHorarioSelecionado("");
+      setEtapa("data");
+      return;
+    }
 
     // Quem fica com a reserva: o escolhido pelo cliente, ou — no encaixe
     // automático — o menos ocupado entre os livres neste horário.
@@ -2186,14 +2238,15 @@ export default function FormularioAgendamento({
                   </p>
                 )}
 
-                {/* Havia vaga, mas tudo já passou: só ocorre quando a data é
-                    hoje e a hora atual ultrapassou o último horário. */}
+                {/* Havia vaga, mas nada respeita mais a antecedência mínima
+                    do salão (hora já passou, ou o corte do dia seguinte
+                    fechou o dia inteiro — ver filtrarPorAntecedenciaMinima). */}
                 {!carregandoSlots &&
                   !erroSlots &&
                   horariosBase.length > 0 &&
                   horariosVisiveis.length === 0 && (
                     <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
-                      Não há mais horários disponíveis para hoje.
+                      Não há mais horários disponíveis para esta data.
                     </p>
                   )}
 

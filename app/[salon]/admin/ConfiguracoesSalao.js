@@ -142,6 +142,17 @@ export default function ConfiguracoesSalao({
   const [erroReservaExpira, setErroReservaExpira] = useState("");
   const [statusReservaExpira, setStatusReservaExpira] = useState("");
 
+  // Antecedência mínima (em horas) pra cliente agendar pelo app (ver
+  // lib/disponibilidade.js -> filtrarPorAntecedenciaMinima). String do
+  // <select> ("" = "Nenhum"/null, senão "12"/"24"/"48"); undefined = ainda
+  // carregando. O corte do dia seguinte (cutoffDiaSeguinte*) é uma regra
+  // INDEPENDENTE — funciona com qualquer antecedência, inclusive "Nenhum".
+  const [antecedenciaMinimaHoras, setAntecedenciaMinimaHoras] = useState(undefined);
+  const [cutoffDiaSeguinteAtivo, setCutoffDiaSeguinteAtivo] = useState(false);
+  const [cutoffDiaSeguinteHora, setCutoffDiaSeguinteHora] = useState("19");
+  const [erroAntecedenciaMinima, setErroAntecedenciaMinima] = useState("");
+  const [statusAntecedenciaMinima, setStatusAntecedenciaMinima] = useState("");
+
   // Qual bloco retrátil está expandido — só um aberto por vez, mesmo padrão
   // do acordeão de categorias de serviço (ver GerenciarServicos.js).
   const [blocoAberto, setBlocoAberto] = useState(null);
@@ -257,7 +268,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -277,6 +288,7 @@ export default function ConfiguracoesSalao({
         setErroFoto(error.message);
         setErroGoogleCalendar(error.message);
         setErroJanela(error.message);
+        setErroAntecedenciaMinima(error.message);
         return;
       }
       setErro("");
@@ -342,6 +354,17 @@ export default function ConfiguracoesSalao({
 
       setErroJanela("");
       setJanelaAgendamentoFim(data?.janela_agendamento_fim ?? "");
+
+      setErroAntecedenciaMinima("");
+      setAntecedenciaMinimaHoras(
+        data?.antecedencia_minima_horas == null
+          ? ""
+          : String(data.antecedencia_minima_horas)
+      );
+      setCutoffDiaSeguinteAtivo(Boolean(data?.cutoff_dia_seguinte_ativo));
+      setCutoffDiaSeguinteHora(
+        data?.cutoff_dia_seguinte_hora == null ? "19" : String(data.cutoff_dia_seguinte_hora)
+      );
 
       const textosMensagens = {};
       MENSAGENS_WHATSAPP_CONFIG.forEach(({ campo, padrao, camposDestino }) => {
@@ -468,6 +491,12 @@ export default function ConfiguracoesSalao({
     const t = setTimeout(() => setStatusJanela(""), 2500);
     return () => clearTimeout(t);
   }, [statusJanela]);
+
+  useEffect(() => {
+    if (statusAntecedenciaMinima !== "salvo") return;
+    const t = setTimeout(() => setStatusAntecedenciaMinima(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusAntecedenciaMinima]);
 
   // Abre/fecha um bloco retrátil — só um aberto por vez, mesmo padrão do
   // acordeão de categorias de serviço.
@@ -904,6 +933,77 @@ export default function ConfiguracoesSalao({
     onJanelaAgendamentoFimAtualizada(novaData);
   }
 
+  // Grava a antecedência mínima (select "Nenhum"/12/24/48 — ver
+  // filtrarPorAntecedenciaMinima em lib/disponibilidade.js). Regra
+  // independente do corte do dia seguinte — não mexe nos campos de cutoff.
+  async function salvarAntecedenciaMinima(novoValorStr) {
+    const novoValor = novoValorStr === "" ? null : Number(novoValorStr);
+
+    setStatusAntecedenciaMinima("salvando");
+    setErroAntecedenciaMinima("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ antecedencia_minima_horas: novoValor })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setStatusAntecedenciaMinima("");
+      setErroAntecedenciaMinima(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setAntecedenciaMinimaHoras(novoValorStr);
+    setStatusAntecedenciaMinima("salvo");
+  }
+
+  // Liga/desliga o corte do dia seguinte — regra independente da antecedência
+  // mínima (ver filtrarPorAntecedenciaMinima em lib/disponibilidade.js). Ao
+  // desligar, limpa também a hora gravada (null): o checkbox desmarcado não
+  // deixa uma hora "fantasma" no banco.
+  async function alternarCutoffDiaSeguinte() {
+    const novo = !cutoffDiaSeguinteAtivo;
+    setCutoffDiaSeguinteAtivo(novo);
+    setStatusAntecedenciaMinima("salvando");
+    setErroAntecedenciaMinima("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({
+        cutoff_dia_seguinte_ativo: novo,
+        cutoff_dia_seguinte_hora: novo ? Number(cutoffDiaSeguinteHora) : null,
+      })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setCutoffDiaSeguinteAtivo(!novo);
+      setStatusAntecedenciaMinima("");
+      setErroAntecedenciaMinima(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setStatusAntecedenciaMinima("salvo");
+  }
+
+  async function salvarCutoffDiaSeguinteHora(novaHoraStr) {
+    setStatusAntecedenciaMinima("salvando");
+    setErroAntecedenciaMinima("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ cutoff_dia_seguinte_hora: Number(novaHoraStr) })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setStatusAntecedenciaMinima("");
+      setErroAntecedenciaMinima(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setCutoffDiaSeguinteHora(novaHoraStr);
+    setStatusAntecedenciaMinima("salvo");
+  }
+
   // Grava o texto vigente de UMA mensagem (`mensagens[campo]`), literal —
   // inclusive string vazia, quando o dono esvazia o campo de propósito (ver
   // regra em MENSAGENS_WHATSAPP_CONFIG/lib/whatsapp.js: vazio salvo é ''
@@ -951,6 +1051,7 @@ export default function ConfiguracoesSalao({
   const carregandoFoto = fotoPerfilUrl === undefined;
   const carregandoGoogleCalendar = googleCalendarAtivo === undefined;
   const carregandoJanela = janelaAgendamentoFim === undefined;
+  const carregandoAntecedenciaMinima = antecedenciaMinimaHoras === undefined;
   const sinalDesligado = sinalRegra === "desligado";
   // Com 1 só profissional ativo (ou enquanto a contagem ainda carrega), o
   // toggle some — não há outro profissional pro cliente escolher de qualquer
@@ -1489,6 +1590,71 @@ export default function ConfiguracoesSalao({
               <p className="text-xs font-medium text-green-600">Salvo ✓</p>
             )}
             {erroJanela && <p className="text-xs text-red-600">{erroJanela}</p>}
+
+            {/* Sub-bloco: antecedência mínima do CLIENTE (não afeta o
+                calendário da janela acima, que é o limite máximo) + corte do
+                dia seguinte. As duas regras são INDEPENDENTES — o corte
+                aparece sempre, funciona mesmo com antecedência "Nenhum" (ver
+                filtrarPorAntecedenciaMinima em lib/disponibilidade.js). */}
+            <div className="border-t border-border pt-4">
+              <label
+                htmlFor="antecedencia-minima-horas"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Antecedência mínima para agendamentos do cliente
+              </label>
+              <p className="mb-2 text-xs text-muted">
+                Defina com quanta antecedência os clientes podem agendar pelo
+                app.
+              </p>
+              <select
+                id="antecedencia-minima-horas"
+                value={antecedenciaMinimaHoras ?? ""}
+                onChange={(e) => salvarAntecedenciaMinima(e.target.value)}
+                disabled={carregandoAntecedenciaMinima}
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="">Nenhum</option>
+                <option value="12">12 horas antes</option>
+                <option value="24">24 horas antes</option>
+                <option value="48">48 horas antes</option>
+              </select>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 text-sm text-body">
+                  <input
+                    type="checkbox"
+                    checked={cutoffDiaSeguinteAtivo}
+                    onChange={alternarCutoffDiaSeguinte}
+                    disabled={carregandoAntecedenciaMinima}
+                    className="h-4 w-4 rounded border-border"
+                  />
+                  Encerrar agendamentos da manhã seguinte às
+                </label>
+                <select
+                  value={cutoffDiaSeguinteHora}
+                  onChange={(e) => salvarCutoffDiaSeguinteHora(e.target.value)}
+                  disabled={carregandoAntecedenciaMinima || !cutoffDiaSeguinteAtivo}
+                  className="rounded-lg border border-border px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {[18, 19, 20, 21].map((h) => (
+                    <option key={h} value={h}>
+                      {h}h
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {statusAntecedenciaMinima === "salvando" && (
+                <p className="mt-2 text-xs text-muted">Salvando…</p>
+              )}
+              {statusAntecedenciaMinima === "salvo" && !erroAntecedenciaMinima && (
+                <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+              )}
+              {erroAntecedenciaMinima && (
+                <p className="mt-2 text-xs text-red-600">{erroAntecedenciaMinima}</p>
+              )}
+            </div>
           </div>
         )}
       </div>
