@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import { buscarPerfil } from "@/lib/perfil";
@@ -319,6 +319,8 @@ async function buscarPendenciasAdmin(estabelecimentoId) {
 
 export default function AdminPage() {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   // Slug do salão no path (/[salon]/admin). Fonte única do tenant: alimenta a
   // resolução do estabelecimento e a montagem das URLs de login/redirect.
@@ -356,7 +358,15 @@ export default function AdminPage() {
 
   // Aba-pai do topo (ver ABAS_PAI): "pendentes" (inbox), "painel" (calendário),
   // "historico" e "agendar". A partição é derivada (lib/particao), sem status novo.
-  const [viewPai, setViewPai] = useState("pendentes");
+  // Inicializa a partir da query string (?aba=) pra sobreviver a refresh.
+  const [viewPai, setViewPai] = useState(searchParams.get("aba") || "pendentes");
+
+  // Mantém viewPai em sincronia com a URL quando ela muda por fora do onClick
+  // das abas (botão voltar/avançar do navegador, ou back gesture no Android).
+  useEffect(() => {
+    const abaNaUrl = searchParams.get("aba") || "pendentes";
+    setViewPai((atual) => (atual === abaNaUrl ? atual : abaNaUrl));
+  }, [searchParams]);
 
   // Drawer lateral de navegação (mobile-first): substitui a antiga barra de abas
   // fixa. `true` = aberto. Selecionar uma aba troca `viewPai` e fecha o drawer.
@@ -1976,6 +1986,7 @@ export default function AdminPage() {
                     setViewPai(aba.id);
                     setDrawerAberto(false);
                     setAvisoAgendar("");
+                    router.push(`${pathname}?aba=${aba.id}`, { scroll: false });
                   }}
                   aria-current={ativa ? "page" : undefined}
                   className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition ${
