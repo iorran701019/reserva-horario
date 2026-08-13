@@ -2509,10 +2509,6 @@ export default function AdminPage() {
               </span>
               {carregandoDiasAlterarData ? (
                 <p className="text-sm text-body">Carregando disponibilidade...</p>
-              ) : diasSemanaAtivosAlterarData.size === 0 ? (
-                <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
-                  Este profissional não tem dias de atendimento configurados.
-                </p>
               ) : (
                 <CalendarioDias
                   mes={mesVisivelAlterarData}
@@ -2536,6 +2532,13 @@ export default function AdminPage() {
                   }
                   podeVoltar={podeVoltarMesAlterarData}
                   estabelecimento={estabelecimento}
+                  // Este modal é sempre admin — modo livre sempre ligado (ver
+                  // CalendarioDias/modoLivre em FormularioAgendamento.js). A
+                  // grade de horários abaixo NÃO foi estendida (fora do
+                  // escopo pedido): dias fora da janela/expediente ficam
+                  // clicáveis aqui, mas ainda podem mostrar "nenhum horário
+                  // disponível" até essa segunda parte ser implementada.
+                  modoLivre
                 />
               )}
             </div>

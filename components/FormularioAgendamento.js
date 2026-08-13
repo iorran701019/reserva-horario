@@ -52,6 +52,15 @@ const DIAS_SEMANA = [
   "sábado",
 ];
 
+// Rótulos pt-BR dos `motivo` que calcularVagasPorHorario/filtrarPorAntecedenciaMinima
+// anotam no formato enriquecido (contexto='admin') — usado só pelo tooltip da
+// grade do modo livre (ver gradeAdmin/ROTULOS_MOTIVO_BLOQUEIO no JSX).
+const ROTULOS_MOTIVO_BLOQUEIO = {
+  excecao_ausencia: "ausência cadastrada",
+  fora_do_modo: "fora do expediente/modo configurado",
+  antecedencia: "fora da antecedência mínima do salão",
+};
+
 // "YYYY-MM-DD" de hoje em horário local — usado como mínimo do date picker.
 function dataDeHoje() {
   const agora = new Date();
@@ -229,6 +238,16 @@ async function buscarPerguntasServico(servicoId) {
 //                   fundo verde sutil, dias após ganham laranja. Um dia
 //                   desabilitado (cinza, sem profissional) mantém prioridade
 //                   visual sobre essas cores.
+//   modoLivre        – true no /admin (ver FormularioAgendamento): `fechado` e
+//                   `foraDaJanela` deixam de desabilitar o dia — a dona pode
+//                   escolher qualquer dia, mesmo sem profissional elegível ou
+//                   além da janela de agendamento. `passado` continua
+//                   bloqueando SEMPRE, nos dois modos (não dá pra agendar num
+//                   dia que já passou). Um dia que só ficou clicável por
+//                   causa do modoLivre ganha uma marcação visual distinta
+//                   (borda tracejada + selo) — nunca a mesma paleta
+//                   verde/laranja do vencimento de manutenção, pra não
+//                   misturar as duas informações.
 // Exportado pra ser reaproveitado fora do wizard (ver modal "Alterar data"
 // da seção "Fora da janela de agendamento" em app/[salon]/admin/page.js) —
 // componente puro, tudo vem por props, nenhuma dependência do resto do
@@ -244,6 +263,7 @@ export function CalendarioDias({
   podeVoltar,
   estabelecimento,
   vencimentoManutencao,
+  modoLivre = false,
 }) {
   const ano = mes.getFullYear();
   const mesIdx = mes.getMonth();
@@ -326,7 +346,13 @@ export function CalendarioDias({
           const passado = iso < min;
           const fechado = !diasSemanaAtivos.has(date.getDay());
           const foraDaJanela = !dentroDaJanelaAgendamento(iso, estabelecimento);
-          const desabilitado = passado || fechado || foraDaJanela;
+          // No modo livre, `fechado`/`foraDaJanela` deixam de desabilitar —
+          // só continuam existindo pra saber quando aplicar o selo (abaixo).
+          // `passado` nunca é dispensado, nos dois modos.
+          const desabilitado = passado || (!modoLivre && (fechado || foraDaJanela));
+          // Dia que só está clicável PORQUE está em modo livre (normalmente
+          // seria cinza) — ganha o selo/borda tracejada distintos.
+          const liberado = modoLivre && !desabilitado && (fechado || foraDaJanela);
           const sel = iso === selecionado;
           const dentroDoPrazo =
             vencimentoManutencao != null && date <= vencimentoManutencao;
@@ -340,9 +366,10 @@ export function CalendarioDias({
               disabled={desabilitado}
               aria-disabled={desabilitado}
               aria-pressed={sel}
+              title={liberado ? "Fora das regras normais de agendamento — modo livre do admin" : undefined}
               onClick={() => onSelecionar(iso)}
               className={[
-                "flex h-9 items-center justify-center rounded-lg text-sm transition",
+                "relative flex h-9 items-center justify-center rounded-lg text-sm transition",
                 desabilitado
                   ? "cursor-not-allowed text-muted/40"
                   : sel
@@ -352,13 +379,27 @@ export function CalendarioDias({
                   : foraDoPrazo
                   ? "bg-orange-50 text-body ring-1 ring-orange-200 hover:border-primary hover:ring-primary"
                   : "text-body ring-1 ring-border hover:border-primary hover:ring-primary",
+                liberado && !sel ? "border-2 border-dashed border-violet-300" : "",
               ].join(" ")}
             >
               {d}
+              {liberado && (
+                <span
+                  aria-hidden="true"
+                  className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-violet-500"
+                />
+              )}
             </button>
           );
         })}
       </div>
+
+      {modoLivre && (
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-muted">
+          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-violet-500" />
+          Fora das regras normais de agendamento (modo livre)
+        </p>
+      )}
     </div>
   );
 }
@@ -622,6 +663,16 @@ export default function FormularioAgendamento({
 
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
+
+  // Modo livre: só o /admin (status truthy) — a dona pode escolher qualquer
+  // dia/horário, mesmo os que as regras de negócio normalmente bloqueiam
+  // (fora da janela de agendamento, fora do expediente, em cima de uma
+  // ausência...). A ÚNICA coisa que nunca é liberada, nos dois modos, é
+  // colisão real com um agendamento já confirmado (ver calcularVagasPorHorario,
+  // contexto='admin', em lib/disponibilidade.js). Mesmo gate de `status` que
+  // já distingue admin/público no resto do componente — não é um toggle
+  // separado.
+  const modoLivre = Boolean(status);
 
   // Sinal de reserva: regra do salão decide se é exigido (todos, só novos
   // clientes, ou nunca). O cliente declara (não comprovante) que já pagou via
@@ -943,6 +994,15 @@ export default function FormularioAgendamento({
     return set;
   })();
 
+  // ADMIN (modoLivre): gate mínimo pro calendário aparecer — precisa existir
+  // ALGUÉM pra assumir a reserva (o selecionado, ou pelo menos 1 elegível no
+  // encaixe automático). Sem isso, nem o modo livre ajuda (não há profissional
+  // pra atribuir). Fora do modo livre, o gate continua sendo diasSemanaAtivos
+  // vazio (comportamento de sempre).
+  const semProfissionalParaAgendar = escolherProfissional
+    ? profissionalSelecionado == null
+    : profissionaisDoServico.length === 0;
+
   // Navegação do calendário: não deixa recuar antes do mês atual.
   const agoraMes = new Date();
   const podeVoltarMes =
@@ -970,15 +1030,20 @@ export default function FormularioAgendamento({
   // encaixe automático basta existir >=1 profissional livre (a chave existe).
   // `horariosBase` NÃO passa pela antecedência mínima — só existe pra
   // distinguir, na mensagem da UI, "não tem vaga nenhuma" de "tinha vaga, mas
-  // nada respeita mais a antecedência" (ver JSX da etapa "data").
-  const horariosBase = Object.keys(vagas)
-    .filter((h) =>
-      escolherProfissional
-        ? profissionalSelecionado != null &&
-          vagas[h].includes(profissionalSelecionado.id)
-        : true
-    )
-    .sort();
+  // nada respeita mais a antecedência" (ver JSX da etapa "data"). SÓ público
+  // — no admin (modoLivre), `vagas` vem no formato enriquecido de
+  // calcularVagasPorHorario(contexto:'admin') e é lido por `gradeAdmin`, logo
+  // abaixo, não por este bloco.
+  const horariosBase = modoLivre
+    ? []
+    : Object.keys(vagas)
+        .filter((h) =>
+          escolherProfissional
+            ? profissionalSelecionado != null &&
+              vagas[h].includes(profissionalSelecionado.id)
+            : true
+        )
+        .sort();
 
   // Remove os horários que ferem a antecedência mínima do salão ou o corte do
   // dia seguinte (ver filtrarPorAntecedenciaMinima em lib/disponibilidade.js)
@@ -987,12 +1052,52 @@ export default function FormularioAgendamento({
   // antecedência configurada, o resultado ainda esconde horários já passados
   // de hoje (mesmo efeito do antigo filtro por horaDeAgora()). Client-side
   // só: é filtro de UX, não a proteção real (ver validarAntecedenciaNoServidor).
-  const vagasDentroDaAntecedencia = filtrarPorAntecedenciaMinima(
-    vagas,
-    form.data,
-    estabelecimento
-  );
-  const horariosVisiveis = horariosBase.filter((h) => vagasDentroDaAntecedencia[h] != null);
+  const vagasDentroDaAntecedencia = modoLivre
+    ? {}
+    : filtrarPorAntecedenciaMinima(vagas, form.data, estabelecimento);
+  const horariosVisiveis = modoLivre
+    ? []
+    : horariosBase.filter((h) => vagasDentroDaAntecedencia[h] != null);
+
+  // ADMIN (modoLivre): classifica CADA horário do mapa enriquecido (já cobre
+  // o dia inteiro, ver calcularVagasPorHorario contexto='admin') pro
+  // profissional relevante — o selecionado (fluxo "cliente escolhe", sempre
+  // ligado no /admin com 2+ profissionais elegíveis) ou o único elegível (0
+  // ou 1 profissional, encaixe automático). "livre" = respeitaria as regras
+  // normais; "bloqueado" = só aparece por causa do modo livre (motivo
+  // anotado, vem da API); ausente = sobreposição real com um agendamento já
+  // confirmado — nunca aparece, em nenhum dos dois. Sem profissional
+  // escolhido ainda (fluxo "cliente escolhe" recém chegou na data), fica []
+  // — mesmo comportamento do público esperando a seleção.
+  const vagasAdminComAntecedencia = modoLivre
+    ? filtrarPorAntecedenciaMinima(vagas, form.data, estabelecimento, "admin")
+    : {};
+  const idProfissionalAlvoAdmin = escolherProfissional
+    ? profissionalSelecionado?.id ?? null
+    : null;
+  const gradeAdmin =
+    modoLivre && !(escolherProfissional && idProfissionalAlvoAdmin == null)
+      ? Object.keys(vagasAdminComAntecedencia)
+          .sort()
+          .map((horario) => {
+            const entrada = vagasAdminComAntecedencia[horario];
+            if (idProfissionalAlvoAdmin != null) {
+              if (entrada.livres.includes(idProfissionalAlvoAdmin)) {
+                return { horario, status: "livre" };
+              }
+              const bloqueio = entrada.bloqueados.find(
+                (b) => b.profissionalId === idProfissionalAlvoAdmin
+              );
+              return bloqueio ? { horario, status: "bloqueado", motivo: bloqueio.motivo } : null;
+            }
+            if (entrada.livres.length > 0) return { horario, status: "livre" };
+            if (entrada.bloqueados.length > 0) {
+              return { horario, status: "bloqueado", motivo: entrada.bloqueados[0].motivo };
+            }
+            return null;
+          })
+          .filter(Boolean)
+      : [];
 
   // Mantém `vagas` (mapa horário -> profissionais livres) sincronizado com a
   // data/serviço selecionados. A flag `ativo` cancela corridas entre datas e
@@ -1016,6 +1121,7 @@ export default function FormularioAgendamento({
           // aparecer como "ocupada" — senão, ao voltar pra "data", o próprio
           // horário escolhido sumiria da grade.
           excluirAgendamentoId: reservaId,
+          contexto: modoLivre ? "admin" : "publico",
         });
         if (!ativo) return;
         setVagas(mapa);
@@ -1037,7 +1143,7 @@ export default function FormularioAgendamento({
     return () => {
       ativo = false;
     };
-  }, [form.data, servicoSelecionado, estabelecimento.id, reservaId]);
+  }, [form.data, servicoSelecionado, estabelecimento.id, reservaId, modoLivre]);
 
   // 1) Restaura o SERVIÇO só depois que a lista de serviços ATIVOS carrega —
   // um id salvo que não está mais nela (desativado/excluído nesse meio-tempo)
@@ -1732,11 +1838,19 @@ export default function FormularioAgendamento({
     // Revalida no servidor ANTES de inserir (ver validarAntecedenciaNoServidor
     // — mesma checagem do fluxo público, aplicada aqui também pra manter as
     // duas telas consistentes com o filtro já usado em horariosVisiveis).
-    const antecedenciaOk = await validarAntecedenciaNoServidor({
-      estabelecimentoId: estabelecimento.id,
-      data: form.data,
-      horario: horarioSelecionado,
-    });
+    // modoLivre PULA essa checagem: antecedência mínima é uma regra de
+    // negócio que o modo livre já deixa a dona ignorar na grade (ver
+    // gradeAdmin, motivo 'antecedencia') — não faz sentido barrar de novo
+    // aqui só porque o relógio do servidor concorda com o filtro normal. A
+    // única coisa que continua protegida no servidor é a colisão real,
+    // via constraint do banco (23P01, tratado no catch abaixo).
+    const antecedenciaOk = modoLivre
+      ? true
+      : await validarAntecedenciaNoServidor({
+          estabelecimentoId: estabelecimento.id,
+          data: form.data,
+          horario: horarioSelecionado,
+        });
     if (!antecedenciaOk) {
       setEnviando(false);
       setErro("Esse horário não respeita mais a antecedência mínima do salão. Escolha outro.");
@@ -1751,7 +1865,16 @@ export default function FormularioAgendamento({
     if (escolherProfissional) {
       profissionalId = profissionalSelecionado.id;
     } else {
-      const livres = vagas[horarioSelecionado] ?? [];
+      // modoLivre: `vagas` vem no formato enriquecido (ver calcularVagasPorHorario,
+      // contexto='admin') — junta livres + bloqueados (a dona pode assumir um
+      // horário bloqueado por regra; só sobreposição real já removeu o
+      // profissional do mapa inteiro, nos dois formatos).
+      const livres = modoLivre
+        ? [
+            ...(vagas[horarioSelecionado]?.livres ?? []),
+            ...(vagas[horarioSelecionado]?.bloqueados ?? []).map((b) => b.profissionalId),
+          ]
+        : vagas[horarioSelecionado] ?? [];
       if (livres.length === 0) {
         setEnviando(false);
         setErro("Esse horário acabou de ser reservado. Escolha outro.");
@@ -1809,6 +1932,7 @@ export default function FormularioAgendamento({
             estabelecimentoId: estabelecimento.id,
             servicoId: servicoSelecionado.id,
             data: form.data,
+            contexto: modoLivre ? "admin" : "publico",
           });
           setVagas(mapa);
         } catch {
@@ -2086,7 +2210,7 @@ export default function FormularioAgendamento({
                 <p className="text-sm text-body">
                   Carregando disponibilidade...
                 </p>
-              ) : diasSemanaAtivos.size === 0 ? (
+              ) : semProfissionalParaAgendar || (!modoLivre && diasSemanaAtivos.size === 0) ? (
                 <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
                   {escolherProfissional
                     ? "Este profissional não tem dias de atendimento."
@@ -2104,6 +2228,7 @@ export default function FormularioAgendamento({
                   podeVoltar={podeVoltarMes}
                   estabelecimento={estabelecimento}
                   vencimentoManutencao={vencimentoManutencao}
+                  modoLivre={modoLivre}
                 />
               )}
             </div>
@@ -2139,53 +2264,116 @@ export default function FormularioAgendamento({
                   </p>
                 )}
 
-                {/* Sem nenhuma vaga no dia: ninguém trabalha, ou tudo já foi
-                    reservado (a grade só lista horários com >=1 livre). */}
-                {!carregandoSlots && !erroSlots && horariosBase.length === 0 && (
-                  <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
-                    Nenhum horário disponível neste dia.
-                  </p>
+                {/* Público: grade normal (só o que respeita as regras). */}
+                {!carregandoSlots && !erroSlots && !modoLivre && (
+                  <>
+                    {/* Sem nenhuma vaga no dia: ninguém trabalha, ou tudo já
+                        foi reservado (a grade só lista horários com >=1
+                        livre). */}
+                    {horariosBase.length === 0 && (
+                      <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
+                        Nenhum horário disponível neste dia.
+                      </p>
+                    )}
+
+                    {/* Havia vaga, mas nada respeita mais a antecedência
+                        mínima do salão (hora já passou, ou o corte do dia
+                        seguinte fechou o dia inteiro — ver
+                        filtrarPorAntecedenciaMinima). */}
+                    {horariosBase.length > 0 && horariosVisiveis.length === 0 && (
+                      <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
+                        Não há mais horários disponíveis para esta data.
+                      </p>
+                    )}
+
+                    {horariosVisiveis.length > 0 && (
+                      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                        {horariosVisiveis.map((slot) => {
+                          // A grade só contém horários com pelo menos um
+                          // profissional livre (no fluxo "cliente escolhe",
+                          // livre para o selecionado), então nenhum botão
+                          // fica travado.
+                          const selecionado = horarioSelecionado === slot;
+
+                          return (
+                            <button
+                              key={slot}
+                              type="button"
+                              onClick={() => selecionarHorario(slot)}
+                              disabled={criandoReserva}
+                              aria-pressed={selecionado}
+                              className={[
+                                "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
+                                selecionado
+                                  ? "bg-primary text-white ring-primary"
+                                  : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+                              ].join(" ")}
+                            >
+                              {slot}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
                 )}
 
-                {/* Havia vaga, mas nada respeita mais a antecedência mínima
-                    do salão (hora já passou, ou o corte do dia seguinte
-                    fechou o dia inteiro — ver filtrarPorAntecedenciaMinima). */}
-                {!carregandoSlots &&
-                  !erroSlots &&
-                  horariosBase.length > 0 &&
-                  horariosVisiveis.length === 0 && (
-                    <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
-                      Não há mais horários disponíveis para esta data.
-                    </p>
-                  )}
+                {/* Admin (modoLivre): grade do dia inteiro, na granularidade
+                    do salão (ver gradeAdmin) — inclui horários que as regras
+                    normais bloqueariam (fora do expediente/modo, em cima de
+                    uma ausência, fora da antecedência mínima), marcados com
+                    borda tracejada + selo. Só nunca aparece aqui quem
+                    colidiria com um agendamento real já confirmado (ver
+                    calcularVagasPorHorario, contexto='admin'). */}
+                {!carregandoSlots && !erroSlots && modoLivre && (
+                  <>
+                    {gradeAdmin.length === 0 && (
+                      <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
+                        Nenhum horário disponível neste dia (todos colidem com
+                        agendamentos já confirmados).
+                      </p>
+                    )}
 
-                {!carregandoSlots && !erroSlots && horariosVisiveis.length > 0 && (
-                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                    {horariosVisiveis.map((slot) => {
-                      // A grade só contém horários com pelo menos um
-                      // profissional livre (no fluxo "cliente escolhe", livre
-                      // para o selecionado), então nenhum botão fica travado.
-                      const selecionado = horarioSelecionado === slot;
+                    {gradeAdmin.length > 0 && (
+                      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                        {gradeAdmin.map(({ horario, status, motivo }) => {
+                          const selecionado = horarioSelecionado === horario;
+                          const bloqueado = status === "bloqueado";
 
-                      return (
-                        <button
-                          key={slot}
-                          type="button"
-                          onClick={() => selecionarHorario(slot)}
-                          disabled={criandoReserva}
-                          aria-pressed={selecionado}
-                          className={[
-                            "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
-                            selecionado
-                              ? "bg-primary text-white ring-primary"
-                              : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
-                          ].join(" ")}
-                        >
-                          {slot}
-                        </button>
-                      );
-                    })}
-                  </div>
+                          return (
+                            <button
+                              key={horario}
+                              type="button"
+                              onClick={() => selecionarHorario(horario)}
+                              disabled={criandoReserva}
+                              aria-pressed={selecionado}
+                              title={
+                                bloqueado
+                                  ? `Fora das regras normais de agendamento (${ROTULOS_MOTIVO_BLOQUEIO[motivo] ?? motivo})`
+                                  : undefined
+                              }
+                              className={[
+                                "relative rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
+                                selecionado
+                                  ? "bg-primary text-white ring-primary"
+                                  : bloqueado
+                                  ? "border-2 border-dashed border-violet-300 bg-card text-body ring-border hover:border-violet-400"
+                                  : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+                              ].join(" ")}
+                            >
+                              {horario}
+                              {bloqueado && !selecionado && (
+                                <span
+                                  aria-hidden="true"
+                                  className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-violet-500"
+                                />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {/* Gravação (público) ou cancelamento da tentativa anterior,
