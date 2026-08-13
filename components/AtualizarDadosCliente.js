@@ -19,8 +19,22 @@ import {
 // busca o ViaCEP e preenche endereço/bairro/cidade/estado; falha de rede ou
 // CEP inexistente não trava o formulário.
 //
+// WhatsApp: só faz parte deste formulário quando !modoAdmin (fluxo público,
+// PainelCliente) — o cliente ainda troca o próprio número aqui, com a mesma
+// dupla digitação de sempre, mas a persistência vai por
+// supabase.rpc("atualizar_whatsapp_cliente", ...) em vez do UPDATE direto em
+// `clientes`, porque o vínculo agendamento↔cliente hoje é por telefone (ver
+// lib/clientesAdmin.js) — só trocar a coluna deixaria o histórico órfão; a
+// RPC atualiza cliente e histórico juntos. Em modoAdmin (GerenciarClientes) o
+// campo nem aparece aqui: a troca de WhatsApp em nome do cliente tem fluxo
+// próprio (popup "Alterar WhatsApp" no detalhe), com uma confirmação extra
+// que não faz sentido pro cliente editando os próprios dados.
+//
 // Props:
 //   clienteId    – id do cliente em `clientes` a ser editado/buscado.
+//   estabelecimentoId – necessário só quando !modoAdmin, pra RPC de troca de
+//                  WhatsApp (p_estabelecimento_id, escopa a atualização do
+//                  histórico ao salão certo).
 //   exigirEndereco – estabelecimentos.exigir_endereco (default true,
 //                  preserva o comportamento atual). false oculta todo o
 //                  bloco de CEP/endereço/bairro/cidade/estado (não renderiza,
@@ -30,11 +44,19 @@ import {
 //   onAtualizado – recebe { id, nome, telefone } com os dados novos após o
 //                  update ter sucesso.
 //   onCancelar   – botão "Voltar": descarta a edição sem salvar.
+//   modoAdmin    – uso pelo /admin (GerenciarClientes), editando em nome do
+//                  cliente: torna nascimento opcional (único campo, além de
+//                  endereço/instagram/contato de emergência, que hoje é
+//                  obrigatório aqui) — nome continua exigido; WhatsApp não
+//                  faz parte do formulário (ver acima). Ausente/false
+//                  preserva o comportamento atual do fluxo público.
 export default function AtualizarDadosCliente({
   clienteId,
+  estabelecimentoId,
   exigirEndereco = true,
   onAtualizado,
   onCancelar,
+  modoAdmin = false,
 }) {
   const [form, setForm] = useState({
     nome: "",
@@ -57,6 +79,11 @@ export default function AtualizarDadosCliente({
   const [mostrarReconfirmacao, setMostrarReconfirmacao] = useState(false);
   const [whatsappReconfirmacao, setWhatsappReconfirmacao] = useState("");
 
+  // Valor de whatsapp como carregado do banco (dígitos), pra saber no submit
+  // se o cliente de fato trocou o número — só então vale a pena chamar a RPC
+  // de troca (ver handleSubmit). Não usado em modoAdmin.
+  const [whatsappOriginal, setWhatsappOriginal] = useState("");
+
   // Busca os dados atuais do cliente ao montar e pré-preenche o formulário
   // (whatsappConfirmacao também nasce com o valor atual, espelhando o que já
   // está salvo — o cliente só precisa reeditar se quiser trocar o número).
@@ -77,6 +104,7 @@ export default function AtualizarDadosCliente({
       if (error || !data) {
         setErro("Não foi possível carregar seus dados.");
       } else {
+        setWhatsappOriginal(String(data.whatsapp ?? "").replace(/\D/g, ""));
         setForm({
           nome: data.nome ?? "",
           whatsapp: data.whatsapp ?? "",
@@ -163,40 +191,64 @@ export default function AtualizarDadosCliente({
       setErroNascimento(erroData);
       return;
     }
-    if (!nascimentoIso) {
+    if (!nascimentoIso && !modoAdmin) {
       setErroNascimento("Informe sua data de nascimento.");
       return;
     }
 
-    const digitosWhatsapp = form.whatsapp.replace(/\D/g, "");
-    if (digitosWhatsapp.length < 10) {
-      setErro("Informe um WhatsApp válido com DDD.");
-      return;
+    let novoWhatsappDigitos = null;
+
+    if (!modoAdmin) {
+      const digitosWhatsapp = form.whatsapp.replace(/\D/g, "");
+      if (digitosWhatsapp.length < 10) {
+        setErro("Informe um WhatsApp válido com DDD.");
+        return;
+      }
+
+      const digitosBase = mostrarReconfirmacao
+        ? form.whatsappConfirmacao.replace(/\D/g, "")
+        : digitosWhatsapp;
+
+      const digitosParaComparar = mostrarReconfirmacao
+        ? whatsappReconfirmacao.replace(/\D/g, "")
+        : form.whatsappConfirmacao.replace(/\D/g, "");
+
+      if (digitosBase !== digitosParaComparar) {
+        setMostrarReconfirmacao(true);
+        setErro("Os números não coincidem. Confirme novamente abaixo.");
+        return;
+      }
+
+      novoWhatsappDigitos = (mostrarReconfirmacao
+        ? whatsappReconfirmacao
+        : form.whatsappConfirmacao
+      ).replace(/\D/g, "");
     }
-
-    const digitosBase = mostrarReconfirmacao
-      ? form.whatsappConfirmacao.replace(/\D/g, "")
-      : digitosWhatsapp;
-
-    const digitosParaComparar = mostrarReconfirmacao
-      ? whatsappReconfirmacao.replace(/\D/g, "")
-      : form.whatsappConfirmacao.replace(/\D/g, "");
-
-    if (digitosBase !== digitosParaComparar) {
-      setMostrarReconfirmacao(true);
-      setErro("Os números não coincidem. Confirme novamente abaixo.");
-      return;
-    }
-
-    const numeroConfirmado = mostrarReconfirmacao
-      ? whatsappReconfirmacao
-      : form.whatsappConfirmacao;
 
     setEnviando(true);
 
+    // Troca de número: só quando de fato mudou, via RPC (nunca um UPDATE
+    // direto aqui — ver comentário no topo do arquivo). Se a RPC falhar,
+    // interrompe antes de tocar no resto dos dados.
+    if (!modoAdmin && novoWhatsappDigitos !== whatsappOriginal) {
+      const { error: erroWhatsapp } = await supabase.rpc(
+        "atualizar_whatsapp_cliente",
+        {
+          p_cliente_id: clienteId,
+          p_novo_whatsapp: novoWhatsappDigitos,
+          p_estabelecimento_id: estabelecimentoId,
+        }
+      );
+
+      if (erroWhatsapp) {
+        setEnviando(false);
+        setErro(erroWhatsapp.message);
+        return;
+      }
+    }
+
     const dadosCliente = {
       nome: form.nome.trim(),
-      whatsapp: numeroConfirmado.replace(/\D/g, ""),
       nascimento: nascimentoIso,
       instagram: form.instagram || null,
     };
@@ -227,9 +279,8 @@ export default function AtualizarDadosCliente({
     }
 
     onAtualizado({
-      id: data.id,
-      nome: data.nome,
-      telefone: numeroConfirmado,
+      ...data,
+      telefone: data.whatsapp,
     });
   }
 
@@ -257,22 +308,24 @@ export default function AtualizarDadosCliente({
         />
       </div>
 
-      <div>
-        <label htmlFor="atu-whatsapp" className="mb-1 block text-sm font-medium text-body">
-          WhatsApp
-        </label>
-        <input
-          id="atu-whatsapp"
-          name="whatsapp"
-          type="tel"
-          inputMode="tel"
-          value={form.whatsapp}
-          onChange={handleChange}
-          required
-          placeholder="(24) 99999-9999"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-        />
-      </div>
+      {!modoAdmin && (
+        <div>
+          <label htmlFor="atu-whatsapp" className="mb-1 block text-sm font-medium text-body">
+            WhatsApp
+          </label>
+          <input
+            id="atu-whatsapp"
+            name="whatsapp"
+            type="tel"
+            inputMode="tel"
+            value={form.whatsapp}
+            onChange={handleChange}
+            required
+            placeholder="(24) 99999-9999"
+            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+          />
+        </div>
+      )}
 
       {exigirEndereco ? (
         <>
@@ -374,7 +427,8 @@ export default function AtualizarDadosCliente({
 
       <div>
         <label htmlFor="atu-nascimento" className="mb-1 block text-sm font-medium text-body">
-          Nascimento
+          Nascimento{" "}
+          {modoAdmin && <span className="font-normal text-muted">(opcional)</span>}
         </label>
         <input
           id="atu-nascimento"
@@ -383,7 +437,7 @@ export default function AtualizarDadosCliente({
           inputMode="numeric"
           value={form.nascimento}
           onChange={handleChangeNascimento}
-          required
+          required={!modoAdmin}
           placeholder="dd/mm/aaaa"
           maxLength={10}
           className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
@@ -393,24 +447,26 @@ export default function AtualizarDadosCliente({
         )}
       </div>
 
-      <div>
-        <label htmlFor="atu-whatsapp-confirmacao" className="mb-1 block text-sm font-medium text-body">
-          Confirme seu WhatsApp
-        </label>
-        <input
-          id="atu-whatsapp-confirmacao"
-          name="whatsappConfirmacao"
-          type="tel"
-          inputMode="tel"
-          value={form.whatsappConfirmacao}
-          onChange={handleChange}
-          required
-          placeholder="(24) 99999-9999"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-        />
-      </div>
+      {!modoAdmin && (
+        <div>
+          <label htmlFor="atu-whatsapp-confirmacao" className="mb-1 block text-sm font-medium text-body">
+            Confirme seu WhatsApp
+          </label>
+          <input
+            id="atu-whatsapp-confirmacao"
+            name="whatsappConfirmacao"
+            type="tel"
+            inputMode="tel"
+            value={form.whatsappConfirmacao}
+            onChange={handleChange}
+            required
+            placeholder="(24) 99999-9999"
+            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+          />
+        </div>
+      )}
 
-      {mostrarReconfirmacao && (
+      {!modoAdmin && mostrarReconfirmacao && (
         <div>
           <label htmlFor="atu-whatsapp-reconfirmacao" className="mb-1 block text-sm font-medium text-body">
             Confirme seu WhatsApp novamente

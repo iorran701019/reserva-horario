@@ -1732,6 +1732,7 @@ export default function AdminPage() {
             onVincularCliente={(item) => setIdParaVincular(item.id)}
             onMarcarComoAtendimento={marcarComoAtendimento}
             estabelecimentoId={estabelecimento.id}
+            dataInicial={searchParams.get("data")}
           />
         )}
 

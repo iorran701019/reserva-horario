@@ -39,23 +39,34 @@ import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendament
 //                       o consumidor (app/[salon]/page.js) só armar o voltar
 //                       físico depois que a tela é realmente mostrada, e não
 //                       nesse flash-through de "modelo === null".
+//   modoAdmin         – uso pelo /admin (GerenciarClientes, seção Anamnese
+//                       do detalhe do cliente): pré-carrega o formulário com
+//                       a resposta mais recente do cliente (se houver, pra
+//                       dona corrigir/completar em vez de partir em branco)
+//                       e NUNCA lê/grava em sessionStorage (a persistência
+//                       de rascunho é só do wizard público, por `slug` —
+//                       nada a ver com a dona editando pelo /admin). Salvar
+//                       segue gravando um INSERT novo, igual ao fluxo
+//                       público (renova a validade de 12 meses, preserva o
+//                       histórico de respostas anteriores).
 export default function FormularioAnamnese({
   slug,
   estabelecimentoId,
   clienteId,
   onConcluido,
   onVisivel,
+  modoAdmin = false,
 }) {
   // undefined = carregando; null = nenhum modelo ativo encontrado; objeto = ok.
   const [modelo, setModelo] = useState(undefined);
   const [respostas, setRespostas] = useState(
-    () => lerFatia(slug, "anamnese")?.respostas ?? {}
+    () => (modoAdmin ? {} : lerFatia(slug, "anamnese")?.respostas ?? {})
   );
   const [observacoes, setObservacoes] = useState(
-    () => lerFatia(slug, "anamnese")?.observacoes ?? {}
+    () => (modoAdmin ? {} : lerFatia(slug, "anamnese")?.observacoes ?? {})
   );
   const [aceite, setAceite] = useState(
-    () => lerFatia(slug, "anamnese")?.aceite ?? false
+    () => (modoAdmin ? false : lerFatia(slug, "anamnese")?.aceite ?? false)
   );
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
@@ -95,16 +106,48 @@ export default function FormularioAnamnese({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelo]);
 
+  // modoAdmin: pré-carrega a resposta MAIS RECENTE do cliente (se houver),
+  // pra dona corrigir/completar em vez de partir em branco (ver comentário
+  // de `modoAdmin` acima). Roda uma vez só — não some ao trocar seção/aba de
+  // pergunta, já que respostas/observacoes/aceite não estão nas deps.
+  useEffect(() => {
+    if (!modoAdmin || !clienteId || !estabelecimentoId) return;
+    let ativo = true;
+
+    (async () => {
+      const { data } = await supabase
+        .from("anamnese_respostas")
+        .select("respostas, observacoes, termos_aceitos")
+        .eq("cliente_id", clienteId)
+        .eq("estabelecimento_id", estabelecimentoId)
+        .order("criado_em", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!ativo || !data) return;
+      setRespostas(data.respostas ?? {});
+      setObservacoes(data.observacoes ?? {});
+      setAceite(Boolean(data.termos_aceitos));
+    })();
+
+    return () => {
+      ativo = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modoAdmin, clienteId, estabelecimentoId]);
+
   // Grava a fatia "anamnese" a cada mudança relevante, pra sobreviver a um
   // reload real da página (ver lib/persistenciaAgendamento). Limpa ao
   // submeter com sucesso (ver handleSubmit). Só grava com um modelo REAL
   // carregado — sem isso, todo estabelecimento sem anamnese ativa deixaria
   // um retalho vazio no storage a cada visita (o suficiente pra confundir a
-  // heurística de modoNovoAgendamento em app/[salon]/page.js).
+  // heurística de modoNovoAgendamento em app/[salon]/page.js). Nunca roda em
+  // modoAdmin (ver comentário de `modoAdmin` acima) — a dona editando pelo
+  // /admin não deve tocar no rascunho por slug do fluxo público.
   useEffect(() => {
-    if (!slug || !modelo) return;
+    if (modoAdmin || !slug || !modelo) return;
     salvarFatia(slug, "anamnese", { respostas, observacoes, aceite });
-  }, [slug, modelo, respostas, observacoes, aceite]);
+  }, [modoAdmin, slug, modelo, respostas, observacoes, aceite]);
 
   function responder(pergunta, valor) {
     setRespostas((anterior) => ({ ...anterior, [pergunta]: valor }));
@@ -166,7 +209,7 @@ export default function FormularioAnamnese({
       return;
     }
 
-    limparFatia(slug, "anamnese");
+    if (!modoAdmin) limparFatia(slug, "anamnese");
     onConcluido?.();
   }
 
