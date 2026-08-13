@@ -192,6 +192,7 @@ export default function PainelCliente({
       <div className="space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border">
         <AtualizarDadosCliente
           clienteId={clienteAtual.id}
+          estabelecimentoId={estabelecimento.id}
           exigirEndereco={estabelecimento.exigir_endereco !== false}
           onAtualizado={(dados) => {
             setClienteAtual((anterior) => ({ ...anterior, ...dados }));

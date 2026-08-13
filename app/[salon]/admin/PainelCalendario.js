@@ -117,12 +117,18 @@ function paraHoraCompleta(hora) {
 // sempre Dia, independente de mobile ou desktop — Dia/Lista/Mês só trocam
 // pelas abas manuais. Toolbar nativa desligada — navegação própria (abas +
 // prev/next/Hoje) logo acima do calendário.
+// Props:
+//   dataInicial – "YYYY-MM-DD" opcional (ver ?data= em GerenciarClientes,
+//                 clique no card "Próximo agendamento"): no MOUNT, pula
+//                 direto pra aba Dia nessa data em vez de abrir em hoje.
+//                 Ausente/null preserva o comportamento normal.
 export default function PainelCalendario({
   agendamentos,
   onSelecionarConfirmado,
   onVincularCliente,
   onMarcarComoAtendimento,
   estabelecimentoId,
+  dataInicial,
 }) {
   // Filtro "Ver agenda de": "todos" (padrão) ou o profissional_id (como string,
   // já que é o value do <select>). Filtra os eventos EM MEMÓRIA, sem query nova.
@@ -197,6 +203,16 @@ export default function PainelCalendario({
     api?.changeView("timeGridDay");
     api?.gotoDate(data);
   }
+
+  // Pula direto pra data recebida via ?data= (ver dataInicial acima), uma
+  // única vez no mount — abrir de novo a mesma aba Painel sem esse
+  // parâmetro (ex.: clicando na aba "Painel" do menu) volta a abrir em
+  // hoje normalmente, já que o efeito não roda de novo.
+  useEffect(() => {
+    if (!dataInicial) return;
+    irParaAbaDiaEm(dataInicial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!estabelecimentoId) return;

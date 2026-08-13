@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   buscarClientes,
@@ -11,10 +12,14 @@ import {
   buscarAnotacoesLivres,
   criarAnotacaoLivre,
 } from "@/lib/clientesAdmin";
+import { existeModeloAtivo } from "@/lib/anamnese";
 import { classificarAgendamento } from "@/lib/particao";
 import { buscarProgressoFidelidade } from "@/lib/fidelidade";
 import { linkWhatsApp, MENSAGEM_CONTATO_CLIENTE_ADMIN } from "@/lib/whatsapp";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
+import AtualizarDadosCliente from "@/components/AtualizarDadosCliente";
+import FormularioAnamnese from "@/components/FormularioAnamnese";
+import ModalAlterarWhatsapp from "@/components/ModalAlterarWhatsapp";
 
 // Aba "Clientes" do /admin: lista somente-leitura dos clientes do salão
 // (tabela `clientes`, particionada por estabelecimento_id) com busca por nome
@@ -79,9 +84,18 @@ function situacaoAnamnese(criadoEm) {
 
 // Bloco "Próximo agendamento" / "Último atendimento" do detalhe: data,
 // horário e serviço de um item de agendamento (ou o texto vazio informado).
-function BlocoAgendamento({ titulo, item, vazio, mostrarSelo }) {
+// `onClick` opcional (só passado quando há `item`, ver "Próximo agendamento"
+// em DetalheCliente) torna o card inteiro clicável — vira um <button> em vez
+// de <div>, mesmo conteúdo.
+function BlocoAgendamento({ titulo, item, vazio, mostrarSelo, onClick }) {
+  const Wrapper = onClick ? "button" : "div";
   return (
-    <div className="rounded-xl bg-surface p-3 ring-1 ring-border">
+    <Wrapper
+      {...(onClick ? { type: "button", onClick } : {})}
+      className={`w-full rounded-xl bg-surface p-3 text-left ring-1 ring-border ${
+        onClick ? "transition hover:bg-card" : ""
+      }`}
+    >
       <h4 className="text-sm font-semibold text-heading">{titulo}</h4>
       {item ? (
         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-body">
@@ -111,7 +125,7 @@ function BlocoAgendamento({ titulo, item, vazio, mostrarSelo }) {
       ) : (
         <p className="mt-1.5 text-sm text-body">{vazio}</p>
       )}
-    </div>
+    </Wrapper>
   );
 }
 
@@ -149,6 +163,15 @@ function tipoObservacao(item) {
   return classificarAgendamento(item) === "confirmado" ? "Observação" : "Anotação";
 }
 
+// Rótulo exibido pra cada `tipo` (ver tipoObservacao acima) — só o texto
+// mostrado na tag muda (com o contexto de onde a nota nasceu); o valor
+// interno ("Observação"/"Anotação") continua o mesmo, usado pelo filtro
+// (ver observacoesFiltradas) e pela lógica que decide qual tipo é.
+const ROTULO_TIPO_OBSERVACAO = {
+  Observação: "Observação (Painel)",
+  Anotação: "Anotação (Histórico)",
+};
+
 // Chip de progresso de fidelidade da linha da lista (ver BadgeFidelidade).
 // Componente próprio pra isolar o fetch por cliente sem travar a montagem da
 // lista inteira num só Promise.all.
@@ -174,8 +197,27 @@ function ChipFidelidadeLista({ clienteId, estabelecimento }) {
 // demanda (histórico completo, detalhe da anamnese, observações/anotações).
 // `cliente` já traz os campos cadastrais de buscarClientes.
 function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContatoAdmin, onVoltar }) {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // Cópia local dos dados cadastrais: nasce igual à prop `cliente`, mas
+  // passa a refletir nome/whatsapp/endereço/etc. novos assim que o botão
+  // "Editar" (ver AtualizarDadosCliente modoAdmin abaixo) salva com sucesso
+  // — sem precisar recarregar a lista inteira. Mesmo padrão de
+  // `clienteAtual` em PainelCliente.js.
+  const [clienteAtual, setClienteAtual] = useState(cliente);
+  const [editandoDados, setEditandoDados] = useState(false);
+  const [alterandoWhatsapp, setAlterandoWhatsapp] = useState(false);
+
   const [resumo, setResumo] = useState(null);
   const [carregando, setCarregando] = useState(true);
+
+  // Existe modelo de anamnese ATIVO pro estabelecimento (ver lib/anamnese.js
+  // existeModeloAtivo)? Decide se a seção "Anamnese" abaixo aparece —
+  // salão sem anamnese configurada não tem o que mostrar. null = ainda
+  // resolvendo (a seção some por padrão até saber, mesmo tratamento de
+  // `carregando` pro resto do resumo).
+  const [temModeloAtivo, setTemModeloAtivo] = useState(null);
 
   // Progresso do programa de fidelidade (ver lib/fidelidade.js), banner no
   // topo da ficha. null = programa desligado ou nada a mostrar ainda.
@@ -183,13 +225,13 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
 
   useEffect(() => {
     let ativo = true;
-    buscarProgressoFidelidade(cliente.id, estabelecimento).then((resultado) => {
+    buscarProgressoFidelidade(clienteAtual.id, estabelecimento).then((resultado) => {
       if (ativo) setProgressoFidelidade(resultado);
     });
     return () => {
       ativo = false;
     };
-  }, [cliente.id, estabelecimento]);
+  }, [clienteAtual.id, estabelecimento]);
 
   const [historicoAberto, setHistoricoAberto] = useState(false);
   const [historico, setHistorico] = useState(null);
@@ -198,6 +240,7 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
   const [anamneseAberta, setAnamneseAberta] = useState(false);
   const [anamneseDetalhe, setAnamneseDetalhe] = useState(null);
   const [carregandoAnamneseDetalhe, setCarregandoAnamneseDetalhe] = useState(false);
+  const [editandoAnamnese, setEditandoAnamnese] = useState(false);
 
   const [observacoesAbertas, setObservacoesAbertas] = useState(false);
   const [observacoes, setObservacoes] = useState(null);
@@ -209,23 +252,25 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
   const [salvandoAnotacao, setSalvandoAnotacao] = useState(false);
   const [erroAnotacao, setErroAnotacao] = useState("");
 
-  const telefoneDigitos = String(cliente.whatsapp ?? "").replace(/\D/g, "");
+  const telefoneDigitos = String(clienteAtual.whatsapp ?? "").replace(/\D/g, "");
 
   useEffect(() => {
     let ativo = true;
     setCarregando(true);
-    buscarResumoCliente(cliente.id, estabelecimentoId, telefoneDigitos).then(
-      (dados) => {
-        if (ativo) {
-          setResumo(dados);
-          setCarregando(false);
-        }
+    Promise.all([
+      buscarResumoCliente(clienteAtual.id, estabelecimentoId, telefoneDigitos),
+      existeModeloAtivo(estabelecimentoId),
+    ]).then(([dados, temModelo]) => {
+      if (ativo) {
+        setResumo(dados);
+        setTemModeloAtivo(temModelo);
+        setCarregando(false);
       }
-    );
+    });
     return () => {
       ativo = false;
     };
-  }, [cliente.id, telefoneDigitos, estabelecimentoId]);
+  }, [clienteAtual.id, telefoneDigitos, estabelecimentoId]);
 
   async function toggleHistorico() {
     const abrir = !historicoAberto;
@@ -243,10 +288,27 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
     setAnamneseAberta(abrir);
     if (abrir && anamneseDetalhe === null) {
       setCarregandoAnamneseDetalhe(true);
-      const detalhe = await buscarAnamneseDetalhe(cliente.id, estabelecimentoId);
+      const detalhe = await buscarAnamneseDetalhe(clienteAtual.id, estabelecimentoId);
       setAnamneseDetalhe(detalhe);
       setCarregandoAnamneseDetalhe(false);
     }
+  }
+
+  // Após salvar pelo FormularioAnamnese (modoAdmin, ver botão Editar/Preencher
+  // acima): refaz o detalhe e o carimbo usado por `situacaoAnamnese` (badge
+  // Em dia/Vencida), pra ficha refletir a resposta nova sem recarregar a
+  // página. Já abre a seção expandida com o resultado.
+  async function handleAnamneseSalva() {
+    setEditandoAnamnese(false);
+    setCarregandoAnamneseDetalhe(true);
+    const detalhe = await buscarAnamneseDetalhe(clienteAtual.id, estabelecimentoId);
+    setAnamneseDetalhe(detalhe);
+    setCarregandoAnamneseDetalhe(false);
+    setAnamneseAberta(true);
+    setResumo((atual) => ({
+      ...atual,
+      anamneseData: detalhe.resposta ? { criado_em: detalhe.resposta.criado_em } : null,
+    }));
   }
 
   // Mescla observações de agendamento (lib/clientesAdmin buscarObservacoes)
@@ -260,7 +322,7 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
       setCarregandoObservacoes(true);
       const [doAgendamento, livres] = await Promise.all([
         buscarObservacoes(estabelecimentoId, telefoneDigitos),
-        buscarAnotacoesLivres(cliente.id, estabelecimentoId),
+        buscarAnotacoesLivres(clienteAtual.id, estabelecimentoId),
       ]);
       const mescladas = [
         ...doAgendamento.map((item) => ({
@@ -287,7 +349,7 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
 
     setSalvandoAnotacao(true);
     setErroAnotacao("");
-    const { data, error } = await criarAnotacaoLivre(cliente.id, estabelecimentoId, texto);
+    const { data, error } = await criarAnotacaoLivre(clienteAtual.id, estabelecimentoId, texto);
     setSalvandoAnotacao(false);
 
     if (error) {
@@ -312,6 +374,26 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
 
   const anamnese = situacaoAnamnese(resumo?.anamneseData?.criado_em);
 
+  // Edição dos dados cadastrais (botão "Editar" abaixo): substitui a ficha
+  // inteira pelo formulário, mesmo padrão de PainelCliente.js. modoAdmin
+  // torna tudo opcional exceto nome/whatsapp (ver AtualizarDadosCliente).
+  if (editandoDados) {
+    return (
+      <div className="space-y-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+        <AtualizarDadosCliente
+          clienteId={clienteAtual.id}
+          exigirEndereco={estabelecimento.exigir_endereco !== false}
+          modoAdmin
+          onAtualizado={(dados) => {
+            setClienteAtual((anterior) => ({ ...anterior, ...dados }));
+            setEditandoDados(false);
+          }}
+          onCancelar={() => setEditandoDados(false)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
       <button
@@ -323,32 +405,50 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
       </button>
 
       <div>
-        <h3 className="text-base font-semibold text-heading">{cliente.nome}</h3>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-base font-semibold text-heading">{clienteAtual.nome}</h3>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAlterandoWhatsapp(true)}
+              className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface"
+            >
+              Alterar WhatsApp
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditandoDados(true)}
+              className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface"
+            >
+              Editar
+            </button>
+          </div>
+        </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
           <a
             href={linkWhatsApp(
-              cliente.whatsapp,
-              MENSAGEM_CONTATO_CLIENTE_ADMIN(cliente, msgContatoAdmin)
+              clienteAtual.whatsapp,
+              MENSAGEM_CONTATO_CLIENTE_ADMIN(clienteAtual, msgContatoAdmin)
             )}
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-primary underline-offset-2 hover:underline"
           >
-            {cliente.whatsapp}
+            {clienteAtual.whatsapp}
           </a>
-          {cliente.contato_emergencia && (
+          {clienteAtual.contato_emergencia && (
             <span className="text-sm text-body">
               Emergência:{" "}
               <a
                 href={linkWhatsApp(
-                  cliente.contato_emergencia,
-                  MENSAGEM_CONTATO_CLIENTE_ADMIN(cliente, msgContatoAdmin)
+                  clienteAtual.contato_emergencia,
+                  MENSAGEM_CONTATO_CLIENTE_ADMIN(clienteAtual, msgContatoAdmin)
                 )}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="font-medium text-primary underline-offset-2 hover:underline"
               >
-                {cliente.contato_emergencia}
+                {clienteAtual.contato_emergencia}
               </a>
             </span>
           )}
@@ -365,27 +465,27 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
       )}
 
       <dl className="space-y-1 text-sm">
-        {(cliente.endereco || cliente.bairro || cliente.cidade || cliente.estado) && (
+        {(clienteAtual.endereco || clienteAtual.bairro || clienteAtual.cidade || clienteAtual.estado) && (
           <div className="flex justify-between gap-3">
             <dt className="text-body">Endereço</dt>
             <dd className="text-right font-medium text-heading">
-              {[cliente.endereco, cliente.bairro, cliente.cidade, cliente.estado]
+              {[clienteAtual.endereco, clienteAtual.bairro, clienteAtual.cidade, clienteAtual.estado]
                 .filter(Boolean)
                 .join(" · ")}
             </dd>
           </div>
         )}
-        {cliente.instagram && (
+        {clienteAtual.instagram && (
           <div className="flex justify-between gap-3">
             <dt className="text-body">Instagram</dt>
-            <dd className="text-right font-medium text-heading">{cliente.instagram}</dd>
+            <dd className="text-right font-medium text-heading">{clienteAtual.instagram}</dd>
           </div>
         )}
-        {cliente.nascimento && (
+        {clienteAtual.nascimento && (
           <div className="flex justify-between gap-3">
             <dt className="text-body">Nascimento</dt>
             <dd className="text-right font-medium text-heading">
-              {formatarDataBR(cliente.nascimento)}
+              {formatarDataBR(clienteAtual.nascimento)}
             </dd>
           </div>
         )}
@@ -400,6 +500,15 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
             item={resumo.proximoAgendamento}
             vazio="Nenhum agendamento ativo."
             mostrarSelo
+            onClick={
+              resumo.proximoAgendamento
+                ? () =>
+                    router.push(
+                      `${pathname}?aba=painel&data=${resumo.proximoAgendamento.data}`,
+                      { scroll: false }
+                    )
+                : undefined
+            }
           />
           <div className="rounded-xl bg-surface p-3 ring-1 ring-border">
             <CabecalhoRetratil
@@ -453,80 +562,114 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
             )}
           </div>
 
-          <div className="rounded-xl bg-surface p-3 ring-1 ring-border">
-            <CabecalhoRetratil
-              titulo="Anamnese"
-              aberto={anamneseAberta}
-              onClick={toggleAnamnese}
-            />
-            {anamnese === null ? (
-              <p className="mt-1.5 text-sm text-body">Nunca preenchida.</p>
-            ) : (
-              <p
-                className={`mt-1.5 text-sm font-medium ${
-                  anamnese === "vencida" ? "text-amber-700" : "text-green-700"
-                }`}
-              >
-                {anamnese === "vencida" ? "Vencida" : "Em dia"} (preenchida em{" "}
-                {formatarDataBR(resumo.anamneseData.criado_em)})
-              </p>
-            )}
+          {temModeloAtivo && (
+            <div className="rounded-xl bg-surface p-3 ring-1 ring-border">
+              {editandoAnamnese ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-sm font-semibold text-heading">Anamnese</h4>
+                    <button
+                      type="button"
+                      onClick={() => setEditandoAnamnese(false)}
+                      className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                  <FormularioAnamnese
+                    estabelecimentoId={estabelecimentoId}
+                    clienteId={clienteAtual.id}
+                    modoAdmin
+                    onConcluido={handleAnamneseSalva}
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between gap-2">
+                    <CabecalhoRetratil
+                      titulo="Anamnese"
+                      aberto={anamneseAberta}
+                      onClick={toggleAnamnese}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setEditandoAnamnese(true)}
+                      className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface"
+                    >
+                      {anamnese === null ? "Preencher" : "Editar"}
+                    </button>
+                  </div>
+                  {anamnese === null ? (
+                    <p className="mt-1.5 text-sm text-body">Nunca preenchida.</p>
+                  ) : (
+                    <p
+                      className={`mt-1.5 text-sm font-medium ${
+                        anamnese === "vencida" ? "text-amber-700" : "text-green-700"
+                      }`}
+                    >
+                      {anamnese === "vencida" ? "Vencida" : "Em dia"} (preenchida em{" "}
+                      {formatarDataBR(resumo.anamneseData.criado_em)})
+                    </p>
+                  )}
 
-            {anamneseAberta && (
-              <div className="mt-2">
-                {carregandoAnamneseDetalhe ? (
-                  <p className="text-sm text-body">Carregando anamnese...</p>
-                ) : (
-                  anamneseDetalhe?.resposta && (
-                    <div className="space-y-3">
-                      {anamneseDetalhe.modelo?.titulo && (
-                        <h5 className="text-sm font-semibold text-heading">
-                          {anamneseDetalhe.modelo.titulo}
-                        </h5>
-                      )}
+                  {anamneseAberta && (
+                    <div className="mt-2">
+                      {carregandoAnamneseDetalhe ? (
+                        <p className="text-sm text-body">Carregando anamnese...</p>
+                      ) : (
+                        anamneseDetalhe?.resposta && (
+                          <div className="space-y-3">
+                            {anamneseDetalhe.modelo?.titulo && (
+                              <h5 className="text-sm font-semibold text-heading">
+                                {anamneseDetalhe.modelo.titulo}
+                              </h5>
+                            )}
 
-                      {(anamneseDetalhe.modelo?.secoes ?? []).map((secao, si) => (
-                        <div
-                          key={si}
-                          className="space-y-1.5 rounded-lg bg-card p-2.5 ring-1 ring-border"
-                        >
-                          <p className="text-sm font-medium text-heading">
-                            {secao.titulo}
-                          </p>
-                          {(secao.perguntas ?? []).map((pergunta, pi) => (
-                            <div
-                              key={pi}
-                              className="flex items-center justify-between gap-2 text-sm text-body"
-                            >
-                              <span>{pergunta}</span>
+                            {(anamneseDetalhe.modelo?.secoes ?? []).map((secao, si) => (
+                              <div
+                                key={si}
+                                className="space-y-1.5 rounded-lg bg-card p-2.5 ring-1 ring-border"
+                              >
+                                <p className="text-sm font-medium text-heading">
+                                  {secao.titulo}
+                                </p>
+                                {(secao.perguntas ?? []).map((pergunta, pi) => (
+                                  <div
+                                    key={pi}
+                                    className="flex items-center justify-between gap-2 text-sm text-body"
+                                  >
+                                    <span>{pergunta}</span>
+                                    <span className="font-medium text-heading">
+                                      {anamneseDetalhe.resposta.respostas?.[pergunta] === "sim"
+                                        ? "Sim"
+                                        : "Não"}
+                                    </span>
+                                  </div>
+                                ))}
+                                {anamneseDetalhe.resposta.observacoes?.[secao.titulo] && (
+                                  <p className="mt-1 text-xs text-body">
+                                    Obs: {anamneseDetalhe.resposta.observacoes[secao.titulo]}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+
+                            <p className="text-sm text-body">
+                              Termos aceitos:{" "}
                               <span className="font-medium text-heading">
-                                {anamneseDetalhe.resposta.respostas?.[pergunta] === "sim"
-                                  ? "Sim"
-                                  : "Não"}
-                              </span>
-                            </div>
-                          ))}
-                          {anamneseDetalhe.resposta.observacoes?.[secao.titulo] && (
-                            <p className="mt-1 text-xs text-body">
-                              Obs: {anamneseDetalhe.resposta.observacoes[secao.titulo]}
+                                {anamneseDetalhe.resposta.termos_aceitos ? "Sim" : "Não"}
+                              </span>{" "}
+                              ({formatarDataBR(anamneseDetalhe.resposta.criado_em)})
                             </p>
-                          )}
-                        </div>
-                      ))}
-
-                      <p className="text-sm text-body">
-                        Termos aceitos:{" "}
-                        <span className="font-medium text-heading">
-                          {anamneseDetalhe.resposta.termos_aceitos ? "Sim" : "Não"}
-                        </span>{" "}
-                        ({formatarDataBR(anamneseDetalhe.resposta.criado_em)})
-                      </p>
+                          </div>
+                        )
+                      )}
                     </div>
-                  )
-                )}
-              </div>
-            )}
-          </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           <div className="rounded-xl bg-surface p-3 ring-1 ring-border">
             <CabecalhoRetratil
@@ -632,7 +775,7 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
                                 : "bg-purple-50 text-purple-700 ring-purple-200"
                             }`}
                           >
-                            {item.tipo}
+                            {ROTULO_TIPO_OBSERVACAO[item.tipo] ?? item.tipo}
                           </span>
                         </div>
                         <p className="mt-1 text-body">{item.texto}</p>
@@ -645,6 +788,23 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
           </div>
         </div>
       )}
+
+      <ModalAlterarWhatsapp
+        cliente={alterandoWhatsapp ? clienteAtual : null}
+        estabelecimentoId={estabelecimentoId}
+        onFechar={() => setAlterandoWhatsapp(false)}
+        onAlterado={(novoWhatsapp) => {
+          setClienteAtual((anterior) => ({ ...anterior, whatsapp: novoWhatsapp }));
+          // Histórico/observações foram carregados com o telefone antigo —
+          // limpa e fecha os acordeões pra recarregar sob o número novo na
+          // próxima abertura (evita mostrar dados presos ao número trocado).
+          setHistorico(null);
+          setHistoricoAberto(false);
+          setObservacoes(null);
+          setObservacoesAbertas(false);
+          setAlterandoWhatsapp(false);
+        }}
+      />
     </div>
   );
 }
