@@ -27,7 +27,7 @@ export async function POST(request) {
   const { data: agendamento } = await supabaseAdmin
     .from("agendamentos")
     .select(
-      "id, nome_cliente, telefone, data, horario, duracao_min, status, servico_livre, google_event_id, estabelecimento_id, servicos(nome), estabelecimentos(google_calendar_ativo)"
+      "id, nome_cliente, telefone, data, horario, duracao_min, status, servico_livre, google_event_id, estabelecimento_id, servicos(nome), estabelecimentos(google_calendar_ativo, google_calendar_ordem_titulo)"
     )
     .eq("id", agendamentoId)
     .single();
