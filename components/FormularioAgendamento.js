@@ -70,6 +70,21 @@ function dataDeHoje() {
   return `${ano}-${mes}-${dia}`;
 }
 
+// ADMIN (modoLivre): true quando `data` é HOJE e `horario` ("HH:MM") já
+// começou em relação ao relógio do navegador. Usado só pra ESCONDER esses
+// slots da grade do dia inteiro (gradeAdmin) — puro filtro visual, diferente
+// do motivo 'antecedencia' (que continua marcando "bloqueado" mas visível,
+// já que faz parte do que o modo livre existe pra contornar). Dias que não
+// são hoje sempre retornam false — a grade deles continua completa desde
+// 00:00 (ver gradeAdmin).
+function horarioJaPassouHoje(data, horario) {
+  if (data !== dataDeHoje()) return false;
+  const agora = new Date();
+  const [h, m] = horario.split(":").map(Number);
+  const alvo = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate(), h, m);
+  return alvo.getTime() < agora.getTime();
+}
+
 // Date -> "YYYY-MM-DD" em horário LOCAL (a mesma chave usada nas queries e na
 // comparação com `hoje`). Montado componente-a-componente pra não sofrer o
 // deslocamento de fuso de toISOString() (que converte pra UTC).
@@ -1097,6 +1112,7 @@ export default function FormularioAgendamento({
             return null;
           })
           .filter(Boolean)
+          .filter(({ horario }) => !horarioJaPassouHoje(form.data, horario))
       : [];
 
   // Mantém `vagas` (mapa horário -> profissionais livres) sincronizado com a
