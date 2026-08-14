@@ -146,7 +146,11 @@ export default function ConfiguracoesSalao({
   // lib/disponibilidade.js -> filtrarPorAntecedenciaMinima). String do
   // <select> ("" = "Nenhum"/null, senão "12"/"24"/"48"); undefined = ainda
   // carregando. O corte do dia seguinte (cutoffDiaSeguinte*) é uma regra
-  // INDEPENDENTE — funciona com qualquer antecedência, inclusive "Nenhum".
+  // funcionalmente independente na lógica de bloqueio, mas a checkbox só é
+  // exibida na UI quando antecedenciaMinimaHoras for "Nenhum" ou "12" — em
+  // 24h/48h ela perde o sentido (a própria antecedência já cobre a manhã
+  // seguinte, ver investigação no PR). O valor salvo no banco pode continuar
+  // true mesmo com a checkbox oculta; é seguro, fica dormente sem efeito.
   const [antecedenciaMinimaHoras, setAntecedenciaMinimaHoras] = useState(undefined);
   const [cutoffDiaSeguinteAtivo, setCutoffDiaSeguinteAtivo] = useState(false);
   const [cutoffDiaSeguinteHora, setCutoffDiaSeguinteHora] = useState("19");
@@ -1180,9 +1184,12 @@ export default function ConfiguracoesSalao({
 
             {/* Sub-bloco: antecedência mínima do CLIENTE (não afeta o
                 calendário da janela acima, que é o limite máximo) + corte do
-                dia seguinte. As duas regras são INDEPENDENTES — o corte
-                aparece sempre, funciona mesmo com antecedência "Nenhum" (ver
-                filtrarPorAntecedenciaMinima em lib/disponibilidade.js). */}
+                dia seguinte. As duas regras são independentes na lógica de
+                bloqueio (ver filtrarPorAntecedenciaMinima em
+                lib/disponibilidade.js), mas a checkbox do corte só aparece
+                na UI quando a antecedência for "Nenhum" ou "12h" — em 24h/48h
+                a antecedência já cobre a manhã seguinte, então a checkbox
+                fica escondida (não desabilitada). */}
             <div className="border-t border-border pt-4">
               <label
                 htmlFor="antecedencia-minima-horas"
@@ -1207,30 +1214,32 @@ export default function ConfiguracoesSalao({
                 <option value="48">48 horas antes</option>
               </select>
 
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <label className="flex items-center gap-2 text-sm text-body">
-                  <input
-                    type="checkbox"
-                    checked={cutoffDiaSeguinteAtivo}
-                    onChange={alternarCutoffDiaSeguinte}
-                    disabled={carregandoAntecedenciaMinima}
-                    className="h-4 w-4 rounded border-border"
-                  />
-                  Encerrar agendamentos da manhã seguinte às
-                </label>
-                <select
-                  value={cutoffDiaSeguinteHora}
-                  onChange={(e) => salvarCutoffDiaSeguinteHora(e.target.value)}
-                  disabled={carregandoAntecedenciaMinima || !cutoffDiaSeguinteAtivo}
-                  className="rounded-lg border border-border px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {[18, 19, 20, 21].map((h) => (
-                    <option key={h} value={h}>
-                      {h}h
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {(antecedenciaMinimaHoras === "" || antecedenciaMinimaHoras === "12") && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-2 text-sm text-body">
+                    <input
+                      type="checkbox"
+                      checked={cutoffDiaSeguinteAtivo}
+                      onChange={alternarCutoffDiaSeguinte}
+                      disabled={carregandoAntecedenciaMinima}
+                      className="h-4 w-4 rounded border-border"
+                    />
+                    Encerrar agendamentos da manhã seguinte às
+                  </label>
+                  <select
+                    value={cutoffDiaSeguinteHora}
+                    onChange={(e) => salvarCutoffDiaSeguinteHora(e.target.value)}
+                    disabled={carregandoAntecedenciaMinima || !cutoffDiaSeguinteAtivo}
+                    className="rounded-lg border border-border px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {[18, 19, 20, 21].map((h) => (
+                      <option key={h} value={h}>
+                        {h}h
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {statusAntecedenciaMinima === "salvando" && (
                 <p className="mt-2 text-xs text-muted">Salvando…</p>
