@@ -12,16 +12,37 @@ import { supabase } from "@/lib/supabaseClient";
 // resto do form), mas replica o padrão pra manter a experiência consistente.
 //
 // `agendamento` é o item vivo selecionado no Painel (precisa de id,
-// nome_cliente e observacao; nome_cliente aparece só como referência
-// somente-leitura em "Dados importados" — a busca nasce vazia); null fecha
-// o modal. Confirmar faz um UPDATE direto em agendamentos
-// (nome_cliente, telefone e, se um serviço foi escolhido no dropdown
-// opcional, servico_id — nunca duracao_min, que continua sendo a do evento
-// real do Calendar) — isso dispara o gatilho pg_net normalmente, e a partir
-// daí o sync de saída (lib/googleCalendarSync.js) passa a atualizar o evento
-// no Google, já que a guarda de telefone null deixa de valer. Se observacao
-// ainda estiver vazia, o UPDATE também grava ali o nome_cliente original (o
-// texto cru do Calendar), pra não perder essa referência.
+// nome_cliente e observacao; nome_cliente aparece como referência
+// somente-leitura em "Dados importados" acima do campo, E — quando o tenant
+// usa google_calendar_ordem_titulo='servico_cliente' — como sugestão inicial
+// do campo Nome, ver sugerirNomeDoTitulo); null fecha o modal. Confirmar faz
+// um UPDATE direto em agendamentos (nome_cliente, telefone e, se um serviço
+// foi escolhido no dropdown opcional, servico_id — nunca duracao_min, que
+// continua sendo a do evento real do Calendar) — isso dispara o gatilho
+// pg_net normalmente, e a partir daí o sync de saída
+// (lib/googleCalendarSync.js) passa a atualizar o evento no Google, já que a
+// guarda de telefone null deixa de valer. Se observacao ainda estiver vazia,
+// o UPDATE também grava ali o nome_cliente original (o texto cru do
+// Calendar), pra não perder essa referência.
+
+// Sugere o nome pro campo a partir do título bruto do evento, só quando o
+// tenant grava os títulos como "Serviço - Nome" (mesmo separador literal
+// " - " que montarSummary usa pra montar esse formato na exportação, ver
+// lib/googleCalendarSync.js:26-32 — aqui é o split inverso). Sem esse padrão
+// configurado, ou sem o separador no texto (título não segue o padrão, ou é
+// só o nome), retorna "" e o campo nasce vazio como antes — nunca inventa um
+// nome. É só um valor inicial editável: a dona ainda revisa/confirma antes
+// de salvar, nada grava sozinho.
+function sugerirNomeDoTitulo(tituloBruto, ordemTitulo) {
+  if (ordemTitulo !== "servico_cliente") return "";
+
+  const texto = tituloBruto ?? "";
+  const indiceSeparador = texto.indexOf(" - ");
+  if (indiceSeparador === -1) return "";
+
+  return texto.slice(indiceSeparador + 3).trim();
+}
+
 export default function ModalVincularCliente({
   agendamento,
   estabelecimentoId,
@@ -38,18 +59,22 @@ export default function ModalVincularCliente({
 
   const [servicos, setServicos] = useState([]);
   const [servicoId, setServicoId] = useState("");
+  const [ordemTitulo, setOrdemTitulo] = useState(null);
 
-  // Recomeça do zero a cada agendamento selecionado — o nome nasce vazio (o
-  // texto bruto do evento fica só na referência "Dados importados" acima do
-  // campo, sem pré-preencher a busca).
+  // Recomeça do zero a cada agendamento selecionado. O nome nasce vazio,
+  // EXCETO quando o título bruto bate com o padrão "Serviço - Nome" do
+  // tenant (ver sugerirNomeDoTitulo) — nesse caso já vem preenchido, mas
+  // continua editável/apagável. Depende de ordemTitulo pra recalcular quando
+  // ele chega depois do fetch abaixo (mount, antes de qualquer agendamento
+  // selecionado — na prática sem corrida real com edição da dona).
   useEffect(() => {
-    setNome("");
+    setNome(sugerirNomeDoTitulo(agendamento?.nome_cliente, ordemTitulo));
     setTelefone("");
     setClienteSelecionado(null);
     setResultados([]);
     setErro("");
     setServicoId("");
-  }, [agendamento]);
+  }, [agendamento, ordemTitulo]);
 
   // Serviços ativos do tenant pro dropdown opcional — mesmo filtro
   // (estabelecimento_id + ativo=true) da etapa "Serviço" do
@@ -67,6 +92,28 @@ export default function ModalVincularCliente({
       .then(({ data, error }) => {
         if (!ativo) return;
         setServicos(error ? [] : data ?? []);
+      });
+
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimentoId]);
+
+  // Preferência de título do Google Calendar do tenant (ver
+  // lib/googleCalendarSync.js:20-32) — só usada aqui pra decidir se
+  // sugerirNomeDoTitulo tenta o split. Sem UI de toggle: hoje só é setada
+  // direto no banco por tenant (ver estabelecimentos.google_calendar_ordem_titulo).
+  useEffect(() => {
+    let ativo = true;
+
+    supabase
+      .from("estabelecimentos")
+      .select("google_calendar_ordem_titulo")
+      .eq("id", estabelecimentoId)
+      .single()
+      .then(({ data, error }) => {
+        if (!ativo) return;
+        setOrdemTitulo(error ? null : data?.google_calendar_ordem_titulo ?? null);
       });
 
     return () => {
