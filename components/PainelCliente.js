@@ -37,6 +37,23 @@ const SELO_STATUS = {
   },
 };
 
+// Rótulo do item em "Histórico recente" (abaixo): cancelado -> "Cancelado"
+// (ou "Expirado" se foi o cron de reserva provisória que cancelou, ver
+// agendamentos.expirado_automaticamente); confirmado (só chega aqui já com o
+// horário passado, ver classificarAgendamento) -> "Concluído";
+// pendente/aguardando_sinal que passou do horário sem confirmação ->
+// "Vencido" (nunca foi de fato atendido — não é "Concluído"). Mesma
+// distinção já feita em rotuloHistorico/HISTORICO_META do /admin (ver
+// app/[salon]/admin/page.js), reimplementada aqui porque este componente não
+// importa daquele arquivo (client-facing, sem acesso ao admin).
+function rotuloHistoricoItem(item) {
+  if (item.status === "cancelado") {
+    return item.expirado_automaticamente ? "Expirado" : "Cancelado";
+  }
+  if (item.status === "confirmado") return "Concluído";
+  return "Vencido";
+}
+
 // Painel exibido no fluxo público quando o cliente já identificado tem
 // agendamentos ativos (pendente/confirmado): lista os horários marcados,
 // permite cancelar (com aviso automático pro WhatsApp da dona) e oferece
@@ -403,8 +420,20 @@ export default function PainelCliente({
                   </span>
                 </span>
 
-                <span className="shrink-0 text-xs font-medium">
-                  {item.status === "cancelado" ? "Cancelado" : "Concluído"}
+                <span className="flex shrink-0 flex-col items-end gap-1.5">
+                  <span className="text-xs font-medium">
+                    {rotuloHistoricoItem(item)}
+                  </span>
+                  {/* Mesmo onNovoAgendamento do botão "Novo agendamento" logo
+                      abaixo — sem serviço, então o wizard abre do zero (só
+                      pula a identificação, que já está resolvida aqui). */}
+                  <button
+                    type="button"
+                    onClick={() => onNovoAgendamento()}
+                    className="rounded-lg bg-primary/10 px-2 py-1 text-xs font-medium text-primary transition hover:bg-primary/20"
+                  >
+                    Agendar novamente
+                  </button>
                 </span>
               </li>
             ))}

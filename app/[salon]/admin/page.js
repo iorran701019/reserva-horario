@@ -15,7 +15,13 @@ import {
   MENSAGEM_CONFIRMACAO,
   MENSAGEM_FORA_DA_JANELA,
 } from "@/lib/whatsapp";
-import { classificarAgendamento, fimDoAtendimento } from "@/lib/particao";
+import {
+  classificarAgendamento,
+  fimDoAtendimento,
+  rotuloHistorico,
+  ordenarHistoricoPorStatus,
+} from "@/lib/particao";
+import { useNavegacaoTrimestre } from "@/lib/useNavegacaoTrimestre";
 import { calcularVagasPorHorario, profissionaisLivresNoHorario } from "@/lib/disponibilidade";
 import { dentroDaJanelaAgendamento, diasRestantesJanela } from "@/lib/janelaAgendamento";
 import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
@@ -50,6 +56,7 @@ import FormularioAgendamento, { CalendarioDias } from "@/components/FormularioAg
 import IdentificacaoClienteAdmin from "@/components/IdentificacaoClienteAdmin";
 import AtivarNotificacoes from "@/components/AtivarNotificacoes";
 import ModalVincularCliente from "@/components/ModalVincularCliente";
+import NavegacaoTrimestre from "@/components/NavegacaoTrimestre";
 
 // URL do login do salão, carregando o destino pretendido em ?next= pra reentrar
 // no MESMO salão após autenticar. Com o slug agora no PATH, tanto o login quanto
@@ -127,27 +134,42 @@ function classesStatus(status) {
   return mapa[status] ?? "bg-surface text-body ring-border";
 }
 
-// Categoria de exibição de um item arquivado (aba Histórico). O status ORIGINAL
-// não muda no banco — isto é só rótulo derivado. Dentro do histórico, todo item
-// não-cancelado já tem o fim no passado (ver classificarAgendamento), então o
-// status basta pra escolher a categoria:
-//   confirmado -> "concluido" (atendido)
-//   cancelado  -> "cancelado"
-//   pendente (ou desconhecido) -> "caducado" (passou sem confirmar)
-function rotuloHistorico(item) {
-  if (item.status === "cancelado") return "cancelado";
-  if (item.status === "confirmado") return "concluido";
-  return "caducado";
+// Badge "Expira em Xh" da aba Pendentes (ver inbox mais abaixo): só aparece
+// nos 48h antes do fim da reserva provisória, pra não poluir a UI logo na
+// criação. Limite separado (18h) decide a cor de alerta (azul -> vermelho).
+const LIMITE_BADGE_EXPIRA_HORAS = 48;
+const LIMITE_BADGE_EXPIRA_VERMELHO_HORAS = 18;
+
+// Horas restantes até a reserva provisória do item expirar
+// (created_at + estabelecimentos.reserva_provisoria_expira_horas), ou null se
+// o salão não configurou expiração (coluna nula) — nesse caso nenhum badge
+// deve aparecer. Valor CRU (sem arredondar, pode ser negativo se já passou do
+// prazo): quem renderiza decide o corte de exibição (LIMITE_BADGE_EXPIRA_HORAS)
+// e o arredondamento pro texto; a ordenação do inbox usa o valor cru direto.
+// Função PURA — não muda nada no banco nem tira o item do inbox (a reserva
+// provisória hoje só afeta este contador visual, nada mais).
+function horasRestantesReserva(item, estabelecimento, agora) {
+  const expiraHoras = estabelecimento?.reserva_provisoria_expira_horas;
+  if (expiraHoras == null || !item.created_at) return null;
+
+  const horasDesdeCriacao = (agora - new Date(item.created_at)) / (1000 * 60 * 60);
+  return Number(expiraHoras) - horasDesdeCriacao;
 }
 
-// Texto + cores do badge por categoria do histórico. Concluído em verde
-// apagado, caducado (exibido como "Vencido") neutro/cinza, cancelado em
-// vermelho apagado. A chave `caducado` é interna (vem de rotuloHistorico /
-// lib/particao) — só o rótulo exibido muda.
+// Texto + cores do badge por categoria do histórico (rotuloHistorico, ver
+// lib/particao — fonte única da categorização, compartilhada com
+// GerenciarClientes.js). Concluído em verde
+// apagado, cancelado em vermelho apagado, caducado (exibido como "Vencido")
+// e expirado no mesmo neutro/cinza (evita confundir "expirado" com
+// "cancelado", já que os dois têm o mesmo vermelho). A chave `caducado` é
+// interna (vem de rotuloHistorico / lib/particao) — só o rótulo exibido
+// muda. "expirado" tem o mesmo status cru "cancelado" no banco (ver
+// agendamentos.expirado_automaticamente), só muda a razão exibida.
 const HISTORICO_META = {
   concluido: { rotulo: "Concluído", classe: "bg-green-50 text-green-600 ring-green-100" },
   caducado: { rotulo: "Vencido", classe: "bg-surface text-body ring-border" },
   cancelado: { rotulo: "Cancelado", classe: "bg-red-50 text-red-500 ring-red-100" },
+  expirado: { rotulo: "Expirado", classe: "bg-surface text-body ring-border" },
 };
 
 // Ícone do WhatsApp. Herda a cor do texto (fill="currentColor") e o tamanho
@@ -261,6 +283,7 @@ const FILTROS_HISTORICO = [
   { id: "concluido", rotulo: "Concluído" },
   { id: "caducado", rotulo: "Vencido" },
   { id: "cancelado", rotulo: "Cancelado" },
+  { id: "expirado", rotulo: "Expirado" },
 ];
 
 // Abre a conversa do WhatsApp do cliente em nova aba, com a mensagem pronta.
@@ -278,7 +301,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, expirado_automaticamente, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -1149,6 +1172,54 @@ export default function AdminPage() {
     };
   }, [agendamentoParaAlterarData, dataAlterarData, estabelecimento, versaoAlterarData]);
 
+  // Um único `agora` pra classificar tudo no render (inbox, fora da janela,
+  // histórico).
+  const agora = new Date();
+
+  // Histórico (aba "Histórico"): tudo arquivado — cancelados, pendentes
+  // caducados e confirmados concluídos. Ordenado do mais recente pro mais
+  // antigo (data+horário desc); a query vem asc, então invertemos a chave.
+  // Calculado ANTES dos guards de carregamento/sem-perfil abaixo (mesmo com
+  // `agendamentos` ainda vazio) porque alimenta o hook useNavegacaoTrimestre
+  // logo em seguida — hook precisa rodar sempre na mesma ordem entre renders
+  // (Rules of Hooks), não pode ficar atrás de um `return` condicional.
+  const historico = agendamentos
+    .filter((item) => classificarAgendamento(item, agora) === "historico" && item.telefone)
+    .sort((a, b) => {
+      const chaveA = `${a.data ?? ""} ${a.horario ?? ""}`;
+      const chaveB = `${b.data ?? ""} ${b.horario ?? ""}`;
+      return chaveB.localeCompare(chaveA);
+    });
+
+  // Contagem por categoria (Concluído/Vencido/Cancelado) + "todos", pros
+  // contadores do filtro.
+  const contagensHistorico = {
+    concluido: 0,
+    caducado: 0,
+    cancelado: 0,
+    expirado: 0,
+    todos: historico.length,
+  };
+  for (const item of historico) {
+    contagensHistorico[rotuloHistorico(item)] += 1;
+  }
+
+  // Lista visível: aplica o filtro client-side (todos = sem filtro), depois
+  // reordena por status (Expirado, Cancelado, Concluído/Vencido — ver
+  // ordenarHistoricoPorStatus) preservando a ordem cronológica dentro de
+  // cada grupo.
+  const historicoVisivel = ordenarHistoricoPorStatus(
+    filtroHistorico === "todos"
+      ? historico
+      : historico.filter((item) => rotuloHistorico(item) === filtroHistorico)
+  );
+
+  // Navegação por trimestre da aba Histórico (ver lib/useNavegacaoTrimestre):
+  // abre no trimestre corrente, "<"/">" só andam entre trimestres com dado
+  // (considerando o filtro de categoria acima), mesmo componente/hook
+  // reaproveitado na ficha do cliente (GerenciarClientes.js).
+  const navTrimestreHistorico = useNavegacaoTrimestre(historicoVisivel);
+
   // Autenticado, mas sem perfil vinculado (conta órfã): não há salão a resolver.
   // Vem ANTES do guard de carregamento — nesse caso `estabelecimento` continua
   // undefined, então checar aqui evita ficar preso no "Carregando...".
@@ -1206,10 +1277,23 @@ export default function AdminPage() {
   // — sem ficha real, não faz sentido aparecer como pendência/histórico de
   // cliente; ele já ocupa o horário e aparece no Painel (que NÃO filtra),
   // com o botão "Vincular cliente" pra sair desse estado.
-  const agora = new Date();
-  const inbox = agendamentos.filter(
-    (item) => classificarAgendamento(item, agora) === "inbox" && item.finalizado && item.telefone
-  );
+  const inbox = agendamentos
+    .filter(
+      (item) => classificarAgendamento(item, agora) === "inbox" && item.finalizado && item.telefone
+    )
+    // Itens com contador ativo (<=48h pra expirar a reserva) primeiro, mais
+    // próximos de expirar no topo; os demais mantêm a ordem cronológica de
+    // sempre (sort é estável, então "não mexe" nesse grupo, ver
+    // horasRestantesReserva).
+    .sort((a, b) => {
+      const restA = horasRestantesReserva(a, estabelecimento, agora);
+      const restB = horasRestantesReserva(b, estabelecimento, agora);
+      const ativoA = restA != null && restA <= LIMITE_BADGE_EXPIRA_HORAS;
+      const ativoB = restB != null && restB <= LIMITE_BADGE_EXPIRA_HORAS;
+      if (ativoA && ativoB) return restA - restB;
+      if (ativoA !== ativoB) return ativoA ? -1 : 1;
+      return 0;
+    });
 
   // Seção "Fora da janela de agendamento" (aba Pendentes): DERIVADA, mesmo
   // padrão de `inbox`/`historico` — nenhum status novo, nenhuma query extra.
@@ -1232,30 +1316,6 @@ export default function AdminPage() {
       const chaveB = `${b.data ?? ""} ${b.horario ?? ""}`;
       return chaveA.localeCompare(chaveB);
     });
-
-  // Histórico (aba "Histórico"): tudo arquivado — cancelados, pendentes
-  // caducados e confirmados concluídos. Ordenado do mais recente pro mais
-  // antigo (data+horário desc); a query vem asc, então invertemos a chave.
-  const historico = agendamentos
-    .filter((item) => classificarAgendamento(item, agora) === "historico" && item.telefone)
-    .sort((a, b) => {
-      const chaveA = `${a.data ?? ""} ${a.horario ?? ""}`;
-      const chaveB = `${b.data ?? ""} ${b.horario ?? ""}`;
-      return chaveB.localeCompare(chaveA);
-    });
-
-  // Contagem por categoria (Concluído/Vencido/Cancelado) + "todos", pros
-  // contadores do filtro.
-  const contagensHistorico = { concluido: 0, caducado: 0, cancelado: 0, todos: historico.length };
-  for (const item of historico) {
-    contagensHistorico[rotuloHistorico(item)] += 1;
-  }
-
-  // Lista visível: aplica o filtro client-side (todos = sem filtro).
-  const historicoVisivel =
-    filtroHistorico === "todos"
-      ? historico
-      : historico.filter((item) => rotuloHistorico(item) === filtroHistorico);
 
   // Item do modal de detalhe, sempre lido VIVO de `agendamentos` pelo id — assim
   // o patch do lembrete (atualizarItemLocal) aparece sem reabrir o modal.
@@ -1459,6 +1519,14 @@ export default function AdminPage() {
                     fimDoAtendimento(a) >= agora
                 );
 
+                // Contador "Expira em Xh" (ver horasRestantesReserva acima):
+                // null enquanto o salão não configurou expiração, ou fora da
+                // janela de 48h. mostrarBadgeExpira controla só a exibição; o
+                // valor cru (não arredondado) decide a cor.
+                const horasRestantes = horasRestantesReserva(item, estabelecimento, agora);
+                const mostrarBadgeExpira =
+                  horasRestantes != null && horasRestantes <= LIMITE_BADGE_EXPIRA_HORAS;
+
                 return (
                 <li
                   key={item.id}
@@ -1473,13 +1541,26 @@ export default function AdminPage() {
                       <p className="mt-0.5 text-sm text-body">{item.telefone}</p>
                     </div>
 
-                    <span
-                      className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classesStatus(
-                        item.status
-                      )}`}
-                    >
-                      {item.status ?? "—"}
-                    </span>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classesStatus(
+                          item.status
+                        )}`}
+                      >
+                        {item.status ?? "—"}
+                      </span>
+                      {mostrarBadgeExpira && (
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${
+                            horasRestantes <= LIMITE_BADGE_EXPIRA_VERMELHO_HORAS
+                              ? "bg-red-50 text-red-600 ring-red-100"
+                              : "bg-blue-50 text-blue-700 ring-blue-100"
+                          }`}
+                        >
+                          Expira em {Math.max(0, Math.round(horasRestantes))}h
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-body">
@@ -1762,13 +1843,23 @@ export default function AdminPage() {
               </select>
             </div>
 
-            {historicoVisivel.length === 0 ? (
+            <NavegacaoTrimestre
+              rotulo={navTrimestreHistorico.rotulo}
+              temAnterior={navTrimestreHistorico.temAnterior}
+              temProximo={navTrimestreHistorico.temProximo}
+              noAtual={navTrimestreHistorico.noAtual}
+              onAnterior={navTrimestreHistorico.irParaAnterior}
+              onProximo={navTrimestreHistorico.irParaProximo}
+              onVoltarAtual={navTrimestreHistorico.voltarParaAtual}
+            />
+
+            {navTrimestreHistorico.itensDoTrimestre.length === 0 ? (
               <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
-                Nenhum agendamento no histórico.
+                Nenhum agendamento no histórico neste trimestre.
               </p>
             ) : (
               <ul className="space-y-3">
-                {historicoVisivel.map((item) => {
+                {navTrimestreHistorico.itensDoTrimestre.map((item) => {
                   const meta = HISTORICO_META[rotuloHistorico(item)];
                   return (
                     <li
@@ -1829,7 +1920,7 @@ export default function AdminPage() {
                         )}
                       </div>
 
-                      <div className="mt-4">
+                      <div className="mt-4 flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() =>
@@ -1842,6 +1933,33 @@ export default function AdminPage() {
                         >
                           <IconeWhatsApp />
                           Entrar em contato
+                        </button>
+
+                        {/* Atalho pra reagendar sem repetir a busca por nome:
+                            preenche clienteParaAgendar direto (mesmo formato
+                            de IdentificacaoClienteAdmin.onIdentificado, ver
+                            aba Agendar abaixo) e troca de aba — pula o
+                            pré-passo. `id: null` porque `agendamentos` não
+                            guarda cliente_id (ver progressoFidelidadeModal
+                            acima); inofensivo, FormularioAgendamento só lê
+                            .nome/.telefone de clienteInicial. Não pré-preenche
+                            serviço/profissional — reagendamento é do zero. */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setClienteParaAgendar({
+                              id: null,
+                              nome: item.nome_cliente,
+                              telefone: item.telefone,
+                            });
+                            setAvisoAgendar("");
+                            setViewPai("agendar");
+                            router.push(`${pathname}?aba=agendar`, { scroll: false });
+                          }}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                        >
+                          <CalendarPlus className="h-4 w-4" />
+                          Novo agendamento
                         </button>
                       </div>
 

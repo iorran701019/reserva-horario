@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import NavegacaoTrimestre from "@/components/NavegacaoTrimestre";
+import { useNavegacaoTrimestre } from "@/lib/useNavegacaoTrimestre";
 import {
   buscarClientes,
   buscarResumoCliente,
@@ -13,7 +15,7 @@ import {
   criarAnotacaoLivre,
 } from "@/lib/clientesAdmin";
 import { existeModeloAtivo } from "@/lib/anamnese";
-import { classificarAgendamento } from "@/lib/particao";
+import { classificarAgendamento, rotuloHistorico, ordenarHistoricoPorStatus } from "@/lib/particao";
 import { buscarProgressoFidelidade } from "@/lib/fidelidade";
 import { linkWhatsApp, MENSAGEM_CONTATO_CLIENTE_ADMIN } from "@/lib/whatsapp";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
@@ -172,6 +174,16 @@ const ROTULO_TIPO_OBSERVACAO = {
   Anotação: "Anotação (Histórico)",
 };
 
+// Texto + cor do badge de cada categoria do Histórico (ver rotuloHistorico,
+// lib/particao). buscarHistoricoCompleto só traz confirmado/cancelado (nunca
+// "caducado" — pendente vencido), mas a entrada fica aqui por completude.
+const HISTORICO_BADGE = {
+  expirado: { rotulo: "Expirado", classe: "bg-gray-100 text-gray-700 ring-gray-200" },
+  cancelado: { rotulo: "Cancelado", classe: "bg-gray-100 text-gray-700 ring-gray-200" },
+  concluido: { rotulo: "Concluído", classe: "bg-green-100 text-green-700 ring-green-200" },
+  caducado: { rotulo: "Vencido", classe: "bg-gray-100 text-gray-700 ring-gray-200" },
+};
+
 // Chip de progresso de fidelidade da linha da lista (ver BadgeFidelidade).
 // Componente próprio pra isolar o fetch por cliente sem travar a montagem da
 // lista inteira num só Promise.all.
@@ -236,6 +248,16 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
   const [historicoAberto, setHistoricoAberto] = useState(false);
   const [historico, setHistorico] = useState(null);
   const [carregandoHistorico, setCarregandoHistorico] = useState(false);
+
+  // Reordena por status (Expirado, Cancelado, Concluído — ver
+  // ordenarHistoricoPorStatus) preservando a ordem cronológica que já vem da
+  // query (mais recente primeiro), e agrupa por trimestre (mesmo componente/
+  // hook da aba Histórico do admin geral, ver app/[salon]/admin/page.js).
+  // Chamado incondicionalmente aqui (antes do `return` de editandoDados
+  // abaixo) porque é hook — precisa rodar sempre na mesma ordem entre renders.
+  const navTrimestreHistorico = useNavegacaoTrimestre(
+    ordenarHistoricoPorStatus(historico ?? [])
+  );
 
   const [anamneseAberta, setAnamneseAberta] = useState(false);
   const [anamneseDetalhe, setAnamneseDetalhe] = useState(null);
@@ -526,37 +548,54 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
                     Nenhum atendimento no histórico ainda.
                   </p>
                 ) : (
-                  historico.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex flex-wrap items-center gap-2 text-sm text-body"
-                    >
-                      <span className="font-medium text-heading">
-                        {formatarDataBR(item.data)} · {formatarHorario(item.horario)}
-                      </span>
-                      <span>{item.servicos?.nome ?? "Serviço"}</span>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${
-                          item.status === "cancelado"
-                            ? "bg-gray-100 text-gray-700 ring-gray-200"
-                            : "bg-green-100 text-green-700 ring-green-200"
-                        }`}
-                      >
-                        {item.status === "cancelado" ? "Cancelado" : "Concluído"}
-                      </span>
-                      {/* Respostas do popup de perguntas do serviço (ver
-                          lib/agendamentoRespostas), quando houver. */}
-                      {(item.respostas ?? []).length > 0 && (
-                        <ul className="basis-full space-y-0.5">
-                          {item.respostas.map((texto, i) => (
-                            <li key={i} className="text-xs text-body">
-                              {texto}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ))
+                  <>
+                    <NavegacaoTrimestre
+                      rotulo={navTrimestreHistorico.rotulo}
+                      temAnterior={navTrimestreHistorico.temAnterior}
+                      temProximo={navTrimestreHistorico.temProximo}
+                      noAtual={navTrimestreHistorico.noAtual}
+                      onAnterior={navTrimestreHistorico.irParaAnterior}
+                      onProximo={navTrimestreHistorico.irParaProximo}
+                      onVoltarAtual={navTrimestreHistorico.voltarParaAtual}
+                    />
+
+                    {navTrimestreHistorico.itensDoTrimestre.length === 0 ? (
+                      <p className="text-sm text-body">
+                        Nenhum atendimento no histórico neste trimestre.
+                      </p>
+                    ) : (
+                      navTrimestreHistorico.itensDoTrimestre.map((item) => {
+                        const meta = HISTORICO_BADGE[rotuloHistorico(item)];
+                        return (
+                          <div
+                            key={item.id}
+                            className="flex flex-wrap items-center gap-2 text-sm text-body"
+                          >
+                            <span className="font-medium text-heading">
+                              {formatarDataBR(item.data)} · {formatarHorario(item.horario)}
+                            </span>
+                            <span>{item.servicos?.nome ?? "Serviço"}</span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${meta.classe}`}
+                            >
+                              {meta.rotulo}
+                            </span>
+                            {/* Respostas do popup de perguntas do serviço (ver
+                                lib/agendamentoRespostas), quando houver. */}
+                            {(item.respostas ?? []).length > 0 && (
+                              <ul className="basis-full space-y-0.5">
+                                {item.respostas.map((texto, i) => (
+                                  <li key={i} className="text-xs text-body">
+                                    {texto}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </>
                 )}
               </div>
             )}
