@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Check, MessageCircleOff } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { calcularVagasPorHorario, filtrarPorAntecedenciaMinima } from "@/lib/disponibilidade";
 import { buscarTema } from "@/lib/temas";
 import PopupRegrasAgendamento from "@/components/PopupRegrasAgendamento";
+import IconeWhatsApp from "@/components/IconeWhatsApp";
 import {
   calcularPrecoManutencao,
   buscarVencimentoManutencao,
@@ -12,6 +14,7 @@ import {
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 import { useVoltarFisico } from "@/lib/voltarFisico";
 import { dentroDaJanelaAgendamento } from "@/lib/janelaAgendamento";
+import { linkWhatsApp, MENSAGEM_CONFIRMACAO } from "@/lib/whatsapp";
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
 // "pendente"/"aguardando_sinal") e a aba Agendar do /admin (cria
@@ -722,6 +725,13 @@ export default function FormularioAgendamento({
   // PopupRegrasAgendamento no JSX abaixo).
   const [avisoRegrasConfirmado, setAvisoRegrasConfirmado] = useState(false);
   const [mostrarPopupAvisoRegras, setMostrarPopupAvisoRegras] = useState(false);
+
+  // Botão dividido "Confirmar agendamento" — só existe no /admin (`status`
+  // truthy, ver JSX). Zona pequena pula o WhatsApp de confirmação (mesmo
+  // padrão da aba Pendentes, ver app/[salon]/admin/page.js); este popup é o
+  // "tem certeza" antes de criar sem notificar.
+  const [popupConfirmarSemNotificarAberto, setPopupConfirmarSemNotificarAberto] =
+    useState(false);
 
   async function copiarChavePix() {
     try {
@@ -1745,36 +1755,46 @@ export default function FormularioAgendamento({
     setEtapa("dados");
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setErro("");
-
+  // Validações comuns aos dois caminhos de envio (zona grande via submit do
+  // form, zona pequena "sem notificar" via botão avulso — só existe com
+  // `status`, ver JSX). Devolve false e já seta `erro` no primeiro problema
+  // encontrado; quem chama só decide o que fazer a seguir.
+  function validarCamposObrigatorios() {
     if (!form.nome || !form.telefone || !form.data) {
       setErro("Preencha nome, WhatsApp e data para continuar.");
-      return;
+      return false;
     }
 
     // Validação leve: pelo menos 10 dígitos (DDD + número) após limpar a máscara.
     if (form.telefone.replace(/\D/g, "").length < 10) {
       setErro("Informe um WhatsApp válido com DDD.");
-      return;
+      return false;
     }
 
     if (!servicoSelecionado) {
       setErro("Selecione um serviço.");
-      return;
+      return false;
     }
 
     if (!horarioSelecionado) {
       setErro("Selecione um horário disponível.");
-      return;
+      return false;
     }
 
     // No fluxo "cliente escolhe", o profissional é obrigatório.
     if (escolherProfissional && !profissionalSelecionado) {
       setErro("Selecione um profissional.");
-      return;
+      return false;
     }
+
+    return true;
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setErro("");
+
+    if (!validarCamposObrigatorios()) return;
 
     // Público: a esta altura a reserva já deveria existir (gravada ao entrar
     // em "dados", ver selecionarHorario). Sem ela não há o que fazer UPDATE —
@@ -1799,13 +1819,29 @@ export default function FormularioAgendamento({
       return;
     }
 
-    await finalizarAgendamento();
+    await finalizarAgendamento(true);
   }
 
   async function confirmarAvisoRegras() {
     setAvisoRegrasConfirmado(true);
     setMostrarPopupAvisoRegras(false);
-    await finalizarAgendamento();
+    await finalizarAgendamento(true);
+  }
+
+  // Zona pequena do botão dividido (só /admin, `status` truthy — ver JSX):
+  // mesma validação do submit normal, mas em vez de criar na hora abre o
+  // popup "tem certeza" (ver confirmarSemNotificar). Sem as checagens de
+  // reservaId/aviso de regras acima porque essas são exclusivas do público,
+  // que nunca vê este botão.
+  function abrirPopupConfirmarSemNotificar() {
+    setErro("");
+    if (!validarCamposObrigatorios()) return;
+    setPopupConfirmarSemNotificarAberto(true);
+  }
+
+  async function confirmarSemNotificar() {
+    setPopupConfirmarSemNotificarAberto(false);
+    await finalizarAgendamento(false);
   }
 
   // Submit final ("Confirmar agendamento").
@@ -1819,7 +1855,7 @@ export default function FormularioAgendamento({
   // pagamento e liberando o status; qualquer outro caso (sem sinal, ou com
   // sinal mas caixa desmarcada) -> nada a gravar, só avança a UI, já que o
   // registro existe do jeito certo desde que a etapa foi alcançada.
-  async function finalizarAgendamento() {
+  async function finalizarAgendamento(notificar = true) {
     if (!status) {
       setEnviando(true);
 
@@ -1960,6 +1996,28 @@ export default function FormularioAgendamento({
       // Outros erros: mostra a mensagem real do Supabase.
       setErro(error.message);
       return;
+    }
+
+    // Notificação de confirmação (zona grande do botão dividido, ver JSX —
+    // mesma mensagem/gatilho de "Confirmar" na aba Pendentes).
+    // `notificar=false` (zona pequena, popup "sem notificar") pula só isto.
+    if (notificar) {
+      window.open(
+        linkWhatsApp(
+          form.telefone,
+          MENSAGEM_CONFIRMACAO(
+            {
+              nome_cliente: form.nome,
+              data: form.data,
+              horario: horarioSelecionado,
+              servicos: { nome: servicoSelecionado.nome },
+            },
+            estabelecimento.msg_confirmacao
+          )
+        ),
+        "_blank",
+        "noopener,noreferrer"
+      );
     }
 
     // Sucesso: entrega o resumo ao consumidor (refetch + reset no admin — o
@@ -2561,13 +2619,47 @@ export default function FormularioAgendamento({
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={enviando}
-              className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {enviando ? "Enviando..." : rotuloSubmit}
-            </button>
+            {/* Só no /admin (status truthy): botão dividido, mesmo padrão da
+                aba Pendentes (ver app/[salon]/admin/page.js) — zona grande
+                (texto+zap) manda a notificação de confirmação de sempre;
+                zona pequena (~64px, dois ícones) abre um popup e, aceito,
+                cria sem notificar. O público mantém o botão único de sempre,
+                sem WhatsApp nenhum aqui (ele já viu a tela de "Solicitação
+                enviada" e usa o próprio botão fixo pra falar com o salão).
+                Paleta FIXA (verde), igual Pendentes — não a cor de tema do
+                salão (--color-primary): esta ação é sempre "confirmar", com
+                o mesmo significado visual em qualquer tenant. */}
+            {status ? (
+              <div className="flex items-stretch overflow-hidden rounded-lg bg-green-50 ring-1 ring-green-100">
+                <button
+                  type="submit"
+                  disabled={enviando}
+                  className="inline-flex flex-1 items-center justify-center gap-1.5 px-4 py-2.5 font-medium text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <IconeWhatsApp />
+                  {enviando ? "Enviando..." : rotuloSubmit}
+                </button>
+                <button
+                  type="button"
+                  onClick={abrirPopupConfirmarSemNotificar}
+                  disabled={enviando}
+                  aria-label="Confirmar sem notificar cliente"
+                  title="Confirmar sem notificar cliente"
+                  className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-green-100 text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Check className="h-4 w-4" aria-hidden="true" />
+                  <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="submit"
+                disabled={enviando}
+                className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {enviando ? "Enviando..." : rotuloSubmit}
+              </button>
+            )}
 
             {/* Só no /admin: no público a reserva já foi gravada de verdade
                 ao entrar em "dados" (ver selecionarHorario), então esta
@@ -2762,6 +2854,50 @@ export default function FormularioAgendamento({
           texto={estabelecimento.aviso_regras_agendamento}
           onConfirmar={confirmarAvisoRegras}
         />
+      )}
+
+      {/* Popup da zona pequena do botão dividido (só /admin) — mesmo texto e
+          par Confirmar/Cancelar do popup equivalente na aba Pendentes. */}
+      {popupConfirmarSemNotificarAberto && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-confirmar-sem-notificar"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setPopupConfirmarSemNotificarAberto(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-confirmar-sem-notificar"
+              className="text-lg font-semibold text-heading"
+            >
+              Confirmar agendamento
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Confirmar agendamento sem notificar o cliente?
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarSemNotificar}
+                className="flex-1 rounded-lg bg-green-600 px-4 py-2.5 font-medium text-white transition hover:bg-green-700"
+              >
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={() => setPopupConfirmarSemNotificarAberto(false)}
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

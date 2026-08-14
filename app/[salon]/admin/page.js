@@ -44,9 +44,11 @@ import {
   AlertCircle,
   Gift,
   ChevronRight,
-  BellOff,
+  Check,
+  MessageCircleOff,
 } from "lucide-react";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
+import IconeWhatsApp from "@/components/IconeWhatsApp";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
@@ -172,21 +174,6 @@ const HISTORICO_META = {
   cancelado: { rotulo: "Cancelado", classe: "bg-red-50 text-red-500 ring-red-100" },
   expirado: { rotulo: "Expirado", classe: "bg-surface text-body ring-border" },
 };
-
-// Ícone do WhatsApp. Herda a cor do texto (fill="currentColor") e o tamanho
-// via className, então serve tanto pro botão verde quanto pro vermelho.
-function IconeWhatsApp({ className = "h-4 w-4" }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-      className={className}
-    >
-      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.71.306 1.263.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.885-9.885 9.885M20.52 3.449C18.24 1.245 15.24.044 12.045.044 5.463.044.102 5.404.1 11.986c0 2.096.547 4.142 1.588 5.945L0 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.582 0 11.943-5.361 11.945-11.945a11.86 11.86 0 00-3.418-8.4" />
-    </svg>
-  );
-}
 
 // Ação "Arquivar", comum a qualquer tipo de pendência: marca resolvido=true
 // (ver handleArquivarPendencia) e some o card. Fábrica pra não repetir o
@@ -415,6 +402,12 @@ export default function AdminPage() {
   // WhatsApp. false só quando o modal foi aberto pela zona pequena (sem
   // notificar) do botão dividido em Pendentes; sempre true nos outros casos.
   const [notificarAoCancelar, setNotificarAoCancelar] = useState(true);
+
+  // Agendamento aguardando confirmação da zona pequena de "Confirmar" (sem
+  // notificar). Mesmo padrão de agendamentoParaCancelar: null = modal
+  // fechado. A zona grande de Confirmar (com WhatsApp) não passa por aqui —
+  // continua executando handleConfirmar direto, sem popup.
+  const [agendamentoParaConfirmar, setAgendamentoParaConfirmar] = useState(null);
 
   // Agendamento confirmado selecionado no Painel (controla o modal de detalhe/
   // ações). Guardamos o id; os dados vivos saem de `agendamentos` no render,
@@ -1643,11 +1636,12 @@ export default function AdminPage() {
                   <div className="mt-4 flex flex-col gap-2">
                     {/* Botão dividido em duas zonas: a maior (texto+ícone)
                         mantém o comportamento de sempre (update + WhatsApp);
-                        a menor (só ícone, ~44px pra área de toque no mobile)
-                        faz o mesmo update mas pula o redirecionamento pro
-                        WhatsApp. Mesma cor de fundo dos dois lados — só uma
-                        borda fina (mesma cor do ring já usado no botão)
-                        separa as zonas, sem criar elemento/cor novos. */}
+                        a menor (só ícones, ~64px pra área de toque no mobile)
+                        abre um popup de confirmação e, se aceito, faz o mesmo
+                        update mas pula o redirecionamento pro WhatsApp. Mesma
+                        cor de fundo dos dois lados — só uma borda fina (mesma
+                        cor do ring já usado no botão) separa as zonas, sem
+                        criar elemento/cor novos. */}
                     <div className="flex items-stretch overflow-hidden rounded-lg bg-green-50 ring-1 ring-green-100">
                       <button
                         type="button"
@@ -1659,12 +1653,13 @@ export default function AdminPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleConfirmar(item, false)}
+                        onClick={() => setAgendamentoParaConfirmar(item)}
                         aria-label="Confirmar sem notificar cliente"
                         title="Confirmar sem notificar cliente"
-                        className="inline-flex w-11 shrink-0 items-center justify-center border-l border-green-100 text-green-700 transition hover:bg-green-100"
+                        className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-green-100 text-green-700 transition hover:bg-green-100"
                       >
-                        <BellOff className="h-4 w-4" aria-hidden="true" />
+                        <Check className="h-4 w-4" aria-hidden="true" />
+                        <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
                       </button>
                     </div>
 
@@ -1688,9 +1683,10 @@ export default function AdminPage() {
                         }}
                         aria-label="Cancelar sem notificar cliente"
                         title="Cancelar sem notificar cliente"
-                        className="inline-flex w-11 shrink-0 items-center justify-center border-l border-red-200 text-red-600 transition hover:bg-red-50"
+                        className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-red-200 text-red-600 transition hover:bg-red-50"
                       >
-                        <BellOff className="h-4 w-4" aria-hidden="true" />
+                        <X className="h-4 w-4" aria-hidden="true" />
+                        <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
                       </button>
                     </div>
 
@@ -2573,6 +2569,55 @@ export default function AdminPage() {
                 className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup leve da zona pequena de "Confirmar" (sem notificar) — mesmo
+          estilo visual do modal de cancelamento acima, sem o texto extra do
+          nome do cliente (aqui é só uma pergunta direta sim/não). A zona
+          grande de Confirmar não passa por aqui — continua direta. */}
+      {agendamentoParaConfirmar && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-confirmar"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setAgendamentoParaConfirmar(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-confirmar"
+              className="text-lg font-semibold text-heading"
+            >
+              Confirmar agendamento
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Confirmar agendamento sem notificar o cliente?
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={() => {
+                  handleConfirmar(agendamentoParaConfirmar, false);
+                  setAgendamentoParaConfirmar(null);
+                }}
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-green-700"
+              >
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={() => setAgendamentoParaConfirmar(null)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Cancelar
               </button>
             </div>
           </div>
