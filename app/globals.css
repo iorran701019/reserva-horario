@@ -139,3 +139,21 @@ a:focus-visible, button:focus-visible {
   );
   border: 1px dashed rgba(75, 85, 99, 0.6);
 }
+
+/* Dia sem expediente configurado, view Mês (ver diasSemVagas em
+   PainelCalendario.js) — mesma receita de listras diagonais dos blocos de
+   ausência acima, agora em vermelho translúcido e aplicada à CÉLULA DO DIA
+   inteira (via dayCellClassNames), não a um evento. Alvo é o -day-frame (não
+   o <td> .ag-dia-sem-vagas em si): background de elemento não-posicionado
+   sempre pinta ATRÁS dos filhos (número do dia, badges de horário), então o
+   número/badges continuam legíveis por cima sem precisar de z-index. */
+.ag-dia-sem-vagas .fc-daygrid-day-frame {
+  background-color: rgba(239, 68, 68, 0.06);
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(239, 68, 68, 0.18) 0px,
+    rgba(239, 68, 68, 0.18) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}

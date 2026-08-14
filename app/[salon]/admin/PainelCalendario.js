@@ -168,6 +168,17 @@ export default function PainelCalendario({
   // buscarHistoricoRecente em lib/agendamentosCliente.js).
   const [ausencias, setAusencias] = useState([]);
 
+  // Expediente configurado de cada profissional ATIVO (dia_semana com
+  // horário, por modo — mesma fonte que diasSemanaAtivos usa em
+  // FormularioAgendamento.js e no modal "Alterar data" de page.js): Map
+  // profissional_id -> Set<dia_semana>. Alimenta só a aproximação "sem vaga"
+  // da view Mês (ver diasSemVagas abaixo) — NÃO é vaga a vaga (sem serviço
+  // âncora no Painel, seria caro demais rodar por dia visível). Refeita só
+  // quando a lista de profissionais ativos mudar, não a cada troca de mês.
+  const [expedientePorProfissional, setExpedientePorProfissional] = useState(
+    new Map()
+  );
+
   // Botão flutuante "voltar ao início", só na aba Lista: aparece depois de
   // ~300px de scroll no container da lista (ver `listaScrollRef`).
   const [mostrarBotaoTopo, setMostrarBotaoTopo] = useState(false);
@@ -279,6 +290,48 @@ export default function PainelCalendario({
       ativo = false;
     };
   }, [estabelecimentoId, profissionaisDisponiveis, rangeVisivel]);
+
+  // Busca o expediente (ver `expedientePorProfissional` acima) dos
+  // profissionais ativos: 1 query só, não por dia/mês. `dia_semana` vem de
+  // `horarios_trabalho` (modo 'janela') ou `horarios_fixos` (modo 'fixo'),
+  // por profissional. Refeita quando a lista de profissionais ativos mudar
+  // (mesmo gatilho de `profissionaisDisponiveis` já usado pela busca de
+  // ausências acima).
+  useEffect(() => {
+    if (profissionaisDisponiveis.length === 0) {
+      setExpedientePorProfissional(new Map());
+      return;
+    }
+    let ativo = true;
+
+    (async () => {
+      const ids = profissionaisDisponiveis.map((p) => p.id);
+      const { data, error } = await supabase
+        .from("profissionais")
+        .select(
+          "id, modo_horario, horarios_trabalho(dia_semana), horarios_fixos(dia_semana)"
+        )
+        .in("id", ids);
+      if (!ativo) return;
+      if (error || !data) {
+        setExpedientePorProfissional(new Map());
+        return;
+      }
+      setExpedientePorProfissional(
+        new Map(
+          data.map((p) => {
+            const linhas =
+              p.modo_horario === "fixo" ? p.horarios_fixos : p.horarios_trabalho;
+            return [p.id, new Set((linhas ?? []).map((h) => h.dia_semana))];
+          })
+        )
+      );
+    })();
+
+    return () => {
+      ativo = false;
+    };
+  }, [profissionaisDisponiveis]);
 
   // Mostra o botão flutuante "voltar ao início" só na aba Lista, depois de
   // ~300px de scroll no container próprio da lista (o reset ao trocar de aba
@@ -438,6 +491,80 @@ export default function PainelCalendario({
     return lista;
   }, [ausencias, rangeVisivel, filtroProfissional, nomePorProfissional]);
 
+  // Dias (dentro do range visível) sem vaga possível — aproximação, não
+  // lotação real (ver `expedientePorProfissional` acima; não olha
+  // `agendamentos` nenhum). Um dia entra no Set por dois motivos:
+  // (1) já é PASSADO (antes de hoje, comparado por data local — mesmo
+  //     cuidado de fuso do resto do projeto, componente a componente, nunca
+  //     string): sempre entra, incondicional, mesmo sem `ausencias`/
+  //     `expedientePorProfissional` carregados ainda e mesmo sem nenhum
+  //     profissional relevante.
+  // (2) hoje/futuro, mas NENHUM profissional do filtro ativo tem expediente
+  //     pra aquele dia da semana, ou o(s) que teria(m) está(ão) de ausência
+  //     `dia_inteiro` (recorrente ou período — mesma fonte crua de
+  //     `ausencias`) cobrindo justamente essa data. Só é avaliado depois que
+  //     `expedientePorProfissional` carrega (evita marcar tudo de vermelho
+  //     no flash inicial, antes da query resolver).
+  // Alimenta só `dayCellClassNames` da view Mês (ver <FullCalendar> abaixo).
+  const diasSemVagas = useMemo(() => {
+    if (!rangeVisivel) return new Set();
+
+    const agora = new Date();
+    const hoje = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate());
+
+    const idsRelevantes = profissionaisDisponiveis
+      .map((p) => p.id)
+      .filter(
+        (id) => filtroProfissional === "todos" || String(id) === filtroProfissional
+      );
+
+    const ausenciasDiaInteiro = ausencias.filter(
+      (a) => (a.tipo_registro ?? "ausencia") === "ausencia" && a.dia_inteiro
+    );
+
+    const resultado = new Set();
+    const [ai, mi, di] = rangeVisivel.inicio.split("-").map(Number);
+    const [af, mf, df] = rangeVisivel.fimExclusivo.split("-").map(Number);
+    const fim = new Date(af, mf - 1, df);
+
+    for (
+      let cursor = new Date(ai, mi - 1, di);
+      cursor < fim;
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1)
+    ) {
+      const iso = paraISOLocal(cursor);
+
+      if (cursor < hoje) {
+        resultado.add(iso);
+        continue;
+      }
+
+      if (expedientePorProfissional.size === 0 || idsRelevantes.length === 0) continue;
+
+      const diaSemana = cursor.getDay();
+      const algumTrabalha = idsRelevantes.some((id) => {
+        const dias = expedientePorProfissional.get(id);
+        if (!dias || !dias.has(diaSemana)) return false;
+        const ausenteHoje = ausenciasDiaInteiro.some((a) => {
+          if (a.profissional_id !== id) return false;
+          return a.tipo === "recorrente"
+            ? a.dia_semana === diaSemana
+            : a.data_inicio <= iso && iso <= a.data_fim;
+        });
+        return !ausenteHoje;
+      });
+
+      if (!algumTrabalha) resultado.add(iso);
+    }
+    return resultado;
+  }, [
+    rangeVisivel,
+    expedientePorProfissional,
+    profissionaisDisponiveis,
+    filtroProfissional,
+    ausencias,
+  ]);
+
   // Array combinado que alimenta o calendário: agendamentos + blocos de
   // ausência. slotMinTime/slotMaxTime (abaixo) e eventosExibidos (Lista)
   // enxergam os dois juntos, sem duplicar lógica.
@@ -595,6 +722,14 @@ export default function PainelCalendario({
           eventTimeFormat={FORMATO_24H}
           slotLabelFormat={FORMATO_24H}
           events={eventosExibidos}
+          dayCellClassNames={(arg) => {
+            // Só a view Mês tem célula de dia no sentido usado aqui — evita
+            // rodar a checagem em qualquer outro contexto de dayCell.
+            if (arg.view.type !== "dayGridMonth") return [];
+            return diasSemVagas.has(paraISOLocal(arg.date))
+              ? ["ag-dia-sem-vagas"]
+              : [];
+          }}
           datesSet={(arg) => {
             setViewAtual(arg.view.type);
             setTituloAtual(arg.view.title);
