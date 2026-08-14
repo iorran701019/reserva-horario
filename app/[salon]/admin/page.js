@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
@@ -394,6 +394,42 @@ export default function AdminPage() {
   // o bloco "Janela de agendamento" já expandido e rolar até ele. Consumida
   // uma vez (ver onFocarBlocoJanelaConsumido) — não é "sticky".
   const [focarJanelaAgendamento, setFocarJanelaAgendamento] = useState(false);
+
+  // Id do agendamento pendente clicado no bloco cinza da view Dia do Painel
+  // (ver PainelCalendario -> onSelecionarPendente): sinaliza pra aba
+  // Pendentes rolar até o card certo e destacá-lo por alguns segundos. Mesma
+  // ideia de focarJanelaAgendamento, mas carrega o id do alvo em vez de um
+  // boolean, já que aqui a lista tem N itens (não um bloco fixo). Some
+  // sozinho (ver useEffect abaixo) — não precisa de "consumido" explícito
+  // porque não há componente filho separado pra notificar de volta.
+  const [pendenteEmDestaqueId, setPendenteEmDestaqueId] = useState(null);
+
+  // Refs dos <li> da lista de Pendentes (inbox), indexados por item.id — alvo
+  // do scrollIntoView acima. Mapa (não array) porque a lista é dinâmica e
+  // alguns itens desmontam (some da inbox ao confirmar/cancelar).
+  const refsPendentes = useRef(new Map());
+
+  // Rola até o card e liga o destaque quando pendenteEmDestaqueId muda. O
+  // setTimeout de 80ms espera o commit da troca de aba (setViewPai +
+  // setPendenteEmDestaqueId chegam juntos no mesmo clique) refletir no DOM
+  // antes de medir a posição — mesmo motivo do temporizador equivalente em
+  // ConfiguracoesSalao (blocoJanelaRef). O destaque desliga sozinho depois de
+  // ~1.8s; se o item não existir na lista (ex.: pendente não finalizado,
+  // nunca aparece em Pendentes — ver comentário de `inbox` abaixo), o
+  // optional chaining só pula o scroll, sem quebrar nada.
+  useEffect(() => {
+    if (pendenteEmDestaqueId == null) return;
+    const paraRolar = setTimeout(() => {
+      refsPendentes.current
+        .get(pendenteEmDestaqueId)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    const paraLimpar = setTimeout(() => setPendenteEmDestaqueId(null), 1800);
+    return () => {
+      clearTimeout(paraRolar);
+      clearTimeout(paraLimpar);
+    };
+  }, [pendenteEmDestaqueId]);
 
   // Agendamento aguardando confirmação de cancelamento (controla o modal).
   // null = nenhum modal aberto.
@@ -1537,8 +1573,20 @@ export default function AdminPage() {
                 return (
                 <li
                   key={item.id}
+                  id={`pendente-${item.id}`}
+                  ref={(el) => {
+                    if (el) refsPendentes.current.set(item.id, el);
+                    else refsPendentes.current.delete(item.id);
+                  }}
                   // Todo item do inbox precisa de ação: destaque âmbar fixo.
-                  className="rounded-2xl bg-amber-50/60 p-4 shadow-sm ring-1 ring-amber-300 transition"
+                  // Destaque temporário azul por cima (ver
+                  // pendenteEmDestaqueId + PainelCalendario/onSelecionarPendente):
+                  // chegada vinda do clique no bloco "Pendente" da view Dia.
+                  className={`rounded-2xl bg-amber-50/60 p-4 shadow-sm ring-1 ring-amber-300 transition ${
+                    pendenteEmDestaqueId === item.id
+                      ? "ring-4 ring-blue-500"
+                      : ""
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -1858,6 +1906,11 @@ export default function AdminPage() {
           <PainelCalendario
             agendamentos={agendamentos}
             onSelecionarConfirmado={(item) => setIdSelecionado(item.id)}
+            onSelecionarPendente={(item) => {
+              setViewPai("pendentes");
+              setPendenteEmDestaqueId(item.id);
+              setDrawerAberto(false);
+            }}
             onVincularCliente={(item) => setIdParaVincular(item.id)}
             onMarcarComoAtendimento={marcarComoAtendimento}
             estabelecimentoId={estabelecimento.id}

@@ -125,6 +125,7 @@ function paraHoraCompleta(hora) {
 export default function PainelCalendario({
   agendamentos,
   onSelecionarConfirmado,
+  onSelecionarPendente,
   onVincularCliente,
   onMarcarComoAtendimento,
   estabelecimentoId,
@@ -842,8 +843,11 @@ export default function PainelCalendario({
             // tem `extendedProps.agendamento` (classificarAgendamento abaixo
             // quebraria em cima de undefined).
             if (info.event.extendedProps.ausencia) return;
-            // Nas demais views (Dia/Lista): o pendente (cinza) é só ocupação —
-            // tratado no Inbox, não clicável aqui. Bloco pessoal (cinza-azulado)
+            // Nas demais views (Dia/Lista): o pendente (cinza) não abre modal
+            // de detalhe aqui — ele é tratado no Inbox (aba Pendentes). Em vez
+            // de ficar inerte, o clique navega direto pro card certo lá (ver
+            // onSelecionarPendente -> page.js: setViewPai("pendentes") +
+            // scrollIntoView/destaque temporário). Bloco pessoal (cinza-azulado)
             // também é só ocupação, sem selo — mas continua clicável pra
             // correção pontual (a regra por colorId erra às vezes): um
             // window.confirm (mesmo padrão de correção pontual usado em
@@ -856,6 +860,10 @@ export default function PainelCalendario({
             // ações de sempre (leva B.2). O calendário apenas sinaliza a
             // seleção; estado/handlers ficam no /admin.
             const item = info.event.extendedProps.agendamento;
+            if (info.event.extendedProps.pendente) {
+              onSelecionarPendente?.(item);
+              return;
+            }
             if (classificarAgendamento(item) !== "confirmado") return;
             if (info.event.extendedProps.pessoal) {
               const ok = window.confirm(
