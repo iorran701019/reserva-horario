@@ -723,6 +723,33 @@ function diaSemanaDeISO(iso) {
   return new Date(ano, mes - 1, dia).getDay();
 }
 
+// "YYYY-MM-DD" de hoje em horário LOCAL — usado pra desabilitar datas
+// passadas nos seletores da aba Exceções (mesma técnica de app/[salon]/admin/
+// page.js: componente-a-componente, nunca toISOString, que é UTC e pode
+// voltar um dia em GMT-3).
+function hojeISOLocal() {
+  const d = new Date();
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
+// Marcadores "HH:00" cuja hora já começou — desabilitados no grid de
+// liberação só quando a data escolhida é HOJE (em qualquer outra data, um
+// horário "passado" hoje ainda está no futuro nela). Fora daqui, devolve
+// sempre vazio.
+function horariosPassadosHoje(diaData) {
+  if (diaData !== hojeISOLocal()) return new Set();
+  const agora = new Date();
+  const minutosAgora = agora.getHours() * 60 + agora.getMinutes();
+  const passados = new Set();
+  for (const marcador of MARCADORES_HORARIO) {
+    if (minutos(marcador) <= minutosAgora) passados.add(marcador);
+  }
+  return passados;
+}
+
 // Marcadores "HH:00" que já fazem parte do horário normal do profissional
 // naquele dia da semana — usado pra desabilitar no grid de liberação (só
 // clica quem é exceção de verdade):
@@ -765,6 +792,77 @@ function somarUmaHora(hhmm) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
+// Pro dia escolhido no formulário, cruza os registros JÁ CADASTRADOS em
+// `lista` (já carregada em memória — nenhuma busca nova) pra saber quais
+// marcadores da grade já têm bloqueio ou liberação ANTES de qualquer clique
+// nesta ação. Mesma regra de casamento usada em lib/disponibilidade.js
+// (excecoesDoDia): recorrente casa pelo dia da semana, periodo pelo
+// intervalo data_inicio..data_fim.
+function statusGradeDoDia(lista, diaData, diaSemana) {
+  const bloqueados = new Set();
+  const liberados = new Set();
+  let diaTodoBloqueado = false;
+  if (!diaData) return { bloqueados, liberados, diaTodoBloqueado };
+
+  for (const a of lista) {
+    const casaRecorrente = a.tipo === "recorrente" && a.dia_semana === diaSemana;
+    const casaPeriodo =
+      a.tipo === "periodo" && a.data_inicio <= diaData && diaData <= a.data_fim;
+    if (!casaRecorrente && !casaPeriodo) continue;
+
+    if ((a.tipo_registro ?? "ausencia") === "liberacao") {
+      if (a.hora_inicio) liberados.add(paraHHMM(a.hora_inicio));
+      continue;
+    }
+
+    if (a.dia_inteiro) {
+      diaTodoBloqueado = true;
+      continue;
+    }
+    if (!a.hora_inicio || !a.hora_fim) continue;
+    const ini = minutos(paraHHMM(a.hora_inicio));
+    const fim = minutos(paraHHMM(a.hora_fim));
+    for (const marcador of MARCADORES_HORARIO) {
+      const m = minutos(marcador);
+      if (m >= ini && m < fim) bloqueados.add(marcador);
+    }
+  }
+
+  return { bloqueados, liberados, diaTodoBloqueado };
+}
+
+// Agrupa os períodos de UM ÚNICO DIA (data_inicio === data_fim) pela mesma
+// data — um card por dia, listando dentro cada bloqueio/liberação daquele
+// dia. Períodos de VÁRIOS dias (férias/viagem) ficam de fora do agrupamento e
+// continuam um card por linha, como hoje (não faz sentido condensá-los sob
+// uma única data). Dentro do card, bloqueios aparecem antes das liberações —
+// espelha a precedência real do cálculo de disponibilidade
+// (lib/disponibilidade.js: aplicarExcecoes aplica bloqueios por último).
+function agruparPeriodosPorDia(periodos) {
+  const multiDia = periodos.filter((a) => a.data_inicio !== a.data_fim);
+
+  const mapa = new Map();
+  for (const a of periodos) {
+    if (a.data_inicio !== a.data_fim) continue;
+    if (!mapa.has(a.data_inicio)) mapa.set(a.data_inicio, []);
+    mapa.get(a.data_inicio).push(a);
+  }
+
+  const grupos = [...mapa.entries()]
+    .map(([data, itens]) => ({
+      data,
+      itens: [...itens].sort((x, y) => {
+        const xLiberacao = (x.tipo_registro ?? "ausencia") === "liberacao";
+        const yLiberacao = (y.tipo_registro ?? "ausencia") === "liberacao";
+        if (xLiberacao !== yLiberacao) return xLiberacao ? 1 : -1;
+        return (x.hora_inicio ?? "").localeCompare(y.hora_inicio ?? "");
+      }),
+    }))
+    .sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
+
+  return { grupos, multiDia };
+}
+
 function SecaoAusencias({
   profissionalId,
   estabelecimentoId,
@@ -785,6 +883,12 @@ function SecaoAusencias({
   const [modo, setModo] = useState("recorrente");
   const [formErro, setFormErro] = useState("");
   const [salvando, setSalvando] = useState(false);
+
+  // Bloqueio de dia inteiro pendente de confirmação — só é setado quando o
+  // dia já tem liberações pontuais cadastradas (ver salvar()). Guarda as
+  // linhas do bloqueio E as liberações que serão excluídas junto, se
+  // confirmado.
+  const [confirmarBloqueio, setConfirmarBloqueio] = useState(null);
 
   // Campos "Ausência fixa" (recorrente).
   const [recDias, setRecDias] = useState([]); // dia_semana 0..6 marcados
@@ -907,6 +1011,17 @@ function SecaoAusencias({
       // Liberação: cada marcador selecionado (+ "outro horário") vira UMA
       // linha própria, todas na mesma data/motivo — não usa dia_inteiro.
       if (tipoRegistro === "liberacao") {
+        // Bloqueio de dia inteiro sempre vence (mesma precedência de
+        // lib/disponibilidade.js) — não faz sentido liberar horários pontuais
+        // num dia já todo bloqueado. Checado de novo aqui (além do grid
+        // desabilitado) pra cobrir o submit em si.
+        const diaSemana = diaSemanaDeISO(diaData);
+        if (statusGradeDoDia(lista, diaData, diaSemana).diaTodoBloqueado) {
+          return {
+            erro:
+              "Este dia está totalmente bloqueado. Exclua o bloqueio antes de liberar horários específicos.",
+          };
+        }
         const horarios = [
           ...new Set([
             ...diaHorarios,
@@ -996,7 +1111,48 @@ function SecaoAusencias({
       return;
     }
 
+    // Bloqueio de dia inteiro sempre vence sobre liberações pontuais do
+    // mesmo dia (mesma precedência de lib/disponibilidade.js) — deixá-las
+    // coexistir no banco é um estado morto e visualmente contraditório (ver
+    // agruparPeriodosPorDia). Confirma com o usuário antes de excluí-las.
+    if (tipoRegistro === "ausencia" && modo === "umdia" && diaInteiro) {
+      const liberacoesConflitantes = lista.filter(
+        (a) =>
+          a.tipo === "periodo" &&
+          (a.tipo_registro ?? "ausencia") === "liberacao" &&
+          a.data_inicio === diaData
+      );
+      if (liberacoesConflitantes.length > 0) {
+        setConfirmarBloqueio({ linhas, liberacoes: liberacoesConflitantes });
+        return;
+      }
+    }
+
+    await gravar(linhas);
+  }
+
+  // Grava as `linhas` do bloqueio/liberação e, quando vier de uma
+  // confirmação de conflito, exclui antes as liberações que perderam o
+  // sentido — mesma função usada nos dois caminhos (com e sem conflito) pra
+  // não duplicar a lógica de insert/atualização de lista.
+  async function gravar(linhas, liberacoesParaExcluir = []) {
     setSalvando(true);
+
+    if (liberacoesParaExcluir.length > 0) {
+      const { error: erroExclusao } = await supabase
+        .from("ausencias")
+        .delete()
+        .in(
+          "id",
+          liberacoesParaExcluir.map((a) => a.id)
+        );
+      if (erroExclusao) {
+        setSalvando(false);
+        setFormErro(erroExclusao.message);
+        return;
+      }
+    }
+
     const { data, error } = await supabase
       .from("ausencias")
       .insert(linhas)
@@ -1008,8 +1164,19 @@ function SecaoAusencias({
       return;
     }
 
-    setLista((atual) => [...atual, ...(data ?? [])]);
+    const idsExcluidos = new Set(liberacoesParaExcluir.map((a) => a.id));
+    setLista((atual) => [
+      ...atual.filter((a) => !idsExcluidos.has(a.id)),
+      ...(data ?? []),
+    ]);
     limparCampos();
+  }
+
+  async function confirmarBloqueioComExclusao() {
+    if (!confirmarBloqueio) return;
+    const { linhas, liberacoes } = confirmarBloqueio;
+    setConfirmarBloqueio(null);
+    await gravar(linhas, liberacoes);
   }
 
   async function excluir(id) {
@@ -1038,6 +1205,12 @@ function SecaoAusencias({
     horariosFixosPorDia,
     dias,
   });
+  // Horários da grade que já ficaram pra trás (só quando diaData é hoje) e o
+  // que já existe cadastrado nesse dia (bloqueio/liberação), pra colorir a
+  // grade antes de qualquer clique novo.
+  const horariosPassados = horariosPassadosHoje(diaData);
+  const statusGrade = statusGradeDoDia(lista, diaData, diaSemanaEscolhido);
+  const hoje = hojeISOLocal();
 
   const gruposRec = agruparRecorrentes(
     lista.filter((a) => a.tipo === "recorrente")
@@ -1047,6 +1220,7 @@ function SecaoAusencias({
     .sort((a, b) =>
       a.data_inicio < b.data_inicio ? -1 : a.data_inicio > b.data_inicio ? 1 : 0
     );
+  const { grupos: gruposPeriodo, multiDia } = agruparPeriodosPorDia(periodos);
   const vazio = gruposRec.length === 0 && periodos.length === 0;
 
   return (
@@ -1173,6 +1347,7 @@ function SecaoAusencias({
               <input
                 type="date"
                 aria-label="Data da ausência"
+                min={hoje}
                 value={diaData}
                 onChange={(e) => {
                   setDiaData(e.target.value);
@@ -1228,6 +1403,11 @@ function SecaoAusencias({
                   </div>
                 )}
               </>
+            ) : statusGrade.diaTodoBloqueado ? (
+              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 ring-1 ring-red-100">
+                Este dia está totalmente bloqueado. Exclua o bloqueio antes de
+                liberar horários específicos.
+              </p>
             ) : (
               <div className="mt-3">
                 <span className="block text-xs font-medium text-body">
@@ -1235,8 +1415,44 @@ function SecaoAusencias({
                 </span>
                 <div className="mt-1 flex flex-wrap gap-2">
                   {MARCADORES_HORARIO.map((h) => {
-                    const desabilitado = horariosNormais.has(h);
+                    const normal = horariosNormais.has(h);
+                    const passado = horariosPassados.has(h);
+                    const desabilitado = normal || passado;
                     const selecionado = diaHorarios.includes(h);
+                    // Bloqueio sempre vence na cor também, espelhando a
+                    // precedência real (lib/disponibilidade.js): se o dia
+                    // inteiro ou esse horário específico já está bloqueado,
+                    // não importa se também existe liberação.
+                    const jaBloqueado =
+                      statusGrade.diaTodoBloqueado || statusGrade.bloqueados.has(h);
+                    const jaLiberado = !jaBloqueado && statusGrade.liberados.has(h);
+
+                    let classeEstado;
+                    if (normal) {
+                      // Já faz parte do expediente normal recorrente — verde
+                      // translúcido hachurado (mesma receita de jaLiberado)
+                      // em vez do cinza apagado: comunica "já disponível",
+                      // não "indisponível". Continua desabilitado ao clique.
+                      classeEstado =
+                        "cursor-not-allowed exc-horario-liberado text-green-700 ring-green-300";
+                    } else if (desabilitado) {
+                      classeEstado = "cursor-not-allowed bg-surface text-muted/60 ring-border";
+                    } else if (selecionado) {
+                      classeEstado = "bg-green-600 text-white ring-green-600";
+                    } else if (jaBloqueado) {
+                      classeEstado = "exc-horario-bloqueado text-red-700 ring-red-300";
+                    } else if (jaLiberado) {
+                      classeEstado = "exc-horario-liberado text-green-700 ring-green-300";
+                    } else {
+                      classeEstado = "bg-card text-body ring-border hover:bg-surface";
+                    }
+
+                    let titulo;
+                    if (normal) titulo = "Já faz parte do horário normal deste dia";
+                    else if (passado) titulo = "Esse horário já passou";
+                    else if (jaBloqueado) titulo = "Esse horário já está bloqueado nesse dia";
+                    else if (jaLiberado) titulo = "Esse horário já foi liberado nesse dia";
+
                     return (
                       <button
                         key={h}
@@ -1244,19 +1460,9 @@ function SecaoAusencias({
                         role="checkbox"
                         aria-checked={selecionado}
                         disabled={desabilitado}
-                        title={
-                          desabilitado
-                            ? "Já faz parte do horário normal deste dia"
-                            : undefined
-                        }
+                        title={titulo}
                         onClick={() => alternarDiaHorario(h)}
-                        className={`flex h-10 w-10 items-center justify-center rounded-full text-xs font-medium ring-1 transition ${
-                          desabilitado
-                            ? "cursor-not-allowed bg-surface text-muted/60 ring-border"
-                            : selecionado
-                              ? "bg-green-600 text-white ring-green-600"
-                              : "bg-card text-body ring-border hover:bg-surface"
-                        }`}
+                        className={`flex h-10 w-10 items-center justify-center rounded-full text-xs font-medium ring-1 transition ${classeEstado}`}
                       >
                         {h}
                       </button>
@@ -1302,6 +1508,7 @@ function SecaoAusencias({
                 <input
                   type="date"
                   aria-label="Data de início"
+                  min={hoje}
                   value={varInicio}
                   onChange={(e) => setVarInicio(e.target.value)}
                   className={`mt-1 block ${classeCampo}`}
@@ -1312,6 +1519,7 @@ function SecaoAusencias({
                 <input
                   type="date"
                   aria-label="Data de fim"
+                  min={varInicio || hoje}
                   value={varFim}
                   onChange={(e) => setVarFim(e.target.value)}
                   className={`mt-1 block ${classeCampo}`}
@@ -1415,45 +1623,132 @@ function SecaoAusencias({
             </div>
           ))}
 
-          {/* Períodos / férias, um card por linha. Borda + selo indicam
-              bloqueio (vermelho) ou liberação (verde). */}
-          {periodos.map((a) => {
-            const umDia = a.data_inicio === a.data_fim;
+          {/* Períodos de UM dia, condensados por data — um card por dia,
+              listando dentro cada bloqueio/liberação daquele dia (já
+              ordenados com bloqueios primeiro, ver agruparPeriodosPorDia).
+              Borda vermelha se o dia tem QUALQUER bloqueio (que sempre vence,
+              ver lib/disponibilidade.js); verde só quando é liberação pura. */}
+          {gruposPeriodo.map((grupo) => {
+            const temBloqueio = grupo.itens.some(
+              (a) => (a.tipo_registro ?? "ausencia") !== "liberacao"
+            );
             return (
               <div
-                key={a.id}
-                className={`flex items-center justify-between gap-3 rounded-xl border-l-4 bg-card p-3 ring-1 ring-border ${
-                  (a.tipo_registro ?? "ausencia") === "liberacao"
-                    ? "border-l-green-500"
-                    : "border-l-red-400"
+                key={grupo.data}
+                className={`rounded-xl border-l-4 bg-card p-3 ring-1 ring-border ${
+                  temBloqueio ? "border-l-red-400" : "border-l-green-500"
                 }`}
               >
-                <div className="min-w-0">
-                  <p className="flex items-center gap-2 text-sm font-medium text-heading">
-                    <SeloTipoRegistro tipoRegistro={a.tipo_registro} />
-                    {umDia
-                      ? formatarDataBR(a.data_inicio)
-                      : `${formatarDataBR(a.data_inicio)} até ${formatarDataBR(
-                          a.data_fim
-                        )}`}
-                  </p>
-                  <p className="text-xs text-muted">
-                    {a.dia_inteiro
-                      ? "Dia inteiro"
-                      : faixaHora(a.hora_inicio, a.hora_fim)}
-                    {a.motivo && <> · {a.motivo}</>}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => excluir(a.id)}
-                  className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-                >
-                  Excluir
-                </button>
+                <p className="text-sm font-medium text-heading">
+                  {formatarDataBR(grupo.data)}
+                </p>
+                <ul className="mt-2 space-y-1.5">
+                  {grupo.itens.map((a) => (
+                    <li
+                      key={a.id}
+                      className="flex items-center justify-between gap-3"
+                    >
+                      <span className="flex min-w-0 items-center gap-2 text-sm text-body">
+                        <SeloTipoRegistro tipoRegistro={a.tipo_registro} />
+                        {a.dia_inteiro
+                          ? "Dia inteiro"
+                          : faixaHora(a.hora_inicio, a.hora_fim)}
+                        {a.motivo && (
+                          <span className="text-muted"> · {a.motivo}</span>
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => excluir(a.id)}
+                        className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                      >
+                        Excluir
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
             );
           })}
+
+          {/* Períodos de VÁRIOS dias (férias/viagem), um card por linha —
+              sempre dia inteiro e nunca liberação (ver coletarLinhas). */}
+          {multiDia.map((a) => (
+            <div
+              key={a.id}
+              className="flex items-center justify-between gap-3 rounded-xl border-l-4 border-l-red-400 bg-card p-3 ring-1 ring-border"
+            >
+              <div className="min-w-0">
+                <p className="flex items-center gap-2 text-sm font-medium text-heading">
+                  <SeloTipoRegistro tipoRegistro={a.tipo_registro} />
+                  {formatarDataBR(a.data_inicio)} até {formatarDataBR(a.data_fim)}
+                </p>
+                <p className="text-xs text-muted">
+                  Dia inteiro
+                  {a.motivo && <> · {a.motivo}</>}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => excluir(a.id)}
+                className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+              >
+                Excluir
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Confirmação: bloqueio de dia inteiro que vai excluir liberações
+          pontuais já cadastradas nesse mesmo dia (ver salvar()). */}
+      {confirmarBloqueio && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-confirmar-bloqueio"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setConfirmarBloqueio(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-confirmar-bloqueio"
+              className="text-lg font-semibold text-heading"
+            >
+              Bloquear o dia inteiro
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Este dia já tem{" "}
+              <span className="font-medium text-heading">
+                {confirmarBloqueio.liberacoes.length === 1
+                  ? "1 horário liberado"
+                  : `${confirmarBloqueio.liberacoes.length} horários liberados`}
+              </span>
+              . Ao bloquear o dia inteiro, eles serão excluídos
+              automaticamente, já que deixam de fazer sentido. Deseja
+              continuar?
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarBloqueioComExclusao}
+                className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+              >
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmarBloqueio(null)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

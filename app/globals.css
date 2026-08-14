@@ -157,3 +157,33 @@ a:focus-visible, button:focus-visible {
     transparent 12px
   );
 }
+
+/* Grade de horários da aba Exceções (SecaoAusencias em
+   GerenciarProfissionais.js) — mesma receita de listras diagonais
+   translúcidas acima, adaptada a botões redondos pequenos (h-10 w-10): marca
+   ANTES de qualquer clique os horários que já têm bloqueio ou liberação
+   cadastrados nesse dia. Listras mais finas (4px/8px em vez de 6px/12px) pra
+   caber num círculo pequeno sem virar uma mancha sólida. Não usa opacity (que
+   esmaeceria o texto do horário) e fica de fora quando o botão está com a
+   seleção ativa da ação em andamento (verde sólido, ver classeEstado). */
+.exc-horario-bloqueado {
+  background-color: rgba(239, 68, 68, 0.1);
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(239, 68, 68, 0.25) 0px,
+    rgba(239, 68, 68, 0.25) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+
+.exc-horario-liberado {
+  background-color: rgba(34, 197, 94, 0.1);
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(34, 197, 94, 0.25) 0px,
+    rgba(34, 197, 94, 0.25) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
