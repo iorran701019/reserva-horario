@@ -2069,7 +2069,13 @@ export default function AdminPage() {
               />
             ) : (
               <>
-                <div className="mb-4 text-center">
+                <div className="mb-4 flex flex-col items-center gap-1.5 text-center">
+                  <p className="text-sm text-body">
+                    Agendando para{" "}
+                    <span className="font-semibold text-headline">
+                      {clienteParaAgendar.nome}
+                    </span>
+                  </p>
                   <button
                     type="button"
                     onClick={() => setClienteParaAgendar(null)}
