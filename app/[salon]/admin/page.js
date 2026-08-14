@@ -44,6 +44,7 @@ import {
   AlertCircle,
   Gift,
   ChevronRight,
+  BellOff,
 } from "lucide-react";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import Hero from "@/components/Hero";
@@ -410,6 +411,10 @@ export default function AdminPage() {
   // Agendamento aguardando confirmação de cancelamento (controla o modal).
   // null = nenhum modal aberto.
   const [agendamentoParaCancelar, setAgendamentoParaCancelar] = useState(null);
+  // Se o "Confirmar cancelamento" do modal acima deve notificar o cliente via
+  // WhatsApp. false só quando o modal foi aberto pela zona pequena (sem
+  // notificar) do botão dividido em Pendentes; sempre true nos outros casos.
+  const [notificarAoCancelar, setNotificarAoCancelar] = useState(true);
 
   // Agendamento confirmado selecionado no Painel (controla o modal de detalhe/
   // ações). Guardamos o id; os dados vivos saem de `agendamentos` no render,
@@ -534,8 +539,10 @@ export default function AdminPage() {
 
   // Botão A: grava o status 'confirmado' no banco e, se der certo, abre o
   // WhatsApp com a mensagem de confirmação. Em caso de erro não abre o
-  // WhatsApp (não anuncia confirmação que não foi gravada).
-  async function handleConfirmar(agendamento) {
+  // WhatsApp (não anuncia confirmação que não foi gravada). `notificar=false`
+  // (zona pequena do botão dividido) pula só o redirecionamento pro WhatsApp,
+  // sem duplicar a gravação do status.
+  async function handleConfirmar(agendamento, notificar = true) {
     const { error } = await supabase
       .from("agendamentos")
       .update({ status: "confirmado" })
@@ -549,16 +556,21 @@ export default function AdminPage() {
     setErro("");
     atualizarStatusLocal(agendamento.id, "confirmado");
 
-    abrirWhatsApp(
-      agendamento.telefone,
-      MENSAGEM_CONFIRMACAO(agendamento, estabelecimento.msg_confirmacao)
-    );
+    if (notificar) {
+      abrirWhatsApp(
+        agendamento.telefone,
+        MENSAGEM_CONFIRMACAO(agendamento, estabelecimento.msg_confirmacao)
+      );
+    }
   }
 
   // Botão B: só roda DEPOIS que o dono confirma no modal. Grava o status
   // 'cancelado' no banco e, se der certo, abre o WhatsApp com a mensagem de
-  // cancelamento. Em caso de erro não abre o WhatsApp.
-  async function handleCancelar(agendamento) {
+  // cancelamento. Em caso de erro não abre o WhatsApp. `notificar=false`
+  // (zona pequena do botão dividido, ver notificarAoCancelar) pula só o
+  // redirecionamento pro WhatsApp — o modal de confirmação continua rodando
+  // normalmente antes de chegar aqui.
+  async function handleCancelar(agendamento, notificar = true) {
     const { error } = await supabase
       .from("agendamentos")
       .update({ status: "cancelado" })
@@ -573,21 +585,23 @@ export default function AdminPage() {
     setErro("");
     atualizarStatusLocal(agendamento.id, "cancelado");
 
-    // Base da URL: a env pública (inlinada no build) quando definida; senão a
-    // origem real do navegador — nunca "undefined" e sem domínio hardcoded.
-    // O link de reagendamento é <base>/<slug>, a rota do cliente pós-migração.
-    // Usa o slug do salão RESOLVIDO (não o do path): pro 'dono' o salão real vem
-    // do perfil e pode diferir do slug da URL, e é ele que dono/cliente devem ver.
-    const base = process.env.NEXT_PUBLIC_URL_BASE || window.location.origin;
-    abrirWhatsApp(
-      agendamento.telefone,
-      MENSAGEM_CANCELAMENTO(
-        agendamento,
-        base,
-        estabelecimento.slug,
-        estabelecimento.msg_cancelamento
-      )
-    );
+    if (notificar) {
+      // Base da URL: a env pública (inlinada no build) quando definida; senão a
+      // origem real do navegador — nunca "undefined" e sem domínio hardcoded.
+      // O link de reagendamento é <base>/<slug>, a rota do cliente pós-migração.
+      // Usa o slug do salão RESOLVIDO (não o do path): pro 'dono' o salão real vem
+      // do perfil e pode diferir do slug da URL, e é ele que dono/cliente devem ver.
+      const base = process.env.NEXT_PUBLIC_URL_BASE || window.location.origin;
+      abrirWhatsApp(
+        agendamento.telefone,
+        MENSAGEM_CANCELAMENTO(
+          agendamento,
+          base,
+          estabelecimento.slug,
+          estabelecimento.msg_cancelamento
+        )
+      );
+    }
     setAgendamentoParaCancelar(null);
   }
 
@@ -1627,23 +1641,58 @@ export default function AdminPage() {
                   )}
 
                   <div className="mt-4 flex flex-col gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmar(item)}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
-                    >
-                      <IconeWhatsApp />
-                      Confirmar agendamento
-                    </button>
+                    {/* Botão dividido em duas zonas: a maior (texto+ícone)
+                        mantém o comportamento de sempre (update + WhatsApp);
+                        a menor (só ícone, ~44px pra área de toque no mobile)
+                        faz o mesmo update mas pula o redirecionamento pro
+                        WhatsApp. Mesma cor de fundo dos dois lados — só uma
+                        borda fina (mesma cor do ring já usado no botão)
+                        separa as zonas, sem criar elemento/cor novos. */}
+                    <div className="flex items-stretch overflow-hidden rounded-lg bg-green-50 ring-1 ring-green-100">
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmar(item)}
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100"
+                      >
+                        <IconeWhatsApp />
+                        Confirmar agendamento
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmar(item, false)}
+                        aria-label="Confirmar sem notificar cliente"
+                        title="Confirmar sem notificar cliente"
+                        className="inline-flex w-11 shrink-0 items-center justify-center border-l border-green-100 text-green-700 transition hover:bg-green-100"
+                      >
+                        <BellOff className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setAgendamentoParaCancelar(item)}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-                    >
-                      <IconeWhatsApp />
-                      Cancelar agendamento
-                    </button>
+                    <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAgendamentoParaCancelar(item);
+                          setNotificarAoCancelar(true);
+                        }}
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                      >
+                        <IconeWhatsApp />
+                        Cancelar agendamento
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAgendamentoParaCancelar(item);
+                          setNotificarAoCancelar(false);
+                        }}
+                        aria-label="Cancelar sem notificar cliente"
+                        title="Cancelar sem notificar cliente"
+                        className="inline-flex w-11 shrink-0 items-center justify-center border-l border-red-200 text-red-600 transition hover:bg-red-50"
+                      >
+                        <BellOff className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    </div>
 
                     {/* Contato livre (sem mensagem pré-preenchida), mesmo
                         padrão dos cards de pendência administrativa acima
@@ -1763,7 +1812,10 @@ export default function AdminPage() {
                       <div className="mt-4 flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={() => setAgendamentoParaCancelar(item)}
+                          onClick={() => {
+                            setAgendamentoParaCancelar(item);
+                            setNotificarAoCancelar(true);
+                          }}
                           className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
                         >
                           <IconeWhatsApp />
@@ -2457,6 +2509,7 @@ export default function AdminPage() {
                 onClick={() => {
                   setIdSelecionado(null);
                   setAgendamentoParaCancelar(selecionado);
+                  setNotificarAoCancelar(true);
                 }}
                 className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
               >
@@ -2506,7 +2559,9 @@ export default function AdminPage() {
             <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
               <button
                 type="button"
-                onClick={() => handleCancelar(agendamentoParaCancelar)}
+                onClick={() =>
+                  handleCancelar(agendamentoParaCancelar, notificarAoCancelar)
+                }
                 className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700"
               >
                 <IconeWhatsApp />
