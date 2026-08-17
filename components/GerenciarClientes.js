@@ -14,7 +14,7 @@ import {
   buscarAnotacoesLivres,
   criarAnotacaoLivre,
 } from "@/lib/clientesAdmin";
-import { existeModeloAtivo } from "@/lib/anamnese";
+import { existeModeloAtivo, buscarUltimasAnamnesesPorCliente } from "@/lib/anamnese";
 import { classificarAgendamento, rotuloHistorico, ordenarHistoricoPorStatus } from "@/lib/particao";
 import { buscarProgressoFidelidade } from "@/lib/fidelidade";
 import { linkWhatsApp, MENSAGEM_CONTATO_CLIENTE_ADMIN } from "@/lib/whatsapp";
@@ -855,12 +855,25 @@ export default function GerenciarClientes({ estabelecimento }) {
   const [busca, setBusca] = useState("");
   const [selecionado, setSelecionado] = useState(null);
 
+  // Insumos das tags "Cadastro incompleto" e "Anamnese não preenchida" (ver
+  // render da lista abaixo): se o salão tem anamnese ativa e o carimbo mais
+  // recente de cada cliente, buscados em lote (uma consulta cada, não uma
+  // por cliente — ver buscarUltimasAnamnesesPorCliente em lib/anamnese.js).
+  const [modeloAnamneseAtivo, setModeloAnamneseAtivo] = useState(false);
+  const [ultimasAnamneses, setUltimasAnamneses] = useState(new Map());
+
   useEffect(() => {
     let ativo = true;
 
-    buscarClientes(estabelecimento.id).then((dados) => {
+    Promise.all([
+      buscarClientes(estabelecimento.id),
+      existeModeloAtivo(estabelecimento.id),
+      buscarUltimasAnamnesesPorCliente(estabelecimento.id),
+    ]).then(([dadosClientes, temModelo, mapaAnamneses]) => {
       if (!ativo) return;
-      setClientes(dados);
+      setClientes(dadosClientes);
+      setModeloAnamneseAtivo(temModelo);
+      setUltimasAnamneses(mapaAnamneses);
       setCarregando(false);
     });
 
@@ -948,6 +961,17 @@ export default function GerenciarClientes({ estabelecimento }) {
                         🎂 Aniversário
                       </span>
                     )}
+                    {estabelecimento.cadastro_completo && !cliente.nascimento && (
+                      <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
+                        Cadastro incompleto
+                      </span>
+                    )}
+                    {modeloAnamneseAtivo &&
+                      situacaoAnamnese(ultimasAnamneses.get(cliente.id)) !== "em_dia" && (
+                        <span className="rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-medium text-orange-700 ring-1 ring-orange-200">
+                          Anamnese não preenchida
+                        </span>
+                      )}
                   </span>
                 </div>
                 <p className="mt-0.5 text-sm text-body">{cliente.whatsapp}</p>
