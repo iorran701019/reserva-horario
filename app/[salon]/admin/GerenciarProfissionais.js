@@ -682,6 +682,14 @@ function agruparRecorrentes(linhas) {
 //                toggle "dia inteiro" (liga = horas null; desliga = faixa).
 //   varios     – "Vários dias": intervalo data_inicio..data_fim, sempre dia
 //                inteiro (viagem/férias), horas null.
+//   avulsas    – "Datas avulsas": N datas não sequenciais (data_inicio=
+//                data_fim em cada uma), ligadas por um `grupo_id` comum
+//                (crypto.randomUUID(), gerado uma vez por salvamento) pra
+//                excluir o lote inteiro de uma vez. Toggle "dia inteiro" como
+//                em "umdia"; em horários específicos, MESMA grade de
+//                MARCADORES_HORARIO da liberação, mas em multi-seleção — uma
+//                linha por combinação data×horário, hora_fim = hora_inicio +
+//                1h (somarUmaHora), tipo_registro sempre "ausencia".
 const OPCOES_AUSENCIA = [
   {
     valor: "recorrente",
@@ -694,6 +702,11 @@ const OPCOES_AUSENCIA = [
     exemplo: "consulta médica ou folga",
   },
   { valor: "varios", rotulo: "Vários dias", exemplo: "viagem ou férias" },
+  {
+    valor: "avulsas",
+    rotulo: "Datas/horários avulsos - ex: Curso",
+    exemplo: null,
+  },
 ];
 
 // No modo Liberar, só "Um dia específico" é oferecido — liberação recorrente
@@ -732,6 +745,16 @@ function hojeISOLocal() {
   const ano = d.getFullYear();
   const mes = String(d.getMonth() + 1).padStart(2, "0");
   const dia = String(d.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
+// Date -> "YYYY-MM-DD" em horário LOCAL, generalização de hojeISOLocal pra
+// qualquer data (não só hoje) — usada pela grade do mini-calendário de
+// "Datas avulsas" (MiniCalendarioMultiplo).
+function paraISOLocal(date) {
+  const ano = date.getFullYear();
+  const mes = String(date.getMonth() + 1).padStart(2, "0");
+  const dia = String(date.getDate()).padStart(2, "0");
   return `${ano}-${mes}-${dia}`;
 }
 
@@ -863,6 +886,156 @@ function agruparPeriodosPorDia(periodos) {
   return { grupos, multiDia };
 }
 
+// Agrupa registros de "Datas avulsas" (grupo_id não nulo, ver coletarLinhas)
+// num único card por grupo — fica de FORA de agruparPeriodosPorDia (nunca
+// entra no agrupamento por dia único nem no de vários dias), mesmo quando o
+// grupo tem só uma data. Dentro do card: datas ordenadas e sem repetição (uma
+// mesma data pode ter várias linhas quando são horários específicos), e
+// diaInteiro/horarios refletem a escolha única do grupo inteiro (todas as
+// linhas de um mesmo grupo_id levam a mesma escolha, ver coletarLinhas).
+function agruparPorGrupoId(periodos) {
+  const mapa = new Map();
+  for (const a of periodos) {
+    if (!a.grupo_id) continue;
+    if (!mapa.has(a.grupo_id)) mapa.set(a.grupo_id, []);
+    mapa.get(a.grupo_id).push(a);
+  }
+
+  return [...mapa.entries()]
+    .map(([grupoId, itens]) => {
+      const datas = [...new Set(itens.map((a) => a.data_inicio))].sort();
+      const diaInteiro = itens.every((a) => a.dia_inteiro);
+      const horarios = diaInteiro
+        ? []
+        : [...new Set(itens.map((a) => paraHHMM(a.hora_inicio)))].sort();
+      return {
+        grupoId,
+        itens,
+        datas,
+        diaInteiro,
+        horarios,
+        motivo: itens[0]?.motivo ?? null,
+      };
+    })
+    .sort((a, b) => (a.datas[0] < b.datas[0] ? -1 : a.datas[0] > b.datas[0] ? 1 : 0));
+}
+
+// Mini-calendário de mês pra seleção de MÚLTIPLAS datas (modo "Datas
+// avulsas"). Mesmo desenho de grade 7 colunas do calendário público
+// (components/FormularioAgendamento.js: CalendarioDias) — cabeçalho de dias
+// da semana, navegação de mês, células arredondadas —, mas SEM nenhuma das
+// restrições de agendamento daquele componente (janela, dia da semana ativo,
+// vencimento): aqui qualquer dia a partir de `min` é clicável, e o clique
+// ALTERNA (toggle) a data no conjunto `selecionadas`, em vez de substituir
+// uma seleção única. Não reaproveita CalendarioDias diretamente pra não medir
+// esse formulário admin com as regras do fluxo público de agendamento.
+function MiniCalendarioMultiplo({ mes, min, selecionadas, onAlternar, onPrev, onNext, podeVoltar }) {
+  const ano = mes.getFullYear();
+  const mesIdx = mes.getMonth();
+  const primeiroDiaSemana = new Date(ano, mesIdx, 1).getDay();
+  const diasNoMes = new Date(ano, mesIdx + 1, 0).getDate();
+
+  const celulas = [];
+  for (let i = 0; i < primeiroDiaSemana; i++) celulas.push(null);
+  for (let d = 1; d <= diasNoMes; d++) celulas.push(d);
+
+  const rotuloMes = mes.toLocaleDateString("pt-BR", {
+    month: "long",
+    year: "numeric",
+  });
+
+  return (
+    <div className="rounded-xl bg-card p-3 ring-1 ring-border">
+      <div className="mb-2 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onPrev}
+          disabled={!podeVoltar}
+          aria-label="Mês anterior"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="h-4 w-4"
+          >
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+
+        <span className="text-sm font-semibold capitalize text-heading">
+          {rotuloMes}
+        </span>
+
+        <button
+          type="button"
+          onClick={onNext}
+          aria-label="Próximo mês"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-body ring-1 ring-border transition hover:bg-surface"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="h-4 w-4"
+          >
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-muted">
+        {DIAS.map((info) => (
+          <span key={info.n} className="py-1">
+            {info.curto}
+          </span>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7 gap-1">
+        {celulas.map((d, i) => {
+          if (d === null) return <span key={`vazio-${i}`} />;
+
+          const date = new Date(ano, mesIdx, d);
+          const iso = paraISOLocal(date);
+          const passado = iso < min;
+          const sel = selecionadas.has(iso);
+
+          return (
+            <button
+              key={iso}
+              type="button"
+              disabled={passado}
+              aria-disabled={passado}
+              aria-pressed={sel}
+              onClick={() => onAlternar(iso)}
+              className={[
+                "flex h-9 items-center justify-center rounded-lg text-sm transition",
+                passado
+                  ? "cursor-not-allowed text-muted/40"
+                  : sel
+                  ? "bg-primary font-semibold text-white ring-1 ring-primary"
+                  : "text-body ring-1 ring-border hover:border-primary hover:ring-primary",
+              ].join(" ")}
+            >
+              {d}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function SecaoAusencias({
   profissionalId,
   estabelecimentoId,
@@ -914,6 +1087,21 @@ function SecaoAusencias({
   const [varFim, setVarFim] = useState("");
   const [varMotivo, setVarMotivo] = useState("");
 
+  // Campos "Datas avulsas" (periodo, N datas não sequenciais ligadas por
+  // grupo_id, sempre tipo_registro="ausencia"). avulsasMes é só navegação do
+  // mini-calendário, não é resetado em limparCampos (mesma ideia de
+  // mesVisivel em components/FormularioAgendamento.js).
+  const [avulsasMes, setAvulsasMes] = useState(() => new Date());
+  const [avulsasDatas, setAvulsasDatas] = useState([]); // ISO "YYYY-MM-DD", sem duplicatas
+  const [avulsasDiaInteiro, setAvulsasDiaInteiro] = useState(true);
+  const [avulsasHorarios, setAvulsasHorarios] = useState([]); // "HH:MM" marcados, multi-seleção
+  const [avulsasMotivo, setAvulsasMotivo] = useState("");
+
+  // Grupo de "Datas avulsas" pendente de confirmação de exclusão (ver
+  // agruparPorGrupoId) — mesma ideia de confirmarBloqueio, mas aqui a
+  // exclusão sempre apaga o grupo_id inteiro de uma vez.
+  const [confirmarExclusaoGrupo, setConfirmarExclusaoGrupo] = useState(null);
+
   // Carga inicial: todas as ausências do profissional.
   useEffect(() => {
     let vivo = true;
@@ -923,7 +1111,7 @@ function SecaoAusencias({
       const { data, error } = await supabase
         .from("ausencias")
         .select(
-          "id, tipo, tipo_registro, dia_semana, data_inicio, data_fim, dia_inteiro, hora_inicio, hora_fim, motivo"
+          "id, tipo, tipo_registro, dia_semana, data_inicio, data_fim, dia_inteiro, hora_inicio, hora_fim, motivo, grupo_id"
         )
         .eq("profissional_id", profissionalId);
 
@@ -956,6 +1144,29 @@ function SecaoAusencias({
     );
   }
 
+  // Alterna (toggle) uma data no conjunto de "Datas avulsas" — usado tanto
+  // pelo clique numa célula do mini-calendário quanto pelo "×" de um chip
+  // (ambos removem a data se ela já estiver selecionada).
+  function alternarAvulsasData(iso) {
+    setAvulsasDatas((atual) =>
+      atual.includes(iso) ? atual.filter((d) => d !== iso) : [...atual, iso]
+    );
+  }
+
+  function alternarAvulsasHorario(h) {
+    setAvulsasHorarios((atual) =>
+      atual.includes(h) ? atual.filter((x) => x !== h) : [...atual, h]
+    );
+  }
+
+  function avulsasMesAnterior() {
+    setAvulsasMes((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1));
+  }
+
+  function avulsasProximoMes() {
+    setAvulsasMes((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1));
+  }
+
   // Zera os campos de todos os formatos (chamado após salvar com sucesso).
   function limparCampos() {
     setRecDias([]);
@@ -972,6 +1183,10 @@ function SecaoAusencias({
     setVarInicio("");
     setVarFim("");
     setVarMotivo("");
+    setAvulsasDatas([]);
+    setAvulsasDiaInteiro(true);
+    setAvulsasHorarios([]);
+    setAvulsasMotivo("");
   }
 
   // Valida conforme o `modo` e monta as linhas a inserir. Devolve { erro } ou
@@ -1074,33 +1289,82 @@ function SecaoAusencias({
     }
 
     // modo === "varios": intervalo sempre em dia inteiro (não combina com liberação).
-    if (tipoRegistro === "liberacao") {
+    if (modo === "varios") {
+      if (tipoRegistro === "liberacao") {
+        return {
+          erro: "Liberação precisa de um horário específico — use \"Ausência fixa\" ou \"Um dia específico\".",
+        };
+      }
+      if (!varInicio || !varFim) {
+        return { erro: "Informe as datas de início e fim." };
+      }
+      if (varFim < varInicio) {
+        return { erro: "A data de fim deve ser igual ou depois do início." };
+      }
       return {
-        erro: "Liberação precisa de um horário específico — use \"Ausência fixa\" ou \"Um dia específico\".",
+        linhas: [
+          {
+            profissional_id: profissionalId,
+            estabelecimento_id: estabelecimentoId,
+            tipo_registro: tipoRegistro,
+            tipo: "periodo",
+            data_inicio: varInicio,
+            data_fim: varFim,
+            dia_inteiro: true,
+            hora_inicio: null,
+            hora_fim: null,
+            motivo: varMotivo.trim() || null,
+          },
+        ],
       };
     }
-    if (!varInicio || !varFim) {
-      return { erro: "Informe as datas de início e fim." };
+
+    // modo === "avulsas": N datas não sequenciais, sempre tipo_registro=
+    // "ausencia" (não oferecido em Liberar — ver OPCAO_LIBERACAO_UNICA).
+    // Todas as linhas do lote levam o MESMO grupo_id novo, pra poder excluir
+    // o grupo inteiro de uma vez (ver agruparPorGrupoId / excluirGrupo).
+    if (avulsasDatas.length === 0) {
+      return { erro: "Selecione ao menos uma data." };
     }
-    if (varFim < varInicio) {
-      return { erro: "A data de fim deve ser igual ou depois do início." };
+    if (!avulsasDiaInteiro && avulsasHorarios.length === 0) {
+      return { erro: "Selecione ao menos um horário." };
     }
-    return {
-      linhas: [
-        {
+
+    const datasOrdenadas = [...avulsasDatas].sort();
+    const grupoId = crypto.randomUUID();
+    const motivo = avulsasMotivo.trim() || null;
+
+    const linhas = avulsasDiaInteiro
+      ? datasOrdenadas.map((data) => ({
           profissional_id: profissionalId,
           estabelecimento_id: estabelecimentoId,
-          tipo_registro: tipoRegistro,
           tipo: "periodo",
-          data_inicio: varInicio,
-          data_fim: varFim,
+          tipo_registro: "ausencia",
+          data_inicio: data,
+          data_fim: data,
           dia_inteiro: true,
           hora_inicio: null,
           hora_fim: null,
-          motivo: varMotivo.trim() || null,
-        },
-      ],
-    };
+          motivo,
+          grupo_id: grupoId,
+        }))
+      : datasOrdenadas.flatMap((data) =>
+          avulsasHorarios.map((hora_inicio) => ({
+            profissional_id: profissionalId,
+            estabelecimento_id: estabelecimentoId,
+            tipo: "periodo",
+            tipo_registro: "ausencia",
+            data_inicio: data,
+            data_fim: data,
+            dia_inteiro: false,
+            hora_inicio,
+            hora_fim: somarUmaHora(hora_inicio),
+            motivo,
+            grupo_id: grupoId,
+          }))
+        );
+
+    return { linhas };
   }
 
   async function salvar() {
@@ -1189,6 +1453,28 @@ function SecaoAusencias({
     setLista((atual) => atual.filter((a) => a.id !== id));
   }
 
+  // Exclui TODAS as linhas de um grupo de "Datas avulsas" de uma vez (mesmo
+  // grupo_id) — chamado só depois da confirmação em confirmarExclusaoGrupo.
+  async function excluirGrupo(grupoId) {
+    setErro("");
+    const { error } = await supabase
+      .from("ausencias")
+      .delete()
+      .eq("grupo_id", grupoId);
+    if (error) {
+      setErro(`Não foi possível excluir o grupo: ${error.message}`);
+      return;
+    }
+    setLista((atual) => atual.filter((a) => a.grupo_id !== grupoId));
+  }
+
+  async function confirmarExclusaoGrupoConfirmada() {
+    if (!confirmarExclusaoGrupo) return;
+    const grupoId = confirmarExclusaoGrupo.grupoId;
+    setConfirmarExclusaoGrupo(null);
+    await excluirGrupo(grupoId);
+  }
+
   const classeCampo =
     "rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10";
 
@@ -1220,8 +1506,21 @@ function SecaoAusencias({
     .sort((a, b) =>
       a.data_inicio < b.data_inicio ? -1 : a.data_inicio > b.data_inicio ? 1 : 0
     );
-  const { grupos: gruposPeriodo, multiDia } = agruparPeriodosPorDia(periodos);
+  // Registros de grupo_id (Datas avulsas) ficam de FORA do agrupamento por
+  // dia único/vários dias — têm o card próprio de agruparPorGrupoId.
+  const periodosIndividuais = periodos.filter((a) => !a.grupo_id);
+  const periodosAvulsos = periodos.filter((a) => a.grupo_id);
+  const { grupos: gruposPeriodo, multiDia } = agruparPeriodosPorDia(periodosIndividuais);
+  const gruposAvulsos = agruparPorGrupoId(periodosAvulsos);
   const vazio = gruposRec.length === 0 && periodos.length === 0;
+
+  // Mês atual pra travar o "mês anterior" do mini-calendário de "Datas
+  // avulsas" (mesmo cálculo de podeVoltarMes em components/FormularioAgendamento.js).
+  const agoraMes = new Date();
+  const podeVoltarAvulsas =
+    avulsasMes.getFullYear() > agoraMes.getFullYear() ||
+    (avulsasMes.getFullYear() === agoraMes.getFullYear() &&
+      avulsasMes.getMonth() > agoraMes.getMonth());
 
   return (
     <div className="space-y-4">
@@ -1273,7 +1572,7 @@ function SecaoAusencias({
           >
             {opcoesModo.map((o) => (
               <option key={o.valor} value={o.valor}>
-                {o.rotulo} — ex.: {o.exemplo}
+                {o.exemplo ? `${o.rotulo} — ex.: ${o.exemplo}` : o.rotulo}
               </option>
             ))}
           </select>
@@ -1542,6 +1841,105 @@ function SecaoAusencias({
           </>
         )}
 
+        {/* OPÇÃO 4 — Datas avulsas (periodo, N datas não sequenciais ligadas
+            por grupo_id, sempre tipo_registro="ausencia"). */}
+        {modo === "avulsas" && (
+          <>
+            <div className="mt-3">
+              <span className="block text-xs font-medium text-body">
+                Datas
+              </span>
+              <div className="mt-1">
+                <MiniCalendarioMultiplo
+                  mes={avulsasMes}
+                  min={hoje}
+                  selecionadas={new Set(avulsasDatas)}
+                  onAlternar={alternarAvulsasData}
+                  onPrev={avulsasMesAnterior}
+                  onNext={avulsasProximoMes}
+                  podeVoltar={podeVoltarAvulsas}
+                />
+              </div>
+
+              {avulsasDatas.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {[...avulsasDatas].sort().map((iso) => (
+                    <span
+                      key={iso}
+                      className="inline-flex items-center gap-1 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-heading ring-1 ring-border"
+                    >
+                      {formatarDataBR(iso)}
+                      <button
+                        type="button"
+                        aria-label={`Remover ${formatarDataBR(iso)}`}
+                        onClick={() => alternarAvulsasData(iso)}
+                        className="text-muted transition hover:text-red-600"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={avulsasDiaInteiro}
+                onClick={() => setAvulsasDiaInteiro((v) => !v)}
+                className="flex items-center gap-2"
+              >
+                <span className="text-sm font-medium text-heading">
+                  Dia inteiro
+                </span>
+                <Interruptor ativo={avulsasDiaInteiro} />
+              </button>
+            </div>
+
+            {!avulsasDiaInteiro && (
+              <div className="mt-3">
+                <span className="block text-xs font-medium text-body">
+                  Horários
+                </span>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {MARCADORES_HORARIO.map((h) => {
+                    const selecionado = avulsasHorarios.includes(h);
+                    return (
+                      <button
+                        key={h}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={selecionado}
+                        onClick={() => alternarAvulsasHorario(h)}
+                        className={`flex h-10 w-10 items-center justify-center rounded-full text-xs font-medium ring-1 transition ${
+                          selecionado
+                            ? "bg-primary text-white ring-primary"
+                            : "bg-card text-body ring-border hover:bg-surface"
+                        }`}
+                      >
+                        {h}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <label className="mt-3 block text-xs font-medium text-body">
+              Motivo (opcional)
+              <input
+                type="text"
+                value={avulsasMotivo}
+                onChange={(e) => setAvulsasMotivo(e.target.value)}
+                placeholder="Ex.: curso, plantão…"
+                className={`mt-1 block w-full ${classeCampo}`}
+              />
+            </label>
+          </>
+        )}
+
         {formErro && (
           <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 ring-1 ring-red-100">
             {formErro}
@@ -1697,6 +2095,89 @@ function SecaoAusencias({
               </button>
             </div>
           ))}
+
+          {/* Grupos de "Datas avulsas" (grupo_id), um card por grupo (ver
+              agruparPorGrupoId) — resumo compacto no topo (qtde de datas +
+              dia inteiro/horários) e a lista completa das datas abaixo.
+              Excluir apaga o grupo_id inteiro de uma vez, com confirmação. */}
+          {gruposAvulsos.map((grupo) => (
+            <div
+              key={grupo.grupoId}
+              className="flex items-start justify-between gap-3 rounded-xl border-l-4 border-l-red-400 bg-card p-3 ring-1 ring-border"
+            >
+              <div className="min-w-0">
+                <p className="flex items-center gap-2 text-sm font-medium text-heading">
+                  <SeloTipoRegistro tipoRegistro="ausencia" />
+                  {grupo.datas.length === 1 ? "1 data" : `${grupo.datas.length} datas`}
+                  {" · "}
+                  {grupo.diaInteiro ? "dia inteiro" : grupo.horarios.join(", ")}
+                </p>
+                {grupo.motivo && (
+                  <p className="mt-0.5 text-xs text-muted">{grupo.motivo}</p>
+                )}
+                <p className="mt-1.5 text-xs text-body">
+                  {grupo.datas.map(formatarDataBR).join(" · ")}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmarExclusaoGrupo(grupo)}
+                className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+              >
+                Excluir
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Confirmação: exclusão de um grupo inteiro de "Datas avulsas" (ver
+          excluirGrupo) — avisa quantas datas serão desbloqueadas. */}
+      {confirmarExclusaoGrupo && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-excluir-grupo-avulsas"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setConfirmarExclusaoGrupo(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-excluir-grupo-avulsas"
+              className="text-lg font-semibold text-heading"
+            >
+              Excluir datas avulsas
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Tem certeza que deseja excluir este grupo? Isso vai desbloquear{" "}
+              <span className="font-medium text-heading">
+                {confirmarExclusaoGrupo.datas.length === 1
+                  ? "1 data"
+                  : `${confirmarExclusaoGrupo.datas.length} datas`}
+              </span>
+              .
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarExclusaoGrupoConfirmada}
+                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700"
+              >
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmarExclusaoGrupo(null)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
