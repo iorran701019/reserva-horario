@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { formatarPreco } from "@/components/FormularioAgendamento";
+import { chaveMes } from "@/lib/mes";
+import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
+import NavegacaoMes from "@/components/NavegacaoMes";
 
 // Aba "Profissionais" do /admin: CRUD dos profissionais do salão (tabela
 // `profissionais`), sempre particionado por estabelecimento_id (o consumidor já
@@ -331,7 +334,9 @@ function CheckAlmoco({ checked, onChange }) {
 // `mostrarAlmoco` — almoço (início/fim), lado a lado (quebram em telas
 // estreitas). `onCampo(campo, valor)` patcha o bloco no pai. `rotulo` só entra
 // nos aria-labels (acessibilidade).
-function CamposHorario({ bloco, onCampo, rotulo, mostrarAlmoco }) {
+// `onBlurCampo`, quando passado (só na tela de edição — ver GradeDias), grava
+// a agenda inteira ao sair de qualquer um destes campos.
+function CamposHorario({ bloco, onCampo, onBlurCampo, rotulo, mostrarAlmoco }) {
   const classe =
     "mt-1 w-28 rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10";
   return (
@@ -343,6 +348,7 @@ function CamposHorario({ bloco, onCampo, rotulo, mostrarAlmoco }) {
           aria-label={`Entrada — ${rotulo}`}
           value={bloco.hora_inicio}
           onChange={(e) => onCampo("hora_inicio", e.target.value)}
+          onBlur={onBlurCampo}
           className={classe}
         />
       </label>
@@ -355,6 +361,7 @@ function CamposHorario({ bloco, onCampo, rotulo, mostrarAlmoco }) {
               aria-label={`Início do almoço — ${rotulo}`}
               value={bloco.almoco_inicio}
               onChange={(e) => onCampo("almoco_inicio", e.target.value)}
+              onBlur={onBlurCampo}
               className={classe}
             />
           </label>
@@ -365,6 +372,7 @@ function CamposHorario({ bloco, onCampo, rotulo, mostrarAlmoco }) {
               aria-label={`Fim do almoço — ${rotulo}`}
               value={bloco.almoco_fim}
               onChange={(e) => onCampo("almoco_fim", e.target.value)}
+              onBlur={onBlurCampo}
               className={classe}
             />
           </label>
@@ -377,6 +385,7 @@ function CamposHorario({ bloco, onCampo, rotulo, mostrarAlmoco }) {
           aria-label={`Saída — ${rotulo}`}
           value={bloco.hora_fim}
           onChange={(e) => onCampo("hora_fim", e.target.value)}
+          onBlur={onBlurCampo}
           className={classe}
         />
       </label>
@@ -388,8 +397,9 @@ function CamposHorario({ bloco, onCampo, rotulo, mostrarAlmoco }) {
 // resumo da edição). Uma linha por dia: rótulo + toggle à esquerda; quando o
 // dia está ativo, os campos de horário aparecem ao lado (quebram no mobile).
 // `onToggle(i)` liga/desliga o dia; `onCampo(i, campo, valor)` edita um horário.
-// `mostrarAlmoco` revela a coluna de almoço em todas as linhas.
-function GradeDias({ dias, onToggle, onCampo, mostrarAlmoco }) {
+// `mostrarAlmoco` revela a coluna de almoço em todas as linhas. `onBlurCampo`
+// (opcional, só na tela de edição) dispara a gravação automática da agenda.
+function GradeDias({ dias, onToggle, onCampo, onBlurCampo, mostrarAlmoco }) {
   return (
     <div className="space-y-2">
       {DIAS.map((info, i) => {
@@ -422,6 +432,7 @@ function GradeDias({ dias, onToggle, onCampo, mostrarAlmoco }) {
                     rotulo={info.rotulo}
                     mostrarAlmoco={mostrarAlmoco}
                     onCampo={(campo, valor) => onCampo(i, campo, valor)}
+                    onBlurCampo={onBlurCampo}
                   />
                 </div>
               )}
@@ -1514,6 +1525,27 @@ function SecaoAusencias({
   const gruposAvulsos = agruparPorGrupoId(periodosAvulsos);
   const vazio = gruposRec.length === 0 && periodos.length === 0;
 
+  // Navegação mensal da lista (ver lib/useNavegacaoMes) — cobre só períodos
+  // com data (dia único, vários dias, datas avulsas); recorrentes ficam de
+  // fora por não terem data própria (sempre visíveis, fora da paginação).
+  // Alimenta o hook com UM item por registro/grupo só pra descobrir quais
+  // meses têm dado real; a filtragem de cada lista pra exibição é feita por
+  // fora, comparando chaveMes(...) === mesSelecionado (ver abaixo).
+  const itensParaNavegacaoMes = [
+    ...periodosIndividuais.map((a) => ({ data: a.data_inicio })),
+    ...gruposAvulsos.map((g) => ({ data: g.datas[0] })),
+  ];
+  const navMes = useNavegacaoMes(itensParaNavegacaoMes);
+  const gruposPeriodoDoMes = gruposPeriodo.filter(
+    (g) => chaveMes(g.data) === navMes.mesSelecionado
+  );
+  const multiDiaDoMes = multiDia.filter(
+    (a) => chaveMes(a.data_inicio) === navMes.mesSelecionado
+  );
+  const gruposAvulsosDoMes = gruposAvulsos.filter(
+    (g) => chaveMes(g.datas[0]) === navMes.mesSelecionado
+  );
+
   // Mês atual pra travar o "mês anterior" do mini-calendário de "Datas
   // avulsas" (mesmo cálculo de podeVoltarMes em components/FormularioAgendamento.js).
   const agoraMes = new Date();
@@ -1982,7 +2014,15 @@ function SecaoAusencias({
       ) : (
         <div className="space-y-3">
           {/* Recorrentes agrupadas por faixa de horário. Borda + selo indicam
-              bloqueio (vermelho) ou liberação (verde). */}
+              bloqueio (vermelho) ou liberação (verde). SEMPRE visíveis, fora
+              da paginação por mês abaixo — são regra permanente (dia_semana),
+              sem data_inicio/data_fim pra encaixar num mês. Título só aparece
+              quando há pelo menos uma, pra não deixar um cabeçalho solto. */}
+          {gruposRec.length > 0 && (
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Recorrentes
+            </p>
+          )}
           {gruposRec.map((grupo) => (
             <div
               key={`${grupo.inicio}|${grupo.fim}|${grupo.tipoRegistro}`}
@@ -2021,12 +2061,35 @@ function SecaoAusencias({
             </div>
           ))}
 
+          {/* Navegação mensal dos períodos com data (dia único, vários dias,
+              datas avulsas) — recorrentes ficam de fora, acima (ver
+              lib/useNavegacaoMes). Sempre visível, igual ao NavegacaoTrimestre
+              do Histórico: o vazio é tratado abaixo, não escondendo o
+              controle. */}
+          <NavegacaoMes
+            rotulo={navMes.rotulo}
+            temAnterior={navMes.temAnterior}
+            temProximo={navMes.temProximo}
+            noAtual={navMes.noAtual}
+            onAnterior={navMes.irParaAnterior}
+            onProximo={navMes.irParaProximo}
+            onVoltarAtual={navMes.voltarParaAtual}
+          />
+
+          {gruposPeriodoDoMes.length === 0 &&
+          multiDiaDoMes.length === 0 &&
+          gruposAvulsosDoMes.length === 0 ? (
+            <p className="rounded-lg bg-surface px-3 py-4 text-center text-sm text-body ring-1 ring-border">
+              Nenhuma ausência neste mês.
+            </p>
+          ) : (
+            <>
           {/* Períodos de UM dia, condensados por data — um card por dia,
               listando dentro cada bloqueio/liberação daquele dia (já
               ordenados com bloqueios primeiro, ver agruparPeriodosPorDia).
               Borda vermelha se o dia tem QUALQUER bloqueio (que sempre vence,
               ver lib/disponibilidade.js); verde só quando é liberação pura. */}
-          {gruposPeriodo.map((grupo) => {
+          {gruposPeriodoDoMes.map((grupo) => {
             const temBloqueio = grupo.itens.some(
               (a) => (a.tipo_registro ?? "ausencia") !== "liberacao"
             );
@@ -2071,7 +2134,7 @@ function SecaoAusencias({
 
           {/* Períodos de VÁRIOS dias (férias/viagem), um card por linha —
               sempre dia inteiro e nunca liberação (ver coletarLinhas). */}
-          {multiDia.map((a) => (
+          {multiDiaDoMes.map((a) => (
             <div
               key={a.id}
               className="flex items-center justify-between gap-3 rounded-xl border-l-4 border-l-red-400 bg-card p-3 ring-1 ring-border"
@@ -2100,7 +2163,7 @@ function SecaoAusencias({
               agruparPorGrupoId) — resumo compacto no topo (qtde de datas +
               dia inteiro/horários) e a lista completa das datas abaixo.
               Excluir apaga o grupo_id inteiro de uma vez, com confirmação. */}
-          {gruposAvulsos.map((grupo) => (
+          {gruposAvulsosDoMes.map((grupo) => (
             <div
               key={grupo.grupoId}
               className="flex items-start justify-between gap-3 rounded-xl border-l-4 border-l-red-400 bg-card p-3 ring-1 ring-border"
@@ -2128,6 +2191,8 @@ function SecaoAusencias({
               </button>
             </div>
           ))}
+            </>
+          )}
         </div>
       )}
 
@@ -2253,6 +2318,41 @@ export default function GerenciarProfissionais({ estabelecimento }) {
   const [carregandoForm, setCarregandoForm] = useState(false);
   const [abaEdicao, setAbaEdicao] = useState("horarios"); // aba ativa na edição
 
+  // `editando` objeto (não "novo") = estamos editando um profissional que já
+  // existe: abas Horários/Serviços gravam sozinhas a cada toggle/blur (ver
+  // salvarAgendaAuto/salvarServicosAuto/salvarNomeEModoAuto), sem esperar um
+  // clique em "Salvar". No wizard de criação (editando === "novo") os MESMOS
+  // handlers compartilhados só mexem no rascunho local — ainda não existe
+  // profissional_id pra gravar.
+  const emEdicao = Boolean(editando) && editando !== "novo";
+
+  // Indicador único (topo do modal) das 3 gravações automáticas acima —
+  // mesmo padrão visual de "Salvando…"/"Salvo ✓" dos toggles de
+  // ConfiguracoesSalao.js. Como é UM indicador pra 3 seções independentes,
+  // uma gravação com erro pode ser "escondida" se outra seção salvar com
+  // sucesso logo em seguida (erro específico de cada seção já vai na própria
+  // mensagem, então o rótulo genérico é só o resumo visual).
+  const [statusEdicao, setStatusEdicao] = useState(""); // "" | "salvando" | "salvo"
+  const [erroEdicao, setErroEdicao] = useState("");
+  // Quantas gravações automáticas (das 3 seções) estão em andamento agora —
+  // só volta a "salvo" quando a última terminar.
+  const emAndamentoEdicaoRef = useRef(0);
+  // Fila por seção: se uma gravação "apaga tudo + reinsere tudo" já está em
+  // andamento quando outra da MESMA seção chega (ex.: dois toggles em
+  // sequência rápida), guarda só a mais recente e dispara assim que a atual
+  // terminar — nunca duas gravações da mesma tabela correndo em paralelo.
+  const nomeFilaRef = useRef({ emAndamento: false, pendente: null });
+  const agendaFilaRef = useRef({ emAndamento: false, pendente: null });
+  const servicosFilaRef = useRef({ emAndamento: false, pendente: null });
+  // Só true depois que abrirEdicao termina de carregar horários/serviços com
+  // sucesso. Trava salvarAgendaAuto/salvarServicosAuto enquanto isso: se o
+  // carregamento falhar (ver erroForm em abrirEdicao), `form` fica com a
+  // grade VAZIA (placeholder) — sem essa trava, qualquer toggle acidental
+  // gravaria essa grade vazia por cima da agenda real do profissional
+  // (mesmo risco que o antigo botão "Salvar" tinha, só que agora um único
+  // clique dispara, em vez de precisar preencher tudo e clicar Salvar).
+  const dadosCarregadosRef = useRef(false);
+
   // Profissional "armado" para soft delete (controla o modal de confirmação).
   const [profissionalParaExcluir, setProfissionalParaExcluir] = useState(null);
 
@@ -2322,6 +2422,15 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     };
   }, [estabelecimento.id]);
 
+  // "Salvo ✓" do indicador de gravação automática some sozinho depois de um
+  // instante (mesmo padrão de ConfiguracoesSalao.js), pra não ficar preso na
+  // tela.
+  useEffect(() => {
+    if (statusEdicao !== "salvo") return;
+    const t = setTimeout(() => setStatusEdicao(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusEdicao]);
+
   // Abre o wizard de criação, sempre da Etapa A com o form zerado. Modo
   // 'janela' por padrão, pra não afetar o fluxo de criação de sempre.
   function abrirNovo() {
@@ -2351,6 +2460,9 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     setEditando(profissional);
     setAbaEdicao("horarios");
     setErroForm("");
+    setStatusEdicao("");
+    setErroEdicao("");
+    dadosCarregadosRef.current = false;
     const modoHorario = profissional.modo_horario ?? "janela";
     setForm({
       nome: profissional.nome,
@@ -2416,6 +2528,7 @@ export default function GerenciarProfissionais({ estabelecimento }) {
       horarioComum: { ...BLOCO_VAZIO },
       servicos: (resVinculos.data ?? []).map((v) => v.servico_id),
     });
+    dadosCarregadosRef.current = true;
   }
 
   function fecharForm() {
@@ -2423,6 +2536,8 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     setEtapa("A");
     setForm(FORM_INICIAL);
     setErroForm("");
+    setStatusEdicao("");
+    setErroEdicao("");
   }
 
   function handleNome(e) {
@@ -2450,71 +2565,74 @@ export default function GerenciarProfissionais({ estabelecimento }) {
   }
 
   // Adiciona/remove uma tag de horário fixo de um dia (modo 'fixo'). Ignora
-  // duplicata; mantém a lista ordenada.
+  // duplicata; mantém a lista ordenada. Compartilhada com o wizard de
+  // criação — só dispara a gravação automática (salvarAgendaAuto) em EDIÇÃO
+  // (emEdicao); no wizard é só rascunho local, sem profissional_id ainda.
   function adicionarHorarioFixo(dia, horario) {
-    setForm((anterior) => {
-      const atual = anterior.horariosFixosPorDia[dia];
-      if (atual.includes(horario)) return anterior;
-      const atualizado = [...atual, horario].sort();
-      return {
-        ...anterior,
-        horariosFixosPorDia: anterior.horariosFixosPorDia.map((lista, i) =>
-          i === dia ? atualizado : lista
-        ),
-      };
-    });
+    const atual = form.horariosFixosPorDia[dia];
+    if (atual.includes(horario)) return;
+    const horariosFixosPorDiaNovo = form.horariosFixosPorDia.map((lista, i) =>
+      i === dia ? [...atual, horario].sort() : lista
+    );
+    setForm((anterior) => ({ ...anterior, horariosFixosPorDia: horariosFixosPorDiaNovo }));
+    if (emEdicao) {
+      salvarAgendaAuto({ ...form, horariosFixosPorDia: horariosFixosPorDiaNovo });
+    }
   }
 
   function removerHorarioFixo(dia, horario) {
-    setForm((anterior) => ({
-      ...anterior,
-      horariosFixosPorDia: anterior.horariosFixosPorDia.map((lista, i) =>
-        i === dia ? lista.filter((h) => h !== horario) : lista
-      ),
-    }));
+    const horariosFixosPorDiaNovo = form.horariosFixosPorDia.map((lista, i) =>
+      i === dia ? lista.filter((h) => h !== horario) : lista
+    );
+    setForm((anterior) => ({ ...anterior, horariosFixosPorDia: horariosFixosPorDiaNovo }));
+    if (emEdicao) salvarAgendaAuto({ ...form, horariosFixosPorDia: horariosFixosPorDiaNovo });
   }
 
   function setTemAlmoco(valor) {
     setForm((anterior) => ({ ...anterior, temAlmoco: valor }));
   }
 
+  // Wrapper só da tela de EDIÇÃO: além de mexer no rascunho (setTemAlmoco,
+  // compartilhado com o wizard), já grava a agenda na hora que a checkbox
+  // muda.
+  function alternarTemAlmocoEdicao(valor) {
+    setTemAlmoco(valor);
+    salvarAgendaAuto({ ...form, temAlmoco: valor });
+  }
+
   // Liga/desliga o vínculo com um serviço (por id) na seleção do form.
+  // Compartilhada com o wizard; só dispara salvarServicosAuto em EDIÇÃO.
   function alternarServico(id) {
-    setForm((anterior) => ({
-      ...anterior,
-      servicos: anterior.servicos.includes(id)
-        ? anterior.servicos.filter((s) => s !== id)
-        : [...anterior.servicos, id],
-    }));
+    const servicosNovo = form.servicos.includes(id)
+      ? form.servicos.filter((s) => s !== id)
+      : [...form.servicos, id];
+    setForm((anterior) => ({ ...anterior, servicos: servicosNovo }));
+    if (emEdicao) salvarServicosAuto(servicosNovo);
   }
 
   // "Selecionar todos": marca/desmarca de uma vez todos os serviços MOSTRADOS
   // (os ativos do salão). Se todos já estão marcados, desmarca só esses (união/
   // diferença preserva algum vínculo oculto de serviço inativo, se houver).
   function alternarTodosServicos() {
-    setForm((anterior) => {
-      const idsMostrados = servicosSalao.map((s) => s.id);
-      const todosMarcados =
-        idsMostrados.length > 0 &&
-        idsMostrados.every((id) => anterior.servicos.includes(id));
-      if (todosMarcados) {
-        return {
-          ...anterior,
-          servicos: anterior.servicos.filter((id) => !idsMostrados.includes(id)),
-        };
-      }
-      return { ...anterior, servicos: [...new Set([...anterior.servicos, ...idsMostrados])] };
-    });
+    const idsMostrados = servicosSalao.map((s) => s.id);
+    const todosMarcados =
+      idsMostrados.length > 0 &&
+      idsMostrados.every((id) => form.servicos.includes(id));
+    const servicosNovo = todosMarcados
+      ? form.servicos.filter((id) => !idsMostrados.includes(id))
+      : [...new Set([...form.servicos, ...idsMostrados])];
+    setForm((anterior) => ({ ...anterior, servicos: servicosNovo }));
+    if (emEdicao) salvarServicosAuto(servicosNovo);
   }
 
   // Liga/desliga um dia. Desligar não apaga os campos (preserva se religar).
+  // Compartilhada com o wizard; só dispara salvarAgendaAuto em EDIÇÃO.
   function alternarDia(indice) {
-    setForm((anterior) => ({
-      ...anterior,
-      dias: anterior.dias.map((dia, i) =>
-        i === indice ? { ...dia, ativo: !dia.ativo } : dia
-      ),
-    }));
+    const diasNovo = form.dias.map((dia, i) =>
+      i === indice ? { ...dia, ativo: !dia.ativo } : dia
+    );
+    setForm((anterior) => ({ ...anterior, dias: diasNovo }));
+    if (emEdicao) salvarAgendaAuto({ ...form, dias: diasNovo });
   }
 
   // Patch de um campo de horário de um dia específico.
@@ -2653,6 +2771,10 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     return erroInsert ?? null;
   }
 
+  // Salva o wizard de CRIAÇÃO (Janela C). A edição não usa mais este caminho
+  // — Nome, Horários e Serviços gravam sozinhos a cada mudança (ver
+  // salvarNomeEModoAuto/salvarAgendaAuto/salvarServicosAuto); esta função só
+  // é chamada pelo botão "Salvar" da Janela C, sempre com editando === "novo".
   async function handleSalvar() {
     const {
       erro: erroValidacao,
@@ -2667,97 +2789,20 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     }
     const dadosAgenda = { modoHorario, horarios, horariosFixos };
 
-    // Remoção real de almoço: checkbox desmarcada E o profissional tinha almoço
-    // salvo antes. Só aí `horarios` vai com almoço null nas linhas — confirma
-    // antes, porque libera o intervalo pra agendamento. Cancelar mantém o almoço
-    // salvo: remarca a checkbox (valores seguem em memória) e aborta o save.
-    // Só se aplica ao modo 'janela' (o 'fixo' não tem almoço).
-    if (modoHorario === "janela" && !form.temAlmoco && form.almocoSalvoOriginal) {
-      const ok = window.confirm(
-        "Remover o horário de almoço deste profissional? Os clientes poderão agendar nesse intervalo."
-      );
-      if (!ok) {
-        setTemAlmoco(true);
-        return;
-      }
-    }
-
     setSalvando(true);
     setErroForm("");
 
-    if (editando === "novo") {
-      // Cria já ativo, particionado pelo estabelecimento resolvido.
-      const { data, error } = await supabase
-        .from("profissionais")
-        .insert({
-          nome,
-          ativo: true,
-          estabelecimento_id: estabelecimento.id,
-          modo_horario: modoHorario,
-        })
-        .select("id, nome, ativo, modo_horario")
-        .single();
-
-      if (error) {
-        setSalvando(false);
-        setErroForm(error.message);
-        return;
-      }
-
-      const erroHorarios = await salvarAgenda(data.id, dadosAgenda);
-      if (erroHorarios) {
-        setSalvando(false);
-        // Profissional criado; a agenda falhou. Cai na tela de resumo (edição)
-        // já com os horários/serviços digitados, pra corrigir/reenviar. A
-        // gravação falhou: nada foi persistido, então almocoSalvoOriginal=false
-        // (não há almoço a "remover" no próximo save).
-        setProfissionais((atuais) => ordenar([...atuais, data]));
-        setForm(
-          formDeFallback({
-            nome,
-            modoHorario,
-            horarios,
-            horariosFixos,
-            servicos: form.servicos,
-            almocoSalvoOriginal: false,
-          })
-        );
-        setEditando(data);
-        setErroForm(`Profissional criado, mas os horários falharam: ${erroHorarios.message}`);
-        return;
-      }
-
-      const erroServicos = await salvarServicos(data.id, form.servicos);
-      setSalvando(false);
-      if (erroServicos) {
-        // Profissional + agenda salvos; os vínculos falharam. Cai no resumo pra
-        // reenviar (o próximo salvar regrava os vínculos inteiros).
-        setProfissionais((atuais) => ordenar([...atuais, data]));
-        setForm(
-          formDeFallback({
-            nome,
-            modoHorario,
-            horarios,
-            horariosFixos,
-            servicos: form.servicos,
-            almocoSalvoOriginal: (horarios ?? []).some((h) => h.almoco_inicio),
-          })
-        );
-        setEditando(data);
-        setErroForm(`Profissional criado, mas os serviços falharam: ${erroServicos.message}`);
-        return;
-      }
-
-      setProfissionais((atuais) => ordenar([...atuais, data]));
-      fecharForm();
-      return;
-    }
-
-    // Edição: atualiza o nome + modo de agenda e regrava a agenda.
-    const { error } = await supabase
+    // Cria já ativo, particionado pelo estabelecimento resolvido.
+    const { data, error } = await supabase
       .from("profissionais")
-      .update({ nome, modo_horario: modoHorario })
-      .eq("id", editando.id);
+      .insert({
+        nome,
+        ativo: true,
+        estabelecimento_id: estabelecimento.id,
+        modo_horario: modoHorario,
+      })
+      .select("id, nome, ativo, modo_horario")
+      .single();
 
     if (error) {
       setSalvando(false);
@@ -2765,28 +2810,160 @@ export default function GerenciarProfissionais({ estabelecimento }) {
       return;
     }
 
-    const erroHorarios = await salvarAgenda(editando.id, dadosAgenda);
+    const erroHorarios = await salvarAgenda(data.id, dadosAgenda);
     if (erroHorarios) {
       setSalvando(false);
-      setErroForm(`Nome salvo, mas os horários falharam: ${erroHorarios.message}`);
+      // Profissional criado; a agenda falhou. Cai na tela de resumo (edição)
+      // já com os horários/serviços digitados, pra corrigir/reenviar. A
+      // gravação falhou: nada foi persistido, então almocoSalvoOriginal=false
+      // (não há almoço a "remover" no próximo save).
+      setProfissionais((atuais) => ordenar([...atuais, data]));
+      setForm(
+        formDeFallback({
+          nome,
+          modoHorario,
+          horarios,
+          horariosFixos,
+          servicos: form.servicos,
+          almocoSalvoOriginal: false,
+        })
+      );
+      setEditando(data);
+      // Cai direto na tela de edição sem passar por abrirEdicao — os dados no
+      // form já são de confiança (o que o dono acabou de digitar), então já
+      // libera a gravação automática das abas Horários/Serviços.
+      dadosCarregadosRef.current = true;
+      setErroForm(`Profissional criado, mas os horários falharam: ${erroHorarios.message}`);
       return;
     }
 
-    const erroServicos = await salvarServicos(editando.id, form.servicos);
+    const erroServicos = await salvarServicos(data.id, form.servicos);
     setSalvando(false);
     if (erroServicos) {
-      setErroForm(`Nome e horários salvos, mas os serviços falharam: ${erroServicos.message}`);
+      // Profissional + agenda salvos; os vínculos falharam. Cai no resumo pra
+      // reenviar (o próximo salvar regrava os vínculos inteiros).
+      setProfissionais((atuais) => ordenar([...atuais, data]));
+      setForm(
+        formDeFallback({
+          nome,
+          modoHorario,
+          horarios,
+          horariosFixos,
+          servicos: form.servicos,
+          almocoSalvoOriginal: (horarios ?? []).some((h) => h.almoco_inicio),
+        })
+      );
+      setEditando(data);
+      dadosCarregadosRef.current = true;
+      setErroForm(`Profissional criado, mas os serviços falharam: ${erroServicos.message}`);
       return;
     }
 
-    setProfissionais((atuais) =>
-      ordenar(
-        atuais.map((p) =>
-          p.id === editando.id ? { ...p, nome, modo_horario: modoHorario } : p
-        )
-      )
-    );
+    setProfissionais((atuais) => ordenar([...atuais, data]));
     fecharForm();
+  }
+
+  // Serializa gravações automáticas de UMA seção (nome/modo, agenda ou
+  // serviços): se uma já está em andamento quando outra chega (ex.: dois
+  // toggles em sequência rápida na mesma seção), guarda só a MAIS RECENTE e
+  // dispara assim que a atual terminar — nunca duas gravações "apaga tudo +
+  // reinsere tudo" da mesma tabela correndo em paralelo pisando uma na
+  // outra. `tarefa` é uma função async que devolve a mensagem de erro
+  // (string) ou null. O indicador único do topo do modal (statusEdicao/
+  // erroEdicao) é compartilhado pelas 3 filas via `emAndamentoEdicaoRef`.
+  async function executarSalvamentoSequencial(filaRef, tarefa) {
+    filaRef.current.pendente = tarefa;
+    if (filaRef.current.emAndamento) return;
+    filaRef.current.emAndamento = true;
+
+    while (filaRef.current.pendente) {
+      const atual = filaRef.current.pendente;
+      filaRef.current.pendente = null;
+      emAndamentoEdicaoRef.current += 1;
+      setStatusEdicao("salvando");
+      setErroEdicao("");
+
+      const erro = await atual();
+
+      emAndamentoEdicaoRef.current -= 1;
+      if (erro) {
+        setErroEdicao(erro);
+      } else if (emAndamentoEdicaoRef.current === 0 && !filaRef.current.pendente) {
+        setStatusEdicao("salvo");
+      }
+    }
+    filaRef.current.emAndamento = false;
+  }
+
+  // Grava Nome + modo de agenda automaticamente (onBlur do campo Nome, tela
+  // de edição). Reaproveita a MESMA gravação que o antigo botão "Salvar" do
+  // rodapé fazia pra esses dois campos — só muda o gatilho.
+  function salvarNomeEModoAuto() {
+    const nome = form.nome.trim();
+    if (!nome) {
+      setErroEdicao("Informe o nome do profissional.");
+      setStatusEdicao("");
+      return;
+    }
+    const modoHorario = form.modoHorario;
+    executarSalvamentoSequencial(nomeFilaRef, async () => {
+      const { error } = await supabase
+        .from("profissionais")
+        .update({ nome, modo_horario: modoHorario })
+        .eq("id", editando.id);
+      if (!error) {
+        setProfissionais((atuais) =>
+          ordenar(
+            atuais.map((p) =>
+              p.id === editando.id ? { ...p, nome, modo_horario: modoHorario } : p
+            )
+          )
+        );
+      }
+      return error ? `Não foi possível salvar o nome: ${error.message}` : null;
+    });
+  }
+
+  // Grava a agenda (aba Horários) automaticamente: reaproveita a MESMA
+  // validação (coletarDados) e a MESMA gravação "apaga tudo + reinsere tudo"
+  // (salvarAgenda) do antigo botão "Salvar" — só muda o gatilho (toggle/
+  // clique imediato; campo de texto no blur, ver onBlurCampo/GradeDias).
+  // `formAtual` é o snapshot do form JÁ COM a mudança que disparou o save
+  // (os handlers de clique passam o valor recém-computado, não o `form` do
+  // fechamento, que ainda não tem a mudança commitada no state).
+  function salvarAgendaAuto(formAtual) {
+    if (!dadosCarregadosRef.current) {
+      setErroEdicao("Ainda carregando os dados do profissional — aguarde e tente de novo.");
+      setStatusEdicao("");
+      return;
+    }
+    const { erro, modoHorario, horarios, horariosFixos } = coletarDados(formAtual);
+    if (erro) {
+      // Estado local já reflete o clique/edição (ex.: dia recém-ativado sem
+      // horário ainda) — só avisa que não dá pra gravar assim; não perde nada.
+      setErroEdicao(erro);
+      setStatusEdicao("");
+      return;
+    }
+    executarSalvamentoSequencial(agendaFilaRef, async () => {
+      const erroSalvar = await salvarAgenda(editando.id, { modoHorario, horarios, horariosFixos });
+      return erroSalvar ? `Não foi possível salvar os horários: ${erroSalvar.message}` : null;
+    });
+  }
+
+  // Grava os vínculos de serviço (aba Serviços) automaticamente: reaproveita
+  // a MESMA gravação "apaga tudo + reinsere tudo" (salvarServicos) do antigo
+  // botão "Salvar" — só muda o gatilho (clique imediato no checkbox).
+  function salvarServicosAuto(servicoIds) {
+    if (!dadosCarregadosRef.current) {
+      setErroEdicao("Ainda carregando os dados do profissional — aguarde e tente de novo.");
+      setStatusEdicao("");
+      return;
+    }
+    executarSalvamentoSequencial(servicosFilaRef, async () => {
+      const erroSalvar = await salvarServicos(editando.id, servicoIds);
+      return erroSalvar ? `Não foi possível salvar os serviços: ${erroSalvar.message}` : null;
+    });
   }
 
   // Soft delete: marca ativo=false (nunca DELETE físico). A grade em
@@ -3136,10 +3313,23 @@ export default function GerenciarProfissionais({ estabelecimento }) {
                   type="text"
                   value={form.nome}
                   onChange={handleNome}
+                  onBlur={salvarNomeEModoAuto}
                   placeholder="Ex.: João da Silva"
                   className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
                 />
               </div>
+
+              {/* Indicador único da gravação automática (Nome, Horários e
+                  Serviços gravam sozinhos nesta tela — ver salvarNomeEModoAuto/
+                  salvarAgendaAuto/salvarServicosAuto). Mesmo padrão visual dos
+                  toggles de ConfiguracoesSalao.js. */}
+              {statusEdicao === "salvando" && (
+                <p className="text-xs text-muted">Salvando…</p>
+              )}
+              {statusEdicao === "salvo" && !erroEdicao && (
+                <p className="text-xs font-medium text-green-600">Salvo ✓</p>
+              )}
+              {erroEdicao && <p className="text-xs text-red-600">{erroEdicao}</p>}
 
               {/* Switcher de abas (estado local `abaEdicao`). */}
               <div className="flex gap-1 rounded-lg bg-surface p-1 ring-1 ring-border">
@@ -3214,12 +3404,13 @@ export default function GerenciarProfissionais({ estabelecimento }) {
                         <span className="text-sm font-medium text-body">
                           Dias e horários
                         </span>
-                        <CheckAlmoco checked={form.temAlmoco} onChange={setTemAlmoco} />
+                        <CheckAlmoco checked={form.temAlmoco} onChange={alternarTemAlmocoEdicao} />
                       </div>
                       <GradeDias
                         dias={form.dias}
                         onToggle={alternarDia}
                         onCampo={handleCampoDia}
+                        onBlurCampo={() => salvarAgendaAuto(form)}
                         mostrarAlmoco={form.temAlmoco}
                       />
                     </div>
@@ -3227,8 +3418,7 @@ export default function GerenciarProfissionais({ estabelecimento }) {
 
                   {diaFixoSemHorario && (
                     <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 ring-1 ring-amber-100">
-                      Cadastre ao menos um horário fixo pra cada dia ativo
-                      antes de salvar.
+                      Cadastre ao menos um horário fixo pra cada dia ativo.
                     </p>
                   )}
                 </div>
@@ -3282,23 +3472,22 @@ export default function GerenciarProfissionais({ estabelecimento }) {
             </p>
           )}
 
-          <div className="flex flex-col gap-2 sm:flex-row-reverse">
-            <button
-              type="button"
-              onClick={handleSalvar}
-              disabled={salvando || carregandoForm || diaFixoSemHorario}
-              className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {salvando ? "Salvando..." : "Salvar"}
-            </button>
-            <button
-              type="button"
-              onClick={fecharForm}
-              className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
-            >
-              Cancelar
-            </button>
-          </div>
+          {/* Nome, Horários e Serviços já gravam sozinhos (ver indicador
+              acima) — não há mais nada pendente pra confirmar, então o rodapé
+              é só "Fechar". Ausências grava cada bloqueio/liberação
+              individualmente (ver SecaoAusencias) e já ficou sem NENHUM
+              botão de rodapé (nem "Fechar") — mantido assim de propósito. */}
+          {abaEdicao !== "ausencias" && (
+            <div className="flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={fecharForm}
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Fechar
+              </button>
+            </div>
+          )}
         </div>
       )}
 
