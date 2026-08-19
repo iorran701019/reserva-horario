@@ -7,6 +7,7 @@ import {
   paraExibicaoNascimento,
   validarNascimento,
 } from "@/lib/nascimentoValidacao";
+import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
 
 // Edição dos dados do cliente, reaproveitando a MESMA estrutura de campos e
 // validação do CadastroCliente (nome, whatsapp com dupla confirmação, CEP
@@ -78,6 +79,13 @@ export default function AtualizarDadosCliente({
   const [erroNascimento, setErroNascimento] = useState("");
   const [mostrarReconfirmacao, setMostrarReconfirmacao] = useState(false);
   const [whatsappReconfirmacao, setWhatsappReconfirmacao] = useState("");
+  // Erro de FORMATO (validarWhatsapp) do campo "WhatsApp", em tempo real
+  // (onBlur) — separado de `erro`, que segue cobrindo nome/divergência entre
+  // WhatsApp e confirmação/reconfirmação.
+  const [erroFormatoWhatsapp, setErroFormatoWhatsapp] = useState("");
+  // Erro de FORMATO (validarWhatsapp) do campo opcional "Contato de
+  // emergência", em tempo real (onBlur).
+  const [erroContatoEmergencia, setErroContatoEmergencia] = useState("");
 
   // Valor de whatsapp como carregado do banco (dígitos), pra saber no submit
   // se o cliente de fato trocou o número — só então vale a pena chamar a RPC
@@ -180,6 +188,8 @@ export default function AtualizarDadosCliente({
     e.preventDefault();
     setErro("");
     setErroNascimento("");
+    setErroFormatoWhatsapp("");
+    setErroContatoEmergencia("");
 
     if (!form.nome.trim()) {
       setErro("Informe seu nome.");
@@ -205,6 +215,12 @@ export default function AtualizarDadosCliente({
         return;
       }
 
+      const validacaoWhatsapp = validarWhatsapp(form.whatsapp);
+      if (!validacaoWhatsapp.valido) {
+        setErroFormatoWhatsapp(validacaoWhatsapp.erro);
+        return;
+      }
+
       const digitosBase = mostrarReconfirmacao
         ? form.whatsappConfirmacao.replace(/\D/g, "")
         : digitosWhatsapp;
@@ -219,10 +235,17 @@ export default function AtualizarDadosCliente({
         return;
       }
 
-      novoWhatsappDigitos = (mostrarReconfirmacao
-        ? whatsappReconfirmacao
-        : form.whatsappConfirmacao
-      ).replace(/\D/g, "");
+      novoWhatsappDigitos = normalizarWhatsapp(
+        mostrarReconfirmacao ? whatsappReconfirmacao : form.whatsappConfirmacao
+      );
+    }
+
+    if (!exigirEndereco && form.contatoEmergencia.trim()) {
+      const validacaoContatoEmergencia = validarWhatsapp(form.contatoEmergencia);
+      if (!validacaoContatoEmergencia.valido) {
+        setErroContatoEmergencia(validacaoContatoEmergencia.erro);
+        return;
+      }
     }
 
     setEnviando(true);
@@ -261,7 +284,7 @@ export default function AtualizarDadosCliente({
       dadosCliente.estado = form.estado || null;
     } else {
       dadosCliente.contato_emergencia =
-        form.contatoEmergencia.replace(/\D/g, "") || null;
+        normalizarWhatsapp(form.contatoEmergencia) || null;
     }
 
     const { data, error } = await supabase
@@ -319,11 +342,22 @@ export default function AtualizarDadosCliente({
             type="tel"
             inputMode="tel"
             value={form.whatsapp}
-            onChange={handleChange}
+            onChange={(e) => {
+              handleChange(e);
+              setErroFormatoWhatsapp("");
+            }}
+            onBlur={() => {
+              if (!form.whatsapp.trim()) return;
+              const validacao = validarWhatsapp(form.whatsapp);
+              setErroFormatoWhatsapp(validacao.valido ? "" : validacao.erro);
+            }}
             required
             placeholder="(24) 99999-9999"
             className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
           />
+          {erroFormatoWhatsapp && (
+            <p className="mt-1 text-sm text-red-700">{erroFormatoWhatsapp}</p>
+          )}
         </div>
       )}
 
@@ -418,10 +452,21 @@ export default function AtualizarDadosCliente({
             type="tel"
             inputMode="tel"
             value={form.contatoEmergencia}
-            onChange={handleChange}
+            onChange={(e) => {
+              handleChange(e);
+              setErroContatoEmergencia("");
+            }}
+            onBlur={() => {
+              if (!form.contatoEmergencia.trim()) return;
+              const validacao = validarWhatsapp(form.contatoEmergencia);
+              setErroContatoEmergencia(validacao.valido ? "" : validacao.erro);
+            }}
             placeholder="(24) 99999-9999"
             className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
           />
+          {erroContatoEmergencia && (
+            <p className="mt-1 text-sm text-red-700">{erroContatoEmergencia}</p>
+          )}
         </div>
       )}
 

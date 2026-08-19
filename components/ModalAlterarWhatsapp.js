@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
 
 // Popup "Alterar WhatsApp" do detalhe do cliente (GerenciarClientes.js), em
 // dois passos: 1) novo número com a mesma dupla digitação já usada em
@@ -35,6 +36,10 @@ export default function ModalAlterarWhatsapp({
   const [whatsappValidado, setWhatsappValidado] = useState("");
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
+  // Erro de FORMATO (validarWhatsapp) do campo "Novo WhatsApp", em tempo
+  // real (onBlur) — separado de `erro`, que segue cobrindo divergência com
+  // confirmação/reconfirmação e falhas da RPC.
+  const [erroFormatoNovoWhatsapp, setErroFormatoNovoWhatsapp] = useState("");
 
   useEffect(() => {
     setPasso("numero");
@@ -44,6 +49,7 @@ export default function ModalAlterarWhatsapp({
     setReconfirmacao("");
     setWhatsappValidado("");
     setErro("");
+    setErroFormatoNovoWhatsapp("");
     setSalvando(false);
   }, [cliente]);
 
@@ -52,10 +58,17 @@ export default function ModalAlterarWhatsapp({
   function handleValidarNumero(e) {
     e.preventDefault();
     setErro("");
+    setErroFormatoNovoWhatsapp("");
 
-    const digitosNovo = novoWhatsapp.replace(/\D/g, "");
+    const digitosNovo = normalizarWhatsapp(novoWhatsapp);
     if (digitosNovo.length < 10) {
       setErro("Informe um WhatsApp válido com DDD.");
+      return;
+    }
+
+    const validacaoNovoWhatsapp = validarWhatsapp(novoWhatsapp);
+    if (!validacaoNovoWhatsapp.valido) {
+      setErroFormatoNovoWhatsapp(validacaoNovoWhatsapp.erro);
       return;
     }
 
@@ -128,11 +141,22 @@ export default function ModalAlterarWhatsapp({
                 type="tel"
                 inputMode="tel"
                 value={novoWhatsapp}
-                onChange={(e) => setNovoWhatsapp(e.target.value)}
+                onChange={(e) => {
+                  setNovoWhatsapp(e.target.value);
+                  setErroFormatoNovoWhatsapp("");
+                }}
+                onBlur={() => {
+                  if (!novoWhatsapp.trim()) return;
+                  const validacao = validarWhatsapp(novoWhatsapp);
+                  setErroFormatoNovoWhatsapp(validacao.valido ? "" : validacao.erro);
+                }}
                 required
                 placeholder="(24) 99999-9999"
                 className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
               />
+              {erroFormatoNovoWhatsapp && (
+                <p className="mt-1 text-xs text-red-600">{erroFormatoNovoWhatsapp}</p>
+              )}
             </div>
 
             <div className="mt-4">

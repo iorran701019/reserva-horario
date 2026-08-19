@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
 
 // Pré-passo do admin (aba Agendar) antes de montar o FormularioAgendamento —
 // identifica o cliente por NOME (diferente do público, que identifica por
@@ -31,6 +32,9 @@ export default function IdentificacaoClienteAdmin({ estabelecimentoId, onIdentif
   const [whatsapp, setWhatsapp] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
+  // Erro de FORMATO (validarWhatsapp) do campo "WhatsApp", em tempo real
+  // (onBlur) — separado de `erro`, que segue cobrindo nome/busca/upsert.
+  const [erroFormatoWhatsapp, setErroFormatoWhatsapp] = useState("");
   // Cliente já cadastrado sob esse WhatsApp com um nome DIFERENTE do
   // digitado (ver cadastrarNovo) — { id, nome } enquanto pede confirmação
   // explícita antes de sobrescrever; null = sem conflito pendente. Qualquer
@@ -106,6 +110,7 @@ export default function IdentificacaoClienteAdmin({ estabelecimentoId, onIdentif
   async function cadastrarNovo(e) {
     e.preventDefault();
     setErro("");
+    setErroFormatoWhatsapp("");
 
     const nomeLimpo = nome.trim();
     if (!nomeLimpo) {
@@ -113,9 +118,15 @@ export default function IdentificacaoClienteAdmin({ estabelecimentoId, onIdentif
       return;
     }
 
-    const digitos = whatsapp.replace(/\D/g, "");
+    const digitos = normalizarWhatsapp(whatsapp);
     if (digitos.length < 10) {
       setErro("Informe um WhatsApp válido com DDD.");
+      return;
+    }
+
+    const validacaoWhatsapp = validarWhatsapp(whatsapp);
+    if (!validacaoWhatsapp.valido) {
+      setErroFormatoWhatsapp(validacaoWhatsapp.erro);
       return;
     }
 
@@ -153,7 +164,7 @@ export default function IdentificacaoClienteAdmin({ estabelecimentoId, onIdentif
 
   async function confirmarSubstituicao() {
     const nomeLimpo = nome.trim();
-    const digitos = whatsapp.replace(/\D/g, "");
+    const digitos = normalizarWhatsapp(whatsapp);
     setConflito(null);
     await upsertar(nomeLimpo, digitos);
   }
@@ -221,11 +232,20 @@ export default function IdentificacaoClienteAdmin({ estabelecimentoId, onIdentif
               onChange={(e) => {
                 setWhatsapp(e.target.value);
                 setConflito(null);
+                setErroFormatoWhatsapp("");
+              }}
+              onBlur={() => {
+                if (!whatsapp.trim()) return;
+                const validacao = validarWhatsapp(whatsapp);
+                setErroFormatoWhatsapp(validacao.valido ? "" : validacao.erro);
               }}
               required
               placeholder="(24) 99999-9999"
               className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
             />
+            {erroFormatoWhatsapp && (
+              <p className="mt-1 text-sm text-red-700">{erroFormatoWhatsapp}</p>
+            )}
           </div>
 
           {conflito ? (

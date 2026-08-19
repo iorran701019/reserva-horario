@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import CadastroCliente from "@/components/CadastroCliente";
 import ModalConflitoWhatsapp from "@/components/ModalConflitoWhatsapp";
 import { enderecoCompleto, whatsappConfere } from "@/lib/clienteValidacao";
+import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
 import { useConflitoWhatsapp } from "@/lib/checagemWhatsapp";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 import { useVoltarFisico } from "@/lib/voltarFisico";
@@ -113,6 +114,9 @@ export default function IdentificacaoCliente({
   );
   const [buscando, setBuscando] = useState(false);
   const [erro, setErro] = useState("");
+  // Erro de FORMATO (validarWhatsapp), em tempo real (onBlur), da etapa
+  // "telefone" — distinto de `erro`, que segue cobrindo falhas de busca.
+  const [erroFormatoTelefone, setErroFormatoTelefone] = useState("");
 
   // Campos da etapa "cadastroSimples" (ramo cadastroCompleto=false).
   // `whatsappSimples` nasce com o telefone digitado na etapa 1, mas é
@@ -129,6 +133,10 @@ export default function IdentificacaoCliente({
   const [enviandoSimples, setEnviandoSimples] = useState(false);
   const [erroSimples, setErroSimples] = useState("");
   const [erroWhatsappSimples, setErroWhatsappSimples] = useState("");
+  // Erro de FORMATO (validarWhatsapp) do campo "WhatsApp" do cadastro
+  // simples, em tempo real (onBlur) — distinto de `erroWhatsappSimples`, que
+  // segue cobrindo só a divergência entre WhatsApp e "confirme seu WhatsApp".
+  const [erroFormatoWhatsappSimples, setErroFormatoWhatsappSimples] = useState("");
 
   // Checagem de WhatsApp já cadastrado (com trava progressiva), usada pelo
   // cadastro simples — a mesma checagem do completarEndereco vive dentro do
@@ -160,6 +168,12 @@ export default function IdentificacaoCliente({
       return;
     }
 
+    const validacaoTelefone = validarWhatsapp(telefone);
+    if (!validacaoTelefone.valido) {
+      setErro(validacaoTelefone.erro);
+      return;
+    }
+
     setBuscando(true);
     const { data } = await supabase
       .from("clientes")
@@ -167,7 +181,7 @@ export default function IdentificacaoCliente({
         "id, nome, whatsapp, cep, endereco, numero, complemento, bairro, cidade, estado, nascimento, instagram"
       )
       .eq("estabelecimento_id", estabelecimentoId)
-      .eq("whatsapp", digitos)
+      .eq("whatsapp", normalizarWhatsapp(telefone))
       .limit(1);
 
     const encontrado = data && data.length > 0 ? data[0] : null;
@@ -283,9 +297,16 @@ export default function IdentificacaoCliente({
     e.preventDefault();
     setErroSimples("");
     setErroWhatsappSimples("");
+    setErroFormatoWhatsappSimples("");
 
     if (!nomeSimples.trim()) {
       setErroSimples("Informe seu nome.");
+      return;
+    }
+
+    const validacaoWhatsappSimples = validarWhatsapp(whatsappSimples);
+    if (!validacaoWhatsappSimples.valido) {
+      setErroFormatoWhatsappSimples(validacaoWhatsappSimples.erro);
       return;
     }
 
@@ -294,7 +315,7 @@ export default function IdentificacaoCliente({
       return;
     }
 
-    const digitos = whatsappSimples.replace(/\D/g, "");
+    const digitos = normalizarWhatsapp(whatsappSimples);
 
     setEnviandoSimples(true);
 
@@ -357,11 +378,22 @@ export default function IdentificacaoCliente({
               type="tel"
               inputMode="tel"
               value={telefone}
-              onChange={(e) => setTelefone(e.target.value)}
+              onChange={(e) => {
+                setTelefone(e.target.value);
+                setErroFormatoTelefone("");
+              }}
+              onBlur={() => {
+                if (!telefone.trim()) return;
+                const validacao = validarWhatsapp(telefone);
+                setErroFormatoTelefone(validacao.valido ? "" : validacao.erro);
+              }}
               required
               placeholder="(24) 99999-9999"
               className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
             />
+            {erroFormatoTelefone && (
+              <p className="mt-1 text-sm text-red-700">{erroFormatoTelefone}</p>
+            )}
           </div>
 
           <button
@@ -445,11 +477,22 @@ export default function IdentificacaoCliente({
               type="tel"
               inputMode="tel"
               value={whatsappSimples}
-              onChange={(e) => setWhatsappSimples(e.target.value)}
+              onChange={(e) => {
+                setWhatsappSimples(e.target.value);
+                setErroFormatoWhatsappSimples("");
+              }}
+              onBlur={() => {
+                if (!whatsappSimples.trim()) return;
+                const validacao = validarWhatsapp(whatsappSimples);
+                setErroFormatoWhatsappSimples(validacao.valido ? "" : validacao.erro);
+              }}
               required
               placeholder="(24) 99999-9999"
               className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
             />
+            {erroFormatoWhatsappSimples && (
+              <p className="mt-1 text-sm text-red-700">{erroFormatoWhatsappSimples}</p>
+            )}
           </div>
 
           <div>

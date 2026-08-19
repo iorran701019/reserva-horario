@@ -315,6 +315,34 @@ export default function PainelCliente({
         </p>
       </div>
 
+      {estabelecimento.link_localizacao && (
+        <a
+          href={estabelecimento.link_localizacao}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+        >
+          <MapPin className="h-5 w-5" aria-hidden="true" />
+          Ver localização
+        </a>
+      )}
+
+      <button
+        type="button"
+        onClick={() => onNovoAgendamento()}
+        className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+      >
+        Novo agendamento
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setEditando(true)}
+        className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+      >
+        Atualizar meus dados
+      </button>
+
       {agendamentos === null && (
         <p className="text-sm text-body">Carregando...</p>
       )}
@@ -441,33 +469,6 @@ export default function PainelCliente({
         </div>
       )}
 
-      {estabelecimento.link_localizacao && (
-        <a
-          href={estabelecimento.link_localizacao}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
-        >
-          <MapPin className="h-5 w-5" aria-hidden="true" />
-          Ver localização
-        </a>
-      )}
-
-      <button
-        type="button"
-        onClick={() => onNovoAgendamento()}
-        className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
-      >
-        Novo agendamento
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setEditando(true)}
-        className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
-      >
-        Atualizar meus dados
-      </button>
     </div>
   );
 }
