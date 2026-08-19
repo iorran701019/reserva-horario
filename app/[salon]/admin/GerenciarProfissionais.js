@@ -2301,7 +2301,11 @@ function SecaoAusencias({
   );
 }
 
-export default function GerenciarProfissionais({ estabelecimento }) {
+export default function GerenciarProfissionais({
+  estabelecimento,
+  qtdProfissionaisAtivos,
+  gatilhoNovoProfissional,
+}) {
   const [profissionais, setProfissionais] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -2449,6 +2453,46 @@ export default function GerenciarProfissionais({ estabelecimento }) {
     setEtapa("A");
     setEditando("novo");
   }
+
+  // Abre o wizard remotamente quando "Cadastrar novo profissional" (aba
+  // Regras de negócio) é clicado — mesmo efeito do botão local, só que
+  // disparado de fora via gatilhoNovoProfissional (contador incrementado
+  // pelo pai). Compara valor anterior x atual (não uma flag de "primeira
+  // vez") pra ser idempotente sob o duplo-invoke de efeitos do Strict Mode
+  // em dev — uma ref booleana "já montou" é resetada a cada invoke e acaba
+  // achando que a 2ª chamada é uma mudança real, abrindo o wizard sozinho.
+  const gatilhoAnteriorRef = useRef(gatilhoNovoProfissional);
+  useEffect(() => {
+    if (gatilhoAnteriorRef.current !== gatilhoNovoProfissional) {
+      gatilhoAnteriorRef.current = gatilhoNovoProfissional;
+      abrirNovo();
+    }
+  }, [gatilhoNovoProfissional]);
+
+  // Se o profissional em edição virar o único ativo (ou o penúltimo for
+  // desativado) enquanto a aba Serviços está aberta, ela deixa de existir no
+  // switcher — tira o form desse estado escondido antes que o usuário note.
+  useEffect(() => {
+    if (qtdProfissionaisAtivos != null && qtdProfissionaisAtivos <= 1 && abaEdicao === "servicos") {
+      setAbaEdicao("horarios");
+    }
+  }, [qtdProfissionaisAtivos, abaEdicao]);
+
+  // Com exatamente 1 profissional ativo não há o que escolher numa lista —
+  // pula direto pra tela de edição desse profissional (mesmo efeito do
+  // botão "Editar" do card), poupando o clique redundante. Vira a única
+  // forma de acesso nessa condição: não há mais caminho de volta pra
+  // lista/Desativar enquanto durar 1 (ou 0) profissional ativo. `editando`
+  // fica de propósito FORA das deps: o efeito só reavalia quando a lista ou
+  // a contagem mudam (ou no mount), nunca quando `editando` muda sozinho —
+  // e também não interfere no wizard (editando === "novo", via
+  // gatilhoNovoProfissional): o guard `editando !== null` já cobre esse caso.
+  useEffect(() => {
+    if (qtdProfissionaisAtivos !== 1 || editando !== null) return;
+    const unicoAtivo = profissionais.find((p) => p.ativo);
+    if (unicoAtivo) abrirEdicao(unicoAtivo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profissionais, qtdProfissionaisAtivos]);
 
   // Edição: carrega o profissional e sua agenda (horarios_trabalho OU
   // horarios_fixos, conforme modo_horario) na tela de resumo. `mesmoHorario=
@@ -3023,6 +3067,15 @@ export default function GerenciarProfissionais({ estabelecimento }) {
   );
   const indiceEtapa = ETAPAS.findIndex((e) => e.id === etapa);
 
+  // Com 0 ou 1 profissional ativo não há o que "atribuir" entre eles — a aba
+  // Serviços da edição (vínculo servico_profissional) some, sobrando só
+  // Horários/Exceções. Mesmo critério de qtdProfissionaisAtivos usado no
+  // rótulo da aba pai (ver page.js).
+  const abasEdicaoVisiveis =
+    qtdProfissionaisAtivos != null && qtdProfissionaisAtivos <= 1
+      ? ABAS_EDICAO.filter((aba) => aba.id !== "servicos")
+      : ABAS_EDICAO;
+
   // Modo 'fixo' com algum dia ativo sem nenhum horário na lista: deixaria a
   // agenda vazia nesse dia sem o dono perceber — bloqueia o Salvar (com
   // mensagem visível, não só disabled silencioso; ver coletarDados).
@@ -3032,20 +3085,14 @@ export default function GerenciarProfissionais({ estabelecimento }) {
 
   return (
     <>
-      {/* Cabeçalho da aba + ação de criar. O botão some enquanto o formulário
-          está aberto pra não competir com ele. */}
+      {/* Cabeçalho da aba: só a contagem. A ação de criar mudou pra "Cadastrar
+          novo profissional" em Regras de negócio (ver onCadastrarProfissional
+          em page.js) — abre o wizard aqui via gatilhoNovoProfissional. */}
       {!editando && (
-        <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="mb-4">
           <p className="text-sm text-body">
             {profissionais.length} profissiona{profissionais.length === 1 ? "l" : "is"}
           </p>
-          <button
-            type="button"
-            onClick={abrirNovo}
-            className="inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
-          >
-            Novo profissional
-          </button>
         </div>
       )}
 
@@ -3333,7 +3380,7 @@ export default function GerenciarProfissionais({ estabelecimento }) {
 
               {/* Switcher de abas (estado local `abaEdicao`). */}
               <div className="flex gap-1 rounded-lg bg-surface p-1 ring-1 ring-border">
-                {ABAS_EDICAO.map((aba) => (
+                {abasEdicaoVisiveis.map((aba) => (
                   <button
                     key={aba.id}
                     type="button"
@@ -3424,8 +3471,14 @@ export default function GerenciarProfissionais({ estabelecimento }) {
                 </div>
               )}
 
-              {/* ABA Serviços — seleção + "Selecionar todos". */}
-              {abaEdicao === "servicos" && (
+              {/* ABA Serviços — seleção + "Selecionar todos". Some com 0/1
+                  profissional ativo (ver abasEdicaoVisiveis); a checagem de
+                  qtdProfissionaisAtivos aqui é redundante com o switcher, mas
+                  evita renderizar o conteúdo se abaEdicao ficar "servicos" por
+                  um instante entre o profissional virar o único ativo e o
+                  efeito de reset (abaixo) rodar. */}
+              {abaEdicao === "servicos" &&
+                !(qtdProfissionaisAtivos != null && qtdProfissionaisAtivos <= 1) && (
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <span className="text-sm font-medium text-body">Serviços</span>

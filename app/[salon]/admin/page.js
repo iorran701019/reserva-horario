@@ -46,6 +46,7 @@ import {
   ChevronRight,
   Check,
   MessageCircleOff,
+  Clock,
 } from "lucide-react";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
@@ -394,6 +395,18 @@ export default function AdminPage() {
   // o bloco "Janela de agendamento" já expandido e rolar até ele. Consumida
   // uma vez (ver onFocarBlocoJanelaConsumido) — não é "sticky".
   const [focarJanelaAgendamento, setFocarJanelaAgendamento] = useState(false);
+
+  // Incrementado a cada clique em "Cadastrar novo profissional" (aba Regras
+  // de negócio): sinaliza pra GerenciarProfissionais (montada só quando
+  // viewPai vira "profissionais") abrir o wizard de criação remotamente.
+  // Contador em vez de boolean pra disparar de novo mesmo se o valor "true"
+  // já tivesse sido consumido antes do usuário trocar de aba.
+  const [gatilhoNovoProfissional, setGatilhoNovoProfissional] = useState(0);
+
+  function irParaCadastroProfissional() {
+    setViewPai("profissionais");
+    setGatilhoNovoProfissional((t) => t + 1);
+  }
 
   // Id do agendamento pendente clicado no bloco cinza da view Dia do Painel
   // (ver PainelCalendario -> onSelecionarPendente): sinaliza pra aba
@@ -1377,6 +1390,31 @@ export default function AdminPage() {
   // id sair de sincronia por algum motivo.
   const abaAtiva = ABAS_PAI.find((aba) => aba.id === viewPai) ?? ABAS_PAI[0];
 
+  // Rótulo da aba "Profissionais" muda pra "Horários" quando o salão tem 0 ou
+  // 1 profissional ativo (não há "profissionais" pra gerenciar, só a agenda
+  // dele) — mesmo critério de qtdProfissionaisAtivos usado em "Trocar
+  // profissional". null (ainda carregando) mantém o rótulo padrão.
+  function rotuloAba(aba) {
+    if (aba.id !== "profissionais") return aba.rotulo;
+    return qtdProfissionaisAtivos != null && qtdProfissionaisAtivos <= 1
+      ? "Horários"
+      : "Profissionais";
+  }
+
+  // Ícone da aba "Profissionais" acompanha o mesmo critério do rótulo acima
+  // (0 ou 1 profissional ativo = tela vira "Horários", sem lista pra
+  // gerenciar) — Clock no lugar de Users nesse caso.
+  function iconeAba(aba) {
+    if (aba.id === "profissionais" && qtdProfissionaisAtivos != null && qtdProfissionaisAtivos <= 1) {
+      return Clock;
+    }
+    return aba.Icone;
+  }
+  // Só escolhe entre ícones já existentes (Clock ou aba.Icone), nunca cria
+  // componente novo — falso positivo do react-hooks/static-components (o
+  // mesmo padrão dentro do .map() do drawer, logo abaixo, não é sinalizado).
+  const IconeAbaAtiva = iconeAba(abaAtiva);
+
   // Navegação do calendário do modal "Alterar data": não deixa recuar antes
   // do mês atual — mesma regra de podeVoltarMes em FormularioAgendamento.
   const agoraMesAlterarData = new Date();
@@ -1470,8 +1508,9 @@ export default function AdminPage() {
         {/* Título da seção ativa (a barra de abas virou drawer). O ícone espelha
             o da aba correspondente no drawer. */}
         <div className="mb-4 flex items-center gap-2 text-heading">
-          <abaAtiva.Icone className="h-5 w-5 shrink-0 text-body" />
-          <h2 className="text-base font-semibold">{abaAtiva.rotulo}</h2>
+          {/* eslint-disable-next-line react-hooks/static-components -- IconeAbaAtiva só escolhe entre ícones já existentes, nunca cria um novo */}
+          <IconeAbaAtiva className="h-5 w-5 shrink-0 text-body" />
+          <h2 className="text-base font-semibold">{rotuloAba(abaAtiva)}</h2>
         </div>
 
         {carregando && (
@@ -2224,7 +2263,11 @@ export default function AdminPage() {
             grade de horários (tabela `horarios_trabalho`), particionado pelo
             estabelecimento resolvido. "Desativar" é soft delete (ativo=false). */}
         {!carregando && !erro && viewPai === "profissionais" && (
-          <GerenciarProfissionais estabelecimento={estabelecimento} />
+          <GerenciarProfissionais
+            estabelecimento={estabelecimento}
+            qtdProfissionaisAtivos={qtdProfissionaisAtivos}
+            gatilhoNovoProfissional={gatilhoNovoProfissional}
+          />
         )}
 
         {/* Clientes: consulta somente-leitura da tabela `clientes`, com busca
@@ -2254,6 +2297,7 @@ export default function AdminPage() {
             }
             focarBlocoJanela={focarJanelaAgendamento}
             onFocarBlocoJanelaConsumido={() => setFocarJanelaAgendamento(false)}
+            onCadastrarProfissional={irParaCadastroProfissional}
           />
         )}
       </div>
@@ -2299,7 +2343,7 @@ export default function AdminPage() {
           <nav className="flex-1 overflow-y-auto p-2">
             {ABAS_PAI.map((aba) => {
               const ativa = viewPai === aba.id;
-              const Icone = aba.Icone;
+              const Icone = iconeAba(aba);
               return (
                 <button
                   key={aba.id}
@@ -2319,7 +2363,7 @@ export default function AdminPage() {
                   }`}
                 >
                   <Icone className="h-5 w-5 shrink-0" />
-                  {aba.rotulo}
+                  {rotuloAba(aba)}
                 </button>
               );
             })}

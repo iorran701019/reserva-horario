@@ -76,6 +76,11 @@ export default function ConfiguracoesSalao({
   // onFocarBlocoJanelaConsumido, pra não reabrir sozinho numa visita normal.
   focarBlocoJanela = false,
   onFocarBlocoJanelaConsumido = () => {},
+  // Chamado ao clicar "Cadastrar novo profissional" (bloco Equipe abaixo) —
+  // quem decide o que fazer é o /admin (troca pra aba Profissionais + abre o
+  // wizard). Opcional (no-op por padrão) só pra não quebrar se algum outro
+  // consumidor montar ConfiguracoesSalao sem passar isso.
+  onCadastrarProfissional = () => {},
 }) {
   // Valor do toggle. undefined = ainda carregando o estado atual do banco.
   const [escolhaProfissional, setEscolhaProfissional] = useState(undefined);
@@ -1783,6 +1788,24 @@ export default function ConfiguracoesSalao({
       <h2 className="pt-4 text-lg font-semibold text-heading">
         Configurações
       </h2>
+
+      {/* Bloco: Equipe — atalho pra cadastrar profissional. O wizard de
+          criação mora em GerenciarProfissionais (aba Profissionais); este
+          botão só troca de aba e dispara ele remotamente (ver
+          onCadastrarProfissional / gatilhoNovoProfissional em page.js). */}
+      <div className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+        <p className="text-sm font-medium text-heading">Equipe</p>
+        <p className="mt-1 text-xs text-muted">
+          Adicione um novo profissional à equipe.
+        </p>
+        <button
+          type="button"
+          onClick={onCadastrarProfissional}
+          className="mt-3 inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+        >
+          Cadastrar novo profissional
+        </button>
+      </div>
 
       {/* Bloco: Google Calendar */}
       <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
