@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
 
 // Vincula um cliente real a um agendamento importado do Google Calendar sem
 // telefone (ver POST em app/api/google-calendar/importar/route.js e o botão
@@ -56,6 +57,10 @@ export default function ModalVincularCliente({
   const [buscando, setBuscando] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
+  // Erro de FORMATO (validarWhatsapp) do campo WhatsApp, em tempo real
+  // (onBlur) — só se aplica quando o campo está editável (sem
+  // clienteSelecionado); mesmo padrão de ModalAlterarWhatsapp.js.
+  const [erroFormatoTelefone, setErroFormatoTelefone] = useState("");
 
   const [servicos, setServicos] = useState([]);
   const [servicoId, setServicoId] = useState("");
@@ -73,6 +78,7 @@ export default function ModalVincularCliente({
     setClienteSelecionado(null);
     setResultados([]);
     setErro("");
+    setErroFormatoTelefone("");
     setServicoId("");
   }, [agendamento, ordemTitulo]);
 
@@ -166,11 +172,13 @@ export default function ModalVincularCliente({
     setTelefone(cliente.whatsapp ?? "");
     setClienteSelecionado(cliente);
     setResultados([]);
+    setErroFormatoTelefone("");
   }
 
   function trocarCliente() {
     setClienteSelecionado(null);
     setTelefone("");
+    setErroFormatoTelefone("");
   }
 
   async function confirmar() {
@@ -181,12 +189,26 @@ export default function ModalVincularCliente({
       return;
     }
 
+    // Só valida formato quando o campo está editável — telefone vindo de
+    // clienteSelecionado já foi validado no cadastro original da cliente.
+    if (!clienteSelecionado) {
+      const validacaoTelefone = validarWhatsapp(telefoneLimpo);
+      if (!validacaoTelefone.valido) {
+        setErroFormatoTelefone(validacaoTelefone.erro);
+        return;
+      }
+    }
+
     setSalvando(true);
     setErro("");
 
+    const telefoneParaGravar = clienteSelecionado
+      ? telefoneLimpo
+      : normalizarWhatsapp(telefoneLimpo);
+
     // Serviço aqui é só categorização (fidelidade/relatório) — nunca mexe em
     // duracao_min, que continua sendo a do evento real importado do Calendar.
-    const patch = { nome_cliente: nomeLimpo, telefone: telefoneLimpo };
+    const patch = { nome_cliente: nomeLimpo, telefone: telefoneParaGravar };
     if (servicoId) patch.servico_id = servicoId;
     // Antes de sobrescrever nome_cliente com o nome real, preserva o texto
     // cru do Calendar em observacao (se ainda vazia) — única referência do
@@ -298,7 +320,15 @@ export default function ModalVincularCliente({
             type="tel"
             inputMode="tel"
             value={telefone}
-            onChange={(e) => setTelefone(e.target.value)}
+            onChange={(e) => {
+              setTelefone(e.target.value);
+              setErroFormatoTelefone("");
+            }}
+            onBlur={() => {
+              if (clienteSelecionado || !telefone.trim()) return;
+              const validacao = validarWhatsapp(telefone);
+              setErroFormatoTelefone(validacao.valido ? "" : validacao.erro);
+            }}
             readOnly={Boolean(clienteSelecionado)}
             placeholder="(24) 99999-9999"
             className={[
@@ -306,6 +336,9 @@ export default function ModalVincularCliente({
               clienteSelecionado ? "bg-surface" : "",
             ].join(" ")}
           />
+          {erroFormatoTelefone && (
+            <p className="mt-1 text-xs text-red-600">{erroFormatoTelefone}</p>
+          )}
         </div>
 
         <div className="mt-4">

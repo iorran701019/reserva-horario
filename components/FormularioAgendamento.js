@@ -15,6 +15,7 @@ import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendament
 import { useVoltarFisico } from "@/lib/voltarFisico";
 import { dentroDaJanelaAgendamento } from "@/lib/janelaAgendamento";
 import { linkWhatsApp, MENSAGEM_CONFIRMACAO } from "@/lib/whatsapp";
+import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
 // "pendente"/"aguardando_sinal") e a aba Agendar do /admin (cria
@@ -681,6 +682,12 @@ export default function FormularioAgendamento({
 
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
+  // Erro de FORMATO (validarWhatsapp) do campo WhatsApp livre da etapa
+  // "dados", em tempo real (onBlur) — mesmo padrão de ModalAlterarWhatsapp.js
+  // e ModalVincularCliente.js. Só se aplica quando o campo é editável (sem
+  // clienteInicial); com clienteInicial o valor já veio validado no cadastro
+  // e nem existe input pra este erro aparecer embaixo.
+  const [erroFormatoTelefone, setErroFormatoTelefone] = useState("");
 
   // Modo livre: só o /admin (status truthy) — a dona pode escolher qualquer
   // dia/horário, mesmo os que as regras de negócio normalmente bloqueiam
@@ -1329,6 +1336,15 @@ export default function FormularioAgendamento({
   function handleChange(e) {
     const { name, value } = e.target;
     setForm((anterior) => ({ ...anterior, [name]: value }));
+    if (name === "telefone") setErroFormatoTelefone("");
+  }
+
+  // onBlur do campo WhatsApp livre da etapa "dados" (ver JSX) — mesmo padrão
+  // de ModalAlterarWhatsapp.js/ModalVincularCliente.js.
+  function handleBlurTelefone() {
+    if (!form.telefone.trim()) return;
+    const validacao = validarWhatsapp(form.telefone);
+    setErroFormatoTelefone(validacao.valido ? "" : validacao.erro);
   }
 
   // Toque num serviço com alerta_mensagem: NÃO seleciona ainda — abre o modal
@@ -1696,7 +1712,7 @@ export default function FormularioAgendamento({
 
     const payload = {
       nome_cliente: form.nome,
-      telefone: form.telefone,
+      telefone: normalizarWhatsapp(form.telefone),
       data: form.data,
       horario: slot,
       servico_id: servicoSelecionado.id,
@@ -1765,8 +1781,20 @@ export default function FormularioAgendamento({
       return false;
     }
 
-    // Validação leve: pelo menos 10 dígitos (DDD + número) após limpar a máscara.
-    if (form.telefone.replace(/\D/g, "").length < 10) {
+    // Sem clienteInicial (único caminho onde o campo é de fato editável, ver
+    // JSX da etapa "dados"): validação estrita de formato (DDD + 9 dígitos),
+    // a mesma de lib/whatsappValidacao.js. Com clienteInicial, o valor já
+    // veio validado no cadastro original — mantém só a checagem leve de
+    // sempre, pra não travar os dois fluxos que hoje dependem dele
+    // pré-preenchido (ver comentário de clienteInicial acima).
+    if (!clienteInicial) {
+      const validacaoTelefone = validarWhatsapp(form.telefone);
+      if (!validacaoTelefone.valido) {
+        setErroFormatoTelefone(validacaoTelefone.erro);
+        setErro("Informe um WhatsApp válido com DDD.");
+        return false;
+      }
+    } else if (form.telefone.replace(/\D/g, "").length < 10) {
       setErro("Informe um WhatsApp válido com DDD.");
       return false;
     }
@@ -1943,7 +1971,7 @@ export default function FormularioAgendamento({
 
     const payload = {
       nome_cliente: form.nome,
-      telefone: form.telefone,
+      telefone: normalizarWhatsapp(form.telefone),
       data: form.data,
       horario: horarioSelecionado,
       servico_id: servicoSelecionado.id,
@@ -2518,10 +2546,14 @@ export default function FormularioAgendamento({
                     inputMode="tel"
                     value={form.telefone}
                     onChange={handleChange}
+                    onBlur={handleBlurTelefone}
                     required
                     placeholder="(24) 99999-9999"
                     className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
                   />
+                  {erroFormatoTelefone && (
+                    <p className="mt-1 text-xs text-red-600">{erroFormatoTelefone}</p>
+                  )}
                 </div>
               </>
             )}
