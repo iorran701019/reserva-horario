@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import { buscarPerfil } from "@/lib/perfil";
@@ -352,6 +353,11 @@ export default function AdminPage() {
   // Autenticado, mas sem linha em perfis (conta órfã): não há salão a resolver.
   // Troca todo o conteúdo pela tela "Conta sem salão vinculado".
   const [semPerfil, setSemPerfil] = useState(false);
+
+  // Papel do perfil logado (ver efeito de resolução de estabelecimento
+  // abaixo) — hoje só usado pra decidir se o link "Painel global" aparece no
+  // drawer (ver seção do rodapé). null = ainda não resolvido ou sem perfil.
+  const [papelUsuario, setPapelUsuario] = useState(null);
 
   const [agendamentos, setAgendamentos] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -912,6 +918,7 @@ export default function AdminPage() {
       }
 
       setSemPerfil(false);
+      setPapelUsuario(perfil?.papel ?? null);
 
       if (perfil.papel === "dono") {
         setEstabelecimento(perfil.estabelecimento ?? null);
@@ -2371,6 +2378,20 @@ export default function AdminPage() {
 
           {/* Item fixo, visível em qualquer aba (ver componente). */}
           <AtivarNotificacoes estabelecimento={estabelecimento} />
+
+          {/* Link fixo pro /painel-global, fora do sistema de abas (ver
+              ABAS_PAI) — só aparece pra quem tem papel 'global' no perfil. */}
+          {papelUsuario === "global" && (
+            <div className="border-t border-border p-2">
+              <Link
+                href="/painel-global"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-body hover:bg-surface"
+              >
+                <Settings className="h-4 w-4" />
+                Painel global
+              </Link>
+            </div>
+          )}
 
           {/* "Sair" mora no drawer (saiu do header). */}
           <div className="border-t border-border p-2">
