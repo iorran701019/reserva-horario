@@ -372,6 +372,30 @@ export default function GerenciarServicos({ estabelecimento }) {
     }));
   }
 
+  // Toggle "Este item é uma manutenção" no fim do form de EDIÇÃO (não existe
+  // na criação): converte um serviço comum <-> manutenção in-place. Ao
+  // desmarcar, limpa os campos exclusivos de manutenção (servico_origem_id,
+  // faixa de prazo) e zera a categoria pra obrigar a dona a escolher de novo
+  // — nunca reaproveita a categoria herdada do serviço-origem. Ao marcar, o
+  // resto do form (Categoria escondida, Serviço vinculado, faixa) já reage a
+  // form.ehManutencao sozinho; categoria_id/servico_origem_id finais são
+  // recalculados em validarForm/handleSalvar, como no "+ Criar manutenção".
+  function handleToggleManutencao(e) {
+    const checked = e.target.checked;
+    setForm((anterior) =>
+      checked
+        ? { ...anterior, ehManutencao: true }
+        : {
+            ...anterior,
+            ehManutencao: false,
+            servico_origem_id: "",
+            prazoInicioDias: "",
+            prazoFimDias: "",
+            categoria_id: "",
+          }
+    );
+  }
+
   function abrirNovo() {
     setForm({
       ...FORM_INICIAL,
@@ -1310,10 +1334,15 @@ export default function GerenciarServicos({ estabelecimento }) {
   function renderServicoItem(servico) {
     const grupo = grupoDaCategoria(servicos, servico);
     const indiceNoGrupo = grupo.findIndex((s) => s.id === servico.id);
+    // Manutenção recebe um fundo levemente mais escuro (bg-surface) que o
+    // serviço comum (bg-card) — mesmos tokens do resto da tela, só pra
+    // diferenciar visualmente os dois tipos de card sem parecer erro.
     return (
       <li
         key={servico.id}
-        className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border transition"
+        className={`rounded-2xl p-4 shadow-sm ring-1 ring-border transition ${
+          servico.eh_manutencao ? "bg-surface" : "bg-card"
+        }`}
       >
         <div className="flex items-start gap-3">
           <div className="flex shrink-0 flex-col pt-0.5">
@@ -1392,6 +1421,20 @@ export default function GerenciarServicos({ estabelecimento }) {
                 Perguntas {perguntasAberto[servico.id] ? "▲" : "▼"}
               </button>
             </div>
+
+            {servico.eh_manutencao ? (
+              nomeServicoOrigem(servicos, servico) && (
+                <p className="mt-2 text-xs text-body">
+                  Vinculado a: {nomeServicoOrigem(servicos, servico)}
+                </p>
+              )
+            ) : (
+              manutencoesVinculadas(servicos, servico).length > 0 && (
+                <p className="mt-2 text-xs text-body">
+                  Manutenção vinculada: {manutencoesVinculadas(servicos, servico).join(", ")}
+                </p>
+              )
+            )}
 
             {perguntasAberto[servico.id] && renderSecaoPerguntas(servico)}
           </div>
@@ -1831,9 +1874,12 @@ export default function GerenciarServicos({ estabelecimento }) {
               true) — ver checagem em validarForm. Lista os serviços
               "originais" ativos do estabelecimento — um mesmo serviço
               original pode ter várias manutenções vinculadas (a trava de
-              unicidade foi removida no banco). Sem opção vazia: se o valor
-              não bater com nenhum serviço (ex.: manutenção legada sem
-              vínculo), o select aparece sem seleção, forçando a dona a
+              unicidade foi removida no banco); exclui o próprio serviço em
+              edição (relevante desde o toggle de conversão, que permite
+              marcar eh_manutencao num serviço que ainda está na lista).
+              Sem opção vazia: se o valor não bater com nenhum serviço (ex.:
+              manutenção legada sem vínculo, ou acabou de virar manutenção
+              pelo toggle), o select aparece sem seleção, forçando a dona a
               escolher antes de salvar. */}
           {form.ehManutencao && (
             <div>
@@ -1851,7 +1897,12 @@ export default function GerenciarServicos({ estabelecimento }) {
                 className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
               >
                 {servicos
-                  .filter((s) => s.ativo && !s.eh_manutencao)
+                  .filter(
+                    (s) =>
+                      s.ativo &&
+                      !s.eh_manutencao &&
+                      (editando === "novo" || s.id !== editando.id)
+                  )
                   .map((s) => (
                     <option key={s.id} value={String(s.id)}>
                       {s.nome}
@@ -2020,6 +2071,27 @@ export default function GerenciarServicos({ estabelecimento }) {
                 selecionados={form.profissionais}
                 onToggle={alternarProfissional}
               />
+            </div>
+          )}
+
+          {/* Converter serviço comum <-> manutenção, só na EDIÇÃO (não existe
+              na criação — ver abrirCriarManutencao pro caminho de criação).
+              O resto do form já reage a form.ehManutencao (Categoria some,
+              Serviço vinculado + faixa aparecem); ao desmarcar,
+              handleToggleManutencao limpa os campos exclusivos de
+              manutenção e zera a categoria pra escolha manual. */}
+          {editando !== "novo" && (
+            <div>
+              <label className="flex items-center gap-2 text-sm text-body">
+                <input
+                  type="checkbox"
+                  name="ehManutencao"
+                  checked={form.ehManutencao}
+                  onChange={handleToggleManutencao}
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+                />
+                Este item é uma manutenção
+              </label>
             </div>
           )}
 
@@ -2531,6 +2603,22 @@ function ordenar(lista) {
 // agrupamento exibido no acordeão.
 function grupoDaCategoria(lista, servico) {
   return lista.filter((s) => s.categoria_id === servico.categoria_id);
+}
+
+// Nomes das manutenções ATIVAS vinculadas a este serviço original
+// (servico_origem_id apontando pra ele) — usado no card do serviço original
+// pra mostrar "Manutenção vinculada: ...". Pode haver mais de uma (faixas
+// diferentes de prazo).
+function manutencoesVinculadas(lista, servico) {
+  return lista.filter((s) => s.ativo && s.servico_origem_id === servico.id).map((s) => s.nome);
+}
+
+// Nome do serviço-origem desta manutenção (servico_origem_id) — usado no
+// card da manutenção pra mostrar "Vinculado a: ...". null se o serviço de
+// origem não existir mais na lista (ou estiver inativo).
+function nomeServicoOrigem(lista, servico) {
+  const origem = lista.find((s) => s.ativo && s.id === servico.servico_origem_id);
+  return origem ? origem.nome : null;
 }
 
 // Patch imutável do campo `ativo` de um serviço na lista.
