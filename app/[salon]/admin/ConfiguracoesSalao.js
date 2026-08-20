@@ -70,6 +70,11 @@ export default function ConfiguracoesSalao({
   // o banner/popup e o calendário da aba Agendar. Opcional (no-op por
   // padrão): nada além do /admin passa isso hoje.
   onJanelaAgendamentoFimAtualizada = () => {},
+  // Mesmo padrão acima, para as mensagens de WhatsApp editáveis (ver
+  // salvarMensagem abaixo): chamado com (coluna, valor) por coluna gravada
+  // com sucesso, pra AdminPage patchar sua própria cópia de `estabelecimento`
+  // sem refetch. Opcional (no-op por padrão).
+  onMensagemAtualizada = () => {},
   // true quando a navegação veio do banner "Agenda aberta até" (ver page.js) —
   // abre o bloco "Janela de agendamento" (accordion) já expandido e rola até
   // ele. Consumido uma vez (ver useEffect abaixo) via
@@ -1041,6 +1046,8 @@ export default function ConfiguracoesSalao({
       }));
       return;
     }
+
+    colunas.forEach((coluna) => onMensagemAtualizada(coluna, valores[coluna]));
 
     setStatusMensagens((s) => ({ ...s, [campo]: "salvo" }));
     setTimeout(() => {

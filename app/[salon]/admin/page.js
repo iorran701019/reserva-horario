@@ -2302,6 +2302,16 @@ export default function AdminPage() {
                 atual ? { ...atual, janela_agendamento_fim: novaData } : atual
               )
             }
+            // Mesmo patch que onJanelaAgendamentoFimAtualizada, mas para as
+            // mensagens de WhatsApp editáveis (ver MENSAGENS_WHATSAPP_CONFIG em
+            // lib/whatsapp.js): sem isto, handleCancelar/handleConfirmar etc.
+            // (que leem estabelecimento.msg_* deste state) continuariam usando
+            // o texto salvo no mount até um reload da página, mesmo já com o
+            // texto novo gravado no banco (ver salvarMensagem em
+            // ConfiguracoesSalao.js).
+            onMensagemAtualizada={(coluna, valor) =>
+              setEstabelecimento((atual) => (atual ? { ...atual, [coluna]: valor } : atual))
+            }
             focarBlocoJanela={focarJanelaAgendamento}
             onFocarBlocoJanelaConsumido={() => setFocarJanelaAgendamento(false)}
             onCadastrarProfissional={irParaCadastroProfissional}
