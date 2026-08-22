@@ -22,7 +22,7 @@ import {
   rotuloHistorico,
   ordenarHistoricoPorStatus,
 } from "@/lib/particao";
-import { useNavegacaoTrimestre } from "@/lib/useNavegacaoTrimestre";
+import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
 import { calcularVagasPorHorario, profissionaisLivresNoHorario } from "@/lib/disponibilidade";
 import { dentroDaJanelaAgendamento, diasRestantesJanela } from "@/lib/janelaAgendamento";
 import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
@@ -61,7 +61,7 @@ import FormularioAgendamento, { CalendarioDias } from "@/components/FormularioAg
 import IdentificacaoClienteAdmin from "@/components/IdentificacaoClienteAdmin";
 import AtivarNotificacoes from "@/components/AtivarNotificacoes";
 import ModalVincularCliente from "@/components/ModalVincularCliente";
-import NavegacaoTrimestre from "@/components/NavegacaoTrimestre";
+import NavegacaoMes from "@/components/NavegacaoMes";
 
 // URL do login do salão, carregando o destino pretendido em ?next= pra reentrar
 // no MESMO salão após autenticar. Com o slug agora no PATH, tanto o login quanto
@@ -1281,7 +1281,7 @@ export default function AdminPage() {
   // abre no trimestre corrente, "<"/">" só andam entre trimestres com dado
   // (considerando o filtro de categoria acima), mesmo componente/hook
   // reaproveitado na ficha do cliente (GerenciarClientes.js).
-  const navTrimestreHistorico = useNavegacaoTrimestre(historicoVisivel);
+  const navTrimestreHistorico = useNavegacaoMes(historicoVisivel);
 
   // Autenticado, mas sem perfil vinculado (conta órfã): não há salão a resolver.
   // Vem ANTES do guard de carregamento — nesse caso `estabelecimento` continua
@@ -1990,7 +1990,7 @@ export default function AdminPage() {
               </select>
             </div>
 
-            <NavegacaoTrimestre
+            <NavegacaoMes
               rotulo={navTrimestreHistorico.rotulo}
               temAnterior={navTrimestreHistorico.temAnterior}
               temProximo={navTrimestreHistorico.temProximo}
@@ -2000,13 +2000,13 @@ export default function AdminPage() {
               onVoltarAtual={navTrimestreHistorico.voltarParaAtual}
             />
 
-            {navTrimestreHistorico.itensDoTrimestre.length === 0 ? (
+            {navTrimestreHistorico.itensDoMes.length === 0 ? (
               <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
-                Nenhum agendamento no histórico neste trimestre.
+                Nenhum agendamento no histórico neste mês.
               </p>
             ) : (
               <ul className="space-y-3">
-                {navTrimestreHistorico.itensDoTrimestre.map((item) => {
+                {navTrimestreHistorico.itensDoMes.map((item) => {
                   const meta = HISTORICO_META[rotuloHistorico(item)];
                   return (
                     <li

@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import NavegacaoTrimestre from "@/components/NavegacaoTrimestre";
-import { useNavegacaoTrimestre } from "@/lib/useNavegacaoTrimestre";
+import NavegacaoMes from "@/components/NavegacaoMes";
+import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
 import {
   buscarClientes,
   buscarResumoCliente,
@@ -255,7 +255,7 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
   // hook da aba Histórico do admin geral, ver app/[salon]/admin/page.js).
   // Chamado incondicionalmente aqui (antes do `return` de editandoDados
   // abaixo) porque é hook — precisa rodar sempre na mesma ordem entre renders.
-  const navTrimestreHistorico = useNavegacaoTrimestre(
+  const navTrimestreHistorico = useNavegacaoMes(
     ordenarHistoricoPorStatus(historico ?? [])
   );
 
@@ -549,7 +549,7 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
                   </p>
                 ) : (
                   <>
-                    <NavegacaoTrimestre
+                    <NavegacaoMes
                       rotulo={navTrimestreHistorico.rotulo}
                       temAnterior={navTrimestreHistorico.temAnterior}
                       temProximo={navTrimestreHistorico.temProximo}
@@ -559,12 +559,12 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
                       onVoltarAtual={navTrimestreHistorico.voltarParaAtual}
                     />
 
-                    {navTrimestreHistorico.itensDoTrimestre.length === 0 ? (
+                    {navTrimestreHistorico.itensDoMes.length === 0 ? (
                       <p className="text-sm text-body">
-                        Nenhum atendimento no histórico neste trimestre.
+                        Nenhum atendimento no histórico neste mês.
                       </p>
                     ) : (
-                      navTrimestreHistorico.itensDoTrimestre.map((item) => {
+                      navTrimestreHistorico.itensDoMes.map((item) => {
                         const meta = HISTORICO_BADGE[rotuloHistorico(item)];
                         return (
                           <div
