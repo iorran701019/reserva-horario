@@ -31,14 +31,11 @@ const NOME_LOJA = process.env.NEXT_PUBLIC_NOME_LOJA || "Agendamento";
 // minúsculas. NÃO incluir slugs com layoutMarca 'pilha-completa' (ex.:
 // flavia) — esses usam só a cor sólida de tema.bgHeader atrás do logo, sem
 // foto/overlay.
-const SLUGS_COM_FOTO = new Set(["valeria", "junior"]);
+const SLUGS_COM_FOTO = new Set([]);
 
 // Caminho da foto de fundo (arquivo em /public).
 // Foto de fundo por slug. Slug fora do mapa usa a foto padrão.
-const FOTOS_POR_SLUG = {
-  valeria: "/images/hero-salao.jpg",
-  junior: "/images/hero-salao.jpg",
-};
+const FOTOS_POR_SLUG = {};
 const HERO_FOTO_PADRAO = "/images/hero-salao.jpg";
 
 // `nome` sobrescreve o nome exibido (estab.nome resolvido pelo slug do path). Sem ele,
