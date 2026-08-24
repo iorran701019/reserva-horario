@@ -15,6 +15,7 @@ import {
   MENSAGEM_CANCELAMENTO,
   MENSAGEM_CONFIRMACAO,
   MENSAGEM_FORA_DA_JANELA,
+  MENSAGEM_ALTERACAO_DATA,
 } from "@/lib/whatsapp";
 import {
   classificarAgendamento,
@@ -556,6 +557,12 @@ export default function AdminPage() {
   // com excluirAgendamentoId, pra essa mesma reserva não aparecer ocupando o
   // profissional no dia/horário ATUAL dela (ver lib/disponibilidade.js).
   const [agendamentoParaAlterarData, setAgendamentoParaAlterarData] = useState(null);
+  // Botão dividido, mesmo padrão de notificarAoCancelar: zona grande arma
+  // true (handleAlterarData abre o WhatsApp com MENSAGEM_ALTERACAO_DATA
+  // depois do UPDATE), zona pequena arma false (só grava, sem notificar). O
+  // próprio modal de escolher data cumpre o papel de "tem certeza" — sem
+  // popup extra como o de agendamentoParaConfirmar.
+  const [notificarAoAlterarData, setNotificarAoAlterarData] = useState(true);
   const [mesVisivelAlterarData, setMesVisivelAlterarData] = useState(() => new Date());
   const [dataAlterarData, setDataAlterarData] = useState("");
   const [horarioAlterarData, setHorarioAlterarData] = useState("");
@@ -791,6 +798,12 @@ export default function AdminPage() {
   // agendamentoParaAlterarData) — só limpa o horário escolhido e força um
   // refetch da grade (versaoAlterarData) pra já refletir quem ainda está
   // livre, mesmo padrão de "recarrega as vagas" do wizard público.
+  // Depois do UPDATE bem-sucedido, `notificarAoAlterarData` (zona grande vs.
+  // zona pequena do botão dividido, ver JSX) decide se abre o WhatsApp com
+  // MENSAGEM_ALTERACAO_DATA — mesmo padrão de `notificar` em
+  // executarConfirmacao/handleCancelar. A mensagem usa a NOVA data/horario
+  // (dataAlterarData/horarioAlterarData), não agendamentoParaAlterarData.data
+  // (que ainda é a data ANTIGA nesse ponto).
   async function handleAlterarData() {
     if (!agendamentoParaAlterarData || !dataAlterarData || !horarioAlterarData) return;
 
@@ -822,6 +835,17 @@ export default function AdminPage() {
       data: dataAlterarData,
       horario: horarioAlterarData,
     });
+
+    if (notificarAoAlterarData) {
+      abrirWhatsApp(
+        agendamentoParaAlterarData.telefone,
+        MENSAGEM_ALTERACAO_DATA(
+          { ...agendamentoParaAlterarData, data: dataAlterarData, horario: horarioAlterarData },
+          estabelecimento.msg_alteracao_data
+        )
+      );
+    }
+
     setAgendamentoParaAlterarData(null);
   }
 
@@ -1836,12 +1860,12 @@ export default function AdminPage() {
             {/* Fora da janela de agendamento: consulta adicional (data além
                 de estabelecimentos.janela_agendamento_fim, status <>
                 cancelado), derivada de `agendamentos` já carregado — NÃO
-                altera nenhum status. Reaproveita o mesmo card de
-                data/horário/serviço e o botão "Cancelar agendamento" (modal
-                já existente) do inbox acima; sem ação de confirmar/trocar,
-                que não fazem sentido aqui. "Alterar data" (modal próprio, ver
-                mais abaixo) e "Entrar em contato" (mesmo padrão abrirWhatsApp
-                do Histórico) são as duas alternativas ao cancelamento.
+                altera nenhum status. Reaproveita os mesmos botões
+                Confirmar/Cancelar (dividido, popup "confirmar/cancelar sem
+                notificar?") do inbox acima; sem "Trocar profissional", que
+                não faz sentido aqui. "Alterar data" (modal próprio, ver mais
+                abaixo) e "Entrar em contato" (mesmo padrão abrirWhatsApp do
+                Histórico) são as duas alternativas ao cancelamento.
                 Automaticamente reversível: se a dona aumentar a janela
                 depois, OU se "Alterar data" mover o item pra dentro da
                 janela, ele sai sozinho daqui — nenhuma lógica extra, é só o
@@ -1904,25 +1928,99 @@ export default function AdminPage() {
                       </div>
 
                       <div className="mt-4 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAgendamentoParaCancelar(item);
-                            setNotificarAoCancelar(true);
-                          }}
-                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-                        >
-                          <IconeWhatsApp />
-                          Cancelar agendamento
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setAgendamentoParaAlterarData(item)}
-                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading ring-1 ring-border transition hover:bg-surface"
-                        >
-                          <Calendar className="h-4 w-4" />
-                          Alterar data
-                        </button>
+                        {/* Confirmar, dividido no mesmo padrão do inbox
+                            normal (ver acima): a zona maior chama
+                            handleConfirmar direto (que já checa
+                            dentroDaJanelaAgendamento e abre o popup
+                            "Confirmar mesmo assim?" quando necessário — faz
+                            sentido aqui já que este card É o caso fora da
+                            janela); a menor abre o popup "Confirmar sem
+                            notificar?" já existente. */}
+                        <div className="flex items-stretch overflow-hidden rounded-lg bg-green-50 ring-1 ring-green-100">
+                          <button
+                            type="button"
+                            onClick={() => handleConfirmar(item)}
+                            className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100"
+                          >
+                            <IconeWhatsApp />
+                            Confirmar agendamento
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAgendamentoParaConfirmar(item)}
+                            aria-label="Confirmar sem notificar cliente"
+                            title="Confirmar sem notificar cliente"
+                            className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-green-100 text-green-700 transition hover:bg-green-100"
+                          >
+                            <Check className="h-4 w-4" aria-hidden="true" />
+                            <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
+                          </button>
+                        </div>
+
+                        {/* Cancelar, dividido no mesmo padrão do inbox
+                            normal (ver acima): reaproveita o mesmo modal de
+                            cancelamento, só variando notificarAoCancelar. */}
+                        <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAgendamentoParaCancelar(item);
+                              setNotificarAoCancelar(true);
+                            }}
+                            className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                          >
+                            <IconeWhatsApp />
+                            Cancelar agendamento
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAgendamentoParaCancelar(item);
+                              setNotificarAoCancelar(false);
+                            }}
+                            aria-label="Cancelar sem notificar cliente"
+                            title="Cancelar sem notificar cliente"
+                            className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-red-200 text-red-600 transition hover:bg-red-50"
+                          >
+                            <X className="h-4 w-4" aria-hidden="true" />
+                            <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
+                          </button>
+                        </div>
+                        {/* Botão dividido em duas zonas, mesmo padrão de
+                            Confirmar/Cancelar (ver acima): a maior mantém o
+                            comportamento de sempre (update + WhatsApp com
+                            MENSAGEM_ALTERACAO_DATA); a menor arma
+                            notificarAoAlterarData=false e faz o mesmo update
+                            sem notificar. O modal de escolher data (mais
+                            abaixo) é o mesmo pros dois — sem popup extra de
+                            confirmação, já que escolher a nova data e clicar
+                            em "Confirmar nova data" já é o gesto deliberado. */}
+                        <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-border">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAgendamentoParaAlterarData(item);
+                              setNotificarAoAlterarData(true);
+                            }}
+                            className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-heading transition hover:bg-surface"
+                          >
+                            <Calendar className="h-4 w-4" />
+                            Alterar data
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAgendamentoParaAlterarData(item);
+                              setNotificarAoAlterarData(false);
+                            }}
+                            aria-label="Alterar data sem notificar cliente"
+                            title="Alterar data sem notificar cliente"
+                            className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-border text-heading transition hover:bg-surface"
+                          >
+                            <Calendar className="h-4 w-4" aria-hidden="true" />
+                            <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
+                          </button>
+                        </div>
                         <button
                           type="button"
                           onClick={() =>
@@ -2614,7 +2712,9 @@ export default function AdminPage() {
 
             {/* Cancelar: FECHA este modal e abre o fluxo de cancelamento
                 existente (modal de confirmação → handleCancelar). Sem empilhar
-                dois modais. */}
+                dois modais. Dividido no mesmo padrão do inbox de Pendentes e
+                de Fora da janela (ver acima): reaproveita o mesmo modal de
+                cancelamento, só variando notificarAoCancelar. */}
             <div className="mt-4 flex flex-col gap-2">
               {/* Trocar profissional só com o toggle DESLIGADO e 2+
                   profissionais ativos. Fecha este modal e abre o de troca
@@ -2631,18 +2731,34 @@ export default function AdminPage() {
                   Trocar profissional
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  setIdSelecionado(null);
-                  setAgendamentoParaCancelar(selecionado);
-                  setNotificarAoCancelar(true);
-                }}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-              >
-                <IconeWhatsApp />
-                Cancelar agendamento
-              </button>
+              <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIdSelecionado(null);
+                    setAgendamentoParaCancelar(selecionado);
+                    setNotificarAoCancelar(true);
+                  }}
+                  className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                >
+                  <IconeWhatsApp />
+                  Cancelar agendamento
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIdSelecionado(null);
+                    setAgendamentoParaCancelar(selecionado);
+                    setNotificarAoCancelar(false);
+                  }}
+                  aria-label="Cancelar sem notificar cliente"
+                  title="Cancelar sem notificar cliente"
+                  className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-red-200 text-red-600 transition hover:bg-red-50"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                  <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={() => setIdSelecionado(null)}
@@ -2884,7 +3000,10 @@ export default function AdminPage() {
           calendário — a janela de agendamento já bloqueia dias fora dela
           automaticamente, via dentroDaJanelaAgendamento dentro do próprio
           CalendarioDias. A grade de horários é uma réplica inline da mesma
-          grade do wizard (sem extrair componente ainda, só esse um uso). */}
+          grade do wizard (sem extrair componente ainda, só esse um uso).
+          Mesmo modal serve as duas zonas do botão dividido (ver
+          notificarAoAlterarData) — sem popup extra de "tem certeza", já
+          escolher a data e clicar em "Confirmar nova data" é o gesto. */}
       {agendamentoParaAlterarData && (
         <div
           role="dialog"
