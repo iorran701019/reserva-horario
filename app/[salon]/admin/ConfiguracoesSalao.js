@@ -263,14 +263,14 @@ export default function ConfiguracoesSalao({
       : "";
   });
 
-  // As 8 mensagens de WhatsApp editáveis (ver MENSAGENS_WHATSAPP_CONFIG em
+  // As 9 mensagens de WhatsApp editáveis (ver MENSAGENS_WHATSAPP_CONFIG em
   // lib/whatsapp.js). `mensagens` guarda o texto VIGENTE de cada campo
   // (personalizado se houver, senão o padrão) — undefined = carregando.
   // Status/erro por campo, pra cada linha ter seu próprio feedback.
   const [mensagens, setMensagens] = useState(undefined);
   const [statusMensagens, setStatusMensagens] = useState({});
   const [erroMensagens, setErroMensagens] = useState({});
-  // Qual das 8 mensagens está expandida — só uma por vez, mesmo padrão do
+  // Qual das 9 mensagens está expandida — só uma por vez, mesmo padrão do
   // acordeão de blocos acima.
   const [mensagemExpandida, setMensagemExpandida] = useState(null);
 
@@ -282,7 +282,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data"
         )
         .eq("id", estabelecimento.id)
         .single();
