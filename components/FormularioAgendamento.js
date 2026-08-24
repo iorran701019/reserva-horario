@@ -220,17 +220,33 @@ async function validarAntecedenciaNoServidor({ estabelecimentoId, data, horario 
 // (ver pendenteRestaurarRef mais abaixo), que precisa recarregar as perguntas
 // do serviço restaurado sem reabrir o popup. RLS bloqueando a leitura pro
 // público equivale, aqui, a "sem perguntas" — o fluxo segue normalmente.
+// O embed de servico_pergunta_opcoes precisa do hint de FK explícito: desde
+// que opcao_gatilho_id (pergunta condicional) passou a referenciar
+// servico_pergunta_opcoes(id), existem DUAS relações entre as duas tabelas, e
+// o PostgREST rejeita o embed ambíguo (PGRST201) sem o hint — o que fazia essa
+// busca falhar (silenciosamente, como "sem perguntas") pra qualquer serviço.
 async function buscarPerguntasServico(servicoId) {
   const { data, error } = await supabase
     .from("servico_perguntas")
     .select(
-      "id, texto, tipo, ordem, servico_pergunta_opcoes(id, label, ajuste_preco_centavos, ordem)"
+      "id, texto, tipo, ordem, pergunta_pai_id, opcao_gatilho_id, servico_pergunta_opcoes!servico_pergunta_opcoes_pergunta_id_fkey(id, label, ajuste_preco_centavos, ajuste_duracao_min, aplicar_duracao_na_agenda, ordem)"
     )
     .eq("servico_id", servicoId)
     .order("ordem", { ascending: true })
     .order("ordem", { ascending: true, referencedTable: "servico_pergunta_opcoes" });
 
   return error ? [] : (data ?? []);
+}
+
+// Pergunta condicional (filha, ver GerenciarServicos): só deve aparecer e ser
+// exigida quando a mãe (pergunta_pai_id) já foi respondida com a opção
+// gatilho (opcao_gatilho_id) certa. pergunta_pai_id nulo = pergunta raiz,
+// sempre visível — comportamento idêntico ao de antes da pergunta condicional
+// existir. Função pura (recebe `respostas` em vez de fechar sobre o state)
+// pra ser reaproveitada em todos os pontos que percorrem perguntasServico.
+function perguntaDeveAparecer(pergunta, respostas) {
+  if (pergunta.pergunta_pai_id == null) return true;
+  return respostas[pergunta.pergunta_pai_id]?.opcaoId === pergunta.opcao_gatilho_id;
 }
 
 // Calendário mensal próprio para a etapa Data. O <input type="date"> nativo não
@@ -1155,6 +1171,12 @@ export default function FormularioAgendamento({
           // horário escolhido sumiria da grade.
           excluirAgendamentoId: reservaId,
           contexto: modoLivre ? "admin" : "publico",
+          // Duração efetiva (base + ajustes de duração das perguntas já
+          // respondidas, ver calcularAjusteDuracao): as respostas já estão
+          // fechadas neste ponto do fluxo (popup de perguntas roda antes da
+          // etapa "data"), então a grade de vagas reflete o tempo real que
+          // este agendamento vai ocupar.
+          duracaoMinOverride: duracaoEfetivaServico(),
         });
         if (!ativo) return;
         setVagas(mapa);
@@ -1176,7 +1198,18 @@ export default function FormularioAgendamento({
     return () => {
       ativo = false;
     };
-  }, [form.data, servicoSelecionado, estabelecimento.id, reservaId, modoLivre]);
+    // duracaoEfetivaServico não entra: depende de servicoSelecionado +
+    // perguntasServico + respostasPerguntas, já listados abaixo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    form.data,
+    servicoSelecionado,
+    estabelecimento.id,
+    reservaId,
+    modoLivre,
+    perguntasServico,
+    respostasPerguntas,
+  ]);
 
   // 1) Restaura o SERVIÇO só depois que a lista de serviços ATIVOS carrega —
   // um id salvo que não está mais nela (desativado/excluído nesse meio-tempo)
@@ -1445,10 +1478,13 @@ export default function FormularioAgendamento({
     setServicoSelecionado(null);
   }
 
-  // Popup de perguntas — "Continuar": só avança se TODAS as perguntas tiverem
-  // resposta (opção marcada, ou texto livre não-vazio).
+  // Popup de perguntas — "Continuar": só avança se TODAS as perguntas
+  // VISÍVEIS (ver perguntaDeveAparecer) tiverem resposta (opção marcada, ou
+  // texto livre não-vazio). Pergunta filha escondida (mãe ainda não
+  // respondida com a opção gatilho) nunca trava o avanço.
   function confirmarModalPerguntas() {
     for (const pergunta of perguntasServico) {
+      if (!perguntaDeveAparecer(pergunta, respostasPerguntas)) continue;
       const resposta = respostasPerguntas[pergunta.id];
       const respondida =
         pergunta.tipo === "texto_livre"
@@ -1466,11 +1502,16 @@ export default function FormularioAgendamento({
 
   // Soma os ajustes de preço (ajuste_preco_centavos) das opções escolhidas —
   // texto_livre nunca ajusta preço. Devolve o total e a lista de itens com
-  // ajuste != 0, pra exibição transparente na etapa "Dados" (ver JSX).
+  // ajuste != 0, pra exibição transparente na etapa "Dados" (ver JSX). Pula
+  // pergunta filha escondida (ver perguntaDeveAparecer) — se a cliente
+  // respondeu a filha e DEPOIS trocou a resposta da mãe (escondendo a
+  // filha de novo), essa resposta presa em respostasPerguntas não deve
+  // mais contar.
   function calcularAjustePerguntas() {
     let centavos = 0;
     const itens = [];
     for (const pergunta of perguntasServico) {
+      if (!perguntaDeveAparecer(pergunta, respostasPerguntas)) continue;
       const resposta = respostasPerguntas[pergunta.id];
       if (resposta?.opcaoId == null) continue;
       const opcao = (pergunta.servico_pergunta_opcoes ?? []).find(
@@ -1484,12 +1525,50 @@ export default function FormularioAgendamento({
     return { centavos, itens };
   }
 
+  // Soma os ajustes de duração (ajuste_duracao_min) das opções escolhidas —
+  // só entram as que têm aplicar_duracao_na_agenda=true (a dona pode desligar
+  // por opção sem perder o valor cadastrado, ver GerenciarServicos). Somada à
+  // duração base do serviço, forma a duração EFETIVA usada tanto pra calcular
+  // vagas (calcularVagasPorHorario) quanto pra gravar em agendamentos.duracao_min.
+  function calcularAjusteDuracao() {
+    let minutos = 0;
+    for (const pergunta of perguntasServico) {
+      if (!perguntaDeveAparecer(pergunta, respostasPerguntas)) continue;
+      const resposta = respostasPerguntas[pergunta.id];
+      if (resposta?.opcaoId == null) continue;
+      const opcao = (pergunta.servico_pergunta_opcoes ?? []).find(
+        (o) => o.id === resposta.opcaoId
+      );
+      if (opcao?.aplicar_duracao_na_agenda && opcao.ajuste_duracao_min) {
+        minutos += opcao.ajuste_duracao_min;
+      }
+    }
+    return minutos;
+  }
+
+  // Duração efetiva do serviço selecionado: base + calcularAjusteDuracao(),
+  // com piso de 5 min — um ajuste negativo grande o bastante pra zerar ou
+  // passar a duração base não deve virar um agendamento sem duração real (nem
+  // travar o fluxo por isso, só nunca gravar um valor sem sentido no banco).
+  // servicoSelecionado pode ainda não existir quando chamada (guarda-se antes,
+  // nos call sites).
+  function duracaoEfetivaServico() {
+    const DURACAO_MINIMA_MIN = 5;
+    return Math.max(
+      servicoSelecionado.duracao_min + calcularAjusteDuracao(),
+      DURACAO_MINIMA_MIN
+    );
+  }
+
   // Monta as linhas prontas pra inserir em agendamento_respostas (uma por
   // pergunta respondida) — null quando a pergunta ficou sem resposta (não
-  // deveria acontecer, confirmarModalPerguntas já valida antes de fechar).
+  // deveria acontecer, confirmarModalPerguntas já valida antes de fechar) ou
+  // quando é uma filha escondida (ver perguntaDeveAparecer) com uma resposta
+  // presa de antes da mãe mudar.
   function linhasRespostasPerguntas(agendamentoId) {
     return perguntasServico
       .map((pergunta) => {
+        if (!perguntaDeveAparecer(pergunta, respostasPerguntas)) return null;
         const resposta = respostasPerguntas[pergunta.id];
         if (!resposta) return null;
         if (pergunta.tipo === "texto_livre") {
@@ -1716,7 +1795,7 @@ export default function FormularioAgendamento({
       data: form.data,
       horario: slot,
       servico_id: servicoSelecionado.id,
-      duracao_min: servicoSelecionado.duracao_min,
+      duracao_min: duracaoEfetivaServico(),
       estabelecimento_id: estabelecimento.id,
       profissional_id: profissionalId,
       status: precisaSinal ? "aguardando_sinal" : "pendente",
@@ -1750,6 +1829,7 @@ export default function FormularioAgendamento({
             estabelecimentoId: estabelecimento.id,
             servicoId: servicoSelecionado.id,
             data: form.data,
+            duracaoMinOverride: duracaoEfetivaServico(),
           });
           setVagas(mapa);
         } catch {
@@ -1975,7 +2055,7 @@ export default function FormularioAgendamento({
       data: form.data,
       horario: horarioSelecionado,
       servico_id: servicoSelecionado.id,
-      duracao_min: servicoSelecionado.duracao_min,
+      duracao_min: duracaoEfetivaServico(),
       estabelecimento_id: estabelecimento.id,
       profissional_id: profissionalId,
       status,
@@ -2013,6 +2093,7 @@ export default function FormularioAgendamento({
             servicoId: servicoSelecionado.id,
             data: form.data,
             contexto: modoLivre ? "admin" : "publico",
+            duracaoMinOverride: duracaoEfetivaServico(),
           });
           setVagas(mapa);
         } catch {
@@ -2803,7 +2884,9 @@ export default function FormularioAgendamento({
             </h2>
 
             <div className="space-y-5">
-              {perguntasServico.map((pergunta) => (
+              {perguntasServico
+                .filter((pergunta) => perguntaDeveAparecer(pergunta, respostasPerguntas))
+                .map((pergunta) => (
                 <div key={pergunta.id}>
                   <p className="mb-2 text-sm font-medium text-heading">{pergunta.texto}</p>
 

@@ -81,18 +81,34 @@ function faixaManutencao(servico) {
 //   multipla_escolha – lista dinâmica de opções (label + ajuste de preço).
 //   texto_livre       – sem opções; a resposta é digitada pelo cliente depois.
 // `opcoes` no form fica em reais (mesmo padrão de `preco` no form de
-// serviço); só vira `ajuste_preco_centavos` na hora de gravar.
+// serviço); só vira `ajuste_preco_centavos` na hora de gravar. `minutos` é o
+// ajuste de duração (ajuste_duracao_min, inteiro, pode ser negativo) e
+// `aplicarNaAgenda` o `aplicar_duracao_na_agenda` — desligar preserva o valor
+// cadastrado sem afetar o cálculo de vagas (ver FormularioAgendamento,
+// calcularAjusteDuracao).
 function opcoesSimNaoIniciais() {
   return [
-    { id: null, label: "Sim", preco: centavosParaReais(0) },
-    { id: null, label: "Não", preco: centavosParaReais(0) },
+    { id: null, label: "Sim", preco: centavosParaReais(0), minutos: 0, aplicarNaAgenda: true },
+    { id: null, label: "Não", preco: centavosParaReais(0), minutos: 0, aplicarNaAgenda: true },
   ];
 }
 
+// `dependeDeOutra`/`perguntaPaiId`/`opcaoGatilhoId`: pergunta condicional
+// (filha) — ver GerenciarServicos mais abaixo (perguntasCandidatasAMae) e
+// perguntaDeveAparecer em components/FormularioAgendamento. Desmarcado (ou
+// sem seleção) grava pergunta_pai_id/opcao_gatilho_id null — pergunta raiz,
+// comportamento idêntico ao de antes dessa feature existir.
+// `mostrarAjusteNao`: só controla a UI do bloco "Sim ou não" (ver
+// renderFormPergunta) — a opção "Não" raramente precisa de ajuste de
+// preço/duração, então esconde esses campos por padrão atrás de um link.
 const FORM_PERGUNTA_INICIAL = {
   texto: "",
   tipo: "sim_nao",
   opcoes: opcoesSimNaoIniciais(),
+  dependeDeOutra: false,
+  perguntaPaiId: "",
+  opcaoGatilhoId: "",
+  mostrarAjusteNao: false,
 };
 
 function rotuloTipoPergunta(tipo) {
@@ -1037,7 +1053,7 @@ export default function GerenciarServicos({ estabelecimento }) {
 
     const { data: perguntas, error: erroPerguntas } = await supabase
       .from("servico_perguntas")
-      .select("id, texto, tipo, ordem")
+      .select("id, texto, tipo, ordem, pergunta_pai_id, opcao_gatilho_id")
       .eq("servico_id", servicoId)
       .order("ordem", { ascending: true });
 
@@ -1054,7 +1070,9 @@ export default function GerenciarServicos({ estabelecimento }) {
     if (idsPerguntas.length > 0) {
       const { data: opcoes, error: erroOpcoes } = await supabase
         .from("servico_pergunta_opcoes")
-        .select("id, pergunta_id, label, ajuste_preco_centavos, ordem")
+        .select(
+          "id, pergunta_id, label, ajuste_preco_centavos, ajuste_duracao_min, aplicar_duracao_na_agenda, ordem"
+        )
         .in("pergunta_id", idsPerguntas)
         .order("ordem", { ascending: true });
 
@@ -1089,6 +1107,14 @@ export default function GerenciarServicos({ estabelecimento }) {
   }
 
   function abrirEditarPergunta(servicoId, pergunta) {
+    const naoAtual = pergunta.opcoes.find((op) => op.label === "Não");
+    const mostrarAjusteNao = Boolean(
+      naoAtual &&
+        (naoAtual.ajuste_preco_centavos !== 0 ||
+          naoAtual.ajuste_duracao_min !== 0 ||
+          naoAtual.aplicar_duracao_na_agenda === false)
+    );
+
     setFormPergunta({
       texto: pergunta.texto,
       tipo: pergunta.tipo,
@@ -1099,7 +1125,13 @@ export default function GerenciarServicos({ estabelecimento }) {
               id: op.id,
               label: op.label,
               preco: centavosParaReais(op.ajuste_preco_centavos),
+              minutos: op.ajuste_duracao_min ?? 0,
+              aplicarNaAgenda: op.aplicar_duracao_na_agenda ?? true,
             })),
+      dependeDeOutra: pergunta.pergunta_pai_id != null,
+      perguntaPaiId: pergunta.pergunta_pai_id ?? "",
+      opcaoGatilhoId: pergunta.opcao_gatilho_id ?? "",
+      mostrarAjusteNao,
     });
     setErroFormPergunta("");
     setPerguntaEditando({ servicoId, id: pergunta.id });
@@ -1123,8 +1155,9 @@ export default function GerenciarServicos({ estabelecimento }) {
         tipo === "sim_nao"
           ? opcoesSimNaoIniciais()
           : tipo === "multipla_escolha"
-            ? [{ id: null, label: "", preco: centavosParaReais(0) }]
+            ? [{ id: null, label: "", preco: centavosParaReais(0), minutos: 0, aplicarNaAgenda: true }]
             : [],
+      mostrarAjusteNao: tipo === "sim_nao" ? false : atual.mostrarAjusteNao,
     }));
   }
 
@@ -1142,10 +1175,79 @@ export default function GerenciarServicos({ estabelecimento }) {
     }));
   }
 
+  function alterarMinutosOpcao(indice, valor) {
+    setFormPergunta((atual) => ({
+      ...atual,
+      opcoes: atual.opcoes.map((op, i) => (i === indice ? { ...op, minutos: valor } : op)),
+    }));
+  }
+
+  function alterarAplicarNaAgendaOpcao(indice, valor) {
+    setFormPergunta((atual) => ({
+      ...atual,
+      opcoes: atual.opcoes.map((op, i) =>
+        i === indice ? { ...op, aplicarNaAgenda: valor } : op
+      ),
+    }));
+  }
+
+  // Desmarcar "depende de outra" limpa a seleção — salvar nesse estado grava
+  // pergunta_pai_id/opcao_gatilho_id null (pergunta raiz).
+  function handleToggleDependeDeOutra(e) {
+    const checked = e.target.checked;
+    setFormPergunta((atual) => ({
+      ...atual,
+      dependeDeOutra: checked,
+      perguntaPaiId: checked ? atual.perguntaPaiId : "",
+      opcaoGatilhoId: checked ? atual.opcaoGatilhoId : "",
+    }));
+  }
+
+  // Trocar a pergunta mãe invalida a opção gatilho escolhida antes (era de
+  // outra pergunta) — força escolher de novo.
+  function handlePerguntaPaiChange(e) {
+    setFormPergunta((atual) => ({
+      ...atual,
+      perguntaPaiId: e.target.value,
+      opcaoGatilhoId: "",
+    }));
+  }
+
+  function handleOpcaoGatilhoChange(e) {
+    setFormPergunta((atual) => ({ ...atual, opcaoGatilhoId: e.target.value }));
+  }
+
+  // Candidatas a "pergunta mãe" de uma pergunta condicional, dentro do MESMO
+  // serviço: nunca a própria pergunta em edição, nunca uma pergunta que já é
+  // filha de outra (pergunta_pai_id != null — só um nível de profundidade é
+  // permitido, ver comentário de validarFormPergunta) e nunca texto_livre
+  // (sem opções, não há o que escolher como gatilho).
+  function perguntasCandidatasAMae(servicoId, perguntaEditandoId) {
+    const todas = perguntasPorServico[servicoId]?.perguntas ?? [];
+    return todas.filter(
+      (p) =>
+        p.id !== perguntaEditandoId &&
+        p.pergunta_pai_id == null &&
+        p.tipo !== "texto_livre"
+    );
+  }
+
+  // true se alguma OUTRA pergunta do serviço já usa `perguntaId` como mãe —
+  // nesse caso essa pergunta não pode também se tornar filha (criaria uma
+  // neta indireta: X -> perguntaId -> suas filhas atuais).
+  function perguntaTemFilhas(servicoId, perguntaId) {
+    if (perguntaId == null) return false;
+    const todas = perguntasPorServico[servicoId]?.perguntas ?? [];
+    return todas.some((p) => p.pergunta_pai_id === perguntaId);
+  }
+
   function adicionarOpcao() {
     setFormPergunta((atual) => ({
       ...atual,
-      opcoes: [...atual.opcoes, { id: null, label: "", preco: centavosParaReais(0) }],
+      opcoes: [
+        ...atual.opcoes,
+        { id: null, label: "", preco: centavosParaReais(0), minutos: 0, aplicarNaAgenda: true },
+      ],
     }));
   }
 
@@ -1158,13 +1260,29 @@ export default function GerenciarServicos({ estabelecimento }) {
 
   // Valida o form de pergunta e devolve o payload pronto pro banco, ou uma
   // string de erro. Múltipla escolha exige ao menos uma opção com label;
-  // sim/não sempre grava as duas opções fixas.
+  // sim/não sempre grava as duas opções fixas. pergunta_pai_id/
+  // opcao_gatilho_id são independentes do tipo (uma pergunta de qualquer
+  // tipo pode ser filha), então são resolvidos uma vez só, antes do branch
+  // por tipo, e anexados aos dois caminhos de retorno.
   function validarFormPergunta() {
     const texto = formPergunta.texto.trim();
     if (!texto) return { erro: "Informe o texto da pergunta." };
 
+    let perguntaPaiId = null;
+    let opcaoGatilhoId = null;
+    if (formPergunta.dependeDeOutra) {
+      if (!formPergunta.perguntaPaiId) {
+        return { erro: "Selecione de qual pergunta esta depende." };
+      }
+      if (!formPergunta.opcaoGatilhoId) {
+        return { erro: "Selecione qual opção da pergunta mãe ativa esta pergunta." };
+      }
+      perguntaPaiId = formPergunta.perguntaPaiId;
+      opcaoGatilhoId = formPergunta.opcaoGatilhoId;
+    }
+
     if (formPergunta.tipo === "texto_livre") {
-      return { texto, tipo: formPergunta.tipo, opcoesPayload: [] };
+      return { texto, tipo: formPergunta.tipo, opcoesPayload: [], perguntaPaiId, opcaoGatilhoId };
     }
 
     const opcoesComLabel =
@@ -1184,38 +1302,82 @@ export default function GerenciarServicos({ estabelecimento }) {
       if (Number.isNaN(centavos)) {
         return { erro: `Ajuste de preço inválido em "${op.label}".` };
       }
-      opcoesPayload.push({ id: op.id, label: op.label, ajuste_preco_centavos: centavos });
+      const minutos = op.minutos === "" ? 0 : Number(op.minutos);
+      if (!Number.isInteger(minutos)) {
+        return { erro: `Ajuste de duração inválido em "${op.label}".` };
+      }
+      opcoesPayload.push({
+        id: op.id,
+        label: op.label,
+        ajuste_preco_centavos: centavos,
+        ajuste_duracao_min: minutos,
+        aplicar_duracao_na_agenda: Boolean(op.aplicarNaAgenda),
+      });
     }
 
-    return { texto, tipo: formPergunta.tipo, opcoesPayload };
+    return { texto, tipo: formPergunta.tipo, opcoesPayload, perguntaPaiId, opcaoGatilhoId };
   }
 
-  // Regrava as opções da pergunta: apaga as do pergunta_id e insere as
-  // atuais ("substitui tudo" — mesma estratégia de salvarVinculos). Devolve
-  // as opções gravadas (com id gerado) pra atualizar o cache local sem
-  // refetch, e o erro do Supabase ou null.
+  // Regrava as opções da pergunta preservando id: opções do payload com id
+  // são UPDATE (não recriam a linha), opções sem id são INSERT, e só as que
+  // saíram do payload (removidas no form) são DELETE. Isso importa porque
+  // opcao_gatilho_id (em servico_perguntas, de uma pergunta filha) referencia
+  // o id de uma opção com ON DELETE SET NULL — recriar tudo a cada save
+  // quebrava esse vínculo silenciosamente. Devolve as opções gravadas (com
+  // id) pra atualizar o cache local sem refetch, e o erro do Supabase ou null.
   async function salvarOpcoesPergunta(perguntaId, opcoesPayload) {
-    const { error: erroDelete } = await supabase
+    const { data: existentes, error: erroExistentes } = await supabase
       .from("servico_pergunta_opcoes")
-      .delete()
+      .select("id")
       .eq("pergunta_id", perguntaId);
-    if (erroDelete) return { opcoes: [], error: erroDelete };
+    if (erroExistentes) return { opcoes: [], error: erroExistentes };
+
+    const idsNoPayload = new Set(
+      opcoesPayload.filter((op) => op.id != null).map((op) => op.id)
+    );
+    const idsParaRemover = (existentes ?? [])
+      .map((o) => o.id)
+      .filter((id) => !idsNoPayload.has(id));
+
+    if (idsParaRemover.length > 0) {
+      const { error: erroDelete } = await supabase
+        .from("servico_pergunta_opcoes")
+        .delete()
+        .in("id", idsParaRemover);
+      if (erroDelete) return { opcoes: [], error: erroDelete };
+    }
 
     if (opcoesPayload.length === 0) return { opcoes: [], error: null };
 
-    const linhas = opcoesPayload.map((op, indice) => ({
-      pergunta_id: perguntaId,
-      label: op.label,
-      ajuste_preco_centavos: op.ajuste_preco_centavos,
-      ordem: indice + 1,
-    }));
+    const colunas =
+      "id, pergunta_id, label, ajuste_preco_centavos, ajuste_duracao_min, aplicar_duracao_na_agenda, ordem";
 
-    const { data, error: erroInsert } = await supabase
-      .from("servico_pergunta_opcoes")
-      .insert(linhas)
-      .select("id, pergunta_id, label, ajuste_preco_centavos, ordem");
+    const resultados = await Promise.all(
+      opcoesPayload.map((op, indice) => {
+        const linha = {
+          pergunta_id: perguntaId,
+          label: op.label,
+          ajuste_preco_centavos: op.ajuste_preco_centavos,
+          ajuste_duracao_min: op.ajuste_duracao_min,
+          aplicar_duracao_na_agenda: op.aplicar_duracao_na_agenda,
+          ordem: indice + 1,
+        };
 
-    return { opcoes: data ?? [], error: erroInsert ?? null };
+        return op.id != null
+          ? supabase
+              .from("servico_pergunta_opcoes")
+              .update(linha)
+              .eq("id", op.id)
+              .select(colunas)
+              .single()
+          : supabase.from("servico_pergunta_opcoes").insert(linha).select(colunas).single();
+      })
+    );
+
+    const erro = resultados.find((r) => r.error)?.error ?? null;
+    if (erro) return { opcoes: [], error: erro };
+
+    return { opcoes: resultados.map((r) => r.data), error: null };
   }
 
   async function handleSalvarPergunta(e, servicoId) {
@@ -1226,7 +1388,7 @@ export default function GerenciarServicos({ estabelecimento }) {
       setErroFormPergunta(resultado.erro);
       return;
     }
-    const { texto, tipo, opcoesPayload } = resultado;
+    const { texto, tipo, opcoesPayload, perguntaPaiId, opcaoGatilhoId } = resultado;
 
     setSalvandoPergunta(true);
     setErroFormPergunta("");
@@ -1239,8 +1401,15 @@ export default function GerenciarServicos({ estabelecimento }) {
 
       const { data: novaPergunta, error: erroPergunta } = await supabase
         .from("servico_perguntas")
-        .insert({ servico_id: servicoId, texto, tipo, ordem })
-        .select("id, texto, tipo, ordem")
+        .insert({
+          servico_id: servicoId,
+          texto,
+          tipo,
+          ordem,
+          pergunta_pai_id: perguntaPaiId,
+          opcao_gatilho_id: opcaoGatilhoId,
+        })
+        .select("id, texto, tipo, ordem, pergunta_pai_id, opcao_gatilho_id")
         .single();
 
       if (erroPergunta) {
@@ -1275,7 +1444,12 @@ export default function GerenciarServicos({ estabelecimento }) {
 
     const { error: erroPergunta } = await supabase
       .from("servico_perguntas")
-      .update({ texto, tipo })
+      .update({
+        texto,
+        tipo,
+        pergunta_pai_id: perguntaPaiId,
+        opcao_gatilho_id: opcaoGatilhoId,
+      })
       .eq("id", editandoId);
 
     if (erroPergunta) {
@@ -1295,7 +1469,16 @@ export default function GerenciarServicos({ estabelecimento }) {
       ...atual,
       [servicoId]: {
         perguntas: (atual[servicoId]?.perguntas ?? []).map((p) =>
-          p.id === editandoId ? { ...p, texto, tipo, opcoes } : p
+          p.id === editandoId
+            ? {
+                ...p,
+                texto,
+                tipo,
+                pergunta_pai_id: perguntaPaiId,
+                opcao_gatilho_id: opcaoGatilhoId,
+                opcoes,
+              }
+            : p
         ),
         carregando: false,
         erro: "",
@@ -1572,6 +1755,11 @@ export default function GerenciarServicos({ estabelecimento }) {
   // Form inline de criar/editar pergunta. Opções mudam de acordo com
   // `formPergunta.tipo` (ver handleTipoPerguntaChange).
   function renderFormPergunta(servico) {
+    const perguntaEditandoId = perguntaEditando?.id ?? null;
+    const candidatasAMae = perguntasCandidatasAMae(servico.id, perguntaEditandoId);
+    const jaEhMae = perguntaTemFilhas(servico.id, perguntaEditandoId);
+    const maeSelecionada = candidatasAMae.find((p) => p.id === formPergunta.perguntaPaiId);
+
     return (
       <form
         onSubmit={(e) => handleSalvarPergunta(e, servico.id)}
@@ -1603,23 +1791,137 @@ export default function GerenciarServicos({ estabelecimento }) {
           </select>
         </div>
 
+        {jaEhMae ? (
+          <p className="rounded-lg bg-surface px-3 py-2 text-xs text-body ring-1 ring-border">
+            Esta pergunta já é usada como gatilho de outra — não pode também
+            depender de outra pergunta.
+          </p>
+        ) : (
+          candidatasAMae.length > 0 && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm font-medium text-body">
+                <input
+                  type="checkbox"
+                  checked={formPergunta.dependeDeOutra}
+                  onChange={handleToggleDependeDeOutra}
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+                />
+                Essa pergunta depende de outra?
+              </label>
+
+              {formPergunta.dependeDeOutra && (
+                <div className="space-y-2 pl-6">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-body">
+                      Pergunta mãe
+                    </label>
+                    <select
+                      value={formPergunta.perguntaPaiId}
+                      onChange={handlePerguntaPaiChange}
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                    >
+                      <option value="">Selecione...</option>
+                      {candidatasAMae.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.texto}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {maeSelecionada && (
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-body">
+                        Opção que ativa esta pergunta
+                      </label>
+                      <select
+                        value={formPergunta.opcaoGatilhoId}
+                        onChange={handleOpcaoGatilhoChange}
+                        className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                      >
+                        <option value="">Selecione...</option>
+                        {maeSelecionada.opcoes.map((op) => (
+                          <option key={op.id} value={op.id}>
+                            {op.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        )}
+
         {formPergunta.tipo === "sim_nao" && (
           <div className="space-y-2">
-            <span className="block text-sm font-medium text-body">Ajuste de preço (R$)</span>
-            {formPergunta.opcoes.map((opcao, indice) => (
-              <div key={opcao.label} className="flex items-center gap-2">
-                <span className="w-12 shrink-0 text-sm text-heading">{opcao.label}</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  value={opcao.preco}
-                  onChange={(e) => alterarPrecoOpcao(indice, e.target.value)}
-                  placeholder="0,00"
-                  className="w-full rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                />
-              </div>
-            ))}
+            <span className="block text-sm font-medium text-body">Ajustes por resposta</span>
+            {formPergunta.opcoes.map((opcao, indice) => {
+              // "Não" raramente precisa de ajuste — esconde os campos atrás
+              // de um link por padrão (mostrarAjusteNao), sem perder acesso
+              // pra quem precisar. abrirEditarPergunta já abre expandido
+              // quando a pergunta editada já tinha algum ajuste salvo aqui.
+              const ehNao = opcao.label === "Não";
+              const ocultarAjuste = ehNao && !formPergunta.mostrarAjusteNao;
+
+              return (
+                <div
+                  key={opcao.label}
+                  className="space-y-1.5 rounded-lg bg-card p-2 ring-1 ring-border"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="w-12 shrink-0 text-sm text-heading">{opcao.label}</span>
+                    {ocultarAjuste ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormPergunta((atual) => ({ ...atual, mostrarAjusteNao: true }))
+                        }
+                        className="text-xs font-medium text-primary hover:underline"
+                      >
+                        + adicionar ajuste também pro Não
+                      </button>
+                    ) : (
+                      <>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          value={opcao.preco}
+                          onChange={(e) => alterarPrecoOpcao(indice, e.target.value)}
+                          placeholder="0,00"
+                          className="w-full rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                        />
+                        <span className="shrink-0 text-xs text-body">R$</span>
+                      </>
+                    )}
+                  </div>
+                  {!ocultarAjuste && (
+                    <div className="flex flex-wrap items-center gap-2 pl-14">
+                      <input
+                        type="number"
+                        step="1"
+                        value={opcao.minutos}
+                        onChange={(e) => alterarMinutosOpcao(indice, e.target.value)}
+                        placeholder="0"
+                        className="w-20 shrink-0 rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                      />
+                      <span className="shrink-0 text-xs text-body">min</span>
+                      <label className="flex shrink-0 items-center gap-1.5 text-xs text-body">
+                        <input
+                          type="checkbox"
+                          checked={opcao.aplicarNaAgenda}
+                          onChange={(e) => alterarAplicarNaAgendaOpcao(indice, e.target.checked)}
+                          className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+                        />
+                        Aplicar esse tempo na agenda
+                      </label>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -1627,31 +1929,53 @@ export default function GerenciarServicos({ estabelecimento }) {
           <div className="space-y-2">
             <span className="block text-sm font-medium text-body">Opções</span>
             {formPergunta.opcoes.map((opcao, indice) => (
-              <div key={indice} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={opcao.label}
-                  onChange={(e) => alterarLabelOpcao(indice, e.target.value)}
-                  placeholder="Opção"
-                  className="min-w-0 flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                />
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  value={opcao.preco}
-                  onChange={(e) => alterarPrecoOpcao(indice, e.target.value)}
-                  placeholder="0,00"
-                  className="w-24 shrink-0 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                />
-                <button
-                  type="button"
-                  onClick={() => removerOpcao(indice)}
-                  aria-label="Remover opção"
-                  className="shrink-0 rounded-lg bg-card px-2.5 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-                >
-                  ×
-                </button>
+              <div key={indice} className="space-y-1.5 rounded-lg bg-card p-2 ring-1 ring-border">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={opcao.label}
+                    onChange={(e) => alterarLabelOpcao(indice, e.target.value)}
+                    placeholder="Opção"
+                    className="min-w-0 flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  />
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step="0.01"
+                    value={opcao.preco}
+                    onChange={(e) => alterarPrecoOpcao(indice, e.target.value)}
+                    placeholder="0,00"
+                    className="w-24 shrink-0 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removerOpcao(indice)}
+                    aria-label="Remover opção"
+                    className="shrink-0 rounded-lg bg-card px-2.5 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="number"
+                    step="1"
+                    value={opcao.minutos}
+                    onChange={(e) => alterarMinutosOpcao(indice, e.target.value)}
+                    placeholder="0"
+                    className="w-20 shrink-0 rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  />
+                  <span className="shrink-0 text-xs text-body">min</span>
+                  <label className="flex shrink-0 items-center gap-1.5 text-xs text-body">
+                    <input
+                      type="checkbox"
+                      checked={opcao.aplicarNaAgenda}
+                      onChange={(e) => alterarAplicarNaAgendaOpcao(indice, e.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+                    />
+                    Aplicar esse tempo na agenda
+                  </label>
+                </div>
               </div>
             ))}
             <button
