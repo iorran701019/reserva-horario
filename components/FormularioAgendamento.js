@@ -756,6 +756,15 @@ export default function FormularioAgendamento({
   const [popupConfirmarSemNotificarAberto, setPopupConfirmarSemNotificarAberto] =
     useState(false);
 
+  // Fora da janela de agendamento (admin, modoLivre): o calendário só
+  // sinaliza visualmente (borda tracejada, ver `liberado` no calendário
+  // acima) — este popup vira o momento de decisão consciente antes do
+  // insert final (ver finalizarAgendamento/confirmarForaDaJanela).
+  // notificarForaDaJanela preserva o `notificar` da submissão original (zona
+  // grande ou "sem notificar") pra reaplicar depois que a dona confirmar.
+  const [mostrarPopupForaDaJanela, setMostrarPopupForaDaJanela] = useState(false);
+  const [notificarForaDaJanela, setNotificarForaDaJanela] = useState(true);
+
   async function copiarChavePix() {
     try {
       await navigator.clipboard.writeText(estabelecimento.sinal_chave_pix ?? "");
@@ -1952,6 +1961,14 @@ export default function FormularioAgendamento({
     await finalizarAgendamento(false);
   }
 
+  // Roda DEPOIS que a dona confirma "mesmo assim" no popup de fora da janela
+  // (ver finalizarAgendamento acima) — reinvoca com ignorarJanela:true pra
+  // não reabrir o mesmo popup, preservando o `notificar` original.
+  async function confirmarForaDaJanela() {
+    setMostrarPopupForaDaJanela(false);
+    await finalizarAgendamento(notificarForaDaJanela, { ignorarJanela: true });
+  }
+
   // Submit final ("Confirmar agendamento").
   //
   // /admin (status truthy): comportamento de sempre — faz o INSERT aqui, na
@@ -1963,7 +1980,7 @@ export default function FormularioAgendamento({
   // pagamento e liberando o status; qualquer outro caso (sem sinal, ou com
   // sinal mas caixa desmarcada) -> nada a gravar, só avança a UI, já que o
   // registro existe do jeito certo desde que a etapa foi alcançada.
-  async function finalizarAgendamento(notificar = true) {
+  async function finalizarAgendamento(notificar = true, { ignorarJanela = false } = {}) {
     if (!status) {
       setEnviando(true);
 
@@ -1990,6 +2007,18 @@ export default function FormularioAgendamento({
         horario: horarioSelecionado,
         profissional: escolherProfissional ? profissionalSelecionado : null,
       });
+      return;
+    }
+
+    // ADMIN (modoLivre, único caminho que chega aqui — `status` truthy):
+    // fora da janela de agendamento (estabelecimento.janela_agendamento_fim,
+    // ver dentroDaJanelaAgendamento) o calendário só sinaliza visualmente
+    // (borda tracejada, ver `liberado` acima) — aqui vira decisão consciente
+    // antes do insert. ignorarJanela=true só quando confirmarForaDaJanela
+    // reinvoca depois do "Confirmar mesmo assim?" (ver popup no JSX).
+    if (!ignorarJanela && !dentroDaJanelaAgendamento(form.data, estabelecimento)) {
+      setNotificarForaDaJanela(notificar);
+      setMostrarPopupForaDaJanela(true);
       return;
     }
 
@@ -3006,6 +3035,53 @@ export default function FormularioAgendamento({
               <button
                 type="button"
                 onClick={() => setPopupConfirmarSemNotificarAberto(false)}
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fora da janela de agendamento (só /admin, modoLivre — ver
+          finalizarAgendamento/confirmarForaDaJanela acima): mesmo padrão
+          Confirmar/Cancelar do popup "sem notificar" logo acima. Cancelar só
+          fecha o popup, sem gravar nada. */}
+      {mostrarPopupForaDaJanela && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-fora-da-janela"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setMostrarPopupForaDaJanela(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-fora-da-janela"
+              className="text-lg font-semibold text-heading"
+            >
+              Fora da janela de agendamento
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Esse agendamento está fora da janela de agendamento do seu
+              calendário. Deseja confirmar mesmo assim?
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarForaDaJanela}
+                className="flex-1 rounded-lg bg-green-600 px-4 py-2.5 font-medium text-white transition hover:bg-green-700"
+              >
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={() => setMostrarPopupForaDaJanela(false)}
                 className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Cancelar

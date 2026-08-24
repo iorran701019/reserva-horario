@@ -464,6 +464,14 @@ export default function AdminPage() {
   // continua executando handleConfirmar direto, sem popup.
   const [agendamentoParaConfirmar, setAgendamentoParaConfirmar] = useState(null);
 
+  // Agendamento fora da janela de agendamento (estabelecimento.
+  // janela_agendamento_fim) que handleConfirmar interceptou antes do UPDATE
+  // — ver dentroDaJanelaAgendamento. { agendamento, notificar } enquanto o
+  // popup "Confirmar mesmo assim?" está aberto; null = fechado. `notificar`
+  // preserva a escolha original (zona grande ou zona pequena "sem notificar")
+  // pra aplicar depois que a dona decidir no popup.
+  const [confirmacaoForaDaJanela, setConfirmacaoForaDaJanela] = useState(null);
+
   // Agendamento confirmado selecionado no Painel (controla o modal de detalhe/
   // ações). Guardamos o id; os dados vivos saem de `agendamentos` no render,
   // pra refletir na hora o patch do lembrete. null = modal fechado.
@@ -585,12 +593,27 @@ export default function AdminPage() {
     }
   }
 
-  // Botão A: grava o status 'confirmado' no banco e, se der certo, abre o
-  // WhatsApp com a mensagem de confirmação. Em caso de erro não abre o
-  // WhatsApp (não anuncia confirmação que não foi gravada). `notificar=false`
-  // (zona pequena do botão dividido) pula só o redirecionamento pro WhatsApp,
-  // sem duplicar a gravação do status.
+  // Botão A: gatekeeper. Fora da janela de agendamento (estabelecimento.
+  // janela_agendamento_fim, ver dentroDaJanelaAgendamento), abre o popup
+  // "Confirmar mesmo assim?" (ver confirmacaoForaDaJanela) e adia a gravação
+  // até a dona decidir — nunca confirma fora da janela sem essa checagem
+  // consciente. Dentro da janela, delega direto pra executarConfirmacao.
   async function handleConfirmar(agendamento, notificar = true) {
+    if (!dentroDaJanelaAgendamento(agendamento.data, estabelecimento)) {
+      setConfirmacaoForaDaJanela({ agendamento, notificar });
+      return;
+    }
+    await executarConfirmacao(agendamento, notificar);
+  }
+
+  // Grava o status 'confirmado' no banco e, se der certo, abre o WhatsApp com
+  // a mensagem de confirmação. Em caso de erro não abre o WhatsApp (não
+  // anuncia confirmação que não foi gravada). `notificar=false` (zona pequena
+  // do botão dividido) pula só o redirecionamento pro WhatsApp, sem duplicar
+  // a gravação do status. Chamado direto por handleConfirmar quando dentro da
+  // janela, ou pelo popup de confirmacaoForaDaJanela quando a dona confirma
+  // mesmo assim.
+  async function executarConfirmacao(agendamento, notificar) {
     const { error } = await supabase
       .from("agendamentos")
       .update({ status: "confirmado" })
@@ -1340,17 +1363,19 @@ export default function AdminPage() {
   // Seção "Fora da janela de agendamento" (aba Pendentes): DERIVADA, mesmo
   // padrão de `inbox`/`historico` — nenhum status novo, nenhuma query extra.
   // data além de estabelecimentos.janela_agendamento_fim (ver
-  // dentroDaJanelaAgendamento) e status <> cancelado, incluindo confirmados
-  // (não só pendentes) — a janela pode ter sido reduzida depois de o
-  // agendamento já estar confirmado. Mesmos guards de finalizado/telefone do
-  // inbox, pra não misturar reserva abandonada ou evento importado sem
-  // cliente. Ordenado por data+horário asc (mais próximo primeiro).
+  // dentroDaJanelaAgendamento), só pendente/aguardando_sinal — confirmado
+  // fora da janela já passou pelo popup "Confirmar mesmo assim?" (ver
+  // handleConfirmar/confirmacaoForaDaJanela) e continua normalmente no
+  // Painel, sem aviso; não faz sentido pedir ação de novo aqui. Mesmos guards
+  // de finalizado/telefone do inbox, pra não misturar reserva abandonada ou
+  // evento importado sem cliente. Ordenado por data+horário asc (mais
+  // próximo primeiro).
   const foraDaJanela = agendamentos
     .filter(
       (item) =>
         item.finalizado &&
         item.telefone &&
-        item.status !== "cancelado" &&
+        (item.status === "pendente" || item.status === "aguardando_sinal") &&
         !dentroDaJanelaAgendamento(item.data, estabelecimento)
     )
     .sort((a, b) => {
@@ -2721,6 +2746,58 @@ export default function AdminPage() {
               <button
                 type="button"
                 onClick={() => setAgendamentoParaConfirmar(null)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup "fora da janela": intercepta handleConfirmar quando o
+          agendamento cai além de estabelecimentos.janela_agendamento_fim
+          (ver dentroDaJanelaAgendamento) — mesmo padrão visual do modal de
+          confirmação acima. Cancelar só fecha o popup, sem gravar nada;
+          Confirmar chama executarConfirmacao com o `notificar` original. */}
+      {confirmacaoForaDaJanela && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-fora-da-janela"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setConfirmacaoForaDaJanela(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-fora-da-janela"
+              className="text-lg font-semibold text-heading"
+            >
+              Fora da janela de agendamento
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Esse agendamento está fora da janela de agendamento do seu
+              calendário. Deseja confirmar mesmo assim?
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={() => {
+                  const { agendamento, notificar } = confirmacaoForaDaJanela;
+                  setConfirmacaoForaDaJanela(null);
+                  executarConfirmacao(agendamento, notificar);
+                }}
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-green-700"
+              >
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmacaoForaDaJanela(null)}
                 className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Cancelar
