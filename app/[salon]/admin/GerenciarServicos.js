@@ -193,6 +193,10 @@ export default function GerenciarServicos({ estabelecimento }) {
   // mesmo servico_origem_id com prazos sobrepostos) — controla o popup de
   // aviso que bloqueia o salvamento até o usuário ajustar o prazo.
   const [conflitoManutencao, setConflitoManutencao] = useState(null);
+  // Confirmação de vínculo pendente antes de salvar uma manutenção (ver
+  // checagem no início de handleSalvar) — guarda o payload já validado e o
+  // nome do serviço vinculado, ou null se não há popup aberto.
+  const [manutencaoPendenteConfirmacao, setManutencaoPendenteConfirmacao] = useState(null);
   // Carregando os vínculos do serviço em edição (quais profissionais atendem).
   const [carregandoForm, setCarregandoForm] = useState(false);
 
@@ -398,18 +402,36 @@ export default function GerenciarServicos({ estabelecimento }) {
   // recalculados em validarForm/handleSalvar, como no "+ Criar manutenção".
   function handleToggleManutencao(e) {
     const checked = e.target.checked;
-    setForm((anterior) =>
-      checked
-        ? { ...anterior, ehManutencao: true }
-        : {
-            ...anterior,
-            ehManutencao: false,
-            servico_origem_id: "",
-            prazoInicioDias: "",
-            prazoFimDias: "",
-            categoria_id: "",
-          }
-    );
+
+    if (checked) {
+      const candidato = servicos.find(
+        (s) =>
+          s.ativo &&
+          !s.eh_manutencao &&
+          String(s.categoria_id ?? "") === form.categoria_id &&
+          (editando === "novo" || s.id !== editando.id)
+      );
+
+      setForm((anterior) => ({
+        ...anterior,
+        ehManutencao: true,
+        servico_origem_id: candidato ? String(candidato.id) : anterior.servico_origem_id,
+      }));
+    } else {
+      const servicoVinculado = servicos.find((s) => String(s.id) === form.servico_origem_id);
+      const categoriaRestaurada = servicoVinculado
+        ? String(servicoVinculado.categoria_id ?? "")
+        : "";
+
+      setForm((anterior) => ({
+        ...anterior,
+        ehManutencao: false,
+        servico_origem_id: "",
+        prazoInicioDias: "",
+        prazoFimDias: "",
+        categoria_id: categoriaRestaurada,
+      }));
+    }
   }
 
   function abrirNovo() {
@@ -678,6 +700,28 @@ export default function GerenciarServicos({ estabelecimento }) {
       }
     }
 
+    // Manutenção com um vínculo escolhido precisa de confirmação explícita
+    // antes de salvar (evita gravar o vínculo errado sem a dona perceber).
+    // O botão "Confirmar" do popup chama executarSalvamento diretamente, sem
+    // passar de novo por aqui — seguro porque o conflito de faixa acima já
+    // foi checado antes do popup abrir.
+    if (payload.eh_manutencao && payload.servico_origem_id != null) {
+      const servicoVinculado = servicos.find((s) => s.id === payload.servico_origem_id);
+      setManutencaoPendenteConfirmacao({
+        payload,
+        nome: servicoVinculado ? servicoVinculado.nome : "",
+      });
+      return;
+    }
+
+    await executarSalvamento(payload);
+  }
+
+  // Parte final do salvamento (grava no banco) — extraída de handleSalvar
+  // pra poder ser chamada tanto direto (quando não há necessidade de
+  // confirmação) quanto pelo botão "Confirmar" do popup de vínculo de
+  // manutenção, que pula a validação/checagem de conflito de handleSalvar.
+  async function executarSalvamento(payload) {
     setSalvando(true);
     setErroForm("");
 
@@ -2843,6 +2887,54 @@ export default function GerenciarServicos({ estabelecimento }) {
                 type="button"
                 onClick={() => setCategoriaParaExcluir(null)}
                 className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmação do vínculo de manutenção, disparada no "Salvar" (ver
+          checagem no início de handleSalvar) quando eh_manutencao tem um
+          servico_origem_id preenchido — evita gravar o vínculo errado sem a
+          dona perceber. "Confirmar" segue o salvamento com o payload já
+          validado (chama executarSalvamento direto); "Voltar" só fecha o
+          popup, sem salvar nada, pra dona trocar o serviço vinculado. */}
+      {manutencaoPendenteConfirmacao && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-confirmar-vinculo"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setManutencaoPendenteConfirmacao(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="titulo-confirmar-vinculo" className="text-lg font-semibold text-heading">
+              Confirmar vínculo da manutenção
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Esta manutenção será vinculada ao serviço &quot;
+              {manutencaoPendenteConfirmacao.nome}&quot;. Está correto?
+            </p>
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={async () => {
+                  await executarSalvamento(manutencaoPendenteConfirmacao.payload);
+                  setManutencaoPendenteConfirmacao(null);
+                }}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white"
+              >
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={() => setManutencaoPendenteConfirmacao(null)}
+                className="rounded-lg bg-card px-4 py-2 text-sm font-medium text-body ring-1 ring-border"
               >
                 Voltar
               </button>
