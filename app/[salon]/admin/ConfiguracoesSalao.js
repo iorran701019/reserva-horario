@@ -144,6 +144,17 @@ export default function ConfiguracoesSalao({
   const [erroValorCheio, setErroValorCheio] = useState("");
   const [statusValorCheio, setStatusValorCheio] = useState("");
 
+  // Serviço usado quando a cliente diz que a manutenção foi feita em outro
+  // salão (ver popup de manutenção no FormularioAgendamento) — sem
+  // eh_manutencao=true, então exige sinal normalmente. "" = "Nenhum"/null;
+  // undefined = ainda carregando.
+  const [servicoManutencaoExternaId, setServicoManutencaoExternaId] = useState(undefined);
+  const [erroManutencaoExterna, setErroManutencaoExterna] = useState("");
+  const [statusManutencaoExterna, setStatusManutencaoExterna] = useState("");
+  // Serviços ATIVOS do salão, pro dropdown acima — mesmo formato usado em
+  // GerenciarServicos.js.
+  const [servicosAtivos, setServicosAtivos] = useState([]);
+
   // Horas até uma reserva provisória (pendente/aguardando_sinal, criada
   // antecipadamente pelo wizard público — ver FormularioAgendamento) parar de
   // bloquear disponibilidade (ver lib/disponibilidade.js ->
@@ -282,7 +293,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -295,6 +306,7 @@ export default function ConfiguracoesSalao({
         setErroRegrasAgendamento(error.message);
         setErroCaducidade(error.message);
         setErroValorCheio(error.message);
+        setErroManutencaoExterna(error.message);
         setErroReservaExpira(error.message);
         setErroCancelamentoPrazo(error.message);
         setErroLinkLocalizacao(error.message);
@@ -325,6 +337,9 @@ export default function ConfiguracoesSalao({
 
       setErroValorCheio("");
       setValorCheioAposPrazo(Boolean(data?.manutencao_valor_cheio_apos_prazo));
+
+      setErroManutencaoExterna("");
+      setServicoManutencaoExternaId(data?.servico_manutencao_externa_id ?? "");
 
       setErroReservaExpira("");
       setReservaExpiraHoras(
@@ -427,6 +442,29 @@ export default function ConfiguracoesSalao({
     };
   }, [estabelecimento.id]);
 
+  // Serviços ATIVOS do salão, pro dropdown do serviço de manutenção externa
+  // (ver bloco "Manutenção" abaixo). Mesma tabela/filtro de GerenciarServicos.js.
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregarServicos() {
+      const { data, error } = await supabase
+        .from("servicos")
+        .select("id, nome")
+        .eq("estabelecimento_id", estabelecimento.id)
+        .eq("ativo", true)
+        .order("nome", { ascending: true });
+
+      if (!ativo) return;
+      if (!error) setServicosAtivos(data ?? []);
+    }
+
+    carregarServicos();
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento.id]);
+
   // Limpa o parâmetro `google_calendar_sincronizados` (lido acima, no
   // initializer de sucessoGoogleCalendar) da URL, pra não reexibir a
   // mensagem de sucesso num refresh da página.
@@ -469,6 +507,12 @@ export default function ConfiguracoesSalao({
     const t = setTimeout(() => setStatusValorCheio(""), 2500);
     return () => clearTimeout(t);
   }, [statusValorCheio]);
+
+  useEffect(() => {
+    if (statusManutencaoExterna !== "salvo") return;
+    const t = setTimeout(() => setStatusManutencaoExterna(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusManutencaoExterna]);
 
   useEffect(() => {
     if (statusReservaExpira !== "salvo") return;
@@ -636,6 +680,28 @@ export default function ConfiguracoesSalao({
     }
 
     setStatusValorCheio("salvo");
+  }
+
+  // Grava qual serviço é usado quando a cliente diz ter feito a manutenção
+  // em outro salão (ver confirmarManutencaoOutroSalao no FormularioAgendamento).
+  // "" grava null ("Nenhum" — dona ainda não configurou).
+  async function salvarServicoManutencaoExterna(novoValorStr) {
+    setStatusManutencaoExterna("salvando");
+    setErroManutencaoExterna("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({ servico_manutencao_externa_id: novoValorStr || null })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setStatusManutencaoExterna("");
+      setErroManutencaoExterna(`Não foi possível salvar: ${error.message}`);
+      return;
+    }
+
+    setServicoManutencaoExternaId(novoValorStr);
+    setStatusManutencaoExterna("salvo");
   }
 
   // Exige um inteiro > 0 (não faz sentido "nunca expira" aqui — a coluna já
@@ -1060,6 +1126,7 @@ export default function ConfiguracoesSalao({
   const carregandoRegrasAgendamento = avisoRegrasAgendamento === undefined;
   const carregandoCaducidade = caducidadeDias === undefined;
   const carregandoValorCheio = valorCheioAposPrazo === undefined;
+  const carregandoManutencaoExterna = servicoManutencaoExternaId === undefined;
   const carregandoReservaExpira = reservaExpiraHoras === undefined;
   const carregandoCancelamentoPrazo = cancelamentoPrazoHoras === undefined;
   const carregandoLinkLocalizacao = linkLocalizacao === undefined;
@@ -1440,6 +1507,43 @@ export default function ConfiguracoesSalao({
               )}
               {erroValorCheio && (
                 <p className="mt-2 text-xs text-red-600">{erroValorCheio}</p>
+              )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="manutencao-externa-servico"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Serviço de manutenção vinda de outro salão
+              </label>
+              <select
+                id="manutencao-externa-servico"
+                value={servicoManutencaoExternaId ?? ""}
+                onChange={(e) => salvarServicoManutencaoExterna(e.target.value)}
+                disabled={carregandoManutencaoExterna}
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="">Nenhum</option>
+                {servicosAtivos.map((servico) => (
+                  <option key={servico.id} value={servico.id}>
+                    {servico.nome}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-muted">
+                Usado quando a cliente diz que a manutenção foi feita em
+                outro salão.
+              </p>
+
+              {statusManutencaoExterna === "salvando" && (
+                <p className="mt-2 text-xs text-muted">Salvando…</p>
+              )}
+              {statusManutencaoExterna === "salvo" && !erroManutencaoExterna && (
+                <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+              )}
+              {erroManutencaoExterna && (
+                <p className="mt-2 text-xs text-red-600">{erroManutencaoExterna}</p>
               )}
             </div>
           </div>

@@ -559,6 +559,11 @@ export default function FormularioAgendamento({
   // no acordeão, aguardando confirmação de que já fez o serviço de origem
   // antes (ver selecionarServico). Intercepta ANTES do alerta_mensagem.
   const [manutencaoPendente, setManutencaoPendente] = useState(null);
+  // Mensagem de erro ao clicar "Sim, em outro salão" sem a dona ter
+  // configurado o serviço de manutenção externa (ver
+  // confirmarManutencaoOutroSalao) — some sozinha depois de alguns segundos
+  // (ver efeito abaixo).
+  const [erroManutencaoExterna, setErroManutencaoExterna] = useState("");
   // Preço a exibir/cobrar quando servicoSelecionado é uma manutenção — null
   // enquanto não se aplica (serviço normal) ou ainda calculando (ver efeito
   // abaixo, que chama calcularPrecoManutencao assim que serviço + telefone da
@@ -693,6 +698,13 @@ export default function FormularioAgendamento({
     }
     setDecisaoEtapaPendente(null);
   }, [decisaoEtapaPendente, carregandoProfissionais, escolherProfissional]);
+
+  // Some sozinha depois de alguns segundos (ver confirmarManutencaoOutroSalao).
+  useEffect(() => {
+    if (!erroManutencaoExterna) return;
+    const t = setTimeout(() => setErroManutencaoExterna(""), 4000);
+    return () => clearTimeout(t);
+  }, [erroManutencaoExterna]);
 
   // Mês exibido no calendário da etapa Data (sempre no dia 1 do mês).
   const [mesVisivel, setMesVisivel] = useState(() => {
@@ -1412,10 +1424,31 @@ export default function FormularioAgendamento({
     confirmarSelecaoServico(servico);
   }
 
-  // Popup de manutenção — "Sim, já fiz": segue o fluxo normal de manutenção.
+  // Popup de manutenção — "Sim, fiz aqui": segue o fluxo normal de
+  // manutenção, isenção de sinal continua valendo (ver precisaSinal).
   function confirmarManutencao() {
     confirmarSelecaoServico(manutencaoPendente);
     setManutencaoPendente(null);
+  }
+
+  // Popup de manutenção — "Sim, em outro salão": troca pelo serviço
+  // configurado em estabelecimento.servico_manutencao_externa_id (mesma lista
+  // `servicos` já carregada, que inclui todos os ativos) — eh_manutencao=false
+  // nesse serviço, então o sinal passa a ser exigido normalmente (ver
+  // precisaSinal). Se a dona ainda não configurou esse serviço (ou ele foi
+  // desativado), só fecha o popup e mostra um erro, sem selecionar nada.
+  function confirmarManutencaoOutroSalao() {
+    const servicoExterno = servicos.find(
+      (s) => s.id === estabelecimento.servico_manutencao_externa_id
+    );
+    setManutencaoPendente(null);
+    if (!servicoExterno) {
+      setErroManutencaoExterna(
+        "O salão ainda não configurou o serviço de manutenção externa."
+      );
+      return;
+    }
+    confirmarSelecaoServico(servicoExterno);
   }
 
   // Popup de manutenção — "Não, quero o serviço completo": troca pelo serviço
@@ -2295,6 +2328,12 @@ export default function FormularioAgendamento({
               Serviço
             </span>
 
+            {erroManutencaoExterna && (
+              <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                {erroManutencaoExterna}
+              </p>
+            )}
+
             {carregandoServicos && (
               <p className="text-sm text-body">Carregando serviços...</p>
             )}
@@ -2886,23 +2925,30 @@ export default function FormularioAgendamento({
               Confirmar manutenção
             </h2>
             <p className="mt-2 text-sm text-body">
-              Essa é a manutenção de um serviço que você já fez antes. Confere? 💅
+              Você já está com as unhas de alongamento ou gel aplicadas?
             </p>
 
-            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+            <div className="mt-6 flex flex-col gap-2">
               <button
                 type="button"
                 onClick={confirmarManutencao}
-                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+                className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
               >
-                Sim, já fiz
+                Sim, fiz aqui
+              </button>
+              <button
+                type="button"
+                onClick={confirmarManutencaoOutroSalao}
+                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Sim, em outro salão
               </button>
               <button
                 type="button"
                 onClick={recusarManutencao}
-                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
-                Não, quero o serviço completo
+                Não, está natural
               </button>
             </div>
           </div>
