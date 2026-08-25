@@ -1183,8 +1183,10 @@ export default function GerenciarServicos({ estabelecimento }) {
               aplicarNaAgenda: op.aplicar_duracao_na_agenda ?? true,
             })),
       dependeDeOutra: pergunta.pergunta_pai_id != null,
-      perguntaPaiId: pergunta.pergunta_pai_id ?? "",
-      opcaoGatilhoId: pergunta.opcao_gatilho_id ?? "",
+      // String nos dois, como categoria_id em abrirEdicao: o form guarda SEMPRE
+      // string (é o value do <select>) e só validarFormPergunta converte pro banco.
+      perguntaPaiId: pergunta.pergunta_pai_id != null ? String(pergunta.pergunta_pai_id) : "",
+      opcaoGatilhoId: pergunta.opcao_gatilho_id != null ? String(pergunta.opcao_gatilho_id) : "",
       mostrarAjusteNao,
     });
     setErroFormPergunta("");
@@ -1331,8 +1333,16 @@ export default function GerenciarServicos({ estabelecimento }) {
       if (!formPergunta.opcaoGatilhoId) {
         return { erro: "Selecione qual opção da pergunta mãe ativa esta pergunta." };
       }
-      perguntaPaiId = formPergunta.perguntaPaiId;
-      opcaoGatilhoId = formPergunta.opcaoGatilhoId;
+      // Os dois vêm do <select> como STRING (ver handlePerguntaPaiChange/
+      // handleOpcaoGatilhoChange) e vão pra colunas bigint, que voltam do
+      // banco como number — converte aqui, mesmo padrão de categoria_id/
+      // servico_origem_id acima. Sem isso a string crua vazava pro state
+      // local no update otimista de handleSalvarPergunta e quebrava o
+      // `p.pergunta_pai_id === perguntaId` de perguntaTemFilhas até o reload.
+      // Os guards acima já garantem valor não-vazio; com dependeDeOutra
+      // desmarcado os dois continuam null (pergunta raiz).
+      perguntaPaiId = Number(formPergunta.perguntaPaiId);
+      opcaoGatilhoId = Number(formPergunta.opcaoGatilhoId);
     }
 
     if (formPergunta.tipo === "texto_livre") {
@@ -1812,7 +1822,7 @@ export default function GerenciarServicos({ estabelecimento }) {
     const perguntaEditandoId = perguntaEditando?.id ?? null;
     const candidatasAMae = perguntasCandidatasAMae(servico.id, perguntaEditandoId);
     const jaEhMae = perguntaTemFilhas(servico.id, perguntaEditandoId);
-    const maeSelecionada = candidatasAMae.find((p) => p.id === formPergunta.perguntaPaiId);
+    const maeSelecionada = candidatasAMae.find((p) => String(p.id) === formPergunta.perguntaPaiId);
 
     return (
       <form
