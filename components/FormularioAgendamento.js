@@ -555,6 +555,10 @@ export default function FormularioAgendamento({
   // confirmação no modal (ver selecionarServico/confirmarAlerta/cancelarAlerta).
   // A seleção de fato só acontece se o modal for confirmado.
   const [alertaPendente, setAlertaPendente] = useState(null);
+  // Serviço de manutenção (eh_manutencao=true) que o cliente acabou de tocar
+  // no acordeão, aguardando confirmação de que já fez o serviço de origem
+  // antes (ver selecionarServico). Intercepta ANTES do alerta_mensagem.
+  const [manutencaoPendente, setManutencaoPendente] = useState(null);
   // Preço a exibir/cobrar quando servicoSelecionado é uma manutenção — null
   // enquanto não se aplica (serviço normal) ou ainda calculando (ver efeito
   // abaixo, que chama calcularPrecoManutencao assim que serviço + telefone da
@@ -724,7 +728,9 @@ export default function FormularioAgendamento({
   const precisaSinal =
     !status &&
     (estabelecimento.sinal_regra === "todos" ||
-      (estabelecimento.sinal_regra === "novos" && clienteEhNovo));
+      (estabelecimento.sinal_regra === "novos" &&
+        clienteEhNovo &&
+        !servicoSelecionado?.eh_manutencao));
   const [sinalDeclarado, setSinalDeclarado] = useState(false);
   const [chavePixCopiada, setChavePixCopiada] = useState(false);
 
@@ -790,7 +796,7 @@ export default function FormularioAgendamento({
         supabase
           .from("servicos")
           .select(
-            "id, nome, duracao_min, preco_centavos, categoria_id, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id"
+            "id, nome, duracao_min, preco_centavos, categoria_id, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, eh_manutencao"
           )
           .eq("estabelecimento_id", estabelecimento.id)
           .eq("ativo", true)
@@ -1389,15 +1395,44 @@ export default function FormularioAgendamento({
     setErroFormatoTelefone(validacao.valido ? "" : validacao.erro);
   }
 
-  // Toque num serviço com alerta_mensagem: NÃO seleciona ainda — abre o modal
-  // (ver JSX) e espera a confirmação. Sem alerta, segue direto pra seleção de
-  // fato (mesmo comportamento de sempre).
+  // Toque num serviço de manutenção (eh_manutencao=true): NÃO seleciona ainda
+  // — abre o popup (ver JSX) perguntando se a cliente já fez o serviço de
+  // origem antes, intercepta ANTES do alerta_mensagem. Sem isso, segue pra
+  // checagem de alerta_mensagem e, sem alerta, direto pra seleção de fato
+  // (mesmo comportamento de sempre).
   function selecionarServico(servico) {
+    if (servico.eh_manutencao) {
+      setManutencaoPendente(servico);
+      return;
+    }
     if (servico.alerta_mensagem) {
       setAlertaPendente(servico);
       return;
     }
     confirmarSelecaoServico(servico);
+  }
+
+  // Popup de manutenção — "Sim, já fiz": segue o fluxo normal de manutenção.
+  function confirmarManutencao() {
+    confirmarSelecaoServico(manutencaoPendente);
+    setManutencaoPendente(null);
+  }
+
+  // Popup de manutenção — "Não, quero o serviço completo": troca pelo serviço
+  // de origem (mesma lista já carregada pro acordeão). Se o serviço de
+  // origem não estiver mais nela (ex: foi desativado), só fecha o popup e
+  // deixa a cliente de volta no acordeão, sem selecionar nada.
+  function recusarManutencao() {
+    const servicoOrigem = servicos.find(
+      (s) => s.id === manutencaoPendente.servico_origem_id
+    );
+    setManutencaoPendente(null);
+    if (servicoOrigem) confirmarSelecaoServico(servicoOrigem);
+  }
+
+  // Popup de manutenção — clique no overlay: fecha sem selecionar nada.
+  function cancelarManutencao() {
+    setManutencaoPendente(null);
   }
 
   // Seleção de fato de um serviço: muda a duração/grade e a lista de
@@ -2826,6 +2861,53 @@ export default function FormularioAgendamento({
           </>
         )}
       </form>
+
+      {/* Popup de manutenção (eh_manutencao=true): confirma se a cliente já
+          fez o serviço de origem antes de seguir. Mesmo shell visual do
+          modal de alerta logo abaixo. "Sim" segue com a manutenção; "Não"
+          troca pelo serviço de origem (achado em `servicos`, mesma lista do
+          acordeão); clique no overlay fecha sem selecionar nada. */}
+      {manutencaoPendente && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-manutencao-pendente"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={cancelarManutencao}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-manutencao-pendente"
+              className="text-lg font-semibold text-heading"
+            >
+              Confirmar manutenção
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Essa é a manutenção de um serviço que você já fez antes. Confere? 💅
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarManutencao}
+                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+              >
+                Sim, já fiz
+              </button>
+              <button
+                type="button"
+                onClick={recusarManutencao}
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Não, quero o serviço completo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Alerta do serviço tocado (ver GerenciarServicos): trava o wizard
           antes de avançar pra profissional/data. Continuar confirma a
