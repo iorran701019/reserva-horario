@@ -1012,39 +1012,49 @@ export default function GerenciarServicos({ estabelecimento }) {
     setCategoriaEditandoId(null);
   }
 
-  // Move a categoria uma posição pra cima (-1) ou baixo (+1) trocando `ordem`
-  // com a vizinha. O grupo "Sem categoria" nunca entra aqui — não tem `ordem`
-  // própria, fica sempre fixo no fim da lista.
+  // Move a categoria uma posição pra cima (-1) ou baixo (+1) e recompacta a
+  // ordem de TODAS as categorias (1..N) a partir da nova sequência — em vez
+  // de só trocar o `ordem` de duas linhas soltas, evita furos/duplicatas se a
+  // sequência já estava inconsistente. O grupo "Sem categoria" nunca entra
+  // aqui — não tem `ordem` própria, fica sempre fixo no fim da lista.
   async function moverCategoria(categoria, direcao) {
     const ordenadas = ordenarCategorias(categorias);
     const i = ordenadas.findIndex((c) => c.id === categoria.id);
     const j = i + direcao;
     if (j < 0 || j >= ordenadas.length) return;
-    const vizinha = ordenadas[j];
+
+    const reordenadas = [...ordenadas];
+    [reordenadas[i], reordenadas[j]] = [reordenadas[j], reordenadas[i]];
+    const comNovaOrdem = reordenadas.map((c, indice) => ({ ...c, ordem: indice + 1 }));
+
+    const ordemOriginalPorId = new Map(ordenadas.map((c) => [c.id, c.ordem]));
+    const alteradas = comNovaOrdem.filter((c) => ordemOriginalPorId.get(c.id) !== c.ordem);
 
     setOcupadoCategoria(true);
     setErroAcaoCategoria("");
-    const { error: erro1 } = await supabase
-      .from("categorias_servico")
-      .update({ ordem: vizinha.ordem })
-      .eq("id", categoria.id);
-    const { error: erro2 } = await supabase
-      .from("categorias_servico")
-      .update({ ordem: categoria.ordem })
-      .eq("id", vizinha.id);
+
+    const resultados = await Promise.all(
+      alteradas.map((c) =>
+        supabase.from("categorias_servico").update({ ordem: c.ordem }).eq("id", c.id)
+      )
+    );
 
     setOcupadoCategoria(false);
-    if (erro1 || erro2) {
-      setErroAcaoCategoria((erro1 || erro2).message);
+
+    const erro = resultados.map((r) => r.error).find(Boolean);
+    if (erro) {
+      setErroAcaoCategoria(
+        `${erro.message} — recarregue a página para garantir consistência com o banco.`
+      );
       return;
     }
+
+    const novaOrdemPorId = new Map(comNovaOrdem.map((c) => [c.id, c.ordem]));
     setCategorias((atuais) =>
       ordenarCategorias(
-        atuais.map((c) => {
-          if (c.id === categoria.id) return { ...c, ordem: vizinha.ordem };
-          if (c.id === vizinha.id) return { ...c, ordem: categoria.ordem };
-          return c;
-        })
+        atuais.map((c) =>
+          novaOrdemPorId.has(c.id) ? { ...c, ordem: novaOrdemPorId.get(c.id) } : c
+        )
       )
     );
   }
