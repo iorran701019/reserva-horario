@@ -2,12 +2,17 @@
 
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { formatarPreco } from "@/components/FormularioAgendamento";
+import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 
-// Tela de confirmação de pagamento do sinal, reaproveitando o mesmo bloco
-// âmbar do FormularioAgendamento (etapa "dados"). Usada pelo PainelCliente
-// quando o cliente já tem uma reserva "aguardando_sinal" e volta depois pra
-// declarar o Pix — em vez de reabrir o wizard inteiro.
+// Tela de confirmação de pagamento do sinal. O bloco âmbar em si (valor,
+// chave Pix, upload do comprovante, checkbox) mora em BlocoConfirmacaoPix,
+// compartilhado com a etapa "dados" do FormularioAgendamento — aqui ficam só
+// os botões Confirmar/Voltar e o update de status.
+//
+// Usada quando o cliente já tem uma reserva "aguardando_sinal": pelo
+// PainelCliente (botão "Confirmar pagamento") e direto por app/[salon]/page.js
+// quando TUDO que ele tem ativo está aguardando sinal — nesse caso o painel é
+// pulado e ele cai aqui na hora.
 //
 // Props:
 //   agendamentoId       – id da linha em `agendamentos` a confirmar.
@@ -15,28 +20,19 @@ import { formatarPreco } from "@/components/FormularioAgendamento";
 //   nomeProfissionalContato – mesmo texto usado no bloco do wizard.
 //   onConfirmado        – chamado (sem args) após o update ter sucesso.
 //   onVoltar            – chamado (sem args) ao clicar em "Voltar".
+//   rotuloVoltar        – texto do botão de voltar; o destino muda conforme
+//                         quem montou a tela (painel x lista de agendamentos).
 export default function ConfirmacaoSinal({
   agendamentoId,
   estabelecimento,
   nomeProfissionalContato = "a equipe",
   onConfirmado,
   onVoltar,
+  rotuloVoltar = "Voltar",
 }) {
   const [sinalDeclarado, setSinalDeclarado] = useState(false);
-  const [chavePixCopiada, setChavePixCopiada] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
-
-  async function copiarChavePix() {
-    try {
-      await navigator.clipboard.writeText(estabelecimento.sinal_chave_pix ?? "");
-      setChavePixCopiada(true);
-      setTimeout(() => setChavePixCopiada(false), 2000);
-    } catch {
-      // Clipboard indisponível (permissão negada, contexto não seguro etc.):
-      // a chave já está visível na tela pra copiar manualmente.
-    }
-  }
 
   async function handleConfirmar() {
     setErro("");
@@ -59,42 +55,13 @@ export default function ConfirmacaoSinal({
 
   return (
     <div className="space-y-4">
-      <div className="space-y-3 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
-        <div>
-          <p className="text-base font-medium text-amber-800">
-            {`Este agendamento exige um sinal de ${formatarPreco(estabelecimento.sinal_valor_centavos)} via Pix para confirmar a reserva.`}
-          </p>
-          <p className="mt-1 text-base font-medium text-amber-800">
-            {`Aperte o botão verde "Falar com ${nomeProfissionalContato}" e envie o comprovante do Pix.`}
-          </p>
-          <p className="mt-1 text-base font-medium text-amber-800">
-            O profissional irá confirmar seu agendamento.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 rounded-lg bg-card px-3 py-2 ring-1 ring-border">
-          <span className="min-w-0 flex-1 truncate text-sm text-heading">
-            {estabelecimento.sinal_chave_pix}
-          </span>
-          <button
-            type="button"
-            onClick={copiarChavePix}
-            className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover"
-          >
-            {chavePixCopiada ? "Copiado!" : "Copiar chave"}
-          </button>
-        </div>
-
-        <label className="flex items-start gap-2 text-sm text-amber-900">
-          <input
-            type="checkbox"
-            checked={sinalDeclarado}
-            onChange={(e) => setSinalDeclarado(e.target.checked)}
-            className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-primary/30"
-          />
-          Já realizei o pagamento do sinal via Pix
-        </label>
-      </div>
+      <BlocoConfirmacaoPix
+        estabelecimento={estabelecimento}
+        agendamentoId={agendamentoId}
+        nomeProfissionalContato={nomeProfissionalContato}
+        sinalDeclarado={sinalDeclarado}
+        onSinalDeclaradoChange={setSinalDeclarado}
+      />
 
       <button
         type="button"
@@ -110,7 +77,7 @@ export default function ConfirmacaoSinal({
         onClick={onVoltar}
         className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
       >
-        Voltar
+        {rotuloVoltar}
       </button>
 
       {erro && (

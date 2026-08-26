@@ -9,17 +9,47 @@ import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import { buscarTema } from "@/lib/temas";
 import { precisaAnamnese } from "@/lib/anamnese";
 import { buscarAgendamentosAtivos } from "@/lib/agendamentosCliente";
+import { classificarAgendamento } from "@/lib/particao";
 import Hero from "@/components/Hero";
 import RodapePagina from "@/components/RodapePagina";
 import IdentificacaoCliente from "@/components/IdentificacaoCliente";
 import FormularioAnamnese from "@/components/FormularioAnamnese";
 import PainelCliente from "@/components/PainelCliente";
+import ConfirmacaoSinal from "@/components/ConfirmacaoSinal";
 import FormularioAgendamento, {
   formatarData,
 } from "@/components/FormularioAgendamento";
 import FotoPerfilCircular from "@/components/FotoPerfilCircular";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 import { useVoltarFisico } from "@/lib/voltarFisico";
+
+// Reserva que deve levar DIRETO ao ConfirmacaoSinal, pulando o PainelCliente
+// — a cliente que voltou pra pagar o sinal não deveria ter que achar o botão
+// "Confirmar pagamento" dentro do painel. Devolve null (= painel normal)
+// quando não há nenhum aguardando_sinal OU quando existe qualquer outro
+// agendamento ativo junto: aí o painel é a tela certa, porque tem mais coisa
+// pra ela ver além do sinal.
+//
+// Descarta o que classificarAgendamento já considera histórico (o status cru
+// não vira histórico sozinho quando o horário passa — mesma regra do
+// PainelCliente): sem isso, um aguardando_sinal caducado prenderia a cliente
+// numa tela de pagamento de reserva que nem existe mais.
+//
+// Havendo mais de um, vai o mais próximo por data/horário.
+function reservaAguardandoSinal(lista) {
+  if (!lista || lista.length === 0) return null;
+
+  const agora = new Date();
+  const vigentes = lista.filter(
+    (item) => classificarAgendamento(item, agora) !== "historico"
+  );
+  if (vigentes.length === 0) return null;
+  if (!vigentes.every((item) => item.status === "aguardando_sinal")) return null;
+
+  return [...vigentes].sort((a, b) =>
+    `${a.data} ${a.horario}`.localeCompare(`${b.data} ${b.horario}`)
+  )[0];
+}
 
 // Página pública de agendamento. A lógica do wizard (serviço, slots, ocupados,
 // validação, insert) mora em FormularioAgendamento; aqui ficam só o layout e a
@@ -123,6 +153,12 @@ export default function AgendarPage() {
     return temAnamnesePendente || temAgendamentoPendente;
   });
 
+  // True depois que a cliente sai da confirmação de sinal automática (botão
+  // "Ver meus agendamentos") sem ter confirmado — sem isso ela voltaria pra
+  // mesma tela na hora, já que agendamentosAtivos continua igual. Não
+  // persiste: um reload legitimamente reabre a confirmação.
+  const [confirmacaoSinalPulada, setConfirmacaoSinalPulada] = useState(false);
+
   // Serviço de manutenção escolhido no card de sugestão do PainelCliente
   // (null = fluxo normal). Repassado como `servicoInicial` pro
   // FormularioAgendamento pular a etapa de escolha de serviço.
@@ -209,6 +245,15 @@ export default function AgendarPage() {
 
   const nomeContatoExibido = nomeProfissionalContato ?? "a equipe";
 
+  // Atalho pro pagamento do sinal: quando TUDO que a cliente tem ativo está
+  // aguardando_sinal, ela cai direto no ConfirmacaoSinal em vez do
+  // PainelCliente (ver reservaAguardandoSinal). modoNovoAgendamento tem
+  // precedência — ela já escolheu abrir o wizard, não sequestramos isso.
+  const agendamentoSinal =
+    modoNovoAgendamento || confirmacaoSinalPulada
+      ? null
+      : reservaAguardandoSinal(agendamentosAtivos);
+
   // onVoltarInicio do FormularioAgendamento (etapa "dados" do fluxo
   // público): a reserva já foi gravada de verdade ao entrar em "dados" (ver
   // selecionarHorario) e não pode ser cancelada/alterada por aqui — só a UI
@@ -229,6 +274,7 @@ export default function AgendarPage() {
     setAnamneseNecessaria(null);
     setModoNovoAgendamento(false);
     setServicoManutencao(null);
+    setConfirmacaoSinalPulada(false);
   }
 
   // Voltar físico (ou bubbling de onVoltarAntes do FormularioAgendamento, ver
@@ -430,6 +476,7 @@ export default function AgendarPage() {
               setModoNovoAgendamento(false);
               setServicoManutencao(null);
               setAgendamentosAtivos(null);
+              setConfirmacaoSinalPulada(false);
               setAgendamentosVersao((v) => v + 1);
             }}
             className={`w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover ${
@@ -528,6 +575,31 @@ export default function AgendarPage() {
             />
           ) : agendamentosAtivos === null ? (
             <p className="text-sm text-body">Carregando...</p>
+          ) : agendamentoSinal ? (
+            // Só falta o sinal: pula o painel e já abre a confirmação, com o
+            // mesmo componente que o botão "Confirmar pagamento" do painel
+            // usa. O envelope (card arredondado) é o mesmo que o
+            // PainelCliente aplica na sua sub-tela, pra não mudar o visual
+            // conforme o caminho de entrada.
+            <div className="space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border">
+              <ConfirmacaoSinal
+                agendamentoId={agendamentoSinal.id}
+                estabelecimento={estabelecimento}
+                nomeProfissionalContato={nomeContatoExibido}
+                rotuloVoltar="Ver meus agendamentos"
+                onConfirmado={() => {
+                  // Reflete o novo status na lista em memória: com ela sem
+                  // nenhum aguardando_sinal, a próxima render já cai no
+                  // PainelCliente sozinha.
+                  setAgendamentosAtivos((anterior) =>
+                    (anterior ?? []).map((a) =>
+                      a.id === agendamentoSinal.id ? { ...a, status: "pendente" } : a
+                    )
+                  );
+                }}
+                onVoltar={() => setConfirmacaoSinalPulada(true)}
+              />
+            </div>
           ) : agendamentosAtivos.length > 0 && !modoNovoAgendamento ? (
             <PainelCliente
               estabelecimento={estabelecimento}

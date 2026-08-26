@@ -12,6 +12,8 @@ import {
 import { buscarTema } from "@/lib/temas";
 import PopupRegrasAgendamento from "@/components/PopupRegrasAgendamento";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
+import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
+import { formatarPreco } from "@/lib/preco";
 import {
   calcularPrecoManutencao,
   buscarVencimentoManutencao,
@@ -123,13 +125,10 @@ export function formatarData(iso) {
   return `${String(dia).padStart(2, "0")}/${String(mes).padStart(2, "0")} · ${DIAS_SEMANA[d.getDay()]}`;
 }
 
-// preco_centavos (ex.: 3500) -> "R$ 35,00".
-export function formatarPreco(centavos) {
-  return (centavos / 100).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  });
-}
+// preco_centavos (ex.: 3500) -> "R$ 35,00". Mora em lib/preco.js desde que
+// BlocoConfirmacaoPix passou a usá-la também (importar de volta daqui fecharia
+// um ciclo); reexportada pra não mexer em quem já importava deste módulo.
+export { formatarPreco };
 
 // Botão de um serviço na etapa "Serviço". Extraído porque é renderizado nos dois
 // lugares da lista agrupada (serviços sem categoria + dentro de cada acordeão);
@@ -785,7 +784,6 @@ export default function FormularioAgendamento({
         clienteEhNovo &&
         !servicoSelecionado?.eh_manutencao));
   const [sinalDeclarado, setSinalDeclarado] = useState(false);
-  const [chavePixCopiada, setChavePixCopiada] = useState(false);
 
   // Reserva gravada ao ENTRAR na etapa "dados" (só fluxo público, ver
   // selecionarHorario) — id da linha em `agendamentos` e a "chave" da seleção
@@ -823,17 +821,6 @@ export default function FormularioAgendamento({
   // grande ou "sem notificar") pra reaplicar depois que a dona confirmar.
   const [mostrarPopupForaDaJanela, setMostrarPopupForaDaJanela] = useState(false);
   const [notificarForaDaJanela, setNotificarForaDaJanela] = useState(true);
-
-  async function copiarChavePix() {
-    try {
-      await navigator.clipboard.writeText(estabelecimento.sinal_chave_pix ?? "");
-      setChavePixCopiada(true);
-      setTimeout(() => setChavePixCopiada(false), 2000);
-    } catch {
-      // Clipboard indisponível (permissão negada, contexto não seguro etc.):
-      // a chave já está visível na tela pra copiar manualmente.
-    }
-  }
 
   // Ao montar, busca em paralelo os serviços ativos (ordenados por
   // categoria_id, ordem — mesmo critério configurado na aba Serviços do
@@ -2947,43 +2934,19 @@ export default function FormularioAgendamento({
               </div>
             )}
 
+            {/* Bloco do sinal (valor, chave Pix, comprovante, checkbox):
+                mesmo componente que o ConfirmacaoSinal usa quando a cliente
+                volta depois pelo PainelCliente. `agendamentoId` é a reserva já
+                gravada ao entrar em "dados" (ver selecionarHorario) — é nela
+                que o comprovante é anexado, antes mesmo do submit. */}
             {precisaSinal && (
-              <div className="space-y-3 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
-                <div>
-                  <p className="text-base font-medium text-amber-800">
-                    {`Este agendamento exige um sinal de ${formatarPreco(estabelecimento.sinal_valor_centavos)} via Pix para confirmar a reserva.`}
-                  </p>
-                  <p className="mt-1 text-base font-medium text-amber-800">
-                    {`Aperte o botão verde "Falar com ${nomeProfissionalContato}" e envie o comprovante do Pix.`}
-                  </p>
-                  <p className="mt-1 text-base font-medium text-amber-800">
-                    O profissional irá confirmar seu agendamento.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2 rounded-lg bg-card px-3 py-2 ring-1 ring-border">
-                  <span className="min-w-0 flex-1 truncate text-sm text-heading">
-                    {estabelecimento.sinal_chave_pix}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={copiarChavePix}
-                    className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover"
-                  >
-                    {chavePixCopiada ? "Copiado!" : "Copiar chave"}
-                  </button>
-                </div>
-
-                <label className="flex items-start gap-2 text-sm text-amber-900">
-                  <input
-                    type="checkbox"
-                    checked={sinalDeclarado}
-                    onChange={(e) => setSinalDeclarado(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-primary/30"
-                  />
-                  Já realizei o pagamento do sinal via Pix
-                </label>
-              </div>
+              <BlocoConfirmacaoPix
+                estabelecimento={estabelecimento}
+                agendamentoId={reservaId}
+                nomeProfissionalContato={nomeProfissionalContato}
+                sinalDeclarado={sinalDeclarado}
+                onSinalDeclaradoChange={setSinalDeclarado}
+              />
             )}
 
             {/* Só no /admin (status truthy): botão dividido, mesmo padrão da

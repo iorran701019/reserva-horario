@@ -28,6 +28,7 @@ import { calcularVagasPorHorario, profissionaisLivresNoHorario } from "@/lib/dis
 import { dentroDaJanelaAgendamento, diasRestantesJanela } from "@/lib/janelaAgendamento";
 import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
 import { verificarFidelidadeClientes, buscarProgressoFidelidade } from "@/lib/fidelidade";
+import LinkComprovantePix from "@/components/LinkComprovantePix";
 import {
   Menu,
   X,
@@ -132,13 +133,24 @@ function formatarEnviadoEm(timestamp) {
 }
 
 // Cores do badge de status. Cai num cinza neutro pra status desconhecido.
+// aguardando_sinal usa um âmbar MAIS forte que o de pendente: são estados
+// vizinhos (os dois caem na aba Pendentes) e a dona precisa distinguir num
+// relance "esperando o Pix" de "esperando eu confirmar".
 function classesStatus(status) {
   const mapa = {
     confirmado: "bg-green-50 text-green-700 ring-green-100",
     pendente: "bg-amber-50 text-amber-700 ring-amber-100",
+    aguardando_sinal: "bg-amber-200 text-amber-900 ring-amber-400",
     cancelado: "bg-red-50 text-red-700 ring-red-100",
   };
   return mapa[status] ?? "bg-surface text-body ring-border";
+}
+
+// Texto do badge de status. Só existe porque o status cru "aguardando_sinal"
+// ficaria com underline na tela; o resto já é legível como veio do banco.
+function rotuloStatus(status) {
+  if (!status) return "—";
+  return status === "aguardando_sinal" ? "Aguardando sinal" : status;
 }
 
 // Badge "Expira em Xh" da aba Pendentes (ver inbox mais abaixo): só aparece
@@ -293,7 +305,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, expirado_automaticamente, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, expirado_automaticamente, comprovante_pix_url, comprovante_pix_enviado_em, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -1739,7 +1751,7 @@ export default function AdminPage() {
                           item.status
                         )}`}
                       >
-                        {item.status ?? "—"}
+                        {rotuloStatus(item.status)}
                       </span>
                       {mostrarBadgeExpira && (
                         <span
@@ -1797,6 +1809,17 @@ export default function AdminPage() {
                       ))}
                     </ul>
                   )}
+
+                  {/* Comprovante do Pix anexado pela cliente na tela de
+                      confirmação de sinal (ver BlocoConfirmacaoPix). Bucket
+                      privado: o que está na coluna é o CAMINHO, e a signed
+                      url só é gerada quando a dona clica. Some sozinho quando
+                      não há comprovante — a maioria dos pendentes. */}
+                  <LinkComprovantePix
+                    caminho={item.comprovante_pix_url}
+                    enviadoEm={item.comprovante_pix_enviado_em}
+                    formatarEnviadoEm={formatarEnviadoEm}
+                  />
 
                   {/* Relatório inline: outros agendamentos CONFIRMADOS do
                       mesmo telefone, ainda no futuro. Só data+horário, sem
@@ -1959,7 +1982,7 @@ export default function AdminPage() {
                             item.status
                           )}`}
                         >
-                          {item.status ?? "—"}
+                          {rotuloStatus(item.status)}
                         </span>
                       </div>
 
@@ -2616,7 +2639,7 @@ export default function AdminPage() {
                   selecionado.status
                 )}`}
               >
-                {selecionado.status ?? "—"}
+                {rotuloStatus(selecionado.status)}
               </span>
             </div>
 
