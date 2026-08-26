@@ -305,7 +305,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, expirado_automaticamente, comprovante_pix_url, comprovante_pix_enviado_em, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, expirado_automaticamente, sinal_declarado_pago, comprovante_pix_url, comprovante_pix_enviado_em, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -1820,6 +1820,21 @@ export default function AdminPage() {
                     enviadoEm={item.comprovante_pix_enviado_em}
                     formatarEnviadoEm={formatarEnviadoEm}
                   />
+
+                  {/* Declarou o pagamento SEM anexar arquivo. Os dois gestos do
+                      BlocoConfirmacaoPix — marcar "Enviei o comprovante pelo
+                      WhatsApp" e subir o arquivo — gravam sinal_declarado_pago
+                      igual, então é a AUSÊNCIA do caminho que separa um do
+                      outro. Mutuamente exclusiva com o bloco acima, que só
+                      renderiza HAVENDO caminho: nunca aparecem os dois.
+                      Tom neutro de propósito — é a palavra da cliente, não um
+                      comprovante conferido, e não deve ler como confirmação. */}
+                  {item.sinal_declarado_pago && !item.comprovante_pix_url && (
+                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-body ring-1 ring-border">
+                      <IconeWhatsApp className="h-3.5 w-3.5" />
+                      Comprovante declarado pelo WhatsApp
+                    </p>
+                  )}
 
                   {/* Relatório inline: outros agendamentos CONFIRMADOS do
                       mesmo telefone, ainda no futuro. Só data+horário, sem
