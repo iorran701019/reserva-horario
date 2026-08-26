@@ -133,12 +133,26 @@ export default function TelaSolicitacaoEnviada({
         </div>
       </dl>
 
+      {/* Botões neutros (Ver localização / Ver meus agendamentos / Editar
+          agendamento) usam bg-surface, não bg-card: o card que os envolve JÁ é
+          bg-card (ver a div raiz acima), então o preenchimento sumia e só o
+          ring marcava o botão. bg-surface é o mesmo token do bloco de resumo
+          logo acima e dos cards de manutenção em GerenciarServicos.js — em
+          todos os temas (globals.css e os overrides por tenant em
+          app/[salon]/page.js, onde surface = tema.bgBody e card =
+          tema.bgHeader) ele é a camada mais ESCURA das duas, então a presença
+          visual vem da paleta do próprio salão, sem cor fixa. Hover vai pra
+          bg-card (o par inverso, como em GerenciarProfissionais.js) porque
+          hover:bg-surface virou no-op — e bg-border/40 também seria no-op na
+          Laysla, onde bordaHeader e bgBody são o MESMO #CDCDCD. Verde
+          (WhatsApp) e vermelho (Cancelar) seguem em bg-card de propósito: a
+          cor deles já é o destaque. */}
       {estabelecimento.link_localizacao && (
         <a
           href={estabelecimento.link_localizacao}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+          className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-surface px-4 py-2.5 font-medium text-heading ring-1 ring-border transition hover:bg-card"
         >
           <MapPin className="h-5 w-5" aria-hidden="true" />
           Ver localização
@@ -161,7 +175,7 @@ export default function TelaSolicitacaoEnviada({
         <button
           type="button"
           onClick={onVerAgendamentos}
-          className={`w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface ${
+          className={`w-full rounded-lg bg-surface px-4 py-2.5 font-medium text-heading ring-1 ring-border transition hover:bg-card ${
             onNovoAgendamento || estabelecimento.link_localizacao ? "mt-3" : "mt-6"
           }`}
         >
@@ -198,7 +212,7 @@ export default function TelaSolicitacaoEnviada({
         <button
           type="button"
           onClick={onEditar}
-          className="mt-3 w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+          className="mt-3 w-full rounded-lg bg-surface px-4 py-2.5 font-medium text-heading ring-1 ring-border transition hover:bg-card"
         >
           Editar agendamento
         </button>
