@@ -252,28 +252,24 @@ export default function CadastroCliente({
     // linha de outra pessoa ("não sou eu" sobre um número já cadastrado), e
     // um campo simplesmente omitido do payload manteria o valor antigo dela
     // no banco em vez de zerar.
-    const dadosCliente = {
-      estabelecimento_id: estabelecimentoId,
-      nome: form.nome.trim(),
-      whatsapp: digitosWhatsapp,
-      nascimento: nascimentoIso,
-      instagram: form.instagram || null,
-      cep: exigirEndereco ? form.cep : null,
-      endereco: exigirEndereco ? form.endereco || null : null,
-      numero: exigirEndereco ? form.numero : null,
-      complemento: exigirEndereco ? form.complemento || null : null,
-      bairro: exigirEndereco ? form.bairro : null,
-      cidade: exigirEndereco ? form.cidade : null,
-      estado: exigirEndereco ? form.estado || null : null,
-      contato_emergencia: exigirEndereco
-        ? null
-        : normalizarWhatsapp(form.contatoEmergencia) || null,
-    };
-
     const { data, error } = await supabase
-      .from("clientes")
-      .upsert(dadosCliente, { onConflict: "estabelecimento_id,whatsapp" })
-      .select()
+      .rpc("cliente_cadastro_completo", {
+        p_estabelecimento_id: estabelecimentoId,
+        p_nome: form.nome.trim(),
+        p_whatsapp: digitosWhatsapp,
+        p_nascimento: nascimentoIso,
+        p_instagram: form.instagram || null,
+        p_cep: exigirEndereco ? form.cep : null,
+        p_endereco: exigirEndereco ? form.endereco || null : null,
+        p_numero: exigirEndereco ? form.numero : null,
+        p_complemento: exigirEndereco ? form.complemento || null : null,
+        p_bairro: exigirEndereco ? form.bairro : null,
+        p_cidade: exigirEndereco ? form.cidade : null,
+        p_estado: exigirEndereco ? form.estado || null : null,
+        p_contato_emergencia: exigirEndereco
+          ? null
+          : normalizarWhatsapp(form.contatoEmergencia) || null,
+      })
       .single();
 
     setEnviando(false);

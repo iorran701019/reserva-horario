@@ -100,11 +100,10 @@ export default function AtualizarDadosCliente({
 
     async function carregar() {
       const { data, error } = await supabase
-        .from("clientes")
-        .select(
-          "id, nome, whatsapp, cep, endereco, bairro, cidade, estado, nascimento, instagram, contato_emergencia"
-        )
-        .eq("id", clienteId)
+        .rpc("cliente_buscar_por_id", {
+          p_cliente_id: clienteId,
+          p_estabelecimento_id: estabelecimentoId,
+        })
         .single();
 
       if (!ativo) return;
@@ -270,28 +269,25 @@ export default function AtualizarDadosCliente({
       }
     }
 
-    const dadosCliente = {
-      nome: form.nome.trim(),
-      nascimento: nascimentoIso,
-      instagram: form.instagram || null,
-    };
-
-    if (exigirEndereco) {
-      dadosCliente.cep = form.cep || null;
-      dadosCliente.endereco = form.endereco || null;
-      dadosCliente.bairro = form.bairro || null;
-      dadosCliente.cidade = form.cidade || null;
-      dadosCliente.estado = form.estado || null;
-    } else {
-      dadosCliente.contato_emergencia =
-        normalizarWhatsapp(form.contatoEmergencia) || null;
-    }
-
+    // Manda sempre os dois conjuntos de campos: a função decide, pelo
+    // p_exigir_endereco, qual lado realmente atualiza e ignora o outro.
     const { data, error } = await supabase
-      .from("clientes")
-      .update(dadosCliente)
-      .eq("id", clienteId)
-      .select()
+      .rpc("cliente_atualizar_por_id", {
+        p_cliente_id: clienteId,
+        p_estabelecimento_id: estabelecimentoId,
+        p_exigir_endereco: exigirEndereco,
+        p_nome: form.nome.trim(),
+        p_nascimento: nascimentoIso,
+        p_instagram: form.instagram || null,
+        p_cep: exigirEndereco ? form.cep || null : null,
+        p_endereco: exigirEndereco ? form.endereco || null : null,
+        p_bairro: exigirEndereco ? form.bairro || null : null,
+        p_cidade: exigirEndereco ? form.cidade || null : null,
+        p_estado: exigirEndereco ? form.estado || null : null,
+        p_contato_emergencia: !exigirEndereco
+          ? normalizarWhatsapp(form.contatoEmergencia) || null
+          : null,
+      })
       .single();
 
     setEnviando(false);

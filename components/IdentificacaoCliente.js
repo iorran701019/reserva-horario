@@ -175,14 +175,10 @@ export default function IdentificacaoCliente({
     }
 
     setBuscando(true);
-    const { data } = await supabase
-      .from("clientes")
-      .select(
-        "id, nome, whatsapp, cep, endereco, numero, complemento, bairro, cidade, estado, nascimento, instagram"
-      )
-      .eq("estabelecimento_id", estabelecimentoId)
-      .eq("whatsapp", normalizarWhatsapp(telefone))
-      .limit(1);
+    const { data } = await supabase.rpc("cliente_buscar_por_whatsapp", {
+      p_estabelecimento_id: estabelecimentoId,
+      p_whatsapp: normalizarWhatsapp(telefone),
+    });
 
     const encontrado = data && data.length > 0 ? data[0] : null;
 
@@ -329,18 +325,17 @@ export default function IdentificacaoCliente({
       return;
     }
 
-    const resultado = clienteEncontrado
-      ? await supabase
-          .from("clientes")
-          .update({ nome: nomeSimples.trim(), whatsapp: digitos })
-          .eq("id", clienteEncontrado.id)
-          .select()
-          .single()
-      : await supabase
-          .from("clientes")
-          .insert({ estabelecimento_id: estabelecimentoId, nome: nomeSimples.trim(), whatsapp: digitos })
-          .select()
-          .single();
+    // RPC unificada: com p_cliente_id faz UPDATE, sem ele faz INSERT.
+    const { data, error } = await supabase
+      .rpc("cliente_identificar_ou_criar", {
+        p_estabelecimento_id: estabelecimentoId,
+        p_cliente_id: clienteEncontrado?.id ?? null,
+        p_nome: nomeSimples.trim(),
+        p_whatsapp: digitos,
+      })
+      .single();
+
+    const resultado = { data, error };
 
     setEnviandoSimples(false);
 

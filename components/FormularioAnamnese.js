@@ -75,7 +75,6 @@ export default function FormularioAnamnese({
     let ativo = true;
 
     async function carregar() {
-      console.log("estabelecimentoId:", estabelecimentoId, typeof estabelecimentoId);
       const { data, error } = await supabase
         .from("anamnese_modelos")
         .select("id, titulo, secoes, declaracoes")
@@ -193,13 +192,13 @@ export default function FormularioAnamnese({
       Object.entries(observacoes).filter(([secao]) => secoesValidas.has(secao))
     );
 
-    const { error } = await supabase.from("anamnese_respostas").insert({
-      cliente_id: clienteId,
-      estabelecimento_id: estabelecimentoId,
-      modelo_id: modelo.id,
-      respostas: respostasValidas,
-      observacoes: observacoesValidas,
-      termos_aceitos: aceite,
+    const { error } = await supabase.rpc("anamnese_responder", {
+      p_cliente_id: clienteId,
+      p_estabelecimento_id: estabelecimentoId,
+      p_modelo_id: modelo.id,
+      p_respostas: respostasValidas,
+      p_observacoes: observacoesValidas,
+      p_termos_aceitos: aceite,
     });
 
     setEnviando(false);

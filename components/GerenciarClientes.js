@@ -404,6 +404,7 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
       <div className="space-y-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
         <AtualizarDadosCliente
           clienteId={clienteAtual.id}
+          estabelecimentoId={estabelecimento.id}
           exigirEndereco={estabelecimento.exigir_endereco !== false}
           modoAdmin
           onAtualizado={(dados) => {
