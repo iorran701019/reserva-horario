@@ -1098,6 +1098,14 @@ export default function FormularioAgendamento({
     setForm((anterior) => ({ ...anterior, data: iso }));
     setHorarioSelecionado("");
     setAvisoHorarioIndisponivel(false);
+    // Tocar num dia é uma escolha fresca da cliente e cancela qualquer
+    // restauração de sessão ainda pendente — mesma regra de
+    // confirmarSelecaoServico. Sem isso, o efeito 3 de restauração continua
+    // armado e pode disparar DEPOIS deste clique (a grade de vagas do dia é
+    // uma chamada de rede), pulando a escolha de horário e caindo direto em
+    // "dados"; e quando a guarda dele aborta por data diferente, a ref nunca
+    // é consumida, deixando `restaurandoParaDados` preso em true.
+    pendenteRestaurarRef.current = null;
   }
 
   // Horários oferecidos = chaves do mapa de vagas. No fluxo "cliente escolhe",
@@ -1755,6 +1763,12 @@ export default function FormularioAgendamento({
   // deixando o popstate resultante disparar a mesma transição, sem deixar a
   // entrada empurrada órfã no histórico real). "servico" não tem botão
   // "Voltar" em tela (nunca teve) — só o físico.
+  // Lê a ref direto (não um state): vale só enquanto "data" for etapa de
+  // passagem rumo a "dados". Não precisa de reset próprio — a ref é zerada
+  // em todos os caminhos que a consomem ou a cancelam, e o único que parte de
+  // uma interação (selecionarData) acompanha o `= null` de setState no mesmo
+  // handler, então sempre há um re-render fresco logo em seguida pra
+  // recalcular isto como false e (re)armar voltarFisicoData.
   const restaurandoParaDados = pendenteRestaurarRef.current?.horario != null;
   const voltarFisicoServico = useVoltarFisico(
     onVoltarAntes,
