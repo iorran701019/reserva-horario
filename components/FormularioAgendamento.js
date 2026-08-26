@@ -3,7 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, MessageCircleOff } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import { calcularVagasPorHorario, filtrarPorAntecedenciaMinima } from "@/lib/disponibilidade";
+import {
+  calcularVagasDoMes,
+  calcularVagasPorHorario,
+  diasSemVagaDoMes,
+  filtrarPorAntecedenciaMinima,
+} from "@/lib/disponibilidade";
 import { buscarTema } from "@/lib/temas";
 import PopupRegrasAgendamento from "@/components/PopupRegrasAgendamento";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
@@ -102,6 +107,11 @@ function formatarISO(date) {
 // Cabeçalho do calendário: iniciais dos dias no padrão Date.getDay()
 // (0=domingo … 6=sábado).
 const DIAS_SEMANA_CURTO = ["D", "S", "T", "Q", "Q", "S", "S"];
+
+// Default estável da prop `diasSemVaga` de CalendarioDias — um Set vazio de
+// módulo em vez de `new Set()` no parâmetro, que criaria um objeto novo a
+// cada render.
+const NENHUM_DIA_SEM_VAGA = new Set();
 
 // "YYYY-MM-DD" -> "dd/mm · dia da semana". Parse manual pra evitar o
 // deslocamento de fuso que new Date("YYYY-MM-DD") sofre (vira UTC). Exportado
@@ -262,6 +272,15 @@ function perguntaDeveAparecer(pergunta, respostas) {
 //   mes              – Date no primeiro dia do mês exibido.
 //   min              – "YYYY-MM-DD" mínimo (hoje); datas anteriores ficam cinza.
 //   diasSemanaAtivos – Set<number> de dias da semana (0–6) com atendimento.
+//   diasSemVaga      – Set<string> de datas "YYYY-MM-DD" do mês exibido que
+//                   não têm NENHUM horário livre (todos já reservados, ou
+//                   removidos por ausência/antecedência) — calculadas em
+//                   lote pra não depender de um clique por dia (ver
+//                   calcularVagasDoMes/diasSemVagaDoMes em
+//                   lib/disponibilidade.js). Ficam cinza com o MESMO visual
+//                   de um dia fechado: pro cliente, "sem horário" e "não
+//                   atende" são a mesma coisa na prática. IGNORADA quando
+//                   modoLivre (ver abaixo).
 //   selecionado      – "YYYY-MM-DD" atualmente escolhido (destaca a célula).
 //   onSelecionar     – recebe o "YYYY-MM-DD" do dia clicado (só dias válidos).
 //   onPrev/onNext    – navegação de mês. podeVoltar trava o passado.
@@ -273,16 +292,17 @@ function perguntaDeveAparecer(pergunta, respostas) {
 //                   fundo verde sutil, dias após ganham laranja. Um dia
 //                   desabilitado (cinza, sem profissional) mantém prioridade
 //                   visual sobre essas cores.
-//   modoLivre        – true no /admin (ver FormularioAgendamento): `fechado` e
-//                   `foraDaJanela` deixam de desabilitar o dia — a dona pode
-//                   escolher qualquer dia, mesmo sem profissional elegível ou
-//                   além da janela de agendamento. `passado` continua
-//                   bloqueando SEMPRE, nos dois modos (não dá pra agendar num
-//                   dia que já passou). Um dia que só ficou clicável por
-//                   causa do modoLivre ganha uma marcação visual distinta
-//                   (borda tracejada + selo) — nunca a mesma paleta
-//                   verde/laranja do vencimento de manutenção, pra não
-//                   misturar as duas informações.
+//   modoLivre        – true no /admin (ver FormularioAgendamento): `fechado`,
+//                   `foraDaJanela` e `diasSemVaga` deixam de desabilitar o
+//                   dia — a dona pode escolher qualquer dia, mesmo sem
+//                   profissional elegível, além da janela de agendamento ou
+//                   com a agenda cheia (ela decide se encaixa na mão).
+//                   `passado` continua bloqueando SEMPRE, nos dois modos
+//                   (não dá pra agendar num dia que já passou). Um dia que
+//                   só ficou clicável por causa do modoLivre ganha uma
+//                   marcação visual distinta (borda tracejada + selo) —
+//                   nunca a mesma paleta verde/laranja do vencimento de
+//                   manutenção, pra não misturar as duas informações.
 // Exportado pra ser reaproveitado fora do wizard (ver modal "Alterar data"
 // da seção "Fora da janela de agendamento" em app/[salon]/admin/page.js) —
 // componente puro, tudo vem por props, nenhuma dependência do resto do
@@ -291,6 +311,7 @@ export function CalendarioDias({
   mes,
   min,
   diasSemanaAtivos,
+  diasSemVaga = NENHUM_DIA_SEM_VAGA,
   selecionado,
   onSelecionar,
   onPrev,
@@ -381,10 +402,16 @@ export function CalendarioDias({
           const passado = iso < min;
           const fechado = !diasSemanaAtivos.has(date.getDay());
           const foraDaJanela = !dentroDaJanelaAgendamento(iso, estabelecimento);
+          // Dia que abre, está dentro da janela, mas não sobrou nenhum
+          // horário nele (ver a prop diasSemVaga). Mesmo tratamento visual de
+          // `fechado`: pro cliente as duas situações são "não dá pra esse
+          // dia". No modo livre não bloqueia — a dona ainda pode encaixar.
+          const semVaga = !modoLivre && diasSemVaga.has(iso);
           // No modo livre, `fechado`/`foraDaJanela` deixam de desabilitar —
           // só continuam existindo pra saber quando aplicar o selo (abaixo).
           // `passado` nunca é dispensado, nos dois modos.
-          const desabilitado = passado || (!modoLivre && (fechado || foraDaJanela));
+          const desabilitado =
+            passado || semVaga || (!modoLivre && (fechado || foraDaJanela));
           // Dia que só está clicável PORQUE está em modo livre (normalmente
           // seria cinza) — ganha o selo/borda tracejada distintos.
           const liberado = modoLivre && !desabilitado && (fechado || foraDaJanela);
@@ -599,6 +626,20 @@ export default function FormularioAgendamento({
   const [vagas, setVagas] = useState({});
   const [carregandoSlots, setCarregandoSlots] = useState(false);
   const [erroSlots, setErroSlots] = useState("");
+  // Vagas do MÊS VISÍVEL inteiro ({ "YYYY-MM-DD": mapa de vagas }), pra saber
+  // de antemão quais dias já não têm horário nenhum e cinzá-los no calendário
+  // — sem isso, só descobriríamos isso clicando dia a dia. null = ainda não
+  // calculado (ou falhou): nesse caso nenhum dia é cinzado por aqui, nunca o
+  // contrário. NÃO substitui `vagas` acima: o dia clicado continua sendo
+  // recalculado sozinho, e é ele que manda na grade de horários.
+  const [vagasDoMes, setVagasDoMes] = useState(null);
+  // Cache dos meses já buscados NESTA sessão do formulário, pra ir e voltar
+  // entre meses não refazer a consulta. A chave carrega tudo que muda o
+  // resultado (serviço, duração efetiva, reserva em edição), então nunca
+  // devolve um mês calculado com outros parâmetros. Fica num ref porque é só
+  // memória — mudar o cache não precisa re-renderizar.
+  const cacheVagasDoMesRef = useRef(new Map());
+
   // Pra qual `data` o `vagas` atual corresponde — usado só pela restauração
   // de sessão abaixo, pra saber com segurança quando `vagas` já reflete o dia
   // restaurado (e não mais o de uma sincronização anterior/em andamento).
@@ -1069,6 +1110,24 @@ export default function FormularioAgendamento({
     return set;
   })();
 
+  // Dias do mês visível que abrem, mas em que já não sobrou nenhum horário —
+  // o calendário os cinza junto com os fechados (ver CalendarioDias). Deriva
+  // de `vagasDoMes` em memória, sem ida ao banco, aplicando os MESMOS dois
+  // filtros que `horariosBase`/`horariosVisiveis` aplicam no dia clicado
+  // (profissional escolhido + antecedência mínima), pra calendário e grade de
+  // horários nunca discordarem.
+  //
+  // Set vazio (nada cinza) enquanto o mês não carregou, no modoLivre, e no
+  // fluxo "cliente escolhe" antes de haver profissional: aí a resposta
+  // dependeria de quem, e cinzar tudo seria pior que não cinzar nada.
+  const diasSemVaga =
+    vagasDoMes == null || (escolherProfissional && profissionalSelecionado == null)
+      ? NENHUM_DIA_SEM_VAGA
+      : diasSemVagaDoMes(vagasDoMes, {
+          estabelecimento,
+          profissionalId: escolherProfissional ? profissionalSelecionado.id : null,
+        });
+
   // ADMIN (modoLivre): gate mínimo pro calendário aparecer — precisa existir
   // ALGUÉM pra assumir a reserva (o selecionado, ou pelo menos 1 elegível no
   // encaixe automático). Sem isso, nem o modo livre ajuda (não há profissional
@@ -1238,6 +1297,83 @@ export default function FormularioAgendamento({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     form.data,
+    servicoSelecionado,
+    estabelecimento.id,
+    reservaId,
+    modoLivre,
+    perguntasServico,
+    respostasPerguntas,
+  ]);
+
+  // Mantém `vagasDoMes` sincronizado com o MÊS VISÍVEL do calendário — uma
+  // consulta em lote por mês (ver calcularVagasDoMes), não uma por dia. É o
+  // que permite cinzar de antemão os dias sem nenhum horário livre, em vez de
+  // só descobrir isso depois do clique.
+  //
+  // Não roda no modoLivre: lá o dia continua clicável de qualquer jeito (ver
+  // CalendarioDias), então a busca não mudaria nada na tela.
+  //
+  // `profissionalSelecionado` de propósito NÃO entra: o mapa guarda quem está
+  // livre em cada horário, então trocar de profissional só refiltra em memória
+  // (ver `diasSemVaga`, abaixo) — sem nova ida ao banco.
+  useEffect(() => {
+    let ativo = true;
+
+    async function sincronizar() {
+      if (modoLivre || !servicoSelecionado) {
+        setVagasDoMes(null);
+        return;
+      }
+
+      const ano = mesVisivel.getFullYear();
+      const mes = mesVisivel.getMonth() + 1;
+      const duracao = duracaoEfetivaServico();
+      const chave = [
+        estabelecimento.id,
+        servicoSelecionado.id,
+        duracao,
+        reservaId ?? "",
+        ano,
+        mes,
+      ].join("|");
+
+      const cacheado = cacheVagasDoMesRef.current.get(chave);
+      if (cacheado) {
+        setVagasDoMes(cacheado);
+        return;
+      }
+
+      try {
+        const porData = await calcularVagasDoMes({
+          estabelecimentoId: estabelecimento.id,
+          servicoId: servicoSelecionado.id,
+          ano,
+          mes,
+          // Mesma razão do efeito acima: a reserva antecipada do próprio
+          // cliente não pode contar como ocupada contra ele.
+          excluirAgendamentoId: reservaId,
+          duracaoMinOverride: duracao,
+        });
+        if (!ativo) return;
+        cacheVagasDoMesRef.current.set(chave, porData);
+        setVagasDoMes(porData);
+      } catch {
+        // Falha aqui é só perda da dica visual — o dia continua clicável e o
+        // cálculo do dia clicado (efeito acima) segue mandando na grade. Não
+        // mostra erro: seria ruído por algo que o cliente nem pediu.
+        if (ativo) setVagasDoMes(null);
+      }
+    }
+
+    sincronizar();
+    return () => {
+      ativo = false;
+    };
+    // duracaoEfetivaServico não entra: depende de servicoSelecionado +
+    // perguntasServico + respostasPerguntas, já listados abaixo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    mesVisivel,
     servicoSelecionado,
     estabelecimento.id,
     reservaId,
@@ -2521,6 +2657,7 @@ export default function FormularioAgendamento({
                   mes={mesVisivel}
                   min={hoje}
                   diasSemanaAtivos={diasSemanaAtivos}
+                  diasSemVaga={diasSemVaga}
                   selecionado={form.data}
                   onSelecionar={selecionarData}
                   onPrev={mesAnterior}
