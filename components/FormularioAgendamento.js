@@ -522,6 +522,16 @@ export function CalendarioDias({
 //                   dos dois veio antes). Gateado por !servicoInicialPendente
 //                   (ver useVoltarFisico abaixo) pra não armar durante o
 //                   pulo automático de "servico" pra "data" (servicoInicial).
+//   agendamentoEmEdicao – só fluxo público. Agendamento JÁ existente que a
+//                   cliente pediu pra editar (botão "Editar" das telas de Pix
+//                   e de protocolo, ver app/[salon]/page.js), no formato
+//                   { id, servicoId, data, horario, profissionalId }. O
+//                   wizard abre pré-carregado com ele e passa a tratá-lo como
+//                   a reserva provisória ativa (reservaId/reservaChave) — ver
+//                   pendenteRestaurarRef abaixo. Consequência desejada:
+//                   escolher outro horário cai no cancela-e-recria de
+//                   selecionarHorario, e sair sem escolher nada deixa o
+//                   agendamento original intacto.
 export default function FormularioAgendamento({
   estabelecimento,
   status,
@@ -534,6 +544,7 @@ export default function FormularioAgendamento({
   servicoInicial = null,
   onVoltarInicio = null,
   onVoltarAntes = null,
+  agendamentoEmEdicao = null,
 }) {
   const [form, setForm] = useState(() => ({
     ...ESTADO_INICIAL,
@@ -554,10 +565,30 @@ export default function FormularioAgendamento({
   // "consumido" (setado pra null) conforme os dados dos quais depende
   // terminam de carregar — NUNCA reaparece como selecionado sem antes ser
   // revalidado contra o banco.
+  //
+  // MODO EDIÇÃO (agendamentoEmEdicao, ver a prop): a cliente pediu pra editar
+  // uma reserva que JÁ existe (tela de Pix ou de protocolo, ver
+  // app/[salon]/page.js). Em vez de um caminho novo, semeamos esse mesmo
+  // retalho com os dados dela — o wizard então a trata exatamente como a
+  // "reserva provisória" de uma sessão anterior: os efeitos 1/2/3 abaixo
+  // recarregam serviço, profissional, data e horário, e reidratam
+  // reservaId/reservaChave. É isso que faz trocar de horário cair na lógica
+  // de cancela-e-recria já existente (ver selecionarHorario), e sair sem
+  // trocar nada deixar o agendamento original intocado. Tem precedência
+  // sobre a fatia da sessão e sobre servicoInicial.
   const pendenteRestaurarRef = useRef(
-    status || servicoInicial
-      ? null
-      : lerFatia(estabelecimento.slug, "agendamento")
+    agendamentoEmEdicao
+      ? {
+          servicoId: agendamentoEmEdicao.servicoId,
+          profissionalId: agendamentoEmEdicao.profissionalId ?? null,
+          data: agendamentoEmEdicao.data,
+          horario: agendamentoEmEdicao.horario,
+          respostasPerguntas: {},
+          reservaId: agendamentoEmEdicao.id,
+        }
+      : status || servicoInicial
+        ? null
+        : lerFatia(estabelecimento.slug, "agendamento")
   );
   // Aviso mostrado quando o horário restaurado da sessão anterior não está
   // mais disponível (outra reserva ocupou o horário enquanto a página estava
@@ -1464,7 +1495,17 @@ export default function FormularioAgendamento({
     }
 
     if (pendente.horario && horariosVisiveis.includes(pendente.horario)) {
-      if (pendente.reservaId != null) {
+      if (agendamentoEmEdicao) {
+        // MODO EDIÇÃO: para na etapa "data", com o horário atual dela
+        // destacado na grade — é essa a tela que ela pediu ao clicar
+        // "Editar". Avançar direto pra "dados" (o que a restauração de
+        // sessão faz, logo abaixo) a deixaria sem saída: "dados" não tem
+        // botão "Voltar" em tela no fluxo público, e o voltar físico dali sai
+        // do wizard inteiro. Tocar no MESMO horário reaproveita a reserva
+        // sem gravar nada (mesmaChaveReserva); tocar em outro cai no
+        // cancela-e-recria de sempre.
+        setHorarioSelecionado(pendente.horario);
+      } else if (pendente.reservaId != null) {
         // Reserva já rehidratada no efeito 2 (reservaId/reservaChave) e
         // revalidada como livre acima — só reidrata a etapa, sem gravar de novo.
         setHorarioSelecionado(pendente.horario);
@@ -1480,6 +1521,18 @@ export default function FormularioAgendamento({
       // Horário restaurado não está mais livre: se havia uma reserva própria
       // pra ele, ela ficou órfã (ex.: outro processo assumiu o profissional
       // nesse meio-tempo) — cancela e descarta a referência.
+      //
+      // EXCEÇÃO: modo edição. Aqui `reservaId` é um agendamento de verdade,
+      // que a cliente só pediu pra EDITAR — cancelá-lo por conta própria (o
+      // horário dele pode ter saído da grade só por antecedência mínima, por
+      // exemplo) apagaria a reserva dela sem ela ter escolhido nada. Segura o
+      // aviso e MANTÉM reservaId/reservaChave: se ela escolher outro horário,
+      // selecionarHorario cancela e recria como sempre; se ela sair sem
+      // escolher, o original continua de pé.
+      if (agendamentoEmEdicao) {
+        pendenteRestaurarRef.current = null;
+        return;
+      }
       if (pendente.reservaId != null) {
         supabase
           .from("agendamentos")
@@ -1499,6 +1552,13 @@ export default function FormularioAgendamento({
   // submit final, nunca deve ser restaurado como confirmado).
   useEffect(() => {
     if (status) return;
+    // Modo edição não grava rascunho: a fatia é o retalho de um agendamento
+    // EM ANDAMENTO, e persistir a reserva já existente aqui faria um wizard
+    // futuro ("novo agendamento") restaurá-la como se fosse a provisória
+    // dele — e cancelá-la ao trocar de horário. Um reload durante a edição
+    // volta pela régua de telas de app/[salon]/page.js, que relê o status do
+    // banco.
+    if (agendamentoEmEdicao) return;
     salvarFatia(estabelecimento.slug, "agendamento", {
       servicoId: servicoSelecionado?.id ?? null,
       profissionalId: profissionalSelecionado?.id ?? null,
@@ -1513,6 +1573,7 @@ export default function FormularioAgendamento({
     });
   }, [
     status,
+    agendamentoEmEdicao,
     estabelecimento.slug,
     servicoSelecionado,
     profissionalSelecionado,
@@ -2013,6 +2074,12 @@ export default function FormularioAgendamento({
       estabelecimento_id: estabelecimento.id,
       profissional_id: profissionalId,
       status: precisaSinal ? "aguardando_sinal" : "pendente",
+      // Marca a ENTRADA em "pendente" — é dela que a régua de telas de
+      // app/[salon]/page.js tira a janela em que a cliente ainda vê a tela de
+      // protocolo em vez do painel. Exigindo sinal, a reserva nasce em
+      // "aguardando_sinal" e ainda não entrou em pendente: quem carimba é o
+      // BlocoConfirmacaoPix, no gesto de declarar o pagamento.
+      pendente_desde: precisaSinal ? null : new Date().toISOString(),
       sinal_declarado_pago: false,
       finalizado: true,
     };
@@ -2189,10 +2256,19 @@ export default function FormularioAgendamento({
     if (!status) {
       setEnviando(true);
 
+      // Rede de segurança: o BlocoConfirmacaoPix já grava isso no gesto
+      // (marcar a caixa / anexar o comprovante), então normalmente este
+      // update não muda nada. Ele sobra pro caso de a linha ainda estar em
+      // "aguardando_sinal" quando o submit chega — e por isso carimba
+      // pendente_desde igual, senão a janela de protocolo nasceria vazia.
       if (precisaSinal && sinalDeclarado) {
         const { error } = await supabase
           .from("agendamentos")
-          .update({ sinal_declarado_pago: true, status: "pendente" })
+          .update({
+            sinal_declarado_pago: true,
+            status: "pendente",
+            pendente_desde: new Date().toISOString(),
+          })
           .eq("id", reservaId);
 
         setEnviando(false);
@@ -2211,6 +2287,9 @@ export default function FormularioAgendamento({
         servico: servicoSelecionado,
         horario: horarioSelecionado,
         profissional: escolherProfissional ? profissionalSelecionado : null,
+        // Id da linha gravada — a tela de protocolo do consumidor precisa
+        // dele pros botões Editar/Cancelar (ver TelaSolicitacaoEnviada).
+        agendamentoId: reservaId,
       });
       return;
     }

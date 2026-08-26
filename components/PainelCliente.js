@@ -2,13 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { MapPin } from "lucide-react";
-import { supabase } from "@/lib/supabaseClient";
+import { linkWhatsApp, MENSAGEM_AJUDA_PRAZO_EXPIRADO } from "@/lib/whatsapp";
 import {
-  linkWhatsApp,
-  MENSAGEM_CANCELAMENTO_CLIENTE,
-  MENSAGEM_AJUDA_PRAZO_EXPIRADO,
-} from "@/lib/whatsapp";
-import { buscarAgendamentosAtivos, buscarHistoricoRecente } from "@/lib/agendamentosCliente";
+  buscarAgendamentosAtivos,
+  buscarHistoricoRecente,
+  cancelarAgendamentoCliente,
+} from "@/lib/agendamentosCliente";
 import { buscarManutencaoSugerida } from "@/lib/manutencaoSugerida";
 import { buscarProgressoFidelidade } from "@/lib/fidelidade";
 import { classificarAgendamento, inicioDoAtendimento } from "@/lib/particao";
@@ -78,6 +77,10 @@ export default function PainelCliente({
   const [agendamentos, setAgendamentos] = useState(null);
   const [historico, setHistorico] = useState(null);
   const [cancelandoId, setCancelandoId] = useState(null);
+  // Erro do cancelamento, mostrado logo abaixo da lista. Antes o update era
+  // `if (error) return` — em silêncio: a cliente clicava, nada acontecia, e
+  // ela ficava sem saber se tinha cancelado ou não.
+  const [erroCancelamento, setErroCancelamento] = useState("");
 
   // Sugestão de manutenção em destaque no topo do painel (null = nenhuma ou
   // ainda carregando — sem diferença visual entre os dois, o card só aparece
@@ -242,35 +245,30 @@ export default function PainelCliente({
     );
   }
 
+  // Cancelamento pela cliente: o update + o aviso no WhatsApp vivem no helper
+  // compartilhado (ver cancelarAgendamentoCliente), o mesmo usado pelas telas
+  // de Pix e de protocolo — aqui fica só o que é desta lista (spinner por
+  // linha, remoção do item, mensagem de erro).
   async function handleCancelar(item) {
+    setErroCancelamento("");
     setCancelandoId(item.id);
 
-    const { error } = await supabase
-      .from("agendamentos")
-      .update({ status: "cancelado", cancelado_por_cliente: true })
-      .eq("id", item.id);
+    const { ok, erro } = await cancelarAgendamentoCliente({
+      agendamentoId: item.id,
+      estabelecimento,
+      nomeCliente: clienteAtual.nome,
+      dataFormatada: formatarData(item.data),
+      horario: item.horario,
+    });
 
     setCancelandoId(null);
 
-    if (error) return;
+    if (!ok) {
+      setErroCancelamento(erro);
+      return;
+    }
 
     setAgendamentos((anterior) => anterior.filter((a) => a.id !== item.id));
-
-    window.open(
-      linkWhatsApp(
-        estabelecimento.whatsapp,
-        MENSAGEM_CANCELAMENTO_CLIENTE(
-          {
-            nomeCliente: clienteAtual.nome,
-            data: formatarData(item.data),
-            horario: item.horario,
-          },
-          estabelecimento.msg_cancelamento_cliente
-        )
-      ),
-      "_blank",
-      "noopener,noreferrer"
-    );
   }
 
   return (
@@ -426,6 +424,12 @@ export default function PainelCliente({
             </li>
           ))}
         </ul>
+      )}
+
+      {erroCancelamento && (
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+          {erroCancelamento}
+        </p>
       )}
 
       {historico !== null && historico.length > 0 && (

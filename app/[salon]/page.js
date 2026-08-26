@@ -2,9 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { MapPin } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import { linkWhatsApp, MENSAGEM_SOLICITACAO_ENVIADA } from "@/lib/whatsapp";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import { buscarTema } from "@/lib/temas";
 import { precisaAnamnese } from "@/lib/anamnese";
@@ -16,19 +14,23 @@ import IdentificacaoCliente from "@/components/IdentificacaoCliente";
 import FormularioAnamnese from "@/components/FormularioAnamnese";
 import PainelCliente from "@/components/PainelCliente";
 import ConfirmacaoSinal from "@/components/ConfirmacaoSinal";
-import FormularioAgendamento, {
-  formatarData,
-} from "@/components/FormularioAgendamento";
+import TelaSolicitacaoEnviada from "@/components/TelaSolicitacaoEnviada";
+import FormularioAgendamento from "@/components/FormularioAgendamento";
 import FotoPerfilCircular from "@/components/FotoPerfilCircular";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 import { useVoltarFisico } from "@/lib/voltarFisico";
 
 // Reserva que deve levar DIRETO ao ConfirmacaoSinal, pulando o PainelCliente
 // — a cliente que voltou pra pagar o sinal não deveria ter que achar o botão
-// "Confirmar pagamento" dentro do painel. Devolve null (= painel normal)
-// quando não há nenhum aguardando_sinal OU quando existe qualquer outro
-// agendamento ativo junto: aí o painel é a tela certa, porque tem mais coisa
-// pra ela ver além do sinal.
+// "Confirmar pagamento" dentro do painel. Devolve null (= painel normal) só
+// quando não há NENHUM aguardando_sinal vigente.
+//
+// Não existe mais trava de exclusividade: o que a cliente tem marcado ao
+// redor (um corte já confirmado pra semana que vem, por exemplo) não muda o
+// fato de que existe um sinal esperando por ela, e era isso que a versão
+// antiga fazia — bastava um confirmado na lista pra ela cair no painel e ter
+// que caçar o botão. O painel continua a um clique daqui ("Ver meus
+// agendamentos").
 //
 // Descarta o que classificarAgendamento já considera histórico (o status cru
 // não vira histórico sozinho quando o horário passa — mesma regra do
@@ -40,13 +42,60 @@ function reservaAguardandoSinal(lista) {
   if (!lista || lista.length === 0) return null;
 
   const agora = new Date();
-  const vigentes = lista.filter(
-    (item) => classificarAgendamento(item, agora) !== "historico"
+  const emSinal = lista.filter(
+    (item) =>
+      classificarAgendamento(item, agora) !== "historico" &&
+      item.status === "aguardando_sinal"
   );
-  if (vigentes.length === 0) return null;
-  if (!vigentes.every((item) => item.status === "aguardando_sinal")) return null;
+  if (emSinal.length === 0) return null;
 
-  return [...vigentes].sort((a, b) =>
+  return emSinal.sort((a, b) =>
+    `${a.data} ${a.horario}`.localeCompare(`${b.data} ${b.horario}`)
+  )[0];
+}
+
+// Por quanto tempo, depois de o agendamento entrar em "pendente"
+// (agendamentos.pendente_desde), a cliente que volta ao link do salão ainda
+// cai na tela de protocolo em vez do painel. É a janela em que "eu acabei de
+// pedir" ainda é a informação mais útil pra ela; passada essa janela, a
+// solicitação vira só mais uma linha do painel. Constante local de propósito
+// — se algum dia virar configuração por salão, o lugar de ler é aqui.
+const PENDENTE_PROTOCOLO_HORAS = 24;
+
+// Este pendente ainda está dentro da janela de protocolo? Sem pendente_desde
+// (linhas anteriores à coluna, ou um pendente que nunca passou pelo fluxo
+// novo) a resposta é NÃO: painel normal, que é o comportamento de sempre.
+function dentroDaJanelaProtocolo(item, agora) {
+  if (!item.pendente_desde) return false;
+  const desde = new Date(item.pendente_desde).getTime();
+  if (Number.isNaN(desde)) return false;
+  return agora.getTime() - desde < PENDENTE_PROTOCOLO_HORAS * 60 * 60 * 1000;
+}
+
+// Irmã de reservaAguardandoSinal, um degrau adiante do fluxo: a solicitação
+// recém-enviada que deve levar DIRETO à tela de protocolo
+// (TelaSolicitacaoEnviada), pulando o PainelCliente. Mesma mudança da irmã —
+// sem trava de exclusividade: outros agendamentos ativos ao redor não apagam
+// o fato de que ela acabou de pedir um horário e ainda está esperando
+// resposta. Um pendente FORA da janela também não atrapalha mais os outros:
+// só ele deixa de contar, em vez de derrubar a tela inteira pro painel.
+//
+// Descarta o que classificarAgendamento já considera histórico, pelo mesmo
+// motivo de lá: um pendente cujo horário já passou não deve prender a cliente
+// numa tela de "aguarde a confirmação".
+function reservaEmProtocolo(lista) {
+  if (!lista || lista.length === 0) return null;
+
+  const agora = new Date();
+  const emProtocolo = lista.filter(
+    (item) =>
+      classificarAgendamento(item, agora) !== "historico" &&
+      item.status === "pendente" &&
+      dentroDaJanelaProtocolo(item, agora)
+  );
+  if (emProtocolo.length === 0) return null;
+
+  return emProtocolo.sort((a, b) =>
     `${a.data} ${a.horario}`.localeCompare(`${b.data} ${b.horario}`)
   )[0];
 }
@@ -159,6 +208,19 @@ export default function AgendarPage() {
   // persiste: um reload legitimamente reabre a confirmação.
   const [confirmacaoSinalPulada, setConfirmacaoSinalPulada] = useState(false);
 
+  // Irmão do acima, pra tela de protocolo: true depois que a cliente clica
+  // "Ver meus agendamentos" nela. Sem isso ela voltaria pra mesma tela na
+  // hora, já que agendamentosAtivos continua igual. Também não persiste — um
+  // reload dentro da janela legitimamente reabre o protocolo.
+  const [protocoloPulado, setProtocoloPulado] = useState(false);
+
+  // Agendamento JÁ existente que a cliente pediu pra editar (botão "Editar"
+  // das telas de Pix e de protocolo). Havendo, o wizard monta em modo edição
+  // (ver agendamentoEmEdicao em FormularioAgendamento) e passa a tratá-lo
+  // como a reserva provisória ativa: trocar de horário cai no cancela-e-recria
+  // que já existe lá, e sair sem trocar nada deixa o original intacto.
+  const [agendamentoEditando, setAgendamentoEditando] = useState(null);
+
   // Serviço de manutenção escolhido no card de sugestão do PainelCliente
   // (null = fluxo normal). Repassado como `servicoInicial` pro
   // FormularioAgendamento pular a etapa de escolha de serviço.
@@ -250,9 +312,19 @@ export default function AgendarPage() {
   // PainelCliente (ver reservaAguardandoSinal). modoNovoAgendamento tem
   // precedência — ela já escolheu abrir o wizard, não sequestramos isso.
   const agendamentoSinal =
-    modoNovoAgendamento || confirmacaoSinalPulada
+    modoNovoAgendamento || confirmacaoSinalPulada || agendamentoEditando
       ? null
       : reservaAguardandoSinal(agendamentosAtivos);
+
+  // Mesmo atalho, um degrau adiante: a solicitação recém-enviada (pendente
+  // dentro da janela, ver reservaEmProtocolo) reabre a tela de protocolo em
+  // vez do painel — a cliente que volta ao link no mesmo dia quer ver "já
+  // pedi, aguarde", com Editar/Cancelar à mão. Mesmas precedências do irmão
+  // acima.
+  const agendamentoProtocolo =
+    modoNovoAgendamento || protocoloPulado || agendamentoEditando
+      ? null
+      : reservaEmProtocolo(agendamentosAtivos);
 
   // onVoltarInicio do FormularioAgendamento (etapa "dados" do fluxo
   // público): a reserva já foi gravada de verdade ao entrar em "dados" (ver
@@ -275,6 +347,69 @@ export default function AgendarPage() {
     setModoNovoAgendamento(false);
     setServicoManutencao(null);
     setConfirmacaoSinalPulada(false);
+    setProtocoloPulado(false);
+    setAgendamentoEditando(null);
+  }
+
+  // Sai da tela de protocolo/Pix rumo ao wizard limpo ("Fazer novo
+  // agendamento") ou ao painel ("Ver meus agendamentos"). Os dois zeram o
+  // resumo e rebuscam a lista, pra próxima tela nunca decidir em cima de
+  // dado velho; a diferença é só qual das duas telas fica de pé depois.
+  function recomecarFluxo({ paraOWizard }) {
+    setResumo(null);
+    setAgendamentoEditando(null);
+    setServicoManutencao(null);
+    setModoNovoAgendamento(paraOWizard);
+    setProtocoloPulado(!paraOWizard);
+    setConfirmacaoSinalPulada(!paraOWizard);
+    setAgendamentosAtivos(null);
+    setAgendamentosVersao((v) => v + 1);
+  }
+
+  // Submit final do wizard, nos dois modos (novo e edição): mostra a tela de
+  // protocolo com o que acabou de ser gravado. Sair do modo edição aqui é
+  // obrigatório — senão o "Fazer novo agendamento" da tela de protocolo
+  // voltaria pro wizard de edição da reserva antiga.
+  function concluirWizard(dados) {
+    setAgendamentoEditando(null);
+    setResumo(dados);
+  }
+
+  // Saída do modo edição SEM confirmar (voltar em tela ou físico). Rebuscar a
+  // lista é obrigatório, não zelo: o modo edição pode ter trocado o horário
+  // pelo caminho, e trocar cancela a linha antiga e cria outra
+  // (selecionarHorario). Sem isso a régua de telas decidiria em cima da lista
+  // carregada ANTES da edição e reabriria o protocolo do agendamento que
+  // acabou de ser cancelado. O agendamento em si não é tocado aqui — quem
+  // sai sem escolher outro horário volta pra ele intacto.
+  function sairDaEdicao() {
+    setAgendamentoEditando(null);
+    setAgendamentosAtivos(null);
+    setAgendamentosVersao((v) => v + 1);
+  }
+
+  // Entra em modo edição a partir de uma tela de agendamento existente (Pix,
+  // protocolo pós-submit ou protocolo reaberto). Zera `resumo` junto: ele tem
+  // precedência sobre a régua de telas lá embaixo, então sem isso a tela de
+  // protocolo continuaria por cima do wizard que acabamos de pedir.
+  function editarAgendamento({ id, servicoId, data, horario, profissionalId }) {
+    setResumo(null);
+    setAgendamentoEditando({ id, servicoId, data, horario, profissionalId });
+  }
+
+  // Depois de um cancelamento bem-sucedido (telas de Pix e de protocolo): não
+  // há mais o que mostrar sobre aquele agendamento, então volta pro estado
+  // neutro e deixa a régua de telas decidir de novo com a lista fresca —
+  // painel (se sobrou algo) ou wizard.
+  function aposCancelamento() {
+    setResumo(null);
+    setAgendamentoEditando(null);
+    setServicoManutencao(null);
+    setModoNovoAgendamento(false);
+    setProtocoloPulado(false);
+    setConfirmacaoSinalPulada(false);
+    setAgendamentosAtivos(null);
+    setAgendamentosVersao((v) => v + 1);
   }
 
   // Voltar físico (ou bubbling de onVoltarAntes do FormularioAgendamento, ver
@@ -296,12 +431,6 @@ export default function AgendarPage() {
       voltarParaIdentificacao();
     }
   }
-
-  // Foca o título da confirmação ao montar — leitores de tela anunciam o status.
-  const tituloConfirmacaoRef = useRef(null);
-  useEffect(() => {
-    if (resumo) tituloConfirmacaoRef.current?.focus();
-  }, [resumo]);
 
   // Altura ao vivo da caixa de identificação/wizard, usada como diâmetro do
   // círculo de foto de perfil — ver FotoPerfilCircular. Ref em callback (não
@@ -392,8 +521,13 @@ export default function AgendarPage() {
       }
     : undefined;
 
+  // Tela de protocolo LOGO APÓS o submit do wizard. O card em si mora em
+  // TelaSolicitacaoEnviada — o mesmo componente que a régua de telas abaixo
+  // reabre quando a cliente volta ao link dentro da janela de protocolo (ver
+  // agendamentoProtocolo). `resumo` traz o que o wizard acabou de gravar,
+  // incluindo o id da linha, que é o que habilita Editar/Cancelar aqui.
   if (resumo) {
-    const { form, servico, horario } = resumo;
+    const { form, servico, horario, agendamentoId } = resumo;
     return (
       <main
         className="flex min-h-screen flex-col bg-surface"
@@ -401,119 +535,26 @@ export default function AgendarPage() {
       >
         <Hero compacto nome={estabelecimento.nome} slug={estabelecimento.slug} />
         <div className="flex flex-1 flex-col items-center justify-center px-4 py-10">
-        <div
-          role="status"
-          className="mx-auto w-full max-w-md rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border"
-        >
-          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-100">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-              className="h-10 w-10 text-green-600"
-            >
-              <path d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-
-          <h1
-            ref={tituloConfirmacaoRef}
-            tabIndex={-1}
-            className="mt-6 text-2xl font-bold text-heading outline-none"
-          >
-            Solicitação enviada!
-          </h1>
-          <p className="mt-2 text-sm text-body">
-            Recebemos seu agendamento. Em breve o estabelecimento confirma seu horário.
-          </p>
-
-          <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-sm font-medium text-amber-700 ring-1 ring-amber-200">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-            Aguardando confirmação
-          </span>
-
-          <dl className="mt-6 space-y-3 rounded-xl bg-surface p-4 text-left text-sm ring-1 ring-border">
-            <div className="flex items-center justify-between gap-4">
-              <dt className="text-body">Serviço</dt>
-              <dd className="font-medium text-heading">
-                {servico?.nome}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <dt className="text-body">Data</dt>
-              <dd className="font-medium text-heading">{formatarData(form.data)}</dd>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <dt className="text-body">Horário</dt>
-              <dd className="font-medium text-heading">{horario}</dd>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <dt className="text-body">Nome</dt>
-              <dd className="font-medium text-heading">{form.nome}</dd>
-            </div>
-          </dl>
-
-          {estabelecimento.link_localizacao && (
-            <a
-              href={estabelecimento.link_localizacao}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
-            >
-              <MapPin className="h-5 w-5" aria-hidden="true" />
-              Ver localização
-            </a>
-          )}
-
-          <button
-            type="button"
-            onClick={() => {
-              setResumo(null);
-              setModoNovoAgendamento(false);
-              setServicoManutencao(null);
-              setAgendamentosAtivos(null);
-              setConfirmacaoSinalPulada(false);
-              setAgendamentosVersao((v) => v + 1);
-            }}
-            className={`w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover ${
-              estabelecimento.link_localizacao ? "mt-3" : "mt-6"
-            }`}
-          >
-            Fazer novo agendamento
-          </button>
-
-          <a
-            href={linkWhatsApp(
-              estabelecimento.whatsapp,
-              MENSAGEM_SOLICITACAO_ENVIADA(
-                {
-                  servico: servico?.nome,
-                  data: formatarData(form.data),
-                  horario,
-                  nome: form.nome,
-                },
-                estabelecimento.msg_solicitacao_enviada
-              )
-            )}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-card px-4 py-2.5 font-medium text-green-700 ring-1 ring-green-600 transition hover:bg-green-50"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              aria-hidden="true"
-              className="h-5 w-5"
-            >
-              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.71.306 1.263.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.885-9.885 9.885M20.52 3.449C18.24 1.245 15.24.044 12.045.044 5.463.044.102 5.404.1 11.986c0 2.096.547 4.142 1.588 5.945L0 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.582 0 11.943-5.361 11.945-11.945a11.86 11.86 0 00-3.418-8.4" />
-            </svg>
-            Falar no WhatsApp
-          </a>
-        </div>
+          <TelaSolicitacaoEnviada
+            estabelecimento={estabelecimento}
+            agendamentoId={agendamentoId ?? null}
+            servicoNome={servico?.nome}
+            data={form.data}
+            horario={horario}
+            nomeCliente={form.nome}
+            onNovoAgendamento={() => recomecarFluxo({ paraOWizard: true })}
+            onVerAgendamentos={() => recomecarFluxo({ paraOWizard: false })}
+            onEditar={() =>
+              editarAgendamento({
+                id: agendamentoId,
+                servicoId: servico?.id ?? null,
+                data: form.data,
+                horario,
+                profissionalId: resumo.profissional?.id ?? null,
+              })
+            }
+            onCancelado={aposCancelamento}
+          />
         </div>
         <RodapePagina estabelecimento={estabelecimento} nome={nomeContatoExibido} />
       </main>
@@ -575,6 +616,24 @@ export default function AgendarPage() {
             />
           ) : agendamentosAtivos === null ? (
             <p className="text-sm text-body">Carregando...</p>
+          ) : agendamentoEditando ? (
+            // Modo edição: o MESMO wizard de sempre, semeado com a reserva
+            // existente (ver agendamentoEmEdicao em FormularioAgendamento) —
+            // ele passa a tratá-la como a reserva provisória ativa, então
+            // trocar de horário cai no cancela-e-recria já testado. Os dois
+            // caminhos de "voltar" (etapa "servico" e etapa "dados") só saem
+            // do modo edição: nenhum deles toca no agendamento, que fica
+            // intacto se ela desistir.
+            <FormularioAgendamento
+              estabelecimento={estabelecimento}
+              clienteInicial={clienteIdentificado}
+              clienteEhNovo={clienteIdentificado?.clienteNovo ?? false}
+              nomeProfissionalContato={nomeContatoExibido}
+              agendamentoEmEdicao={agendamentoEditando}
+              onSucesso={concluirWizard}
+              onVoltarInicio={sairDaEdicao}
+              onVoltarAntes={sairDaEdicao}
+            />
           ) : agendamentoSinal ? (
             // Só falta o sinal: pula o painel e já abre a confirmação, com o
             // mesmo componente que o botão "Confirmar pagamento" do painel
@@ -587,19 +646,63 @@ export default function AgendarPage() {
                 estabelecimento={estabelecimento}
                 nomeProfissionalContato={nomeContatoExibido}
                 rotuloVoltar="Ver meus agendamentos"
+                agendamento={agendamentoSinal}
+                nomeCliente={clienteIdentificado.nome}
                 onConfirmado={() => {
-                  // Reflete o novo status na lista em memória: com ela sem
-                  // nenhum aguardando_sinal, a próxima render já cai no
-                  // PainelCliente sozinha.
+                  // Reflete o novo status na lista em memória — com
+                  // pendente_desde de AGORA, que é o que acabou de ser
+                  // gravado: sem nenhum aguardando_sinal sobrando, a próxima
+                  // render cai sozinha na tela de protocolo (ver
+                  // agendamentoProtocolo).
                   setAgendamentosAtivos((anterior) =>
                     (anterior ?? []).map((a) =>
-                      a.id === agendamentoSinal.id ? { ...a, status: "pendente" } : a
+                      a.id === agendamentoSinal.id
+                        ? {
+                            ...a,
+                            status: "pendente",
+                            pendente_desde: new Date().toISOString(),
+                          }
+                        : a
                     )
                   );
                 }}
                 onVoltar={() => setConfirmacaoSinalPulada(true)}
+                onEditar={() =>
+                  editarAgendamento({
+                    id: agendamentoSinal.id,
+                    servicoId: agendamentoSinal.servico_id,
+                    data: agendamentoSinal.data,
+                    horario: String(agendamentoSinal.horario).slice(0, 5),
+                    profissionalId: agendamentoSinal.profissional_id ?? null,
+                  })
+                }
+                onCancelado={aposCancelamento}
               />
             </div>
+          ) : agendamentoProtocolo ? (
+            // Solicitação recém-enviada e ainda dentro da janela de protocolo:
+            // reabre a MESMA tela de "Solicitação enviada!" do pós-submit, com
+            // Editar/Cancelar à mão e a saída pro painel. Mesmo envelope das
+            // outras sub-telas desta caixa.
+            <TelaSolicitacaoEnviada
+              estabelecimento={estabelecimento}
+              agendamentoId={agendamentoProtocolo.id}
+              servicoNome={agendamentoProtocolo.servicos?.nome ?? "Serviço"}
+              data={agendamentoProtocolo.data}
+              horario={String(agendamentoProtocolo.horario).slice(0, 5)}
+              nomeCliente={clienteIdentificado.nome}
+              onVerAgendamentos={() => setProtocoloPulado(true)}
+              onEditar={() =>
+                editarAgendamento({
+                  id: agendamentoProtocolo.id,
+                  servicoId: agendamentoProtocolo.servico_id,
+                  data: agendamentoProtocolo.data,
+                  horario: String(agendamentoProtocolo.horario).slice(0, 5),
+                  profissionalId: agendamentoProtocolo.profissional_id ?? null,
+                })
+              }
+              onCancelado={aposCancelamento}
+            />
           ) : agendamentosAtivos.length > 0 && !modoNovoAgendamento ? (
             <PainelCliente
               estabelecimento={estabelecimento}
@@ -628,7 +731,7 @@ export default function AgendarPage() {
               clienteEhNovo={clienteIdentificado?.clienteNovo ?? false}
               nomeProfissionalContato={nomeContatoExibido}
               servicoInicial={servicoManutencao}
-              onSucesso={(dados) => setResumo(dados)}
+              onSucesso={concluirWizard}
               onVoltarInicio={voltarParaIdentificacao}
               onVoltarAntes={voltarAntesDoWizard}
             />
