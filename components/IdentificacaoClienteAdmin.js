@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
+import { buscarPendentesPorTelefones } from "@/lib/agendamentosCliente";
+import ModalClientePendente from "@/components/ModalClientePendente";
 
 // Pré-passo do admin (aba Agendar) antes de montar o FormularioAgendamento —
 // identifica o cliente por NOME (diferente do público, que identifica por
@@ -24,10 +26,31 @@ import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
 //   estabelecimentoId – particiona a busca e o upsert.
 //   onIdentificado    – recebe { id, nome, telefone }, pronto pra virar
 //                       clienteInicial do FormularioAgendamento.
-export default function IdentificacaoClienteAdmin({ estabelecimentoId, onIdentificado }) {
+//   onIrParaPendentes – recebe o telefone (dígitos) da cliente escolhida no
+//                       modal de pendência; quem monta troca pra aba
+//                       Pendentes e destaca o item (ver page.js).
+export default function IdentificacaoClienteAdmin({
+  estabelecimentoId,
+  onIdentificado,
+  onIrParaPendentes,
+}) {
   const [nome, setNome] = useState("");
   const [resultados, setResultados] = useState([]);
   const [buscando, setBuscando] = useState(false);
+
+  // Telefones (dígitos) dos `resultados` que têm agendamento pendente ativo —
+  // Set devolvido por buscarPendentesPorTelefones, alimentado pela MESMA busca
+  // do dropdown (ver useEffect). Serve pro selo "pendente" ao lado do nome e
+  // pro gate de selecionarCliente. Vazio enquanto a segunda query não volta:
+  // o dropdown nunca espera por ela, então o selo aparece um instante depois
+  // dos nomes.
+  const [pendentesPorTelefone, setPendentesPorTelefone] = useState(new Set());
+
+  // Cliente clicado no dropdown que TEM pendência, segurando o modal de aviso
+  // antes de seguir pro wizard — { id, nome, telefone } enquanto aberto, null
+  // = sem modal. Não bloqueia nada: "Agendar mesmo assim" chama o
+  // onIdentificado que o clique chamaria direto (ver selecionarCliente).
+  const [clientePendente, setClientePendente] = useState(null);
 
   const [whatsapp, setWhatsapp] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -51,6 +74,7 @@ export default function IdentificacaoClienteAdmin({ estabelecimentoId, onIdentif
     const termo = nome.trim();
     if (termo.length < 2) {
       setResultados([]);
+      setPendentesPorTelefone(new Set());
       setBuscando(false);
       return;
     }
@@ -68,8 +92,25 @@ export default function IdentificacaoClienteAdmin({ estabelecimentoId, onIdentif
         .limit(8);
 
       if (!ativo) return;
-      setResultados(error ? [] : data ?? []);
+      const encontrados = error ? [] : data ?? [];
+      setResultados(encontrados);
+      // Zera junto com a lista: sem isso o Set da busca ANTERIOR sobreviveria
+      // até a nova checagem voltar, e um telefone repetido entre as duas
+      // buscas apareceria com selo antes de ter sido conferido de novo.
+      setPendentesPorTelefone(new Set());
       setBuscando(false);
+
+      // Segunda query, com os telefones que a primeira trouxe — encadeada de
+      // propósito (precisa dos whatsapps) e DEPOIS do setBuscando(false), pra
+      // não segurar o dropdown esperando o selo. Mesmo guard `ativo`: se a
+      // dona continuou digitando, o resultado desta busca é descartado.
+      const comPendencia = await buscarPendentesPorTelefones(
+        estabelecimentoId,
+        encontrados.map((cliente) => cliente.whatsapp)
+      );
+
+      if (!ativo) return;
+      setPendentesPorTelefone(comPendencia);
     }, 300);
 
     return () => {
@@ -78,8 +119,24 @@ export default function IdentificacaoClienteAdmin({ estabelecimentoId, onIdentif
     };
   }, [nome, estabelecimentoId]);
 
+  // Clique num nome do dropdown. Sem pendência (o caso comum) segue direto
+  // pro wizard como sempre; COM pendência abre o modal de aviso e adia o
+  // onIdentificado pro "Agendar mesmo assim" — o gate está aqui, e não no
+  // wizard, porque é aqui que a dona ainda pode escolher ir tratar o pendente
+  // sem ter começado nada.
   function selecionarCliente(cliente) {
-    onIdentificado({ id: cliente.id, nome: cliente.nome, telefone: cliente.whatsapp ?? "" });
+    const escolhido = {
+      id: cliente.id,
+      nome: cliente.nome,
+      telefone: cliente.whatsapp ?? "",
+    };
+
+    if (escolhido.telefone && pendentesPorTelefone.has(escolhido.telefone)) {
+      setClientePendente(escolhido);
+      return;
+    }
+
+    onIdentificado(escolhido);
   }
 
   // Upsert de fato — só chamado depois de já ter decidido que não há
@@ -173,124 +230,156 @@ export default function IdentificacaoClienteAdmin({ estabelecimentoId, onIdentif
   const mostrarNaoEncontrado = termo.length >= 2 && !buscando && resultados.length === 0;
 
   return (
-    <div className="space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border">
-      <div>
-        <label htmlFor="admin-busca-nome" className="mb-1 block text-sm font-medium text-body">
-          Nome do cliente
-        </label>
-        <input
-          id="admin-busca-nome"
-          type="text"
-          value={nome}
-          onChange={(e) => {
-            setNome(e.target.value);
-            setConflito(null);
-          }}
-          autoComplete="off"
-          placeholder="Buscar cliente pelo nome"
-          className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-        />
+    <>
+      <div className="space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border">
+        <div>
+          <label htmlFor="admin-busca-nome" className="mb-1 block text-sm font-medium text-body">
+            Nome do cliente
+          </label>
+          <input
+            id="admin-busca-nome"
+            type="text"
+            value={nome}
+            onChange={(e) => {
+              setNome(e.target.value);
+              setConflito(null);
+            }}
+            autoComplete="off"
+            placeholder="Buscar cliente pelo nome"
+            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+          />
 
-        {/* Renderizado no fluxo normal (não absolute) — não há campo abaixo
-            pra cobrir: o WhatsApp só aparece depois, no bloco "não
-            encontrado", e é mutuamente exclusivo com este dropdown. */}
-        {termo.length >= 2 && buscando && (
-          <p className="mt-1 rounded-lg bg-surface px-3 py-2 text-sm text-body">Buscando...</p>
-        )}
+          {/* Renderizado no fluxo normal (não absolute) — não há campo abaixo
+              pra cobrir: o WhatsApp só aparece depois, no bloco "não
+              encontrado", e é mutuamente exclusivo com este dropdown. */}
+          {termo.length >= 2 && buscando && (
+            <p className="mt-1 rounded-lg bg-surface px-3 py-2 text-sm text-body">Buscando...</p>
+          )}
 
-        {termo.length >= 2 && !buscando && resultados.length > 0 && (
-          <div className="mt-1 overflow-hidden rounded-lg ring-1 ring-border">
-            {resultados.map((cliente) => (
+          {termo.length >= 2 && !buscando && resultados.length > 0 && (
+            <div className="mt-1 overflow-hidden rounded-lg ring-1 ring-border">
+              {resultados.map((cliente) => {
+                // Selo âmbar de "já tem pendente" — mesmas cores do status
+                // pendente no /admin (ver classesStatus em page.js), pra ser a
+                // mesma linguagem visual do card que espera lá. Só aparece
+                // depois da segunda query voltar (ver useEffect).
+                const temPendente =
+                  !!cliente.whatsapp && pendentesPorTelefone.has(cliente.whatsapp);
+
+                return (
+                  <button
+                    key={cliente.id}
+                    type="button"
+                    onClick={() => selecionarCliente(cliente)}
+                    className="flex w-full items-center justify-between gap-2 bg-card px-3 py-2 text-left text-sm text-heading transition hover:bg-surface"
+                  >
+                    <span className="min-w-0 truncate">{cliente.nome}</span>
+                    {temPendente && (
+                      <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
+                        pendente
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {mostrarNaoEncontrado && (
+          <form onSubmit={cadastrarNovo} className="space-y-4">
+            <p className="text-sm text-body">
+              Nenhum cliente encontrado com esse nome. Informe o WhatsApp para cadastrar.
+            </p>
+
+            <div>
+              <label htmlFor="admin-busca-whatsapp" className="mb-1 block text-sm font-medium text-body">
+                WhatsApp
+              </label>
+              <input
+                id="admin-busca-whatsapp"
+                type="tel"
+                inputMode="tel"
+                value={whatsapp}
+                onChange={(e) => {
+                  setWhatsapp(e.target.value);
+                  setConflito(null);
+                  setErroFormatoWhatsapp("");
+                }}
+                onBlur={() => {
+                  if (!whatsapp.trim()) return;
+                  const validacao = validarWhatsapp(whatsapp);
+                  setErroFormatoWhatsapp(validacao.valido ? "" : validacao.erro);
+                }}
+                required
+                placeholder="(24) 99999-9999"
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+              {erroFormatoWhatsapp && (
+                <p className="mt-1 text-sm text-red-700">{erroFormatoWhatsapp}</p>
+              )}
+            </div>
+
+            {conflito ? (
+              <div className="space-y-3 rounded-lg bg-red-50 p-3 ring-1 ring-red-200">
+                <p className="text-sm font-medium text-red-700">
+                  Esse WhatsApp já está cadastrado para{" "}
+                  <strong>{conflito.nome}</strong>. Continuar vai substituir esse
+                  cadastro pelo nome digitado agora — essa ação não pode ser
+                  desfeita.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={cancelarSubstituicao}
+                    className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmarSubstituicao}
+                    disabled={enviando}
+                    className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {enviando ? "Substituindo..." : "Confirmar substituição"}
+                  </button>
+                </div>
+              </div>
+            ) : (
               <button
-                key={cliente.id}
-                type="button"
-                onClick={() => selecionarCliente(cliente)}
-                className="block w-full bg-card px-3 py-2 text-left text-sm text-heading transition hover:bg-surface"
+                type="submit"
+                disabled={enviando}
+                className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {cliente.nome}
+                {enviando ? "Cadastrando..." : "Cadastrar e continuar"}
               </button>
-            ))}
-          </div>
+            )}
+
+            {erro && (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                {erro}
+              </p>
+            )}
+          </form>
         )}
       </div>
 
-      {mostrarNaoEncontrado && (
-        <form onSubmit={cadastrarNovo} className="space-y-4">
-          <p className="text-sm text-body">
-            Nenhum cliente encontrado com esse nome. Informe o WhatsApp para cadastrar.
-          </p>
-
-          <div>
-            <label htmlFor="admin-busca-whatsapp" className="mb-1 block text-sm font-medium text-body">
-              WhatsApp
-            </label>
-            <input
-              id="admin-busca-whatsapp"
-              type="tel"
-              inputMode="tel"
-              value={whatsapp}
-              onChange={(e) => {
-                setWhatsapp(e.target.value);
-                setConflito(null);
-                setErroFormatoWhatsapp("");
-              }}
-              onBlur={() => {
-                if (!whatsapp.trim()) return;
-                const validacao = validarWhatsapp(whatsapp);
-                setErroFormatoWhatsapp(validacao.valido ? "" : validacao.erro);
-              }}
-              required
-              placeholder="(24) 99999-9999"
-              className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-            />
-            {erroFormatoWhatsapp && (
-              <p className="mt-1 text-sm text-red-700">{erroFormatoWhatsapp}</p>
-            )}
-          </div>
-
-          {conflito ? (
-            <div className="space-y-3 rounded-lg bg-red-50 p-3 ring-1 ring-red-200">
-              <p className="text-sm font-medium text-red-700">
-                Esse WhatsApp já está cadastrado para{" "}
-                <strong>{conflito.nome}</strong>. Continuar vai substituir esse
-                cadastro pelo nome digitado agora — essa ação não pode ser
-                desfeita.
-              </p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={cancelarSubstituicao}
-                  className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmarSubstituicao}
-                  disabled={enviando}
-                  className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {enviando ? "Substituindo..." : "Confirmar substituição"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="submit"
-              disabled={enviando}
-              className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {enviando ? "Cadastrando..." : "Cadastrar e continuar"}
-            </button>
-          )}
-
-          {erro && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-              {erro}
-            </p>
-          )}
-        </form>
-      )}
-    </div>
+      {/* Fora do card (irmão, não filho): o overlay é `fixed inset-0` e o
+          `space-y-4` do card dava margin-top nele, deslocando o fundo. */}
+      <ModalClientePendente
+        cliente={clientePendente}
+        onIrParaPendentes={() => {
+          onIrParaPendentes?.(clientePendente.telefone);
+          setClientePendente(null);
+        }}
+        onAgendarMesmoAssim={() => {
+          const escolhido = clientePendente;
+          setClientePendente(null);
+          onIdentificado(escolhido);
+        }}
+        onCancelar={() => setClientePendente(null)}
+      />
+    </>
   );
 }

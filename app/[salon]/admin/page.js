@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
+import ModalClientePendente from "@/components/ModalClientePendente";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
@@ -525,6 +526,23 @@ export default function AdminPage() {
   // clienteInicial do wizard assim que preenchido; zerado ao concluir um
   // agendamento (próximo cadastro recomeça do zero) e ao sair da aba.
   const [clienteParaAgendar, setClienteParaAgendar] = useState(null);
+
+  // Cliente do atalho "Novo agendamento" (aba Histórico) que TEM pendente,
+  // segurando o modal de aviso antes de abrir o wizard — mesmo papel que
+  // `clientePendente` tem dentro do IdentificacaoClienteAdmin, só que pro
+  // caminho que PULA o pré-passo. null = sem modal.
+  const [clientePendenteParaAgendar, setClientePendenteParaAgendar] = useState(null);
+
+  // Abre a aba Agendar já com a cliente escolhida (pula o pré-passo de busca
+  // por nome). Extraído porque agora tem dois disparos: o clique direto no
+  // "Novo agendamento" (cliente sem pendência) e o "Agendar mesmo assim" do
+  // modal de pendência.
+  function irParaAgendarCom(cliente) {
+    setClienteParaAgendar(cliente);
+    setAvisoAgendar("");
+    setViewPai("agendar");
+    router.push(`${pathname}?aba=agendar`, { scroll: false });
+  }
 
   useEffect(() => {
     if (!avisoAgendar) return;
@@ -1384,6 +1402,35 @@ export default function AdminPage() {
       return 0;
     });
 
+  // Essa cliente (por telefone) tem item no inbox? Fonte da checagem do
+  // atalho "Novo agendamento" do Histórico — lê o `inbox` ACIMA em vez de
+  // repetir buscarPendentesPorTelefones: aqui a lista inteira já está em
+  // memória, então a regra não é só "a mesma", é literalmente a mesma array
+  // que a aba Pendentes renderiza (zero query, zero chance de divergir). O
+  // IdentificacaoClienteAdmin não tem esse luxo — lá o componente não conhece
+  // os agendamentos, e a checagem vai pro banco.
+  function temPendenteNoInbox(telefone) {
+    return !!telefone && inbox.some((item) => item.telefone === telefone);
+  }
+
+  // "Ir para pendentes" dos modais de cliente com pendência (busca por nome e
+  // atalho do Histórico): troca de aba e reaproveita o MESMO destaque
+  // temporário do clique no bloco cinza do Painel (pendenteEmDestaqueId +
+  // refsPendentes + o useEffect que rola e limpa), resolvendo o telefone pro
+  // id do primeiro pendente da cliente — a lista já vem cronológica, então é
+  // o mais próximo. Sem item correspondente (corrida rara: a pendência foi
+  // confirmada em outra aba entre o selo e o clique) só troca de aba, sem
+  // destaque.
+  function irParaPendentesDoTelefone(telefone) {
+    const alvo = inbox.find((item) => item.telefone === telefone);
+
+    setViewPai("pendentes");
+    setDrawerAberto(false);
+    router.push(`${pathname}?aba=pendentes`, { scroll: false });
+
+    if (alvo) setPendenteEmDestaqueId(alvo.id);
+  }
+
   // Seção "Fora da janela de agendamento" (aba Pendentes): DERIVADA, mesmo
   // padrão de `inbox`/`historico` — nenhum status novo, nenhuma query extra.
   // data além de estabelecimentos.janela_agendamento_fim (ver
@@ -2191,18 +2238,25 @@ export default function AdminPage() {
                             guarda cliente_id (ver progressoFidelidadeModal
                             acima); inofensivo, FormularioAgendamento só lê
                             .nome/.telefone de clienteInicial. Não pré-preenche
-                            serviço/profissional — reagendamento é do zero. */}
+                            serviço/profissional — reagendamento é do zero.
+                            Pular o pré-passo pularia junto o aviso de cliente
+                            com pendente, então o gate é refeito aqui (ver
+                            temPendenteNoInbox) — mesmo modal, mesmas 3 ações. */}
                         <button
                           type="button"
                           onClick={() => {
-                            setClienteParaAgendar({
+                            const cliente = {
                               id: null,
                               nome: item.nome_cliente,
                               telefone: item.telefone,
-                            });
-                            setAvisoAgendar("");
-                            setViewPai("agendar");
-                            router.push(`${pathname}?aba=agendar`, { scroll: false });
+                            };
+
+                            if (temPendenteNoInbox(item.telefone)) {
+                              setClientePendenteParaAgendar(cliente);
+                              return;
+                            }
+
+                            irParaAgendarCom(cliente);
                           }}
                           className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
                         >
@@ -2314,6 +2368,7 @@ export default function AdminPage() {
                 key={agendarKey}
                 estabelecimentoId={estabelecimento.id}
                 onIdentificado={setClienteParaAgendar}
+                onIrParaPendentes={irParaPendentesDoTelefone}
               />
             ) : (
               <>
@@ -2870,6 +2925,25 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* Aviso de cliente com pendente para o atalho "Novo agendamento" do
+          Histórico. O MESMO modal aparece dentro do IdentificacaoClienteAdmin
+          pro caminho da busca por nome — só o estado que o abre é local a cada
+          um, já que os dois caminhos nunca estão na tela ao mesmo tempo. */}
+      <ModalClientePendente
+        cliente={clientePendenteParaAgendar}
+        onIrParaPendentes={() => {
+          const { telefone } = clientePendenteParaAgendar;
+          setClientePendenteParaAgendar(null);
+          irParaPendentesDoTelefone(telefone);
+        }}
+        onAgendarMesmoAssim={() => {
+          const cliente = clientePendenteParaAgendar;
+          setClientePendenteParaAgendar(null);
+          irParaAgendarCom(cliente);
+        }}
+        onCancelar={() => setClientePendenteParaAgendar(null)}
+      />
 
       {/* Popup "fora da janela": intercepta handleConfirmar quando o
           agendamento cai além de estabelecimentos.janela_agendamento_fim
