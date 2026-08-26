@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { CalendarPlus, ChevronDown, ChevronRight } from "lucide-react";
 import NavegacaoMes from "@/components/NavegacaoMes";
 import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
 import {
@@ -208,7 +208,14 @@ function ChipFidelidadeLista({ clienteId, estabelecimento }) {
 // (próximo agendamento, anamnese) + três seções retráteis carregadas sob
 // demanda (histórico completo, detalhe da anamnese, observações/anotações).
 // `cliente` já traz os campos cadastrais de buscarClientes.
-function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContatoAdmin, onVoltar }) {
+function DetalheCliente({
+  cliente,
+  estabelecimento,
+  estabelecimentoId,
+  msgContatoAdmin,
+  onVoltar,
+  onAgendarPara,
+}) {
   const router = useRouter();
   const pathname = usePathname();
 
@@ -431,6 +438,29 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-base font-semibold text-heading">{clienteAtual.nome}</h3>
           <div className="flex shrink-0 items-center gap-2">
+            {/* Atalho pro wizard da aba Agendar já com esta cliente escolhida
+                (pula o pré-passo de busca por nome). Quem navega é o /admin
+                — ver onAgendarPara em app/[salon]/admin/page.js, o MESMO
+                atalho do "Novo agendamento" do Histórico, incluindo o aviso
+                de cliente com pendente. Diferença: aqui a cliente veio da
+                tabela `clientes`, então o id vai preenchido de verdade (no
+                Histórico vai null). Some quando o pai não passa o callback. */}
+            {onAgendarPara && (
+              <button
+                type="button"
+                onClick={() =>
+                  onAgendarPara({
+                    id: clienteAtual.id,
+                    nome: clienteAtual.nome,
+                    telefone: clienteAtual.whatsapp,
+                  })
+                }
+                className="inline-flex items-center gap-1.5 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+              >
+                <CalendarPlus className="h-4 w-4" />
+                Agendar
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setAlterandoWhatsapp(true)}
@@ -849,7 +879,7 @@ function DetalheCliente({ cliente, estabelecimento, estabelecimentoId, msgContat
   );
 }
 
-export default function GerenciarClientes({ estabelecimento }) {
+export default function GerenciarClientes({ estabelecimento, onAgendarPara }) {
   const [clientes, setClientes] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -913,6 +943,7 @@ export default function GerenciarClientes({ estabelecimento }) {
         estabelecimentoId={estabelecimento.id}
         msgContatoAdmin={estabelecimento.msg_contato_admin}
         onVoltar={() => setSelecionado(null)}
+        onAgendarPara={onAgendarPara}
       />
     );
   }

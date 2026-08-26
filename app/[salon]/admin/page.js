@@ -544,6 +544,22 @@ export default function AdminPage() {
     router.push(`${pathname}?aba=agendar`, { scroll: false });
   }
 
+  // Mesmo atalho acima, mas passando antes pelo aviso de cliente com
+  // pendente: pular o pré-passo pula junto o gate que o
+  // IdentificacaoClienteAdmin faz, então ele é refeito aqui (ver
+  // temPendenteNoInbox). Usado pelos DOIS caminhos que pulam o pré-passo —
+  // o "Novo agendamento" da aba Histórico e o "Agendar" da ficha do cliente
+  // (aba Clientes, via prop onAgendarPara) — pra que os dois compartilhem o
+  // MESMO ModalClientePendente lá embaixo, sem duplicar estado nem modal.
+  function agendarComGateDePendencia(cliente) {
+    if (temPendenteNoInbox(cliente.telefone)) {
+      setClientePendenteParaAgendar(cliente);
+      return;
+    }
+
+    irParaAgendarCom(cliente);
+  }
+
   useEffect(() => {
     if (!avisoAgendar) return;
     const id = setTimeout(() => setAvisoAgendar(""), 5500);
@@ -2240,24 +2256,18 @@ export default function AdminPage() {
                             .nome/.telefone de clienteInicial. Não pré-preenche
                             serviço/profissional — reagendamento é do zero.
                             Pular o pré-passo pularia junto o aviso de cliente
-                            com pendente, então o gate é refeito aqui (ver
-                            temPendenteNoInbox) — mesmo modal, mesmas 3 ações. */}
+                            com pendente, então o gate vem junto no atalho (ver
+                            agendarComGateDePendencia) — mesmo modal, mesmas 3
+                            ações. */}
                         <button
                           type="button"
-                          onClick={() => {
-                            const cliente = {
+                          onClick={() =>
+                            agendarComGateDePendencia({
                               id: null,
                               nome: item.nome_cliente,
                               telefone: item.telefone,
-                            };
-
-                            if (temPendenteNoInbox(item.telefone)) {
-                              setClientePendenteParaAgendar(cliente);
-                              return;
-                            }
-
-                            irParaAgendarCom(cliente);
-                          }}
+                            })
+                          }
                           className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
                         >
                           <CalendarPlus className="h-4 w-4" />
@@ -2437,7 +2447,14 @@ export default function AdminPage() {
             por nome e detalhe do relacionamento (próximo agendamento, último
             atendimento, anamnese), particionado pelo estabelecimento resolvido. */}
         {!carregando && !erro && viewPai === "clientes" && (
-          <GerenciarClientes estabelecimento={estabelecimento} />
+          <GerenciarClientes
+            estabelecimento={estabelecimento}
+            // "Agendar" da ficha do cliente: mesmo atalho do "Novo
+            // agendamento" do Histórico (pula o pré-passo de busca por nome e
+            // passa pelo aviso de pendente), só que aqui o cliente vem da
+            // tabela `clientes`, então leva o id REAL — ver DetalheCliente.
+            onAgendarPara={agendarComGateDePendencia}
+          />
         )}
 
         {/* Regras de negócio: config do salão (escolha_profissional, sinal/Pix
@@ -2926,10 +2943,13 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Aviso de cliente com pendente para o atalho "Novo agendamento" do
-          Histórico. O MESMO modal aparece dentro do IdentificacaoClienteAdmin
-          pro caminho da busca por nome — só o estado que o abre é local a cada
-          um, já que os dois caminhos nunca estão na tela ao mesmo tempo. */}
+      {/* Aviso de cliente com pendente para os atalhos que pulam o pré-passo:
+          "Novo agendamento" (Histórico) e "Agendar" (ficha do cliente, aba
+          Clientes) — os dois chegam aqui por agendarComGateDePendencia, então
+          é um modal só. O MESMO modal aparece dentro do
+          IdentificacaoClienteAdmin pro caminho da busca por nome — só o estado
+          que o abre é local a cada um, já que os dois caminhos nunca estão na
+          tela ao mesmo tempo. */}
       <ModalClientePendente
         cliente={clientePendenteParaAgendar}
         onIrParaPendentes={() => {
