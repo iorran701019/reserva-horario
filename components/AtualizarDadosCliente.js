@@ -7,6 +7,7 @@ import {
   paraExibicaoNascimento,
   validarNascimento,
 } from "@/lib/nascimentoValidacao";
+import { mensagemErroTrocaWhatsapp } from "@/lib/checagemWhatsapp";
 import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
 
 // Edição dos dados do cliente, reaproveitando a MESMA estrutura de campos e
@@ -264,7 +265,10 @@ export default function AtualizarDadosCliente({
 
       if (erroWhatsapp) {
         setEnviando(false);
-        setErro(erroWhatsapp.message);
+        // Nunca o `message` cru: número já usado por outro cadastro volta
+        // como 23505 da UNIQUE (estabelecimento_id, whatsapp) e vazava o
+        // texto da constraint na tela do cliente.
+        setErro(mensagemErroTrocaWhatsapp(erroWhatsapp));
         return;
       }
     }

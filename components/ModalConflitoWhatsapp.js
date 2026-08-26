@@ -1,5 +1,6 @@
 "use client";
 
+import { useCliqueForaBackdrop } from "@/lib/cliqueFora";
 import { linkWhatsApp, MENSAGEM_FALHA_CADASTRO } from "@/lib/whatsapp";
 
 // Os dois modais da checagem de WhatsApp já cadastrado (ver
@@ -27,6 +28,12 @@ export default function ModalConflitoWhatsapp({
   onNegar,
   onFecharContato,
 }) {
+  // Mesma guarda de backdrop dos outros modais (ver lib/cliqueFora.js): sem
+  // ela, um arrasto que sai do card conta como clique-fora. Aqui não há campo
+  // de texto pra selecionar, então é consistência, não bug ativo.
+  const cliqueForaConflito = useCliqueForaBackdrop(onNegar);
+  const cliqueForaContato = useCliqueForaBackdrop(onFecharContato);
+
   return (
     <>
       {clienteConflitante && (
@@ -35,7 +42,7 @@ export default function ModalConflitoWhatsapp({
           aria-modal="true"
           aria-labelledby="titulo-conflito-whatsapp"
           className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
-          onClick={onNegar}
+          {...cliqueForaConflito}
         >
           <div
             className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
@@ -81,7 +88,7 @@ export default function ModalConflitoWhatsapp({
           aria-modal="true"
           aria-labelledby="titulo-contato-whatsapp"
           className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
-          onClick={onFecharContato}
+          {...cliqueForaContato}
         >
           <div
             className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"

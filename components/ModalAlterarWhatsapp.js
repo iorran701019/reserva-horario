@@ -2,6 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import {
+  buscarClienteConflitante,
+  mensagemErroTrocaWhatsapp,
+  MSG_WHATSAPP_DUPLICADO,
+} from "@/lib/checagemWhatsapp";
+import { useCliqueForaBackdrop } from "@/lib/cliqueFora";
 import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
 
 // Popup "Alterar WhatsApp" do detalhe do cliente (GerenciarClientes.js), em
@@ -40,6 +46,11 @@ export default function ModalAlterarWhatsapp({
   // real (onBlur) — separado de `erro`, que segue cobrindo divergência com
   // confirmação/reconfirmação e falhas da RPC.
   const [erroFormatoNovoWhatsapp, setErroFormatoNovoWhatsapp] = useState("");
+
+  // Clique no backdrop fecha; arrasto de seleção que começa dentro do card e
+  // termina fora, não (ver lib/cliqueFora.js). Antes do `return null` abaixo
+  // porque é hook — tem que rodar em toda renderização.
+  const cliqueFora = useCliqueForaBackdrop(onFechar);
 
   useEffect(() => {
     setPasso("numero");
@@ -94,6 +105,28 @@ export default function ModalAlterarWhatsapp({
     setSalvando(true);
     setErro("");
 
+    // Duplicidade ANTES da RPC: o UNIQUE (estabelecimento_id, whatsapp) de
+    // `clientes` já barra a troca, mas o 23505 sai da função SECURITY
+    // DEFINER como texto de constraint. Checando aqui dá pra dizer de QUEM
+    // é o número. `cliente.id` fica de fora da busca — o próprio registro em
+    // edição nunca é conflito consigo mesmo.
+    const conflitante = await buscarClienteConflitante(
+      estabelecimentoId,
+      whatsappValidado,
+      cliente.id
+    );
+
+    if (conflitante) {
+      setSalvando(false);
+      const nomeConflitante = String(conflitante.nome ?? "").trim();
+      setErro(
+        nomeConflitante
+          ? `Esse WhatsApp já pertence a ${nomeConflitante}.`
+          : MSG_WHATSAPP_DUPLICADO
+      );
+      return;
+    }
+
     const { error } = await supabase.rpc("atualizar_whatsapp_cliente", {
       p_cliente_id: cliente.id,
       p_novo_whatsapp: whatsappValidado,
@@ -103,7 +136,10 @@ export default function ModalAlterarWhatsapp({
     setSalvando(false);
 
     if (error) {
-      setErro(`Não foi possível alterar o WhatsApp: ${error.message}`);
+      // Rede de segurança: corrida entre a checagem acima e o save (ou a
+      // checagem tendo falhado — buscarClienteConflitante trata erro como
+      // "não encontrado"). Aqui não há nome pra citar, a mensagem é genérica.
+      setErro(mensagemErroTrocaWhatsapp(error));
       return;
     }
 
@@ -116,7 +152,7 @@ export default function ModalAlterarWhatsapp({
       aria-modal="true"
       aria-labelledby="titulo-alterar-whatsapp"
       className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
-      onClick={onFechar}
+      {...cliqueFora}
     >
       <div
         className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
@@ -144,6 +180,10 @@ export default function ModalAlterarWhatsapp({
                 onChange={(e) => {
                   setNovoWhatsapp(e.target.value);
                   setErroFormatoNovoWhatsapp("");
+                  // Some também com o erro do passo anterior (divergência de
+                  // confirmação, número duplicado): ele fala de um número que
+                  // não é mais o que está no campo.
+                  setErro("");
                 }}
                 onBlur={() => {
                   if (!novoWhatsapp.trim()) return;
@@ -235,7 +275,10 @@ export default function ModalAlterarWhatsapp({
               </button>
               <button
                 type="button"
-                onClick={() => setPasso("numero")}
+                onClick={() => {
+                  setErro("");
+                  setPasso("numero");
+                }}
                 disabled={salvando}
                 className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
               >
