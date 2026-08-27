@@ -1116,6 +1116,37 @@ export default function GerenciarServicos({ estabelecimento }) {
     setStatusFotoCategoria("salvo");
   }
 
+  // Espelha removerFotoPerfil de ConfiguracoesSalao: limpa os três campos
+  // juntos pra a categoria voltar ao estado "nunca fotografada" (o próximo
+  // upload renasce em ZOOM_MINIMO, ver o `categoria.foto_zoom == null` em
+  // handleFotoCategoriaChange). O arquivo fica no bucket 'fotos-categorias'
+  // — caminho fixo por categoria + upsert, órfão não atrapalha nada.
+  async function removerFotoCategoria(categoria) {
+    if (!window.confirm("Remover esta foto?")) return;
+
+    setStatusFotoCategoria("salvando");
+    setErroFotoCategoria("");
+
+    const { error } = await supabase
+      .from("categorias_servico")
+      .update({ foto_url: null, foto_posicao: null, foto_zoom: null })
+      .eq("id", categoria.id);
+
+    if (error) {
+      setStatusFotoCategoria("");
+      setErroFotoCategoria(`Não foi possível remover a foto: ${error.message}`);
+      return;
+    }
+
+    patchCategoria(categoria.id, {
+      foto_url: null,
+      foto_posicao: null,
+      foto_zoom: null,
+    });
+
+    setStatusFotoCategoria("salvo");
+  }
+
   // Move a categoria uma posição pra cima (-1) ou baixo (+1) e recompacta a
   // ordem de TODAS as categorias (1..N) a partir da nova sequência — em vez
   // de só trocar o `ordem` de duas linhas soltas, evita furos/duplicatas se a
@@ -2785,6 +2816,19 @@ export default function GerenciarServicos({ estabelecimento }) {
                               >
                                 Nenhuma foto enviada ainda
                               </div>
+                            </div>
+                          )}
+
+                          {categoria.foto_url && (
+                            <div className="-mt-4 mb-6 flex justify-center">
+                              <button
+                                type="button"
+                                onClick={() => removerFotoCategoria(categoria)}
+                                disabled={enviandoFoto}
+                                className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Remover foto
+                              </button>
                             </div>
                           )}
 
