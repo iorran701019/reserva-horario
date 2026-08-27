@@ -92,6 +92,15 @@ export default function BlocoConfirmacaoPix({
   // nova precisa ser marcada de novo. Ref, não state: só serve pra decidir se
   // o próximo update deve rodar, nunca muda o que está na tela.
   const marcadoPendenteParaRef = useRef(jaPendente ? agendamentoId : null);
+  // Dois inputs de arquivo separados, um por tipo, em vez de um só com
+  // accept="image/*,application/pdf": no Android (confirmado em POCO X7, e o
+  // padrão se repete em outros Xiaomi/MIUI) o accept misto faz o seletor
+  // nativo esconder a Galeria/Fotos e oferecer só Câmera e Arquivos. Com
+  // accept="image/*" sozinho o seletor de fotos volta. Escondidos e
+  // disparados por .click() nos dois botões visíveis — o input nativo não é
+  // estilizável e destoaria do bloco.
+  const inputImagemRef = useRef(null);
+  const inputPdfRef = useRef(null);
 
   // Leva o agendamento de "aguardando_sinal" pra "pendente" — o único write
   // de status do fluxo público do sinal. Chamado pelos DOIS gestos que
@@ -280,30 +289,52 @@ export default function BlocoConfirmacaoPix({
           </button>
         </div>
 
-        {/* Upload do comprovante. Label estilizada de botão + input escondido:
-            o input de arquivo nativo não é estilizável e destoaria do bloco.
-            Reenviar é permitido (upsert no mesmo caminho) — a cliente que mandou
-            o print errado só escolhe outro arquivo. */}
+        {/* Upload do comprovante. Dois botões, um por tipo de arquivo, cada um
+            disparando o SEU input escondido (ver inputImagemRef/inputPdfRef):
+            os dois caem no mesmo handleComprovanteChange, o que muda é só o
+            accept do seletor nativo. Reenviar é permitido (upsert no mesmo
+            caminho) — a cliente que mandou o print errado só escolhe outro
+            arquivo. */}
         <div className="rounded-lg bg-card px-3 py-2 ring-1 ring-border">
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="file"
-              accept="image/*,application/pdf"
-              onChange={handleComprovanteChange}
+          <input
+            ref={inputImagemRef}
+            type="file"
+            accept="image/*"
+            onChange={handleComprovanteChange}
+            disabled={enviandoComprovante}
+            className="hidden"
+          />
+          <input
+            ref={inputPdfRef}
+            type="file"
+            accept="application/pdf"
+            onChange={handleComprovanteChange}
+            disabled={enviandoComprovante}
+            className="hidden"
+          />
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => inputImagemRef.current?.click()}
               disabled={enviandoComprovante}
-              className="sr-only"
-            />
-            <span className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover">
-              {enviandoComprovante
-                ? "Enviando..."
-                : nomeComprovante
-                  ? "Trocar comprovante"
-                  : "Anexar comprovante"}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-sm text-body">
-              {nomeComprovante || "Imagem ou PDF (opcional)"}
-            </span>
-          </label>
+              className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {enviandoComprovante ? "Enviando..." : "Enviar print/foto"}
+            </button>
+            <button
+              type="button"
+              onClick={() => inputPdfRef.current?.click()}
+              disabled={enviandoComprovante}
+              className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Enviar PDF
+            </button>
+          </div>
+
+          <p className="mt-1.5 min-w-0 truncate text-sm text-body">
+            {nomeComprovante || "Imagem ou PDF (opcional)"}
+          </p>
 
           {nomeComprovante && !erroComprovante && (
             <p className="mt-1.5 text-sm text-green-700">
