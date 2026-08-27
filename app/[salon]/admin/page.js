@@ -159,6 +159,10 @@ function rotuloStatus(status) {
 const LIMITE_BADGE_EXPIRA_HORAS = 48;
 const LIMITE_BADGE_EXPIRA_VERMELHO_HORAS = 18;
 
+// Quantos "Agendamentos confirmados" o card de pendente mostra antes de
+// truncar o resto atrás do "+N outros" (ver inbox mais abaixo).
+const MAX_CONFIRMADOS_VISIVEIS = 2;
+
 // Horas restantes até a reserva provisória do item expirar
 // (created_at + estabelecimentos.reserva_provisoria_expira_horas), ou null se
 // o salão não configurou expiração (coluna nula) — nesse caso nenhum badge
@@ -436,6 +440,23 @@ export default function AdminPage() {
   // sozinho (ver useEffect abaixo) — não precisa de "consumido" explícito
   // porque não há componente filho separado pra notificar de volta.
   const [pendenteEmDestaqueId, setPendenteEmDestaqueId] = useState(null);
+
+  // Ids dos pendentes cujo bloco "Agendamentos confirmados" está expandido.
+  // Por padrão a lista mostra só os 2 primeiros itens; o resto fica atrás do
+  // "+N outros". Set (não boolean) porque o toggle vive dentro do inbox.map e
+  // cada card tem o seu — e puramente de UI: não persiste nada, some no
+  // reload de propósito (o estado padrão truncado é o desejado ao voltar).
+  const [pendentesComListaExpandida, setPendentesComListaExpandida] = useState(
+    () => new Set()
+  );
+
+  const alternarListaConfirmados = (id) =>
+    setPendentesComListaExpandida((atual) => {
+      const proximo = new Set(atual);
+      if (proximo.has(id)) proximo.delete(id);
+      else proximo.add(id);
+      return proximo;
+    });
 
   // Refs dos <li> da lista de Pendentes (inbox), indexados por item.id — alvo
   // do scrollIntoView acima. Mapa (não array) porque a lista é dinâmica e
@@ -1778,6 +1799,18 @@ export default function AdminPage() {
                     fimDoAtendimento(a) >= agora
                 );
 
+                // Cliente fiel pode ter uma fila longa de confirmados, e o
+                // card do pendente vira uma parede de linhas. Mostra só as 2
+                // primeiras (as mais próximas, já que `agendamentos` vem
+                // ordenado) e esconde o resto atrás do "+N outros".
+                const listaConfirmadosExpandida =
+                  pendentesComListaExpandida.has(item.id);
+                const outrosAgendamentosVisiveis = listaConfirmadosExpandida
+                  ? outrosAgendamentos
+                  : outrosAgendamentos.slice(0, MAX_CONFIRMADOS_VISIVEIS);
+                const confirmadosOcultos =
+                  outrosAgendamentos.length - MAX_CONFIRMADOS_VISIVEIS;
+
                 // Contador "Expira em Xh" (ver horasRestantesReserva acima):
                 // null enquanto o salão não configurou expiração, ou fora da
                 // janela de 48h. mostrarBadgeExpira controla só a exibição; o
@@ -1840,14 +1873,21 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-body">
+                  {/* Dados do agendamento pendente: é o que a dona precisa ler
+                      primeiro pra decidir confirmar ou não, então ganha caixa
+                      âmbar mais saturada que o fundo do card (amber-50/60) e
+                      um ring fino. O bloco "Agendamentos confirmados" abaixo é
+                      o oposto — cinza claro, informação auxiliar. */}
+                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg bg-amber-100/70 px-3 py-2 text-sm text-body ring-1 ring-amber-200">
                     <span className="inline-flex min-w-0 items-center gap-1.5">
                       <span className="text-body">Data</span>
-                      <span className="font-medium">{formatarData(item.data)}</span>
+                      <span className="font-semibold text-heading">
+                        {formatarData(item.data)}
+                      </span>
                     </span>
                     <span className="inline-flex min-w-0 items-center gap-1.5">
                       <span className="text-body">Horário</span>
-                      <span className="font-medium">
+                      <span className="font-semibold text-heading">
                         {formatarHorario(item.horario)}
                       </span>
                     </span>
@@ -1857,7 +1897,7 @@ export default function AdminPage() {
                         o nome quebrar dentro do card em vez de estourar a borda. */}
                     <span className="flex min-w-0 basis-full flex-col items-start gap-0.5 sm:basis-auto sm:flex-row sm:items-center sm:gap-1.5">
                       <span className="text-body">Serviço</span>
-                      <span className="min-w-0 break-words font-medium">
+                      <span className="min-w-0 break-words font-semibold text-heading">
                         {item.servicos?.nome ?? "—"}
                       </span>
                     </span>
@@ -1921,7 +1961,12 @@ export default function AdminPage() {
                       abrir modal — some sozinho quando não há nenhum, pra não
                       poluir o card na maioria dos casos. */}
                   {outrosAgendamentos.length > 0 && (
-                    <div className="mt-3 rounded-lg bg-amber-100/60 px-3 py-2 text-xs text-body">
+                    // Cinza claro (não mais âmbar): informação auxiliar, não
+                    // deve competir com a caixa âmbar dos dados do pendente
+                    // acima. Mais claro que o bg-stone-200 da bandeja de
+                    // agrupamento por cliente, pra continuar lendo como algo
+                    // DENTRO do card, e não como um segundo nível de bandeja.
+                    <div className="mt-3 rounded-lg bg-stone-100 px-3 py-2 text-xs text-body">
                       <p className="font-bold text-heading">
                         Agendamentos confirmados
                       </p>
@@ -1929,7 +1974,7 @@ export default function AdminPage() {
                           "Ver" em área de toque cheia, linhas coladas viram
                           alvo ambíguo no dedo. */}
                       <ul className="mt-2 space-y-2">
-                        {outrosAgendamentos.map((outro) => (
+                        {outrosAgendamentosVisiveis.map((outro) => (
                           <li
                             key={outro.id}
                             className="flex flex-wrap items-center gap-x-3 gap-y-1"
@@ -1961,6 +2006,24 @@ export default function AdminPage() {
                           </li>
                         ))}
                       </ul>
+                      {/* Toggle da truncagem. Mesma altura de toque (44px)
+                          dos badges "Ver" da lista acima, mas em tom neutro:
+                          é navegação dentro do bloco auxiliar, não uma ação
+                          sobre o agendamento. */}
+                      {confirmadosOcultos > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => alternarListaConfirmados(item.id)}
+                          aria-expanded={listaConfirmadosExpandida}
+                          className="mt-1 inline-flex min-h-11 items-center text-xs font-medium text-body underline underline-offset-2 transition hover:text-heading"
+                        >
+                          {listaConfirmadosExpandida
+                            ? "Mostrar menos"
+                            : `+${confirmadosOcultos} ${
+                                confirmadosOcultos === 1 ? "outro" : "outros"
+                              }`}
+                        </button>
+                      )}
                     </div>
                   )}
 
