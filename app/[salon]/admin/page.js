@@ -1891,11 +1891,13 @@ export default function AdminPage() {
                         {formatarHorario(item.horario)}
                       </span>
                     </span>
-                    {/* Serviço pode ter nome longo: no mobile empilha (rótulo em
-                        cima, valor embaixo) e ocupa a linha inteira; a partir de
-                        sm volta a ficar lado a lado. min-w-0 + break-words deixam
-                        o nome quebrar dentro do card em vez de estourar a borda. */}
-                    <span className="flex min-w-0 basis-full flex-col items-start gap-0.5 sm:basis-auto sm:flex-row sm:items-center sm:gap-1.5">
+                    {/* Serviço pode ter nome longo: no mobile ocupa a linha
+                        inteira (basis-full), mas rótulo e valor ficam lado a
+                        lado como em Data/Horário — só quebram pra linha de
+                        baixo quando não couberem, sem gap vertical extra.
+                        min-w-0 + break-words deixam o nome quebrar dentro do
+                        card em vez de estourar a borda. */}
+                    <span className="flex min-w-0 basis-full flex-wrap items-center gap-x-1.5 gap-y-0 sm:basis-auto">
                       <span className="text-body">Serviço</span>
                       <span className="min-w-0 break-words font-semibold text-heading">
                         {item.servicos?.nome ?? "—"}
@@ -2006,16 +2008,17 @@ export default function AdminPage() {
                           </li>
                         ))}
                       </ul>
-                      {/* Toggle da truncagem. Mesma altura de toque (44px)
-                          dos badges "Ver" da lista acima, mas em tom neutro:
-                          é navegação dentro do bloco auxiliar, não uma ação
-                          sobre o agendamento. */}
+                      {/* Toggle da truncagem. Mesmo formato de badge dos "Ver"
+                          da lista acima (pílula, área de toque de 44px), mas
+                          em cinza em vez do azul: só mostra/esconde linhas que
+                          já estão aqui, não navega pra lugar nenhum — o azul
+                          fica reservado pra ação que troca de tela. */}
                       {confirmadosOcultos > 0 && (
                         <button
                           type="button"
                           onClick={() => alternarListaConfirmados(item.id)}
                           aria-expanded={listaConfirmadosExpandida}
-                          className="mt-1 inline-flex min-h-11 items-center text-xs font-medium text-body underline underline-offset-2 transition hover:text-heading"
+                          className="mt-1 inline-flex min-h-11 min-w-16 items-center justify-center rounded-full bg-stone-200 px-3.5 py-1.5 text-xs text-stone-700 ring-1 ring-stone-300 transition hover:bg-stone-300"
                         >
                           {listaConfirmadosExpandida
                             ? "Mostrar menos"
