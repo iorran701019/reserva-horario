@@ -920,6 +920,53 @@ export default function ConfiguracoesSalao({
     setStatusFotoPosicao("salvo");
   }
 
+  // Desvincula a foto do salão: limpa url + posição e devolve o zoom ao
+  // neutro, pra não herdar um enquadramento calculado pra OUTRA imagem.
+  //
+  // O zoom vai a ZOOM_MINIMO, e NÃO a null como os outros dois, porque
+  // foto_perfil_zoom tem NOT NULL no banco (um null aqui volta 23502 e a
+  // remoção inteira falha). Só url e posicao são nullable.
+  //
+  // E é ZOOM_MINIMO em vez de 1 porque, com a coluna não-nula, o
+  // `temZoomPerfilSalvo` do próximo carregamento volta true e o upload
+  // seguinte NÃO reaplica o mínimo (ver handleFotoPerfilChange) — gravando 1
+  // aqui, uma foto enviada depois de um reload nasceria sem curso nenhum nos
+  // sliders de posição, que é exatamente o que ZOOM_MINIMO existe pra evitar.
+  //
+  // O arquivo NÃO é apagado do bucket, de propósito: o caminho é fixo
+  // (`<id>/perfil.<ext>`) e o upload usa upsert, então o órfão não colide
+  // com envio futuro — e 'fotos-perfil' só tem policy de select/insert/update
+  // (ver sql/fotos_perfil_storage_bucket.sql), delete falharia por RLS.
+  async function removerFotoPerfil() {
+    if (!window.confirm("Remover esta foto?")) return;
+
+    setStatusFotoPosicao("salvando");
+    setErroFoto("");
+
+    const { error } = await supabase
+      .from("estabelecimentos")
+      .update({
+        foto_perfil_url: null,
+        foto_perfil_posicao: null,
+        foto_perfil_zoom: ZOOM_MINIMO,
+      })
+      .eq("id", estabelecimento.id);
+
+    if (error) {
+      setStatusFotoPosicao("");
+      setErroFoto(`Não foi possível remover a foto: ${error.message}`);
+      return;
+    }
+
+    setFotoPerfilUrl(null);
+    setTemZoomPerfilSalvo(false);
+    setFotoPerfilZoom(ZOOM_MINIMO);
+    setFotoPerfilX(50);
+    setFotoPerfilY(50);
+
+    setStatusFotoPosicao("salvo");
+  }
+
   // Redireciona pro consentimento do Google (não é fetch — a página inteira
   // navega pro domínio do Google e volta via app/api/google-calendar/callback).
   // `state` carrega o estabelecimento_id, pra rota de callback saber pra qual
@@ -2093,6 +2140,19 @@ export default function ConfiguracoesSalao({
                 >
                   Nenhuma foto enviada ainda
                 </div>
+              </div>
+            )}
+
+            {fotoPerfilUrl && (
+              <div className="-mt-4 mb-6 flex justify-center">
+                <button
+                  type="button"
+                  onClick={removerFotoPerfil}
+                  disabled={enviandoFoto}
+                  className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Remover foto
+                </button>
               </div>
             )}
 
