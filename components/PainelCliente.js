@@ -68,11 +68,18 @@ function rotuloHistoricoItem(item) {
 //                       serviço pré-selecionado).
 //   nomeProfissionalContato – mesmo texto usado no bloco do sinal do
 //                       FormularioAgendamento; repassado ao ConfirmacaoSinal.
+//   onEditarAgendamento – opcional; recebe { id, servicoId, data, horario,
+//                       profissionalId } e reabre o wizard semeado com essa
+//                       reserva. Mesmo contrato de `editarAgendamento` em
+//                       app/[salon]/page.js, que é quem passa esta prop —
+//                       sem ela o "Editar agendamento" simplesmente não
+//                       aparece na sub-tela do sinal.
 export default function PainelCliente({
   estabelecimento,
   cliente,
   onNovoAgendamento,
   nomeProfissionalContato,
+  onEditarAgendamento,
 }) {
   const [agendamentos, setAgendamentos] = useState(null);
   const [historico, setHistorico] = useState(null);
@@ -225,12 +232,22 @@ export default function PainelCliente({
   }
 
   if (confirmandoSinalId) {
+    // A linha completa da lista, não só o id: Cancelar precisa de data/horário
+    // pra montar o aviso no WhatsApp e Editar precisa de servico_id/
+    // profissional_id pra semear o wizard — tudo já vem de
+    // buscarAgendamentosAtivos, então não há query extra nem mudança no
+    // formato do state (`confirmandoSinalId` segue sendo o id).
+    const itemSinal =
+      (agendamentos ?? []).find((a) => a.id === confirmandoSinalId) ?? null;
+
     return (
       <div className="space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border">
         <ConfirmacaoSinal
           agendamentoId={confirmandoSinalId}
           estabelecimento={estabelecimento}
           nomeProfissionalContato={nomeProfissionalContato}
+          agendamento={itemSinal}
+          nomeCliente={clienteAtual.nome}
           onConfirmado={() => {
             setAgendamentos((anterior) =>
               anterior.map((a) =>
@@ -240,6 +257,28 @@ export default function PainelCliente({
             fecharConfirmandoSinal();
           }}
           onVoltar={fecharConfirmandoSinal}
+          onEditar={
+            onEditarAgendamento && itemSinal
+              ? () =>
+                  onEditarAgendamento({
+                    id: itemSinal.id,
+                    servicoId: itemSinal.servico_id,
+                    data: itemSinal.data,
+                    horario: String(itemSinal.horario).slice(0, 5),
+                    profissionalId: itemSinal.profissional_id ?? null,
+                  })
+              : null
+          }
+          onCancelado={() => {
+            // O update + o aviso no WhatsApp já aconteceram dentro do
+            // ConfirmacaoSinal, pelo mesmo cancelarAgendamentoCliente que a
+            // lista usa — aqui sobra só o que é do painel: tirar a linha
+            // cancelada e voltar pra lista (mesmo desfecho de handleCancelar).
+            setAgendamentos((anterior) =>
+              (anterior ?? []).filter((a) => a.id !== confirmandoSinalId)
+            );
+            fecharConfirmandoSinal();
+          }}
         />
       </div>
     );

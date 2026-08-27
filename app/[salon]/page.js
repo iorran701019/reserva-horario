@@ -712,6 +712,7 @@ export default function AgendarPage() {
                 setModoNovoAgendamento(true);
               }}
               nomeProfissionalContato={nomeContatoExibido}
+              onEditarAgendamento={editarAgendamento}
             />
           ) : anamneseNecessaria === null ? (
             <p className="text-sm text-body">Carregando...</p>
