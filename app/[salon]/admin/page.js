@@ -1788,7 +1788,14 @@ export default function AdminPage() {
                         {item.servicos?.nome ?? "—"}
                       </span>
                     </span>
-                    {item.profissional_nome && (
+                    {/* Com 0 ou 1 profissional ativo o salão é a própria dona:
+                        dizer "Profissional: Fulana" em todo card é ruído, já
+                        que não há outra opção possível. Mesmo critério de
+                        rotuloAba/iconeAba (a aba vira "Horários"). null =
+                        ainda carregando a contagem, mantém o comportamento
+                        padrão de mostrar. */}
+                    {item.profissional_nome &&
+                      !(qtdProfissionaisAtivos != null && qtdProfissionaisAtivos <= 1) && (
                       <span className="inline-flex min-w-0 items-center gap-1.5">
                         <span className="text-body">Profissional</span>
                         <span className="min-w-0 break-words font-medium">
@@ -1843,7 +1850,7 @@ export default function AdminPage() {
                   {outrosAgendamentos.length > 0 && (
                     <div className="mt-3 rounded-lg bg-amber-100/60 px-3 py-2 text-xs text-body">
                       <p className="font-bold text-heading">
-                        Outros agendamentos CONFIRMADOS deste cliente:
+                        Agendamentos confirmados
                       </p>
                       <ul className="mt-1 space-y-0.5">
                         {outrosAgendamentos.map((outro) => (
