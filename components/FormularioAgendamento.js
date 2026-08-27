@@ -3050,16 +3050,23 @@ export default function FormularioAgendamento({
         )}
 
         {/* Etapa 3 — Dados: nome, WhatsApp e confirmação. Com clienteInicial
-            (já identificado antes do wizard), os inputs somem e viram um
-            resumo — os valores já estão em form.nome/form.telefone. */}
+            (já identificado antes do wizard), os inputs somem — os valores já
+            estão em form.nome/form.telefone. */}
         {etapa === "dados" && (
           <>
-            {clienteInicial ? (
+            {/* Confirmação de pra QUEM é o agendamento. Some quando há sinal:
+                nesse caso o resumo do BlocoConfirmacaoPix (logo abaixo, na
+                mesma caixa cinza) já abre com o nome, e as duas linhas juntas
+                eram repetição. Sem sinal não existe bloco de Pix nenhum — aqui
+                é o único lugar que mostra o nome. */}
+            {clienteInicial && !precisaSinal && (
               <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
                 Agendando para{" "}
                 <span className="font-medium text-heading">{form.nome}</span>.
               </p>
-            ) : (
+            )}
+
+            {!clienteInicial && (
               <>
                 {/* /admin nunca chega aqui: o /admin sempre monta este wizard
                     com clienteInicial já preenchido (ver

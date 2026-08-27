@@ -43,9 +43,11 @@ function caminhoComprovante(agendamentoId, arquivo) {
 //                     o comprovante pertence. No wizard é a reserva já
 //                     gravada ao entrar em "dados"; null desabilita o upload
 //                     e o checkbox, o resto do bloco segue.
-//   nomeCliente / servicoNome / data / horario – resumo em uma linha no topo
-//                     do bloco, pra cliente conferir O QUE está pagando antes
-//                     de mandar o Pix. TODOS opcionais e independentes: o que
+//   nomeCliente / servicoNome / data / horario – resumo em uma linha na caixa
+//                     cinza ACIMA do bloco âmbar, pra cliente conferir O QUE
+//                     está pagando antes de mandar o Pix (mesma caixa que o
+//                     wizard usava pro "Agendando para", que saiu daqui em
+//                     diante). TODOS opcionais e independentes: o que
 //                     não vier some da linha (nada de "undefined" em tela), e
 //                     sem nenhum deles a linha inteira não é renderizada.
 //                     `data` é o ISO cru ("YYYY-MM-DD"), formatado aqui.
@@ -145,8 +147,8 @@ export default function BlocoConfirmacaoPix({
     await marcarPendente();
   }
 
-  // Linha de resumo do topo: "Serviço · 27/08 · quarta-feira às 14:00 ·
-  // Nome". Data e horário andam JUNTOS num único trecho porque formatarData
+  // Linha de resumo do topo: "Nome · Serviço · 27/08 · quarta-feira às
+  // 14:00". Data e horário andam JUNTOS num único trecho porque formatarData
   // já traz um "·" dentro (dd/mm · dia da semana) e separar os dois com outro
   // "·" viraria uma fileira de pontos. Cada trecho ausente é descartado em
   // vez de virar vazio — daí o filter, e não um template fixo; o "às" também
@@ -157,7 +159,7 @@ export default function BlocoConfirmacaoPix({
   const quando = [dataFormatada, horarioCurto && horarioTrecho]
     .filter(Boolean)
     .join(" ");
-  const resumo = [servicoNome, quando, nomeCliente].filter(Boolean).join(" · ");
+  const resumo = [nomeCliente, servicoNome, quando].filter(Boolean).join(" · ");
 
   async function copiarChavePix() {
     try {
@@ -241,101 +243,107 @@ export default function BlocoConfirmacaoPix({
   }
 
   return (
-    <div className="space-y-3 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
+    // Fragmento, não um wrapper: o resumo é uma caixa cinza IRMÃ do bloco
+    // âmbar, não parte dele — o âmbar é só o aviso do Pix. Os dois pais
+    // (wizard e ConfirmacaoSinal) empilham por space-y no container deles, que
+    // é o que separa as duas caixas.
+    <>
       {resumo && (
-        <p className="border-b border-amber-200 pb-2 text-sm font-semibold text-amber-900">
+        <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
           {resumo}
         </p>
       )}
 
-      <div>
-        <p className="text-base font-medium text-amber-800">
-          {`Este agendamento exige um sinal de ${formatarPreco(estabelecimento.sinal_valor_centavos)} via Pix para confirmar a reserva.`}
-        </p>
-        <p className="mt-1 text-base font-medium text-amber-800">
-          {`Anexe o comprovante abaixo ou aperte o botão verde "Falar com ${nomeProfissionalContato}" e envie o comprovante do Pix.`}
-        </p>
-        <p className="mt-1 text-base font-medium text-amber-800">
-          O profissional irá confirmar seu agendamento.
-        </p>
-      </div>
-
-      <div className="flex items-center gap-2 rounded-lg bg-card px-3 py-2 ring-1 ring-border">
-        <span className="min-w-0 flex-1 truncate text-sm text-heading">
-          {estabelecimento.sinal_chave_pix}
-        </span>
-        <button
-          type="button"
-          onClick={copiarChavePix}
-          className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover"
-        >
-          {chavePixCopiada ? "Copiado!" : "Copiar chave"}
-        </button>
-      </div>
-
-      {/* Upload do comprovante. Label estilizada de botão + input escondido:
-          o input de arquivo nativo não é estilizável e destoaria do bloco.
-          Reenviar é permitido (upsert no mesmo caminho) — a cliente que mandou
-          o print errado só escolhe outro arquivo. */}
-      <div className="rounded-lg bg-card px-3 py-2 ring-1 ring-border">
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="file"
-            accept="image/*,application/pdf"
-            onChange={handleComprovanteChange}
-            disabled={enviandoComprovante}
-            className="sr-only"
-          />
-          <span className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover">
-            {enviandoComprovante
-              ? "Enviando..."
-              : nomeComprovante
-                ? "Trocar comprovante"
-                : "Anexar comprovante"}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-sm text-body">
-            {nomeComprovante || "Imagem ou PDF (opcional)"}
-          </span>
-        </label>
-
-        {nomeComprovante && !erroComprovante && (
-          <p className="mt-1.5 text-sm text-green-700">
-            Comprovante anexado com sucesso.
+      <div className="space-y-3 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
+        <div>
+          <p className="text-base font-medium text-amber-800">
+            {`Este agendamento exige um sinal de ${formatarPreco(estabelecimento.sinal_valor_centavos)} via Pix para confirmar a reserva.`}
           </p>
-        )}
-        {erroComprovante && (
-          <p className="mt-1.5 text-sm text-red-700">{erroComprovante}</p>
-        )}
-      </div>
+          <p className="mt-1 text-base font-medium text-amber-800">
+            {`Anexe o comprovante abaixo ou aperte o botão verde "Falar com ${nomeProfissionalContato}" e envie o comprovante do Pix.`}
+          </p>
+          <p className="mt-1 text-base font-medium text-amber-800">
+            O profissional irá confirmar seu agendamento.
+          </p>
+        </div>
 
-      <label className="flex items-start gap-2 text-sm text-amber-900">
-        <input
-          type="checkbox"
-          checked={sinalDeclarado}
-          onChange={(e) => handleSinalDeclaradoChange(e.target.checked)}
-          disabled={!agendamentoId || marcandoPendente}
-          className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
-        />
-        Enviei o comprovante pelo WhatsApp
-      </label>
-
-      {/* Erro do update de status — o único dos dois erros deste bloco que
-          precisa de retentativa em tela: sem ele o agendamento continua em
-          "aguardando_sinal" e a solicitação não chega pro salão. O gesto da
-          cliente (caixa marcada, comprovante anexado) fica intacto. */}
-      {erroStatus && (
-        <div className="rounded-lg bg-red-50 px-3 py-2 ring-1 ring-red-100">
-          <p className="text-sm text-red-700">{erroStatus}</p>
+        <div className="flex items-center gap-2 rounded-lg bg-card px-3 py-2 ring-1 ring-border">
+          <span className="min-w-0 flex-1 truncate text-sm text-heading">
+            {estabelecimento.sinal_chave_pix}
+          </span>
           <button
             type="button"
-            onClick={marcarPendente}
-            disabled={marcandoPendente}
-            className="mt-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={copiarChavePix}
+            className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover"
           >
-            {marcandoPendente ? "Enviando..." : "Tentar novamente"}
+            {chavePixCopiada ? "Copiado!" : "Copiar chave"}
           </button>
         </div>
-      )}
-    </div>
+
+        {/* Upload do comprovante. Label estilizada de botão + input escondido:
+            o input de arquivo nativo não é estilizável e destoaria do bloco.
+            Reenviar é permitido (upsert no mesmo caminho) — a cliente que mandou
+            o print errado só escolhe outro arquivo. */}
+        <div className="rounded-lg bg-card px-3 py-2 ring-1 ring-border">
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="file"
+              accept="image/*,application/pdf"
+              onChange={handleComprovanteChange}
+              disabled={enviandoComprovante}
+              className="sr-only"
+            />
+            <span className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover">
+              {enviandoComprovante
+                ? "Enviando..."
+                : nomeComprovante
+                  ? "Trocar comprovante"
+                  : "Anexar comprovante"}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm text-body">
+              {nomeComprovante || "Imagem ou PDF (opcional)"}
+            </span>
+          </label>
+
+          {nomeComprovante && !erroComprovante && (
+            <p className="mt-1.5 text-sm text-green-700">
+              Comprovante anexado com sucesso.
+            </p>
+          )}
+          {erroComprovante && (
+            <p className="mt-1.5 text-sm text-red-700">{erroComprovante}</p>
+          )}
+        </div>
+
+        <label className="flex items-start gap-2 text-sm text-amber-900">
+          <input
+            type="checkbox"
+            checked={sinalDeclarado}
+            onChange={(e) => handleSinalDeclaradoChange(e.target.checked)}
+            disabled={!agendamentoId || marcandoPendente}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
+          />
+          Enviei o comprovante pelo WhatsApp
+        </label>
+
+        {/* Erro do update de status — o único dos dois erros deste bloco que
+            precisa de retentativa em tela: sem ele o agendamento continua em
+            "aguardando_sinal" e a solicitação não chega pro salão. O gesto da
+            cliente (caixa marcada, comprovante anexado) fica intacto. */}
+        {erroStatus && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 ring-1 ring-red-100">
+            <p className="text-sm text-red-700">{erroStatus}</p>
+            <button
+              type="button"
+              onClick={marcarPendente}
+              disabled={marcandoPendente}
+              className="mt-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {marcandoPendente ? "Enviando..." : "Tentar novamente"}
+            </button>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
