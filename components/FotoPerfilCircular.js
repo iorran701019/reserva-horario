@@ -3,12 +3,19 @@
 import { useState } from "react";
 import Image from "next/image";
 
-// Foto de perfil circular clicável — recurso GENÉRICO do motor, alimentado
-// por estabelecimentos.foto_perfil_url/foto_perfil_posicao/foto_perfil_zoom
-// (ver buscarEstabelecimento em lib/estabelecimento.js). Qualquer tenant com
-// foto_perfil_url preenchida ganha o círculo; nada aqui é específico de
-// salão. `src` null/undefined ou `diametro` <= 0 não renderiza nada (sem
-// buraco no layout nem flash de círculo 0x0 antes da primeira medição).
+// Foto circular clicável com crop (zoom + posição) — recurso GENÉRICO do
+// motor, sem nada específico de salão nem de perfil. Hoje serve a DOIS
+// donos, e por isso as props não citam tabela nenhuma:
+//   1. foto de perfil do estabelecimento —
+//      estabelecimentos.foto_perfil_url/_posicao/_zoom (ver
+//      buscarEstabelecimento em lib/estabelecimento.js), usada na página
+//      pública e no preview ao vivo de ConfiguracoesSalao;
+//   2. foto por categoria de serviço —
+//      categorias_servico.foto_url/foto_posicao/foto_zoom, como miniatura
+//      no acordeão de /agendar e como preview em GerenciarServicos.
+// `src` null/undefined ou `diametro` <= 0 não renderiza nada (sem buraco no
+// layout nem flash de círculo 0x0 antes da primeira medição) — é isso que
+// deixa a foto ser opcional nos dois casos.
 //
 // O círculo usa <img> nativa (não next/image) porque precisamos das
 // dimensões reais da imagem (naturalWidth/naturalHeight) pra calcular
@@ -35,12 +42,29 @@ import Image from "next/image";
 //   diametro  – tamanho (px) do círculo, definido por quem usa o componente
 //               (na página pública, a altura da caixa logo abaixo — ver
 //               app/[salon]/page.js).
+//
+// Props de reuso (todas OPCIONAIS, com default == comportamento original —
+// os dois consumidores antigos não passam nenhuma delas):
+//   wrapperClassName – classes do <div> em volta do círculo. O default
+//                      centraliza e reserva margem embaixo, que é o certo
+//                      pra uma foto de perfil sozinha no topo da página; a
+//                      miniatura de categoria (dentro da linha do acordeão
+//                      de /agendar) passa "shrink-0" pra não centralizar
+//                      nem empurrar o resto da linha.
+//   formato          – 'circulo' (default) ou 'quadrado' (cantos só
+//                      arredondados), pra fotos que não são retrato.
+//   ariaLabel        – rótulo do botão que abre o zoom.
+//   ariaLabelDialog  – rótulo do overlay de tela cheia.
 export default function FotoPerfilCircular({
   src,
   posicao,
   zoom = 1,
   diametro,
   alt = "",
+  wrapperClassName = "mb-6 flex justify-center",
+  formato = "circulo",
+  ariaLabel = "Ver foto de perfil",
+  ariaLabelDialog = "Foto de perfil",
 }) {
   const [aberta, setAberta] = useState(false);
   const [dimensoesNaturais, setDimensoesNaturais] = useState(null);
@@ -93,12 +117,15 @@ export default function FotoPerfilCircular({
 
   return (
     <>
-      <div className="mb-6 flex justify-center">
+      <div className={wrapperClassName}>
         <button
           type="button"
           onClick={() => setAberta(true)}
-          aria-label="Ver foto de perfil"
-          className="relative overflow-hidden rounded-full ring-1 ring-border transition hover:opacity-90"
+          aria-label={ariaLabel}
+          className={[
+            "relative overflow-hidden ring-1 ring-border transition hover:opacity-90",
+            formato === "quadrado" ? "rounded-lg" : "rounded-full",
+          ].join(" ")}
           style={{ width: diametro, height: diametro }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element -- precisa de naturalWidth/naturalHeight pro zoom manual, ver comentário acima */}
@@ -120,7 +147,7 @@ export default function FotoPerfilCircular({
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Foto de perfil"
+          aria-label={ariaLabelDialog}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4"
           onClick={() => setAberta(false)}
         >

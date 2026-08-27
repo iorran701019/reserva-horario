@@ -25,6 +25,12 @@ import { useVoltarFisico } from "@/lib/voltarFisico";
 import { dentroDaJanelaAgendamento } from "@/lib/janelaAgendamento";
 import { linkWhatsApp, MENSAGEM_CONFIRMACAO } from "@/lib/whatsapp";
 import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
+import FotoPerfilCircular from "@/components/FotoPerfilCircular";
+
+// Lado (px) da miniatura de foto da categoria no cabeçalho do acordeão da
+// etapa "servico". Grande o bastante pra dar pra ver o que é, pequena o
+// bastante pra não dominar a linha do nome — ajuste aqui, num lugar só.
+const TAMANHO_FOTO_CATEGORIA = 40;
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
 // "pendente"/"aguardando_sinal") e a aba Agendar do /admin (cria
@@ -903,7 +909,7 @@ export default function FormularioAgendamento({
           .single(),
         supabase
           .from("categorias_servico")
-          .select("id, nome, ordem")
+          .select("id, nome, ordem, foto_url, foto_posicao, foto_zoom")
           .eq("estabelecimento_id", estabelecimento.id)
           .order("ordem", { ascending: true })
           .order("nome", { ascending: true }),
@@ -916,12 +922,10 @@ export default function FormularioAgendamento({
       } else {
         setServicos(resServicos.data ?? []);
       }
-      // Categorias são só para agrupar a UI; se falharem, os serviços caem todos
-      // no bloco "sem categoria" (nenhum grupo casa), sem quebrar a etapa.
-      setCategorias(resCategorias.error ? [] : resCategorias.data ?? []);
       setEscolhaProfissional(Boolean(resConfig.data?.escolha_profissional));
-      // Sem categorias cadastradas (ou erro na consulta), a lista de serviços
-      // simplesmente não agrupa — não impede a etapa de funcionar.
+      // Categorias são só para agrupar a UI: sem elas (ou com erro na
+      // consulta), os serviços caem todos no bloco "sem categoria" — nenhum
+      // grupo casa — e a etapa continua funcionando normalmente.
       setCategorias(resCategorias.error ? [] : resCategorias.data ?? []);
       setCarregandoServicos(false);
     }
@@ -2730,11 +2734,19 @@ export default function FormularioAgendamento({
                         key={categoria.id}
                         className="rounded-lg ring-1 ring-border"
                       >
-                        <button
-                          type="button"
-                          onClick={() => alternarCategoria(categoria.id)}
-                          aria-expanded={aberta}
-                          className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left font-medium text-heading transition hover:bg-surface"
+                        {/* Cabeçalho: miniatura (opcional) + nome + seta. A
+                            foto fica IRMÃ do botão, não dentro dele —
+                            FotoPerfilCircular já é um <button> (abre o zoom
+                            em tela cheia), e <button> dentro de <button> é
+                            HTML inválido: o parser hoista o interno pra fora
+                            e o cabeçalho quebra. Com a foto de fora, clicar
+                            nela abre o zoom e o resto da linha (flex-1)
+                            expande/recolhe a categoria, sem precisar de
+                            stopPropagation. Sem foto_url, o `&&` não
+                            renderiza nada e o `gap-3` não reserva espaço —
+                            a linha fica idêntica à de antes. */}
+                        <div
+                          className="flex w-full items-center gap-3 rounded-lg px-3 py-3 transition hover:bg-surface"
                           style={
                             tema && aberta
                               ? {
@@ -2745,9 +2757,29 @@ export default function FormularioAgendamento({
                               : undefined
                           }
                         >
-                          {categoria.nome}
-                          <span aria-hidden="true">{aberta ? "▲" : "▼"}</span>
-                        </button>
+                          {categoria.foto_url && (
+                            <FotoPerfilCircular
+                              src={categoria.foto_url}
+                              posicao={categoria.foto_posicao}
+                              zoom={categoria.foto_zoom ?? 1}
+                              diametro={TAMANHO_FOTO_CATEGORIA}
+                              wrapperClassName="shrink-0"
+                              alt={categoria.nome}
+                              ariaLabel={`Ver foto de ${categoria.nome}`}
+                              ariaLabelDialog={`Foto de ${categoria.nome}`}
+                            />
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => alternarCategoria(categoria.id)}
+                            aria-expanded={aberta}
+                            className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left font-medium text-heading transition"
+                          >
+                            {categoria.nome}
+                            <span aria-hidden="true">{aberta ? "▲" : "▼"}</span>
+                          </button>
+                        </div>
 
                         {aberta && (
                           <div className="space-y-2 border-t border-border p-2">

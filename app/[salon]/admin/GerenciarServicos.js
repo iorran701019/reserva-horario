@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { formatarPreco } from "@/components/FormularioAgendamento";
+import FotoPerfilCircular from "@/components/FotoPerfilCircular";
 
 // Aba "Serviços" do /admin: CRUD dos serviços do salão (tabela `servicos`),
 // sempre particionado por estabelecimento_id (o consumidor já resolveu o salão
@@ -255,6 +256,20 @@ export default function GerenciarServicos({ estabelecimento }) {
   const [ocupadoCategoria, setOcupadoCategoria] = useState(false);
   const [erroAcaoCategoria, setErroAcaoCategoria] = useState("");
 
+  // Foto da categoria (bucket 'fotos-categorias', caminho fixo
+  // `${estabelecimento.id}/${categoria.id}.<extensao>` — sempre sobrescreve,
+  // nunca acumula lixo). Mesmo desenho da foto de perfil em
+  // ConfiguracoesSalao, com uma diferença: os valores de crop (posição/zoom)
+  // NÃO ganham state próprio — vivem na própria linha do array `categorias`
+  // (foto_posicao/foto_zoom) e são patchados por patchCategoria enquanto o
+  // slider arrasta. Um state paralelo aqui teria que ser re-sincronizado a
+  // cada troca de categoria aberta, e ainda daria preview errado no instante
+  // da troca. Estes três abaixo são só de status transitório, por isso
+  // guardam o ID da categoria em jogo (só uma expande por vez).
+  const [enviandoFotoCategoriaId, setEnviandoFotoCategoriaId] = useState(null);
+  const [statusFotoCategoria, setStatusFotoCategoria] = useState("");
+  const [erroFotoCategoria, setErroFotoCategoria] = useState("");
+
   // Seção "Perguntas" de cada card de serviço: quais estão expandidas (chave
   // servico.id) e, pra cada uma, as perguntas já carregadas (+ suas opções).
   // Carregado sob demanda na primeira expansão e cacheado aqui — nunca
@@ -349,7 +364,7 @@ export default function GerenciarServicos({ estabelecimento }) {
     async function carregar() {
       const { data, error } = await supabase
         .from("categorias_servico")
-        .select("id, nome, ordem")
+        .select("id, nome, ordem, foto_url, foto_posicao, foto_zoom")
         .eq("estabelecimento_id", estabelecimento.id)
         .order("ordem", { ascending: true })
         .order("nome", { ascending: true });
@@ -967,7 +982,10 @@ export default function GerenciarServicos({ estabelecimento }) {
     const { data, error } = await supabase
       .from("categorias_servico")
       .insert({ estabelecimento_id: estabelecimento.id, nome, ordem: proximaOrdem })
-      .select("id, nome, ordem")
+      // Mesmas colunas do carregamento inicial: sem os campos de foto aqui, a
+      // categoria recém-criada entraria na lista sem eles e o bloco de foto
+      // renderizaria com `undefined` até o próximo refetch.
+      .select("id, nome, ordem, foto_url, foto_posicao, foto_zoom")
       .single();
 
     setSalvandoCategoria(false);
@@ -1010,6 +1028,85 @@ export default function GerenciarServicos({ estabelecimento }) {
       ordenarCategorias(atuais.map((c) => (c.id === categoria.id ? { ...c, nome } : c)))
     );
     setCategoriaEditandoId(null);
+  }
+
+  // Patch imutável de uma categoria já na lista (sem refetch). Não reordena:
+  // nenhum campo de foto participa da ordenação, e reordenar aqui faria a
+  // linha pular de lugar no meio de um arraste de slider.
+  function patchCategoria(id, campos) {
+    setCategorias((atuais) =>
+      atuais.map((c) => (c.id === id ? { ...c, ...campos } : c))
+    );
+  }
+
+  // Sobe o arquivo pro bucket 'fotos-categorias', sempre no mesmo caminho por
+  // categoria, e grava a URL pública + ?v=<timestamp> em
+  // categorias_servico.foto_url — o cache-buster evita que o otimizador de
+  // imagem do Next continue servindo a foto antiga depois da troca. Espelha
+  // handleFotoPerfilChange de ConfiguracoesSalao; a diferença é o alvo do
+  // update (uma linha de categorias_servico, não o estabelecimento).
+  async function handleFotoCategoriaChange(e, categoria) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setEnviandoFotoCategoriaId(categoria.id);
+    setErroFotoCategoria("");
+    setStatusFotoCategoria("");
+
+    const extensao = file.name.split(".").pop()?.toLowerCase() || "jpg";
+    const caminho = `${estabelecimento.id}/${categoria.id}.${extensao}`;
+
+    const { error: erroUpload } = await supabase.storage
+      .from("fotos-categorias")
+      .upload(caminho, file, { upsert: true, contentType: file.type });
+
+    if (erroUpload) {
+      setEnviandoFotoCategoriaId(null);
+      setErroFotoCategoria(`Não foi possível enviar a foto: ${erroUpload.message}`);
+      return;
+    }
+
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from("fotos-categorias").getPublicUrl(caminho);
+    const urlComCache = `${publicUrl}?v=${Date.now()}`;
+
+    const { error: erroUpdate } = await supabase
+      .from("categorias_servico")
+      .update({ foto_url: urlComCache })
+      .eq("id", categoria.id);
+
+    setEnviandoFotoCategoriaId(null);
+
+    if (erroUpdate) {
+      setErroFotoCategoria(`Não foi possível salvar a foto: ${erroUpdate.message}`);
+      return;
+    }
+
+    patchCategoria(categoria.id, { foto_url: urlComCache });
+  }
+
+  // Grava posição ("x% y%") + zoom juntos ao soltar qualquer um dos 3
+  // sliders — mesmo contrato de salvarFotoPerfilPosicao. x/y/zoom vêm
+  // explícitos porque o valor no array pode ainda não ter commitado no
+  // próprio evento que dispara o save.
+  async function salvarFotoCategoriaPosicao(categoria, x, y, zoom) {
+    setStatusFotoCategoria("salvando");
+    setErroFotoCategoria("");
+
+    const { error } = await supabase
+      .from("categorias_servico")
+      .update({ foto_posicao: `${x}% ${y}%`, foto_zoom: zoom })
+      .eq("id", categoria.id);
+
+    if (error) {
+      setStatusFotoCategoria("");
+      setErroFotoCategoria(`Não foi possível salvar a posição: ${error.message}`);
+      return;
+    }
+
+    setStatusFotoCategoria("salvo");
   }
 
   // Move a categoria uma posição pra cima (-1) ou baixo (+1) e recompacta a
@@ -2545,6 +2642,11 @@ export default function GerenciarServicos({ estabelecimento }) {
                 );
                 const aberta = grupoAberto === categoria.id;
                 const renomeando = categoriaEditandoId === categoria.id;
+                // Valores de crop pros sliders do bloco de foto abaixo, lidos
+                // da própria linha (ver patchCategoria).
+                const { x: fotoX, y: fotoY } = posicaoParaXY(categoria.foto_posicao);
+                const fotoZoom = categoria.foto_zoom ?? 1;
+                const enviandoFoto = enviandoFotoCategoriaId === categoria.id;
 
                 return (
                   <div
@@ -2647,6 +2749,172 @@ export default function GerenciarServicos({ estabelecimento }) {
 
                     {aberta && (
                       <div className="border-t border-border p-4">
+                        {/* Foto da categoria — opcional. Aparece como
+                            miniatura ao lado do nome no acordeão de
+                            /agendar (ver FormularioAgendamento); sem foto,
+                            a categoria segue funcionando igual, só com o
+                            placeholder abaixo. Mesmo trio de sliders da
+                            foto de perfil em ConfiguracoesSalao. */}
+                        <div className="mb-4 border-b border-border pb-4">
+                          <span className="mb-3 block text-sm font-medium text-body">
+                            Foto da categoria
+                          </span>
+
+                          {categoria.foto_url ? (
+                            <FotoPerfilCircular
+                              src={categoria.foto_url}
+                              posicao={`${fotoX}% ${fotoY}%`}
+                              zoom={fotoZoom}
+                              diametro={96}
+                              alt={`Foto de ${categoria.nome}`}
+                              ariaLabel={`Ver foto de ${categoria.nome}`}
+                              ariaLabelDialog={`Foto de ${categoria.nome}`}
+                            />
+                          ) : (
+                            <div className="mb-6 flex justify-center">
+                              <div
+                                className="flex items-center justify-center rounded-full bg-border/40 p-2 text-center text-xs text-muted ring-1 ring-border"
+                                style={{ width: 96, height: 96 }}
+                              >
+                                Nenhuma foto enviada ainda
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-4">
+                            <div>
+                              <label
+                                htmlFor={`foto-categoria-input-${categoria.id}`}
+                                className="mb-1 block text-sm font-medium text-body"
+                              >
+                                Enviar nova foto
+                              </label>
+                              <input
+                                id={`foto-categoria-input-${categoria.id}`}
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => handleFotoCategoriaChange(e, categoria)}
+                                disabled={enviandoFoto}
+                                className="block w-full text-sm text-body file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                              {enviandoFoto && (
+                                <p className="mt-2 text-xs text-muted">Enviando…</p>
+                              )}
+                            </div>
+
+                            <div>
+                              <label
+                                htmlFor={`foto-categoria-zoom-${categoria.id}`}
+                                className="mb-1 block text-sm font-medium text-body"
+                              >
+                                Zoom
+                              </label>
+                              <input
+                                id={`foto-categoria-zoom-${categoria.id}`}
+                                type="range"
+                                min={1}
+                                max={3}
+                                step={0.1}
+                                value={fotoZoom}
+                                onChange={(e) =>
+                                  patchCategoria(categoria.id, {
+                                    foto_zoom: Number(e.target.value),
+                                  })
+                                }
+                                onMouseUp={() =>
+                                  salvarFotoCategoriaPosicao(categoria, fotoX, fotoY, fotoZoom)
+                                }
+                                onTouchEnd={() =>
+                                  salvarFotoCategoriaPosicao(categoria, fotoX, fotoY, fotoZoom)
+                                }
+                                onKeyUp={() =>
+                                  salvarFotoCategoriaPosicao(categoria, fotoX, fotoY, fotoZoom)
+                                }
+                                disabled={!categoria.foto_url}
+                                className="w-full disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                            </div>
+
+                            <div>
+                              <label
+                                htmlFor={`foto-categoria-y-${categoria.id}`}
+                                className="mb-1 block text-sm font-medium text-body"
+                              >
+                                Posição vertical
+                              </label>
+                              <input
+                                id={`foto-categoria-y-${categoria.id}`}
+                                type="range"
+                                min={0}
+                                max={100}
+                                step={1}
+                                value={fotoY}
+                                onChange={(e) =>
+                                  patchCategoria(categoria.id, {
+                                    foto_posicao: `${fotoX}% ${Number(e.target.value)}%`,
+                                  })
+                                }
+                                onMouseUp={() =>
+                                  salvarFotoCategoriaPosicao(categoria, fotoX, fotoY, fotoZoom)
+                                }
+                                onTouchEnd={() =>
+                                  salvarFotoCategoriaPosicao(categoria, fotoX, fotoY, fotoZoom)
+                                }
+                                onKeyUp={() =>
+                                  salvarFotoCategoriaPosicao(categoria, fotoX, fotoY, fotoZoom)
+                                }
+                                disabled={!categoria.foto_url}
+                                className="w-full disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                            </div>
+
+                            <div>
+                              <label
+                                htmlFor={`foto-categoria-x-${categoria.id}`}
+                                className="mb-1 block text-sm font-medium text-body"
+                              >
+                                Posição horizontal
+                              </label>
+                              <input
+                                id={`foto-categoria-x-${categoria.id}`}
+                                type="range"
+                                min={0}
+                                max={100}
+                                step={1}
+                                value={fotoX}
+                                onChange={(e) =>
+                                  patchCategoria(categoria.id, {
+                                    foto_posicao: `${Number(e.target.value)}% ${fotoY}%`,
+                                  })
+                                }
+                                onMouseUp={() =>
+                                  salvarFotoCategoriaPosicao(categoria, fotoX, fotoY, fotoZoom)
+                                }
+                                onTouchEnd={() =>
+                                  salvarFotoCategoriaPosicao(categoria, fotoX, fotoY, fotoZoom)
+                                }
+                                onKeyUp={() =>
+                                  salvarFotoCategoriaPosicao(categoria, fotoX, fotoY, fotoZoom)
+                                }
+                                disabled={!categoria.foto_url}
+                                className="w-full disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                            </div>
+                          </div>
+
+                          {statusFotoCategoria === "salvando" && (
+                            <p className="mt-2 text-xs text-muted">Salvando…</p>
+                          )}
+                          {statusFotoCategoria === "salvo" && !erroFotoCategoria && (
+                            <p className="mt-2 text-xs font-medium text-green-600">
+                              Salvo ✓
+                            </p>
+                          )}
+                          {erroFotoCategoria && (
+                            <p className="mt-2 text-xs text-red-600">{erroFotoCategoria}</p>
+                          )}
+                        </div>
+
                         {servicosDaCategoria.length === 0 ? (
                           <p className="rounded-lg bg-surface px-3 py-3 text-center text-sm text-body ring-1 ring-border">
                             Nenhum serviço nesta categoria.
@@ -3060,6 +3328,19 @@ function nomeServicoOrigem(lista, servico) {
 // Patch imutável do campo `ativo` de um serviço na lista.
 function atualizarAtivo(lista, id, ativo) {
   return lista.map((s) => (s.id === id ? { ...s, ativo } : s));
+}
+
+// Lê categorias_servico.foto_posicao ("x% y%") pros valores 0-100 dos
+// sliders. Vazio/inválido cai no centro — mesmo fallback do
+// FotoPerfilCircular, pra o slider nunca discordar do que o preview mostra.
+function posicaoParaXY(posicao) {
+  const [xStr, yStr] = (posicao || "").split(" ");
+  const x = parseInt(xStr, 10);
+  const y = parseInt(yStr, 10);
+  return {
+    x: Number.isNaN(x) ? 50 : x,
+    y: Number.isNaN(y) ? 50 : y,
+  };
 }
 
 // Ordena as categorias pela sequência de exibição (ordem asc, depois nome).
