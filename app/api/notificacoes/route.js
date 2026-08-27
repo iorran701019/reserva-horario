@@ -11,6 +11,13 @@ import webpush from "web-push";
 //   b) UPDATE pra status "cancelado" com cancelado_por_cliente true (cancelamento
 //      pelo painel público, ver components/PainelCliente.js) -> avisa a dona.
 // Qualquer outro evento responde 200 sem fazer nada.
+//
+// Este endpoint cuida SÓ do push (efêmero). O registro persistente na aba
+// Pendentes do /admin é criado por um trigger no próprio banco (ver
+// sql/pendencias_admin.sql), síncrono dentro da transação do UPDATE. Este
+// arquivo também inseria em `pendencias_admin`, e o resultado era a mesma
+// pendência gravada duas vezes (com textos diferentes) sempre que a entrega
+// do webhook dava certo — o insert daqui foi removido.
 
 const DIAS_SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
 
@@ -65,22 +72,6 @@ export async function POST(request) {
   } else {
     titulo = `Cancelado: ${record.nome_cliente}`;
     corpo = `${record.nome_cliente} · ${quando}`;
-
-    // Além do push (efêmero), deixa um registro persistente na aba Pendentes
-    // do /admin (ver sql/pendencias_admin.sql) — a dona pode não estar com o
-    // navegador aberto quando o push chega.
-    const { error: erroPendencia } = await supabaseAdmin
-      .from("pendencias_admin")
-      .insert({
-        estabelecimento_id: record.estabelecimento_id,
-        tipo: "cancelamento_cliente",
-        titulo: `Cancelamento: ${record.nome_cliente}`,
-        descricao: `Cancelou o agendamento de ${quando}.`,
-        agendamento_id: record.id,
-      });
-    if (erroPendencia) {
-      console.error("Falha ao registrar pendência de cancelamento", erroPendencia);
-    }
   }
 
   const { data: estabelecimento } = await supabaseAdmin

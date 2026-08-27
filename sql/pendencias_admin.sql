@@ -1,8 +1,17 @@
 -- Tabela `pendencias_admin`: itens que a dona precisa ver/agir na aba
 -- "Pendentes" do /admin além dos agendamentos com status = 'pendente' (ex.:
 -- cancelamento feito pela cliente no painel público, ver
--- components/PainelCliente.js). Inserida pelo webhook de notificações
--- (app/api/notificacoes) usando o service role, então RLS não bloqueia o
+-- components/PainelCliente.js).
+--
+-- A pendência de cancelamento ('cancelamento_cliente') é criada pelo trigger
+-- trg_criar_pendencia_cancelamento (função criar_pendencia_cancelamento, ver
+-- sql/trigger_pendencia_cancelamento.sql), que roda síncrono dentro da
+-- transação do UPDATE em `agendamentos` — não pelo app. O webhook de
+-- notificações (app/api/notificacoes) também inseria aqui e gravava a MESMA
+-- pendência uma segunda vez, com outro texto, sempre que a entrega do webhook
+-- dava certo; esse insert foi removido e o webhook hoje cuida só do push.
+--
+-- Quem insere usa o service role (ou roda no banco), então RLS não bloqueia o
 -- insert; as policies abaixo só cobrem o SELECT/UPDATE feitos pelo /admin
 -- autenticado (ler a lista e marcar `resolvido` ao arquivar).
 --
