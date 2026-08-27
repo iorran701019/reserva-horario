@@ -491,6 +491,38 @@ export default function AdminPage() {
   // pra refletir na hora o patch do lembrete. null = modal fechado.
   const [idSelecionado, setIdSelecionado] = useState(null);
 
+  // Abre o modal de detalhe a partir de ?agendamento=<id> na URL — hoje só o
+  // botão "Ver" do bloco "Agendamentos confirmados" da aba Pendentes empurra
+  // esse parâmetro (junto de ?aba=painel&data=, que a aba e o
+  // PainelCalendario já consomem por conta própria). Não mexe em
+  // `selecionado`: o modal continua derivado de idSelecionado.
+  //
+  // Espera `agendamentos` chegar em vez de tentar uma vez só: num refresh
+  // direto nessa URL a lista começa vazia (a carga só roda depois de sessão
+  // + estabelecimento resolvidos), então o efeito depende dela e re-roda
+  // sozinho quando os dados aparecem. Id de URL é string e o do banco é
+  // number — daí o String() na comparação.
+  //
+  // Limpa o parâmetro logo após consumir, com replace (não push, pra não
+  // empilhar histórico): sem isso o refresh de fundo de 60s troca a array de
+  // `agendamentos`, o efeito re-roda e reabre o modal que a dona acabou de
+  // fechar. ?data= FICA na URL de propósito — um refresh deve voltar pro
+  // mesmo dia do Painel, só sem o modal.
+  useEffect(() => {
+    const idNaUrl = searchParams.get("agendamento");
+    if (!idNaUrl) return;
+    if (carregando) return;
+
+    const alvo = agendamentos.find((a) => String(a.id) === idNaUrl);
+    if (!alvo) return;
+
+    setIdSelecionado(alvo.id);
+
+    const params = new URLSearchParams(searchParams);
+    params.delete("agendamento");
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [searchParams, agendamentos, carregando, pathname, router]);
+
   // Agendamento importado sem cliente vinculado (bloco âmbar do Painel,
   // telefone null) selecionado pra vincular. Guardamos o id, mesmo padrão de
   // idSelecionado — dados vivos saem de `agendamentos`. null = modal fechado.
@@ -1893,11 +1925,39 @@ export default function AdminPage() {
                       <p className="font-bold text-heading">
                         Agendamentos confirmados
                       </p>
-                      <ul className="mt-1 space-y-0.5">
+                      {/* space-y maior que o padrão da lista: com o botão
+                          "Ver" em área de toque cheia, linhas coladas viram
+                          alvo ambíguo no dedo. */}
+                      <ul className="mt-2 space-y-2">
                         {outrosAgendamentos.map((outro) => (
-                          <li key={outro.id}>
-                            {formatarData(outro.data)} às{" "}
-                            {formatarHorario(outro.horario)}
+                          <li
+                            key={outro.id}
+                            className="flex flex-wrap items-center gap-x-3 gap-y-1"
+                          >
+                            <span>
+                              {formatarData(outro.data)} às{" "}
+                              {formatarHorario(outro.horario)}
+                            </span>
+                            {/* Atalho pro MESMO modal de detalhe que o Painel
+                                abre no clique do evento (ver
+                                onSelecionarConfirmado): leva pra aba Dia na
+                                data do outro agendamento e carrega o id em
+                                ?agendamento=, consumido pelo efeito que chama
+                                setIdSelecionado (ver acima). Vai pela URL, e
+                                não por setState direto, pra reusar o ?data=
+                                que o PainelCalendario já lê no mount. */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                router.push(
+                                  `${pathname}?aba=painel&data=${outro.data}&agendamento=${outro.id}`,
+                                  { scroll: false }
+                                )
+                              }
+                              className="inline-flex min-h-11 min-w-16 items-center justify-center rounded-full bg-blue-50 px-3.5 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-blue-100 transition hover:bg-blue-100"
+                            >
+                              Ver
+                            </button>
                           </li>
                         ))}
                       </ul>
