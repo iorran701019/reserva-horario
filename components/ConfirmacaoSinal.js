@@ -36,9 +36,13 @@ import { formatarData } from "@/components/FormularioAgendamento";
 //   onCancelado         – opcional. Havendo (junto de `agendamento` e
 //                         `nomeCliente`), mostra "Cancelar" — mesmo helper
 //                         compartilhado da lista do PainelCliente.
-//   agendamento         – { data, horario } da reserva, só pra montar a
-//                         mensagem de cancelamento no WhatsApp.
-//   nomeCliente         – idem.
+//   agendamento         – { data, horario, servicos?: { nome } } da reserva.
+//                         Monta a mensagem de cancelamento no WhatsApp E o
+//                         resumo do topo do BlocoConfirmacaoPix (o que a
+//                         cliente confere antes de mandar o Pix). Os dois
+//                         consumidores já passam a linha inteira que veio de
+//                         buscarAgendamentosAtivos, que traz servicos(nome).
+//   nomeCliente         – idem, e o "nome" do resumo.
 export default function ConfirmacaoSinal({
   agendamentoId,
   estabelecimento,
@@ -84,6 +88,12 @@ export default function ConfirmacaoSinal({
       <BlocoConfirmacaoPix
         estabelecimento={estabelecimento}
         agendamentoId={agendamentoId}
+        nomeCliente={nomeCliente}
+        servicoNome={
+          agendamento ? (agendamento.servicos?.nome ?? "Serviço") : ""
+        }
+        data={agendamento?.data}
+        horario={agendamento?.horario}
         nomeProfissionalContato={nomeProfissionalContato}
         sinalDeclarado={sinalDeclarado}
         onSinalDeclaradoChange={setSinalDeclarado}

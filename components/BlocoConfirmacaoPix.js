@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { formatarPreco } from "@/lib/preco";
+import { formatarData } from "@/lib/data";
 import { comprimirImagem } from "@/lib/comprimirImagem";
 
 // Bucket PRIVADO (anon só faz INSERT; leitura é só do lado autenticado, no
@@ -42,6 +43,12 @@ function caminhoComprovante(agendamentoId, arquivo) {
 //                     o comprovante pertence. No wizard é a reserva já
 //                     gravada ao entrar em "dados"; null desabilita o upload
 //                     e o checkbox, o resto do bloco segue.
+//   nomeCliente / servicoNome / data / horario – resumo em uma linha no topo
+//                     do bloco, pra cliente conferir O QUE está pagando antes
+//                     de mandar o Pix. TODOS opcionais e independentes: o que
+//                     não vier some da linha (nada de "undefined" em tela), e
+//                     sem nenhum deles a linha inteira não é renderizada.
+//                     `data` é o ISO cru ("YYYY-MM-DD"), formatado aqui.
 //   nomeProfissionalContato – mesmo nome do botão fixo ContatoDono.
 //   sinalDeclarado / onSinalDeclaradoChange – checkbox CONTROLADO pelo pai
 //                     (o wizard ainda lê esse valor no submit final dele).
@@ -56,6 +63,10 @@ function caminhoComprovante(agendamentoId, arquivo) {
 export default function BlocoConfirmacaoPix({
   estabelecimento,
   agendamentoId,
+  nomeCliente = "",
+  servicoNome = "",
+  data = "",
+  horario = "",
   nomeProfissionalContato = "a equipe",
   sinalDeclarado,
   onSinalDeclaradoChange,
@@ -133,6 +144,20 @@ export default function BlocoConfirmacaoPix({
     if (!marcado) return;
     await marcarPendente();
   }
+
+  // Linha de resumo do topo: "Serviço · 27/08 · quarta-feira às 14:00 ·
+  // Nome". Data e horário andam JUNTOS num único trecho porque formatarData
+  // já traz um "·" dentro (dd/mm · dia da semana) e separar os dois com outro
+  // "·" viraria uma fileira de pontos. Cada trecho ausente é descartado em
+  // vez de virar vazio — daí o filter, e não um template fixo; o "às" também
+  // só entra se houver data, senão sobraria um "às 14:00" solto.
+  const dataFormatada = formatarData(data);
+  const horarioCurto = horario ? String(horario).slice(0, 5) : "";
+  const horarioTrecho = dataFormatada ? `às ${horarioCurto}` : horarioCurto;
+  const quando = [dataFormatada, horarioCurto && horarioTrecho]
+    .filter(Boolean)
+    .join(" ");
+  const resumo = [servicoNome, quando, nomeCliente].filter(Boolean).join(" · ");
 
   async function copiarChavePix() {
     try {
@@ -217,6 +242,12 @@ export default function BlocoConfirmacaoPix({
 
   return (
     <div className="space-y-3 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
+      {resumo && (
+        <p className="border-b border-amber-200 pb-2 text-sm font-semibold text-amber-900">
+          {resumo}
+        </p>
+      )}
+
       <div>
         <p className="text-base font-medium text-amber-800">
           {`Este agendamento exige um sinal de ${formatarPreco(estabelecimento.sinal_valor_centavos)} via Pix para confirmar a reserva.`}

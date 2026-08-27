@@ -14,6 +14,7 @@ import PopupRegrasAgendamento from "@/components/PopupRegrasAgendamento";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
 import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 import { formatarPreco } from "@/lib/preco";
+import { formatarData } from "@/lib/data";
 import {
   calcularPrecoManutencao,
   buscarVencimentoManutencao,
@@ -52,16 +53,6 @@ const ETAPAS = [
   { id: "servico", rotulo: "Serviço" },
   { id: "data", rotulo: "Data" },
   { id: "dados", rotulo: "Dados" },
-];
-
-const DIAS_SEMANA = [
-  "domingo",
-  "segunda-feira",
-  "terça-feira",
-  "quarta-feira",
-  "quinta-feira",
-  "sexta-feira",
-  "sábado",
 ];
 
 // Rótulos pt-BR dos `motivo` que calcularVagasPorHorario/filtrarPorAntecedenciaMinima
@@ -116,15 +107,11 @@ const DIAS_SEMANA_CURTO = ["D", "S", "T", "Q", "Q", "S", "S"];
 // cada render.
 const NENHUM_DIA_SEM_VAGA = new Set();
 
-// "YYYY-MM-DD" -> "dd/mm · dia da semana". Parse manual pra evitar o
-// deslocamento de fuso que new Date("YYYY-MM-DD") sofre (vira UTC). Exportado
-// pra tela de confirmação do consumidor reaproveitar a mesma formatação.
-export function formatarData(iso) {
-  if (!iso) return "";
-  const [ano, mes, dia] = iso.split("-").map(Number);
-  const d = new Date(ano, mes - 1, dia);
-  return `${String(dia).padStart(2, "0")}/${String(mes).padStart(2, "0")} · ${DIAS_SEMANA[d.getDay()]}`;
-}
+// "YYYY-MM-DD" -> "dd/mm · dia da semana". Mora em lib/data.js desde que
+// BlocoConfirmacaoPix passou a usá-la também (importar de volta daqui fecharia
+// um ciclo, igual formatarPreco); reexportada pra não mexer em quem já
+// importava deste módulo.
+export { formatarData };
 
 // preco_centavos (ex.: 3500) -> "R$ 35,00". Mora em lib/preco.js desde que
 // BlocoConfirmacaoPix passou a usá-la também (importar de volta daqui fecharia
@@ -3182,6 +3169,10 @@ export default function FormularioAgendamento({
                 <BlocoConfirmacaoPix
                   estabelecimento={estabelecimento}
                   agendamentoId={reservaId}
+                  nomeCliente={form.nome}
+                  servicoNome={servicoSelecionado?.nome}
+                  data={form.data}
+                  horario={horarioSelecionado}
                   nomeProfissionalContato={nomeProfissionalContato}
                   sinalDeclarado={sinalDeclarado}
                   onSinalDeclaradoChange={setSinalDeclarado}
