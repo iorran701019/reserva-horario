@@ -1430,6 +1430,34 @@ export default function AdminPage() {
       return 0;
     });
 
+  // Mesmo `inbox` acima, agrupado por cliente pra render (a aba mostra os
+  // cards de uma mesma pessoa juntos, numa moldura só). NÃO reordena nada:
+  // Map preserva ordem de inserção, então o grupo entra na lista geral na
+  // posição do seu PRIMEIRO membro no inbox já ordenado — que é justamente o
+  // mais prioritário —, e dentro do grupo os itens saem na mesma ordem
+  // relativa, ou seja pela MESMA regra (horasRestantesReserva +
+  // LIMITE_BADGE_EXPIRA_HORAS). Sem segundo sort: o critério de prioridade
+  // continua existindo em um lugar só, e qualquer mudança nele se propaga
+  // sozinha pros dois níveis.
+  // A chave do Map é o telefone normalizado (só dígitos) pra unir a mesma
+  // cliente gravada com formatações diferentes em agendamentos distintos; o
+  // `telefone` do grupo guarda o valor ORIGINAL do primeiro item, porque a
+  // tela continua exibindo exatamente o que está no banco, sem reformatar.
+  const inboxAgrupado = [];
+  {
+    const porTelefone = new Map();
+    for (const item of inbox) {
+      const chave = String(item.telefone).replace(/\D/g, "");
+      const grupo = porTelefone.get(chave);
+      if (grupo) grupo.itens.push(item);
+      else {
+        const novo = { telefone: item.telefone, nome: item.nome_cliente, itens: [item] };
+        porTelefone.set(chave, novo);
+        inboxAgrupado.push(novo);
+      }
+    }
+  }
+
   // Essa cliente (por telefone) tem item no inbox? Fonte da checagem do
   // atalho "Novo agendamento" do Histórico — lê o `inbox` ACIMA em vez de
   // repetir buscarPendentesPorTelefones: aqui a lista inteira já está em
@@ -1695,7 +1723,14 @@ export default function AdminPage() {
                 );
               })}
 
-              {inbox.map((item) => {
+              {inboxAgrupado.map((grupo) => {
+                // Cliente com 2+ pendentes: nome e telefone sobem pra etiqueta
+                // do grupo (uma vez só, no topo do bloco), então repeti-los em
+                // cada card seria eco puro. Card solto continua exibindo os
+                // dois normalmente, porque ali não há etiqueta acima.
+                const emGrupo = grupo.itens.length > 1;
+
+                const cards = grupo.itens.map((item) => {
                 // Outros agendamentos CONFIRMADOS do MESMO telefone, ainda no
                 // futuro (exclui o próprio item) — pequeno relatório inline
                 // pra dona ver de cara se a cliente já tem outro horário
@@ -1738,14 +1773,20 @@ export default function AdminPage() {
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-heading">
-                        {item.nome_cliente}
-                      </p>
-                      <p className="mt-0.5 text-sm text-body">{item.telefone}</p>
-                    </div>
+                    {!emGrupo && (
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-heading">
+                          {item.nome_cliente}
+                        </p>
+                        <p className="mt-0.5 text-sm text-body">{item.telefone}</p>
+                      </div>
+                    )}
 
-                    <div className="flex shrink-0 flex-col items-end gap-1">
+                    {/* ml-auto segura os badges na direita também quando o
+                        bloco de nome/telefone acima não renderiza (em grupo):
+                        sem ele, justify-between com um filho só jogaria os
+                        badges pra esquerda. */}
+                    <div className="ml-auto flex shrink-0 flex-col items-end gap-1">
                       <span
                         className={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classesStatus(
                           item.status
@@ -1960,6 +2001,38 @@ export default function AdminPage() {
                     )}
                   </div>
                 </li>
+                );
+                });
+
+                // Cliente com um pendente só (a maioria): o card vai solto na
+                // lista, exatamente como sempre foi. A moldura só existe pra
+                // desambiguar 2+ cards da mesma pessoa, então aqui ela seria
+                // ruído.
+                if (grupo.itens.length === 1) return cards;
+
+                // 2+ pendentes da mesma cliente: uma bandeja neutra em volta do
+                // conjunto, com nome + telefone como etiqueta. bg-stone-200 de
+                // propósito: bg-surface é literalmente a cor do <body> (ver
+                // --surface em globals.css), então a bandeja sumia contra a
+                // página. O cinza é mais escuro que os dois lados e fica fora
+                // da família do amber, então os cards continuam sendo a única
+                // coisa colorida — a bandeja só agrupa.
+                return (
+                  <li
+                    key={grupo.telefone}
+                    className="overflow-hidden rounded-2xl bg-stone-200 shadow-sm ring-1 ring-border"
+                  >
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-4 py-2.5">
+                      <p className="min-w-0 break-words text-sm font-semibold text-heading">
+                        {grupo.nome}
+                      </p>
+                      <p className="text-xs text-body">{grupo.telefone}</p>
+                      <span className="ml-auto shrink-0 text-xs text-body">
+                        {grupo.itens.length} pendentes
+                      </span>
+                    </div>
+                    <ul className="space-y-3 p-3">{cards}</ul>
+                  </li>
                 );
               })}
             </ul>
