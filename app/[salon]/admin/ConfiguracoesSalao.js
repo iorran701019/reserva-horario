@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import FotoPerfilCircular from "@/components/FotoPerfilCircular";
+import FotoPerfilCircular, { ZOOM_MINIMO } from "@/components/FotoPerfilCircular";
 import CampoMensagemWhatsapp from "@/components/CampoMensagemWhatsapp";
 import ModalImportarGoogleCalendar from "@/components/ModalImportarGoogleCalendar";
 import { MENSAGENS_WHATSAPP_CONFIG, substituirVariaveis } from "@/lib/whatsapp";
@@ -244,6 +244,11 @@ export default function ConfiguracoesSalao({
   const [fotoPerfilX, setFotoPerfilX] = useState(50);
   const [fotoPerfilY, setFotoPerfilY] = useState(50);
   const [fotoPerfilZoom, setFotoPerfilZoom] = useState(1);
+  // Se o banco JÁ tem foto_perfil_zoom (vs. NULL). O state acima colapsa
+  // null em 1 pra render (igual à página pública), então sozinho ele não
+  // distingue "nunca ajustado" de "ajustado pra 1" — e é essa diferença que
+  // decide se uma foto nova nasce em ZOOM_MINIMO, ver handleFotoPerfilChange.
+  const [temZoomPerfilSalvo, setTemZoomPerfilSalvo] = useState(false);
   const [enviandoFoto, setEnviandoFoto] = useState(false);
   const [erroFoto, setErroFoto] = useState("");
   const [statusFotoPosicao, setStatusFotoPosicao] = useState("");
@@ -376,6 +381,7 @@ export default function ConfiguracoesSalao({
         if (!Number.isNaN(y)) setFotoPerfilY(y);
       }
       setFotoPerfilZoom(data?.foto_perfil_zoom ?? 1);
+      setTemZoomPerfilSalvo(data?.foto_perfil_zoom != null);
 
       setErroGoogleCalendar("");
       setGoogleCalendarAtivo(Boolean(data?.google_calendar_ativo));
@@ -860,9 +866,16 @@ export default function ConfiguracoesSalao({
     } = supabase.storage.from("fotos-perfil").getPublicUrl(caminho);
     const urlComCache = `${publicUrl}?v=${Date.now()}`;
 
+    // Salão que ainda não tem zoom salvo nasce em ZOOM_MINIMO, não em 1: com
+    // zoom exatamente 1 a imagem cobre o círculo sem sobra em pelo menos um
+    // dos eixos, e os sliders de posição não teriam curso nenhum até o dono
+    // descobrir que precisa mexer no zoom primeiro. Se JÁ existe zoom salvo,
+    // respeita — trocar o arquivo não desfaz o ajuste manual.
+    const zoomInicial = temZoomPerfilSalvo ? null : { foto_perfil_zoom: ZOOM_MINIMO };
+
     const { error: erroUpdate } = await supabase
       .from("estabelecimentos")
-      .update({ foto_perfil_url: urlComCache })
+      .update({ foto_perfil_url: urlComCache, ...zoomInicial })
       .eq("id", estabelecimento.id);
 
     setEnviandoFoto(false);
@@ -873,6 +886,10 @@ export default function ConfiguracoesSalao({
     }
 
     setFotoPerfilUrl(urlComCache);
+    if (zoomInicial) {
+      setFotoPerfilZoom(ZOOM_MINIMO);
+      setTemZoomPerfilSalvo(true);
+    }
   }
 
   // Grava posição ("x% y%") + zoom juntos ao soltar qualquer um dos 3
@@ -897,6 +914,8 @@ export default function ConfiguracoesSalao({
       setErroFoto(`Não foi possível salvar a posição: ${error.message}`);
       return;
     }
+
+    setTemZoomPerfilSalvo(true);
 
     setStatusFotoPosicao("salvo");
   }
@@ -2108,7 +2127,7 @@ export default function ConfiguracoesSalao({
                 <input
                   id="foto-perfil-zoom"
                   type="range"
-                  min={1}
+                  min={ZOOM_MINIMO}
                   max={3}
                   step={0.1}
                   value={fotoPerfilZoom}

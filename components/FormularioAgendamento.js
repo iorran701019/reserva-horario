@@ -2743,10 +2743,19 @@ export default function FormularioAgendamento({
                             nela abre o zoom e o resto da linha (flex-1)
                             expande/recolhe a categoria, sem precisar de
                             stopPropagation. Sem foto_url, o `&&` não
-                            renderiza nada e o `gap-3` não reserva espaço —
-                            a linha fica idêntica à de antes. */}
+                            renderiza nada e o `gap-4` não reserva espaço —
+                            a linha fica idêntica à de antes.
+
+                            O padding (px-3 py-3) mora no <button> do
+                            título, NÃO nesta linha: aqui ele afastaria a
+                            foto das bordas do card e limitaria o quanto ela
+                            pode crescer. Fora dele, a miniatura encosta na
+                            borda e o texto continua com o mesmo respiro de
+                            antes. Pelo mesmo motivo a foto vai com
+                            comRing={false} — o ring dela somaria com o
+                            `ring-1 ring-border` do card ao encostar. */}
                         <div
-                          className="flex w-full items-center gap-3 rounded-lg px-3 py-3 transition hover:bg-surface"
+                          className="flex w-full items-center gap-4 rounded-lg transition hover:bg-surface"
                           style={
                             tema && aberta
                               ? {
@@ -2764,6 +2773,7 @@ export default function FormularioAgendamento({
                               zoom={categoria.foto_zoom ?? 1}
                               diametro={TAMANHO_FOTO_CATEGORIA}
                               wrapperClassName="shrink-0"
+                              comRing={false}
                               alt={categoria.nome}
                               ariaLabel={`Ver foto de ${categoria.nome}`}
                               ariaLabelDialog={`Foto de ${categoria.nome}`}
@@ -2774,7 +2784,7 @@ export default function FormularioAgendamento({
                             type="button"
                             onClick={() => alternarCategoria(categoria.id)}
                             aria-expanded={aberta}
-                            className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left font-medium text-heading transition"
+                            className="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-3 text-left font-medium text-heading transition"
                           >
                             {categoria.nome}
                             <span aria-hidden="true">{aberta ? "▲" : "▼"}</span>

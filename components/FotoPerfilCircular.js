@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
 
 // Foto circular clicável com crop (zoom + posição) — recurso GENÉRICO do
 // motor, sem nada específico de salão nem de perfil. Hoje serve a DOIS
@@ -32,6 +31,24 @@ import Image from "next/image";
 // visualização de foto de perfil do WhatsApp. Fecha ao clicar fora da foto
 // ou no X.
 //
+// O overlay também usa <img> nativa, e por um motivo DIFERENTE do círculo:
+// o otimizador do next/image exige allowlist por bucket em
+// next.config.mjs (images.remotePatterns), e este componente é genérico —
+// serve 'fotos-perfil' E 'fotos-categorias', e amanhã outro bucket. Com
+// <Image> aqui, a miniatura (que é <img> nativa) carregava normal e só o
+// zoom quebrava, com 400 do /_next/image, pra todo bucket fora da lista.
+// <img> nativa vai direto na URL pública e é imune a isso.
+//
+// Zoom mínimo OFERECIDO PELOS EDITORES de crop (ConfiguracoesSalao,
+// GerenciarServicos). Fica aqui só pra ter uma fonte única; o componente
+// NÃO força esse mínimo no render — baseScale segue sendo a cobertura
+// exata (object-fit: cover) e uma foto salva com zoom 1 continua
+// renderizando idêntica a antes. O ponto é que, em zoom exatamente 1, a
+// sobra em pelo menos um dos eixos é zero e os sliders de posição X/Y não
+// têm curso nenhum; começar em 1.12 garante folga pros dois desde a
+// primeira foto enviada.
+export const ZOOM_MINIMO = 1.12;
+
 // Props:
 //   src       – caminho/URL da foto (estabelecimentos.foto_perfil_url).
 //   posicao   – object-position CSS (estabelecimentos.foto_perfil_posicao);
@@ -55,6 +72,13 @@ import Image from "next/image";
 //                      arredondados), pra fotos que não são retrato.
 //   ariaLabel        – rótulo do botão que abre o zoom.
 //   ariaLabelDialog  – rótulo do overlay de tela cheia.
+//   comRing          – desenha o ring de 1px em volta da foto (default
+//                      true, == comportamento original). A miniatura de
+//                      categoria em /agendar passa false porque o card do
+//                      acordeão já tem `ring-1 ring-border` próprio: com a
+//                      foto encostando na borda, os dois rings colam e
+//                      viram uma borda visualmente mais grossa naquele
+//                      trecho.
 export default function FotoPerfilCircular({
   src,
   posicao,
@@ -65,6 +89,7 @@ export default function FotoPerfilCircular({
   formato = "circulo",
   ariaLabel = "Ver foto de perfil",
   ariaLabelDialog = "Foto de perfil",
+  comRing = true,
 }) {
   const [aberta, setAberta] = useState(false);
   const [dimensoesNaturais, setDimensoesNaturais] = useState(null);
@@ -123,7 +148,8 @@ export default function FotoPerfilCircular({
           onClick={() => setAberta(true)}
           aria-label={ariaLabel}
           className={[
-            "relative overflow-hidden ring-1 ring-border transition hover:opacity-90",
+            "relative overflow-hidden transition hover:opacity-90",
+            comRing ? "ring-1 ring-border" : "",
             formato === "quadrado" ? "rounded-lg" : "rounded-full",
           ].join(" ")}
           style={{ width: diametro, height: diametro }}
@@ -174,12 +200,12 @@ export default function FotoPerfilCircular({
             className="relative h-[80vh] w-[90vw] max-w-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <Image
+            {/* eslint-disable-next-line @next/next/no-img-element -- next/image exigiria allowlist por bucket em next.config.mjs, ver comentário no topo */}
+            <img
               src={src}
               alt={alt}
-              fill
-              sizes="90vw"
-              style={{ objectFit: "contain", objectPosition }}
+              className="h-full w-full object-contain"
+              style={{ objectPosition }}
             />
           </div>
         </div>

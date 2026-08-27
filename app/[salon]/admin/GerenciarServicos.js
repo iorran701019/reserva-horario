@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { formatarPreco } from "@/components/FormularioAgendamento";
-import FotoPerfilCircular from "@/components/FotoPerfilCircular";
+import FotoPerfilCircular, { ZOOM_MINIMO } from "@/components/FotoPerfilCircular";
 
 // Aba "Serviços" do /admin: CRUD dos serviços do salão (tabela `servicos`),
 // sempre particionado por estabelecimento_id (o consumidor já resolveu o salão
@@ -1072,9 +1072,16 @@ export default function GerenciarServicos({ estabelecimento }) {
     } = supabase.storage.from("fotos-categorias").getPublicUrl(caminho);
     const urlComCache = `${publicUrl}?v=${Date.now()}`;
 
+    // Categoria que ainda não tem zoom salvo nasce em ZOOM_MINIMO, não em 1:
+    // com zoom exatamente 1 a imagem cobre o círculo sem sobra em pelo menos
+    // um dos eixos, e os sliders de posição abaixo não teriam curso nenhum
+    // até o dono descobrir que precisa mexer no zoom primeiro. Se JÁ existe
+    // zoom salvo, respeita — trocar o arquivo não desfaz o ajuste manual.
+    const zoomInicial = categoria.foto_zoom == null ? { foto_zoom: ZOOM_MINIMO } : null;
+
     const { error: erroUpdate } = await supabase
       .from("categorias_servico")
-      .update({ foto_url: urlComCache })
+      .update({ foto_url: urlComCache, ...zoomInicial })
       .eq("id", categoria.id);
 
     setEnviandoFotoCategoriaId(null);
@@ -1084,7 +1091,7 @@ export default function GerenciarServicos({ estabelecimento }) {
       return;
     }
 
-    patchCategoria(categoria.id, { foto_url: urlComCache });
+    patchCategoria(categoria.id, { foto_url: urlComCache, ...zoomInicial });
   }
 
   // Grava posição ("x% y%") + zoom juntos ao soltar qualquer um dos 3
@@ -2812,7 +2819,7 @@ export default function GerenciarServicos({ estabelecimento }) {
                               <input
                                 id={`foto-categoria-zoom-${categoria.id}`}
                                 type="range"
-                                min={1}
+                                min={ZOOM_MINIMO}
                                 max={3}
                                 step={0.1}
                                 value={fotoZoom}
