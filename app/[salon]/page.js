@@ -633,6 +633,7 @@ export default function AgendarPage() {
               onSucesso={concluirWizard}
               onVoltarInicio={sairDaEdicao}
               onVoltarAntes={sairDaEdicao}
+              onCancelado={aposCancelamento}
             />
           ) : agendamentoSinal ? (
             // Só falta o sinal: pula o painel e já abre a confirmação, com o
@@ -735,6 +736,7 @@ export default function AgendarPage() {
               onSucesso={concluirWizard}
               onVoltarInicio={voltarParaIdentificacao}
               onVoltarAntes={voltarAntesDoWizard}
+              onCancelado={aposCancelamento}
             />
           )}
         </div>

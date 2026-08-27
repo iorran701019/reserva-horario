@@ -19,6 +19,7 @@ import {
   buscarVencimentoManutencao,
 } from "@/lib/manutencaoSugerida";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
+import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
 import { useVoltarFisico } from "@/lib/voltarFisico";
 import { dentroDaJanelaAgendamento } from "@/lib/janelaAgendamento";
 import { linkWhatsApp, MENSAGEM_CONFIRMACAO } from "@/lib/whatsapp";
@@ -532,6 +533,15 @@ export function CalendarioDias({
 //                   escolher outro horário cai no cancela-e-recria de
 //                   selecionarHorario, e sair sem escolher nada deixa o
 //                   agendamento original intacto.
+//   onCancelado    – só fluxo público (ignorado com `status`). Chamado (sem
+//                   args) depois que a cliente cancela, pela etapa "dados", a
+//                   reserva que ainda aguarda o sinal (ver
+//                   cancelarReservaAguardandoSinal). O update em
+//                   `agendamentos` e o aviso no WhatsApp já aconteceram aqui
+//                   dentro, pelo MESMO cancelarAgendamentoCliente das telas
+//                   de Pix e de protocolo — sobra pro consumidor só decidir
+//                   que tela fica de pé depois (app/[salon]/page.js reusa o
+//                   aposCancelamento que já serve às outras duas).
 export default function FormularioAgendamento({
   estabelecimento,
   status,
@@ -545,6 +555,7 @@ export default function FormularioAgendamento({
   onVoltarInicio = null,
   onVoltarAntes = null,
   agendamentoEmEdicao = null,
+  onCancelado = null,
 }) {
   const [form, setForm] = useState(() => ({
     ...ESTADO_INICIAL,
@@ -816,6 +827,23 @@ export default function FormularioAgendamento({
         !servicoSelecionado?.eh_manutencao));
   const [sinalDeclarado, setSinalDeclarado] = useState(false);
 
+  // Status Pix da reserva atual: `{ id, aguardando }`. É o que decide se os
+  // botões "Voltar e escolher outro horário"/"Cancelar agendamento" aparecem
+  // ao lado do BlocoConfirmacaoPix — eles só existem enquanto a linha ainda
+  // está em "aguardando_sinal", nunca depois que a cliente declarou o
+  // pagamento (checkbox ou comprovante) e ela virou "pendente".
+  //
+  // Guarda o ID JUNTO, e não só um booleano, pelo mesmo motivo que o
+  // marcadoPendenteParaRef do BlocoConfirmacaoPix: `reservaId` troca sem o
+  // bloco desmontar (trocar de horário cancela a linha e cria outra, ver
+  // selecionarHorario), e o que sabíamos do id antigo não vale pro novo.
+  //
+  // null (ou id que não bate) = "não sei ainda" e os botões ficam escondidos —
+  // à prova de falha de propósito: melhor não oferecer cancelar do que
+  // oferecer cancelar algo que já avançou.
+  const [statusPixReserva, setStatusPixReserva] = useState(null);
+  const [cancelandoReserva, setCancelandoReserva] = useState(false);
+
   // Reserva gravada ao ENTRAR na etapa "dados" (só fluxo público, ver
   // selecionarHorario) — id da linha em `agendamentos` e a "chave" da seleção
   // que a originou (serviço+data+horário+profissional). Ao reentrar em
@@ -828,6 +856,14 @@ export default function FormularioAgendamento({
   // Enquanto true, a gravação/cancelamento acima está em andamento — trava os
   // botões de horário pra evitar duplo clique.
   const [criandoReserva, setCriandoReserva] = useState(false);
+
+  // Ver statusPixReserva: só é true quando SABEMOS que a linha apontada por
+  // `reservaId` ainda está em "aguardando_sinal".
+  const aguardandoSinal =
+    precisaSinal &&
+    reservaId != null &&
+    statusPixReserva?.id === reservaId &&
+    statusPixReserva.aguardando;
 
   // Regras do agendamento (estabelecimento.aviso_regras_agendamento,
   // configurado no admin): popup bloqueante no fluxo público, mostrado uma
@@ -1583,6 +1619,41 @@ export default function FormularioAgendamento({
     reservaId,
   ]);
 
+  // Resolve o statusPixReserva de uma reserva que NÃO nasceu neste percurso.
+  // O caminho comum (clicar num horário) já anota o status na hora, dentro de
+  // selecionarHorario — este efeito existe pros dois caminhos em que a etapa
+  // "dados" recebe um `reservaId` de procedência desconhecida:
+  //   1) restauração de sessão — a cliente saiu pra pagar o Pix e o navegador
+  //      recarregou a aba ao voltar (ver pendenteRestaurarRef). Entre a saída
+  //      e a volta ela pode ter declarado o pagamento em OUTRA tela;
+  //   2) modo edição (agendamentoEmEdicao) — o "Editar" da tela de protocolo
+  //      abre o wizard com uma linha que já está em "pendente".
+  // Sem isto, os dois casos cairiam no fail-safe (botões escondidos) — o (1)
+  // é justamente o cenário mais provável de quem paga por Pix, então vale a
+  // consulta. Nunca roda no /admin: precisaSinal já embute `!status`.
+  useEffect(() => {
+    if (!precisaSinal || reservaId == null) return;
+    if (statusPixReserva?.id === reservaId) return;
+
+    let ignorar = false;
+    supabase
+      .from("agendamentos")
+      .select("status")
+      .eq("id", reservaId)
+      .single()
+      .then(({ data, error }) => {
+        if (ignorar || error || !data) return;
+        setStatusPixReserva({
+          id: reservaId,
+          aguardando: data.status === "aguardando_sinal",
+        });
+      });
+
+    return () => {
+      ignorar = true;
+    };
+  }, [precisaSinal, reservaId, statusPixReserva]);
+
   // Só os campos de texto (nome, WhatsApp) usam este handler agora — a data é
   // escolhida pelo calendário (selecionarData).
   function handleChange(e) {
@@ -1894,13 +1965,37 @@ export default function FormularioAgendamento({
     if (indice > 0) setEtapa(ETAPAS[indice - 1].id);
   }
 
+  // Pedido EXPLÍCITO de reabrir "data" a partir de "dados" — hoje só o botão
+  // "Voltar e escolher outro horário" do bloco do sinal (ver
+  // voltarParaEscolherHorario). Existe porque essa saída precisa passar pelo
+  // voltarFisicoDados pra consumir a entrada de histórico da etapa (ver
+  // lib/voltarFisico.js), e o hook só sabe chamar UM callback por chave: esta
+  // ref diz a fecharDados que ESTE popstate é o do botão, não o do voltar
+  // físico. One-shot — consumida na primeira leitura.
+  const reabrirDataRef = useRef(false);
+
   // Saída da etapa "dados": só no fluxo público (!status), com
   // onVoltarInicio recebido do consumidor (ver comentário da prop acima), a
   // reserva já gravada ao entrar aqui não pode mais ser reaberta via
   // voltarEtapa (isso reabriria "data" e trocaria/cancelaria a reserva ao
   // escolher outro horário). O /admin (status truthy) nunca recebe
   // onVoltarInicio, então mantém voltarEtapa como sempre.
-  const fecharDados = !status && onVoltarInicio ? onVoltarInicio : voltarEtapa;
+  //
+  // A EXCEÇÃO é reabrirDataRef: aí a cliente pediu de propósito pra trocar de
+  // horário, com a reserva ainda em "aguardando_sinal", e reabrir "data" é o
+  // desfecho certo — a troca em si continua sendo só do selecionarHorario.
+  function fecharDados() {
+    if (reabrirDataRef.current) {
+      reabrirDataRef.current = false;
+      setEtapa("data");
+      return;
+    }
+    if (!status && onVoltarInicio) {
+      onVoltarInicio();
+      return;
+    }
+    voltarEtapa();
+  }
 
   // Botão físico "voltar" (Android/iOS) nas etapas "servico", "data" e
   // "dados": chama o mesmo callback do botão em tela (voltarEtapa/
@@ -1966,6 +2061,67 @@ export default function FormularioAgendamento({
   );
   const voltarFisicoData = useVoltarFisico(voltarEtapa, etapa === "data" && !restaurandoParaDados, "data");
   const voltarFisicoDados = useVoltarFisico(fecharDados, etapa === "dados", "dados");
+
+  // "Voltar e escolher outro horário" (bloco do sinal, só enquanto
+  // aguardandoSinal). NÃO cancela nada aqui de propósito: a reserva atual
+  // continua de pé até que a cliente escolha OUTRO horário, e aí quem cancela
+  // a antiga e cria a nova é o selecionarHorario de sempre (cancela-e-recria).
+  // Reabrindo "data" e desistindo sem tocar em nada, o desfecho é o mesmo de
+  // hoje — a reserva fica lá, como já ficava quando ela abandonava a etapa
+  // pelo voltar físico.
+  //
+  // Passa pelo voltarFisicoDados (não por setEtapa direto) pra consumir a
+  // entrada de histórico que a etapa "dados" empurrou — ver reabrirDataRef e
+  // lib/voltarFisico.js. Sem isso, cada ida e volta entre "dados" e "data"
+  // deixaria uma entrada órfã na pilha real.
+  function voltarParaEscolherHorario() {
+    setErro("");
+    reabrirDataRef.current = true;
+    voltarFisicoDados();
+  }
+
+  // "Cancelar agendamento" (bloco do sinal, só enquanto aguardandoSinal).
+  // Mesmo helper compartilhado das telas de Pix, de protocolo e da lista do
+  // PainelCliente (ver cancelarAgendamentoCliente): ele faz o update pra
+  // "cancelado" e abre o WhatsApp avisando o salão.
+  //
+  // Sai chamando onCancelado direto, sem passar pelo voltarFisicoDados: aqui
+  // o wizard inteiro é abandonado (o consumidor troca de tela), então não há
+  // uma etapa "de volta" pra consumir a entrada de histórico — é o mesmo
+  // desfecho do caminho de sucesso (ver onSucesso em finalizarAgendamento).
+  async function cancelarReservaAguardandoSinal() {
+    setErro("");
+    setCancelandoReserva(true);
+
+    const { ok, erro: erroCancelamento } = await cancelarAgendamentoCliente({
+      agendamentoId: reservaId,
+      estabelecimento,
+      nomeCliente: form.nome,
+      dataFormatada: formatarData(form.data),
+      horario: horarioSelecionado,
+    });
+
+    setCancelandoReserva(false);
+
+    if (!ok) {
+      setErro(erroCancelamento);
+      return;
+    }
+
+    // Zerar `horarioSelecionado` JUNTO de `reservaId` não é zelo: a fatia de
+    // sessão é regravada pelo efeito de persistência logo depois destes
+    // setState, e um rascunho com horário mas SEM reservaId faz a restauração
+    // (efeito 3) chamar selecionarHorario — ou seja, recriaria em silêncio,
+    // no próximo reload, o agendamento que ela acabou de cancelar. Sem
+    // horário, o rascunho regravado é inerte.
+    setReservaId(null);
+    setReservaChave(null);
+    setStatusPixReserva(null);
+    setHorarioSelecionado("");
+    limparFatia(estabelecimento.slug, "agendamento");
+
+    onCancelado?.();
+  }
 
   // Duas seleções (serviço+data+horário+profissional) apontam pro mesmo
   // agendamento? Usado só pra decidir, ao reentrar em "dados", se reaproveita
@@ -2128,6 +2284,9 @@ export default function FormularioAgendamento({
 
     setReservaId(data.id);
     setReservaChave(chaveAtual);
+    // Acabou de nascer com o status do payload acima — anotar aqui poupa a
+    // consulta do efeito de statusPixReserva no caminho comum.
+    setStatusPixReserva({ id: data.id, aguardando: precisaSinal });
     setCriandoReserva(false);
     setEtapa("dados");
   }
@@ -3019,13 +3178,52 @@ export default function FormularioAgendamento({
                 gravada ao entrar em "dados" (ver selecionarHorario) — é nela
                 que o comprovante é anexado, antes mesmo do submit. */}
             {precisaSinal && (
-              <BlocoConfirmacaoPix
-                estabelecimento={estabelecimento}
-                agendamentoId={reservaId}
-                nomeProfissionalContato={nomeProfissionalContato}
-                sinalDeclarado={sinalDeclarado}
-                onSinalDeclaradoChange={setSinalDeclarado}
-              />
+              <>
+                <BlocoConfirmacaoPix
+                  estabelecimento={estabelecimento}
+                  agendamentoId={reservaId}
+                  nomeProfissionalContato={nomeProfissionalContato}
+                  sinalDeclarado={sinalDeclarado}
+                  onSinalDeclaradoChange={setSinalDeclarado}
+                  // O bloco leva a linha de "aguardando_sinal" pra "pendente"
+                  // sozinho, nos dois gestos que valem como "paguei e avisei"
+                  // (marcar a caixa, anexar o comprovante) — inclusive no do
+                  // comprovante, que não passa por `sinalDeclarado`. É por
+                  // aqui que o wizard fica sabendo, e é o que faz os dois
+                  // botões abaixo sumirem no mesmo instante.
+                  onStatusMudou={() =>
+                    setStatusPixReserva({ id: reservaId, aguardando: false })
+                  }
+                />
+
+                {/* Saídas da tela de Pix, enquanto a reserva ainda está em
+                    "aguardando_sinal". Depois que ela avança, somem: a partir
+                    daí qualquer mudança passa pelos caminhos normais (sair e
+                    se reidentificar, ou o Editar/Cancelar das telas de Pix e
+                    de protocolo), pra não cancelar por engano algo que já
+                    seguiu adiante. Só existem no público — `precisaSinal` já
+                    embute `!status`, então o /admin nunca vê nada disto. */}
+                {aguardandoSinal && (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={voltarParaEscolherHorario}
+                      disabled={cancelandoReserva}
+                      className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Voltar e escolher outro horário
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelarReservaAguardandoSinal}
+                      disabled={cancelandoReserva}
+                      className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {cancelandoReserva ? "Cancelando..." : "Cancelar agendamento"}
+                    </button>
+                  </div>
+                )}
+              </>
             )}
 
             {/* Só no /admin (status truthy): botão dividido, mesmo padrão da
