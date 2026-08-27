@@ -30,7 +30,12 @@ import FotoPerfilCircular from "@/components/FotoPerfilCircular";
 // Lado (px) da miniatura de foto da categoria no cabeçalho do acordeão da
 // etapa "servico". Grande o bastante pra dar pra ver o que é, pequena o
 // bastante pra não dominar a linha do nome — ajuste aqui, num lugar só.
-const TAMANHO_FOTO_CATEGORIA = 40;
+// 48 + as margens de 4px (my-1/ml-1 no wrapperClassName) dá uma linha de
+// 56px, 8px mais alta que o botão do título sozinho (py-3 + 24px de
+// line-height = 48px): é a foto que passa a mandar na altura da linha.
+// Categorias SEM foto continuam em 48px de propósito — a diferença lê como
+// intencional numa linha que tem um elemento visual a mais.
+const TAMANHO_FOTO_CATEGORIA = 48;
 
 // Wizard de agendamento COMPARTILHADO entre o fluxo público (/agendar, cria
 // "pendente"/"aguardando_sinal") e a aba Agendar do /admin (cria
@@ -2753,7 +2758,19 @@ export default function FormularioAgendamento({
                             borda e o texto continua com o mesmo respiro de
                             antes. Pelo mesmo motivo a foto vai com
                             comRing={false} — o ring dela somaria com o
-                            `ring-1 ring-border` do card ao encostar. */}
+                            `ring-1 ring-border` do card ao encostar.
+
+                            O `flex` no wrapperClassName da foto NÃO é
+                            enfeite: sem ele o wrapper vira bloco comum e o
+                            <button> de dentro fica inline-block, assentando
+                            na baseline da linha — sobram ~7px de descender
+                            SÓ EMBAIXO da foto (half-leading + descender da
+                            fonte), o wrapper mede ~55px em vez de 48, e o
+                            items-center centraliza esse wrapper torto: a
+                            foto encosta no topo do card com um buraco
+                            embaixo. Com `flex`, o botão vira item de flex
+                            (block-level), o wrapper mede os 48px exatos e
+                            as margens my-1/ml-1 dão o respiro simétrico. */}
                         <div
                           className="flex w-full items-center gap-4 rounded-lg transition hover:bg-surface"
                           style={
@@ -2772,7 +2789,7 @@ export default function FormularioAgendamento({
                               posicao={categoria.foto_posicao}
                               zoom={categoria.foto_zoom ?? 1}
                               diametro={TAMANHO_FOTO_CATEGORIA}
-                              wrapperClassName="shrink-0"
+                              wrapperClassName="my-1 ml-1 flex shrink-0"
                               comRing={false}
                               alt={categoria.nome}
                               ariaLabel={`Ver foto de ${categoria.nome}`}
