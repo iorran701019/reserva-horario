@@ -492,6 +492,15 @@ export default function AdminPage() {
   // WhatsApp. false só quando o modal foi aberto pela zona pequena (sem
   // notificar) do botão dividido em Pendentes; sempre true nos outros casos.
   const [notificarAoCancelar, setNotificarAoCancelar] = useState(true);
+  // Carimbo do último cancelamento CONCLUÍDO (gravado no banco por
+  // handleCancelar). Serve só de sinal pra quem exibe dados de agendamento
+  // fora da lista deste componente e por isso não é alcançado por
+  // atualizarStatusLocal — hoje a ficha do cliente da aba "Clientes", que
+  // refaz o resumo quando o id bate com o "Próximo agendamento" na tela (ver
+  // ultimoCancelamento em GerenciarClientes.js). `em` (Date.now()) garante um
+  // objeto NOVO a cada cancelamento, senão cancelar o mesmo id duas vezes não
+  // dispararia o efeito lá. null = nenhum cancelamento nesta sessão.
+  const [ultimoCancelamento, setUltimoCancelamento] = useState(null);
 
   // Agendamento aguardando confirmação da zona pequena de "Confirmar" (sem
   // notificar). Mesmo padrão de agendamentoParaCancelar: null = modal
@@ -741,6 +750,17 @@ export default function AdminPage() {
     }
   }
 
+  // Arma o MESMO modal de cancelamento usado pelos cards do Painel/Pendentes
+  // (ver agendamentoParaCancelar no render), a pedido de um filho que não tem
+  // acesso ao state daqui — hoje a ficha do cliente da aba "Clientes" (ver
+  // onCancelarAgendamento em GerenciarClientes.js). Só arma: quem grava
+  // continua sendo handleCancelar, depois da confirmação no modal. O modal é
+  // global (fica fora do switch de abas), então funciona com qualquer viewPai.
+  function abrirCancelamentoAgendamento(agendamento, notificar) {
+    setAgendamentoParaCancelar(agendamento);
+    setNotificarAoCancelar(notificar);
+  }
+
   // Botão B: só roda DEPOIS que o dono confirma no modal. Grava o status
   // 'cancelado' no banco e, se der certo, abre o WhatsApp com a mensagem de
   // cancelamento. Em caso de erro não abre o WhatsApp. `notificar=false`
@@ -761,6 +781,7 @@ export default function AdminPage() {
 
     setErro("");
     atualizarStatusLocal(agendamento.id, "cancelado");
+    setUltimoCancelamento({ id: agendamento.id, em: Date.now() });
 
     if (notificar) {
       // Base da URL: a env pública (inlinada no build) quando definida; senão a
@@ -2693,6 +2714,17 @@ export default function AdminPage() {
         {!carregando && !erro && viewPai === "clientes" && (
           <GerenciarClientes
             estabelecimento={estabelecimento}
+            // "Cancelar agendamento" do card "Próximo agendamento" da ficha:
+            // só ARMA o modal global de cancelamento daqui (ver
+            // abrirCancelamentoAgendamento) — a gravação segue em
+            // handleCancelar, igual aos cards do Painel/Pendentes. `notificar`
+            // vem da zona do botão dividido clicada lá dentro.
+            onCancelarAgendamento={abrirCancelamentoAgendamento}
+            // Sinal de "cancelamento concluído" (ver ultimoCancelamento
+            // acima): a ficha só se auto-atualiza porque recebe isto — o
+            // atualizarStatusLocal de handleCancelar patcha a lista DESTE
+            // componente, que a aba Clientes não consome.
+            ultimoCancelamento={ultimoCancelamento}
             // "Agendar" da ficha do cliente: mesmo atalho do "Novo
             // agendamento" do Histórico (pula o pré-passo de busca por nome e
             // passa pelo aviso de pendente), só que aqui o cliente vem da

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { CalendarPlus, ChevronDown, ChevronRight } from "lucide-react";
+import { CalendarPlus, ChevronDown, ChevronRight, MessageCircleOff, X } from "lucide-react";
 import NavegacaoMes from "@/components/NavegacaoMes";
 import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
 import {
@@ -220,6 +220,8 @@ function DetalheCliente({
   msgContatoAdmin,
   onVoltar,
   onAgendarPara,
+  onCancelarAgendamento,
+  ultimoCancelamento,
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -288,23 +290,53 @@ function DetalheCliente({
 
   const telefoneDigitos = String(clienteAtual.whatsapp ?? "").replace(/\D/g, "");
 
+  // Guarda contra setState depois do unmount. Antes era um `let ativo` local
+  // do efeito; virou ref porque a busca agora roda de DOIS lugares (montagem e
+  // refetch pós-cancelamento) e o segundo não tem cleanup próprio pra desarmar.
+  // O `= true` no corpo do efeito não é redundante: em dev o Strict Mode monta,
+  // desmonta e remonta: sem ele a ref ficaria false pra sempre já no primeiro
+  // ciclo e o resumo nunca apareceria.
+  const montadoRef = useRef(true);
   useEffect(() => {
-    let ativo = true;
+    montadoRef.current = true;
+    return () => {
+      montadoRef.current = false;
+    };
+  }, []);
+
+  // Busca (ou rebusca) o resumo do relacionamento + se o salão tem anamnese
+  // ativa. `buscarResumoCliente` já traz proximoAgendamento/ultimoAtendimento/
+  // anamneseData de uma vez (3 consultas em paralelo, ver lib/clientesAdmin),
+  // então não dá pra refazer só o "próximo" — e nem compensa.
+  async function recarregarResumo() {
     setCarregando(true);
-    Promise.all([
+    const [dados, temModelo] = await Promise.all([
       buscarResumoCliente(clienteAtual.id, estabelecimentoId, telefoneDigitos),
       existeModeloAtivo(estabelecimentoId),
-    ]).then(([dados, temModelo]) => {
-      if (ativo) {
-        setResumo(dados);
-        setTemModeloAtivo(temModelo);
-        setCarregando(false);
-      }
-    });
-    return () => {
-      ativo = false;
-    };
+    ]);
+    if (montadoRef.current) {
+      setResumo(dados);
+      setTemModeloAtivo(temModelo);
+      setCarregando(false);
+    }
+  }
+
+  useEffect(() => {
+    recarregarResumo();
   }, [clienteAtual.id, telefoneDigitos, estabelecimentoId]);
+
+  // Cancelou o agendamento que ESTA ficha mostra como "Próximo agendamento"?
+  // Refaz o resumo. O cancelamento é gravado lá no /admin (handleCancelar), que
+  // patcha a própria lista dele e não tem como alcançar este state — o sinal
+  // chega por `ultimoCancelamento` (ver page.js). Compara o id pra não
+  // rebuscar quando o cancelado foi de outro cliente/outra aba. Sem o refetch
+  // o card ficaria mostrando um agendamento já cancelado até fechar e reabrir
+  // a ficha (o resumo só recarrega quando o cliente/telefone muda).
+  useEffect(() => {
+    if (ultimoCancelamento && resumo?.proximoAgendamento?.id === ultimoCancelamento.id) {
+      recarregarResumo();
+    }
+  }, [ultimoCancelamento]);
 
   async function toggleHistorico() {
     const abrir = !historicoAberto;
@@ -587,6 +619,58 @@ function DetalheCliente({
                 : undefined
             }
           />
+
+          {/* Cancela o próximo agendamento sem sair da ficha. O botão só ARMA
+              o modal de confirmação do /admin (ver onCancelarAgendamento em
+              app/[salon]/admin/page.js) — a gravação e a mensagem de WhatsApp
+              continuam sendo as MESMAS dos cards do Painel/Pendentes
+              (handleCancelar). Botão dividido no mesmo padrão de lá: zona
+              grande cancela E notifica; zona pequena cancela sem notificar.
+              `resumo.proximoAgendamento` vem de buscarAgendamentosAtivos, que
+              não seleciona nome_cliente/telefone (a query filtra POR telefone)
+              — completa os dois com os dados do cliente desta ficha, senão o
+              nome do modal sairia vazio e o link do WhatsApp sem número.
+              Some quando o pai não passa o callback, igual ao "Agendar". */}
+          {onCancelarAgendamento && resumo.proximoAgendamento && (
+            <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
+              <button
+                type="button"
+                onClick={() =>
+                  onCancelarAgendamento(
+                    {
+                      ...resumo.proximoAgendamento,
+                      nome_cliente: clienteAtual.nome,
+                      telefone: telefoneDigitos,
+                    },
+                    true
+                  )
+                }
+                className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+              >
+                <IconeWhatsApp />
+                Cancelar agendamento
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onCancelarAgendamento(
+                    {
+                      ...resumo.proximoAgendamento,
+                      nome_cliente: clienteAtual.nome,
+                      telefone: telefoneDigitos,
+                    },
+                    false
+                  )
+                }
+                aria-label="Cancelar sem notificar cliente"
+                title="Cancelar sem notificar cliente"
+                className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-red-200 text-red-600 transition hover:bg-red-50"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+                <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+          )}
           <div className="rounded-xl bg-surface p-3 ring-1 ring-border">
             <CabecalhoRetratil
               titulo="Histórico"
@@ -903,7 +987,12 @@ function DetalheCliente({
   );
 }
 
-export default function GerenciarClientes({ estabelecimento, onAgendarPara }) {
+export default function GerenciarClientes({
+  estabelecimento,
+  onAgendarPara,
+  onCancelarAgendamento,
+  ultimoCancelamento,
+}) {
   const [clientes, setClientes] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -968,6 +1057,8 @@ export default function GerenciarClientes({ estabelecimento, onAgendarPara }) {
         msgContatoAdmin={estabelecimento.msg_contato_admin}
         onVoltar={() => setSelecionado(null)}
         onAgendarPara={onAgendarPara}
+        onCancelarAgendamento={onCancelarAgendamento}
+        ultimoCancelamento={ultimoCancelamento}
       />
     );
   }
