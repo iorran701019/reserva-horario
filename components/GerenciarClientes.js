@@ -435,8 +435,8 @@ function DetalheCliente({
       </button>
 
       <div>
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-base font-semibold text-heading">{clienteAtual.nome}</h3>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="min-w-0 truncate text-base font-semibold text-heading">{clienteAtual.nome}</h3>
           <div className="flex shrink-0 items-center gap-2">
             {/* Atalho pro wizard da aba Agendar já com esta cliente escolhida
                 (pula o pré-passo de busca por nome). Quem navega é o /admin
