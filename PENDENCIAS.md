@@ -22,6 +22,8 @@
 - [x]Foto por categoria de serviço em /agendar, com crop e zoom em tela cheia (sessão 34)
 - [x]Botão "Remover foto" no perfil e nas categorias de serviço (sessão 34)
 - [x]Pendência de cancelamento duplicada em Pendentes (dois sinks gravando a mesma pendência) (sessão 34)
+- [x] Botão "Ver meus agendamentos" removido da entrada direta na tela de confirmação de sinal Pix — evita que a cliente saia do fluxo de resolver aquele agendamento específico (Sessão 35).
+- [x] Consumo de cota "Claude Browser MCP" (38%) investigado e corrigido — causa era o toggle "Claude in Chrome" nas Configurações do claude.ai, não MCP do Claude Code. Desativado por Iorran (Sessão 35).
 
 ## Em aberto
 - [ ] UX da configuração de pergunta condicional (mãe/filha) em `GerenciarServicos.js` — funcional, mas complexa pra configurar; considerar assistente passo-a-passo ou fluxo guiado no futuro.
