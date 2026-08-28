@@ -17,7 +17,12 @@ import {
 import { existeModeloAtivo, buscarUltimasAnamnesesPorCliente } from "@/lib/anamnese";
 import { classificarAgendamento, rotuloHistorico, ordenarHistoricoPorStatus } from "@/lib/particao";
 import { buscarProgressoFidelidade } from "@/lib/fidelidade";
-import { linkWhatsApp, MENSAGEM_CONTATO_CLIENTE_ADMIN } from "@/lib/whatsapp";
+import {
+  linkWhatsApp,
+  linkWhatsAppSemMensagem,
+  MENSAGEM_CONTATO_CLIENTE_ADMIN,
+} from "@/lib/whatsapp";
+import IconeWhatsApp from "@/components/IconeWhatsApp";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import AtualizarDadosCliente from "@/components/AtualizarDadosCliente";
 import FormularioAnamnese from "@/components/FormularioAnamnese";
@@ -435,48 +440,7 @@ function DetalheCliente({
       </button>
 
       <div>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="min-w-0 truncate text-base font-semibold text-heading">{clienteAtual.nome}</h3>
-          <div className="flex shrink-0 items-center gap-2">
-            {/* Atalho pro wizard da aba Agendar já com esta cliente escolhida
-                (pula o pré-passo de busca por nome). Quem navega é o /admin
-                — ver onAgendarPara em app/[salon]/admin/page.js, o MESMO
-                atalho do "Novo agendamento" do Histórico, incluindo o aviso
-                de cliente com pendente. Diferença: aqui a cliente veio da
-                tabela `clientes`, então o id vai preenchido de verdade (no
-                Histórico vai null). Some quando o pai não passa o callback. */}
-            {onAgendarPara && (
-              <button
-                type="button"
-                onClick={() =>
-                  onAgendarPara({
-                    id: clienteAtual.id,
-                    nome: clienteAtual.nome,
-                    telefone: clienteAtual.whatsapp,
-                  })
-                }
-                className="inline-flex items-center gap-1.5 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
-              >
-                <CalendarPlus className="h-4 w-4" />
-                Agendar
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setAlterandoWhatsapp(true)}
-              className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface"
-            >
-              Alterar WhatsApp
-            </button>
-            <button
-              type="button"
-              onClick={() => setEditandoDados(true)}
-              className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface"
-            >
-              Editar
-            </button>
-          </div>
-        </div>
+        <h3 className="min-w-0 truncate text-base font-semibold text-heading">{clienteAtual.nome}</h3>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
           <a
             href={linkWhatsApp(
@@ -505,6 +469,66 @@ function DetalheCliente({
               </a>
             </span>
           )}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {/* Atalho pro wizard da aba Agendar já com esta cliente escolhida
+              (pula o pré-passo de busca por nome). Quem navega é o /admin
+              — ver onAgendarPara em app/[salon]/admin/page.js, o MESMO
+              atalho do "Novo agendamento" do Histórico, incluindo o aviso
+              de cliente com pendente. Diferença: aqui a cliente veio da
+              tabela `clientes`, então o id vai preenchido de verdade (no
+              Histórico vai null). Some quando o pai não passa o callback. */}
+          {onAgendarPara && (
+            <button
+              type="button"
+              onClick={() =>
+                onAgendarPara({
+                  id: clienteAtual.id,
+                  nome: clienteAtual.nome,
+                  telefone: clienteAtual.whatsapp,
+                })
+              }
+              className="inline-flex items-center gap-1.5 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+            >
+              <CalendarPlus className="h-4 w-4" />
+              Agendar
+            </button>
+          )}
+          {/* Contato livre: abre a conversa do WhatsApp em branco, sem
+              mensagem pré-preenchida — mesmo padrão (e mesmo visual) do
+              "Entrar em contato" do inbox de Pendentes. Convive com o link
+              do número logo abaixo, que leva a MENSAGEM_CONTATO_CLIENTE_ADMIN
+              pronta: aqui a dona escreve o que quiser. */}
+          <button
+            type="button"
+            onClick={() =>
+              window.open(
+                linkWhatsAppSemMensagem(clienteAtual.whatsapp),
+                "_blank",
+                "noopener,noreferrer"
+              )
+            }
+            disabled={!clienteAtual.whatsapp}
+            title={!clienteAtual.whatsapp ? "Telefone não cadastrado" : undefined}
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 ring-1 ring-blue-100 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-50"
+          >
+            <IconeWhatsApp />
+            Entrar em contato
+          </button>
+          <button
+            type="button"
+            onClick={() => setAlterandoWhatsapp(true)}
+            className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface"
+          >
+            Alterar WhatsApp
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditandoDados(true)}
+            className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface"
+          >
+            Editar
+          </button>
         </div>
       </div>
 
