@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { CalendarPlus, ChevronDown, ChevronRight, MessageCircleOff, X } from "lucide-react";
+import { CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, MessageCircleOff, X } from "lucide-react";
 import NavegacaoMes from "@/components/NavegacaoMes";
 import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
 import {
@@ -394,9 +394,10 @@ function DetalheCliente({
       <button
         type="button"
         onClick={onVoltar}
-        className="text-sm font-medium text-body transition hover:text-heading"
+        className="inline-flex items-center gap-1.5 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface"
       >
-        ← Voltar
+        <ChevronLeft className="h-4 w-4" />
+        Voltar
       </button>
 
       <div>
