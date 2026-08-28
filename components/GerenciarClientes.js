@@ -17,6 +17,7 @@ import {
 import { existeModeloAtivo, buscarUltimasAnamnesesPorCliente } from "@/lib/anamnese";
 import { classificarAgendamento, rotuloHistorico, ordenarHistoricoPorStatus } from "@/lib/particao";
 import { buscarProgressoFidelidade } from "@/lib/fidelidade";
+import { formatarDataBR, formatarHorario } from "@/lib/data";
 import {
   linkWhatsApp,
   linkWhatsAppSemMensagem,
@@ -27,6 +28,7 @@ import BadgeFidelidade from "@/components/BadgeFidelidade";
 import AtualizarDadosCliente from "@/components/AtualizarDadosCliente";
 import FormularioAnamnese from "@/components/FormularioAnamnese";
 import ModalAlterarWhatsapp from "@/components/ModalAlterarWhatsapp";
+import CarrosselAgendamentos from "@/components/CarrosselAgendamentos";
 
 // Aba "Clientes" do /admin: lista somente-leitura dos clientes do salão
 // (tabela `clientes`, particionada por estabelecimento_id) com busca por nome
@@ -35,41 +37,6 @@ import ModalAlterarWhatsapp from "@/components/ModalAlterarWhatsapp";
 // padrão visual/estrutural de GerenciarProfissionais.js: cards
 // `rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border`, clique abre o
 // detalhe substituindo a lista, botão "Voltar" fecha.
-
-// Selo de status dos agendamentos ATIVOS. Mesma paleta do PainelCliente
-// (SELO_STATUS) — mantém a linguagem visual do status já usada no público.
-const SELO_STATUS = {
-  aguardando_sinal: {
-    rotulo: "Aguardando sinal",
-    classe: "bg-amber-50 text-amber-700 ring-amber-200",
-  },
-  pendente: {
-    rotulo: "Pendente",
-    classe: "bg-gray-100 text-gray-700 ring-gray-200",
-  },
-  confirmado: {
-    rotulo: "Confirmado",
-    classe: "bg-green-100 text-green-700 ring-green-200",
-  },
-};
-
-// "YYYY-MM-DD" (date do Postgres) -> "DD/MM/AAAA". Monta o Date por partes
-// (nunca new Date("YYYY-MM-DD"), que seria interpretada como UTC e desloca o
-// dia em GMT-3) — mesma convenção do resto do projeto.
-function formatarDataBR(iso) {
-  if (!iso) return "";
-  const [ano, mes, dia] = String(iso).slice(0, 10).split("-").map(Number);
-  return new Date(ano, mes - 1, dia).toLocaleDateString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-}
-
-// "HH:MM:SS"/"HH:MM" -> "HH:MM".
-function formatarHorario(horario) {
-  return horario ? String(horario).slice(0, 5) : "";
-}
 
 // true se o mês de `nascimento` (date "YYYY-MM-DD") for o mês atual — decide o
 // badge "🎂 Aniversário" do card. Lê o mês por partes (sem construir Date),
@@ -87,53 +54,6 @@ function situacaoAnamnese(criadoEm) {
   const limite = new Date();
   limite.setMonth(limite.getMonth() - 12);
   return new Date(criadoEm) < limite ? "vencida" : "em_dia";
-}
-
-// Bloco "Próximo agendamento" / "Último atendimento" do detalhe: data,
-// horário e serviço de um item de agendamento (ou o texto vazio informado).
-// `onClick` opcional (só passado quando há `item`, ver "Próximo agendamento"
-// em DetalheCliente) torna o card inteiro clicável — vira um <button> em vez
-// de <div>, mesmo conteúdo.
-function BlocoAgendamento({ titulo, item, vazio, mostrarSelo, onClick }) {
-  const Wrapper = onClick ? "button" : "div";
-  return (
-    <Wrapper
-      {...(onClick ? { type: "button", onClick } : {})}
-      className={`w-full rounded-xl bg-surface p-3 text-left ring-1 ring-border ${
-        onClick ? "transition hover:bg-card" : ""
-      }`}
-    >
-      <h4 className="text-sm font-semibold text-heading">{titulo}</h4>
-      {item ? (
-        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-body">
-          <span className="font-medium text-heading">
-            {formatarDataBR(item.data)} · {formatarHorario(item.horario)}
-          </span>
-          <span>{item.servicos?.nome ?? "Serviço"}</span>
-          {mostrarSelo && SELO_STATUS[item.status] && (
-            <span
-              className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${SELO_STATUS[item.status].classe}`}
-            >
-              {SELO_STATUS[item.status].rotulo}
-            </span>
-          )}
-          {/* Respostas do popup de perguntas do serviço (ver
-              lib/agendamentoRespostas), quando houver. */}
-          {(item.respostas ?? []).length > 0 && (
-            <ul className="mt-1 basis-full space-y-0.5">
-              {item.respostas.map((texto, i) => (
-                <li key={i} className="text-xs text-body">
-                  {texto}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : (
-        <p className="mt-1.5 text-sm text-body">{vazio}</p>
-      )}
-    </Wrapper>
-  );
 }
 
 // Cabeçalho clicável do padrão de acordeão usado em Histórico, Anamnese e
@@ -305,9 +225,9 @@ function DetalheCliente({
   }, []);
 
   // Busca (ou rebusca) o resumo do relacionamento + se o salão tem anamnese
-  // ativa. `buscarResumoCliente` já traz proximoAgendamento/ultimoAtendimento/
+  // ativa. `buscarResumoCliente` já traz proximosAgendamentos/ultimoAtendimento/
   // anamneseData de uma vez (3 consultas em paralelo, ver lib/clientesAdmin),
-  // então não dá pra refazer só o "próximo" — e nem compensa.
+  // então não dá pra refazer só a lista de agendamentos — e nem compensa.
   async function recarregarResumo() {
     setCarregando(true);
     const [dados, temModelo] = await Promise.all([
@@ -325,15 +245,23 @@ function DetalheCliente({
     recarregarResumo();
   }, [clienteAtual.id, telefoneDigitos, estabelecimentoId]);
 
-  // Cancelou o agendamento que ESTA ficha mostra como "Próximo agendamento"?
-  // Refaz o resumo. O cancelamento é gravado lá no /admin (handleCancelar), que
-  // patcha a própria lista dele e não tem como alcançar este state — o sinal
-  // chega por `ultimoCancelamento` (ver page.js). Compara o id pra não
-  // rebuscar quando o cancelado foi de outro cliente/outra aba. Sem o refetch
-  // o card ficaria mostrando um agendamento já cancelado até fechar e reabrir
-  // a ficha (o resumo só recarrega quando o cliente/telefone muda).
+  // Cancelou um dos agendamentos que ESTA ficha mostra no carrossel "Próximos
+  // agendamentos"? Refaz o resumo. O cancelamento é gravado lá no /admin
+  // (handleCancelar), que patcha a própria lista dele e não tem como alcançar
+  // este state — o sinal chega por `ultimoCancelamento` (ver page.js).
+  // Procura o id na lista INTEIRA (não só no primeiro item): o carrossel deixa
+  // cancelar qualquer um dos futuros, e comparar só um id faria o cancelamento
+  // do segundo em diante passar batido. O `some` também evita rebuscar quando o
+  // cancelado foi de outro cliente/outra aba. Sem o refetch o carrossel ficaria
+  // mostrando um agendamento já cancelado até fechar e reabrir a ficha (o
+  // resumo só recarrega quando o cliente/telefone muda).
   useEffect(() => {
-    if (ultimoCancelamento && resumo?.proximoAgendamento?.id === ultimoCancelamento.id) {
+    if (
+      ultimoCancelamento &&
+      (resumo?.proximosAgendamentos ?? []).some(
+        (item) => item.id === ultimoCancelamento.id
+      )
+    ) {
       recarregarResumo();
     }
   }, [ultimoCancelamento]);
@@ -604,73 +532,78 @@ function DetalheCliente({
         <p className="text-sm text-body">Carregando resumo...</p>
       ) : (
         <div className="space-y-3">
-          <BlocoAgendamento
-            titulo="Próximo agendamento"
-            item={resumo.proximoAgendamento}
+          {/* Carrossel dos agendamentos confirmados futuros (ver
+              buscarProximosAgendamentos em lib/clientesAdmin). Substituiu o
+              card único "Próximo agendamento", que só mostrava o primeiro da
+              lista e escondia os demais.
+
+              As ações vão por render prop e recebem o item ATUAL do
+              carrossel, não mais um "próximo" fixo: cancelar age sobre o que
+              está na tela. O botão só ARMA o modal de confirmação do /admin
+              (ver onCancelarAgendamento em app/[salon]/admin/page.js) — a
+              gravação e a mensagem de WhatsApp continuam sendo as MESMAS dos
+              cards do Painel/Pendentes (handleCancelar). Botão dividido no
+              mesmo padrão de lá: zona grande cancela E notifica; zona pequena
+              cancela sem notificar. Os itens vêm de buscarAgendamentosAtivos,
+              que não seleciona nome_cliente/telefone (a query filtra POR
+              telefone) — completa os dois com os dados do cliente desta
+              ficha, senão o nome do modal sairia vazio e o link do WhatsApp
+              sem número. Some quando o pai não passa o callback, igual ao
+              "Agendar". */}
+          <CarrosselAgendamentos
+            titulo="Próximos agendamentos"
+            itens={resumo.proximosAgendamentos ?? []}
             vazio="Nenhum agendamento ativo."
-            mostrarSelo
-            onClick={
-              resumo.proximoAgendamento
-                ? () =>
-                    router.push(
-                      `${pathname}?aba=painel&data=${resumo.proximoAgendamento.data}`,
-                      { scroll: false }
-                    )
-                : undefined
+            onSelecionarItem={(item) =>
+              router.push(`${pathname}?aba=painel&data=${item.data}`, {
+                scroll: false,
+              })
+            }
+            renderAcoes={(item) =>
+              onCancelarAgendamento &&
+              item && (
+                <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onCancelarAgendamento(
+                        {
+                          ...item,
+                          nome_cliente: clienteAtual.nome,
+                          telefone: telefoneDigitos,
+                        },
+                        true
+                      )
+                    }
+                    className="inline-flex flex-1 items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50"
+                  >
+                    <IconeWhatsApp className="h-3.5 w-3.5" />
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onCancelarAgendamento(
+                        {
+                          ...item,
+                          nome_cliente: clienteAtual.nome,
+                          telefone: telefoneDigitos,
+                        },
+                        false
+                      )
+                    }
+                    aria-label="Cancelar sem notificar cliente"
+                    title="Cancelar sem notificar cliente"
+                    className="inline-flex w-12 shrink-0 items-center justify-center gap-1 border-l border-red-200 text-red-600 transition hover:bg-red-50"
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                    <MessageCircleOff className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </div>
+              )
             }
           />
 
-          {/* Cancela o próximo agendamento sem sair da ficha. O botão só ARMA
-              o modal de confirmação do /admin (ver onCancelarAgendamento em
-              app/[salon]/admin/page.js) — a gravação e a mensagem de WhatsApp
-              continuam sendo as MESMAS dos cards do Painel/Pendentes
-              (handleCancelar). Botão dividido no mesmo padrão de lá: zona
-              grande cancela E notifica; zona pequena cancela sem notificar.
-              `resumo.proximoAgendamento` vem de buscarAgendamentosAtivos, que
-              não seleciona nome_cliente/telefone (a query filtra POR telefone)
-              — completa os dois com os dados do cliente desta ficha, senão o
-              nome do modal sairia vazio e o link do WhatsApp sem número.
-              Some quando o pai não passa o callback, igual ao "Agendar". */}
-          {onCancelarAgendamento && resumo.proximoAgendamento && (
-            <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
-              <button
-                type="button"
-                onClick={() =>
-                  onCancelarAgendamento(
-                    {
-                      ...resumo.proximoAgendamento,
-                      nome_cliente: clienteAtual.nome,
-                      telefone: telefoneDigitos,
-                    },
-                    true
-                  )
-                }
-                className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
-              >
-                <IconeWhatsApp />
-                Cancelar agendamento
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  onCancelarAgendamento(
-                    {
-                      ...resumo.proximoAgendamento,
-                      nome_cliente: clienteAtual.nome,
-                      telefone: telefoneDigitos,
-                    },
-                    false
-                  )
-                }
-                aria-label="Cancelar sem notificar cliente"
-                title="Cancelar sem notificar cliente"
-                className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-red-200 text-red-600 transition hover:bg-red-50"
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-                <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </div>
-          )}
           <div className="rounded-xl bg-surface p-3 ring-1 ring-border">
             <CabecalhoRetratil
               titulo="Histórico"
