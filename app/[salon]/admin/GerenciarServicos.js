@@ -2135,16 +2135,7 @@ export default function GerenciarServicos({ estabelecimento }) {
                     value={opcao.label}
                     onChange={(e) => alterarLabelOpcao(indice, e.target.value)}
                     placeholder="Opção"
-                    className="min-w-0 flex-1 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                  />
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    step="0.01"
-                    value={opcao.preco}
-                    onChange={(e) => alterarPrecoOpcao(indice, e.target.value)}
-                    placeholder="0,00"
-                    className="w-24 shrink-0 rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                    className="min-w-0 flex-1 rounded-lg border border-border px-3 py-2 text-base text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
                   />
                   <button
                     type="button"
@@ -2158,11 +2149,20 @@ export default function GerenciarServicos({ estabelecimento }) {
                 <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="number"
+                    inputMode="decimal"
+                    step="0.01"
+                    value={opcao.preco}
+                    onChange={(e) => alterarPrecoOpcao(indice, e.target.value)}
+                    placeholder="0,00"
+                    className="w-24 shrink-0 rounded-lg border border-border px-3 py-2 text-base text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  />
+                  <input
+                    type="number"
                     step="1"
                     value={opcao.minutos}
                     onChange={(e) => alterarMinutosOpcao(indice, e.target.value)}
                     placeholder="0"
-                    className="w-20 shrink-0 rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                    className="w-20 shrink-0 rounded-lg border border-border px-2 py-1.5 text-base text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
                   />
                   <span className="shrink-0 text-xs text-body">min</span>
                   <label className="flex shrink-0 items-center gap-1.5 text-xs text-body">
