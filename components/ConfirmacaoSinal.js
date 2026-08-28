@@ -27,7 +27,10 @@ import { formatarData } from "@/components/FormularioAgendamento";
 //   nomeProfissionalContato – mesmo texto usado no bloco do wizard.
 //   onConfirmado        – chamado (sem args) quando o agendamento passa a
 //                         "pendente" (checkbox ou comprovante).
-//   onVoltar            – chamado (sem args) ao clicar em "Voltar".
+//   onVoltar            – opcional. Havendo, mostra o botão de voltar e é
+//                         chamado (sem args) ao clicar nele. Sem ele o botão
+//                         não aparece — é o caso da entrada direta na
+//                         confirmação de sinal, que não tem pra onde voltar.
 //   rotuloVoltar        – texto do botão de voltar; o destino muda conforme
 //                         quem montou a tela (painel x lista de agendamentos).
 //   onEditar            – opcional. Havendo, mostra "Editar": quem monta
@@ -110,13 +113,15 @@ export default function ConfirmacaoSinal({
         </button>
       )}
 
-      <button
-        type="button"
-        onClick={onVoltar}
-        className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
-      >
-        {rotuloVoltar}
-      </button>
+      {onVoltar && (
+        <button
+          type="button"
+          onClick={onVoltar}
+          className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+        >
+          {rotuloVoltar}
+        </button>
+      )}
 
       {podeCancelar && (
         <button

@@ -646,7 +646,6 @@ export default function AgendarPage() {
                 agendamentoId={agendamentoSinal.id}
                 estabelecimento={estabelecimento}
                 nomeProfissionalContato={nomeContatoExibido}
-                rotuloVoltar="Ver meus agendamentos"
                 agendamento={agendamentoSinal}
                 nomeCliente={clienteIdentificado.nome}
                 onConfirmado={() => {
@@ -667,7 +666,6 @@ export default function AgendarPage() {
                     )
                   );
                 }}
-                onVoltar={() => setConfirmacaoSinalPulada(true)}
                 onEditar={() =>
                   editarAgendamento({
                     id: agendamentoSinal.id,
