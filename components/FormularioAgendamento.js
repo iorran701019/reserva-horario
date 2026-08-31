@@ -3038,7 +3038,7 @@ export default function FormularioAgendamento({
                     {gradeAdmin.length === 0 && (
                       <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
                         Nenhum horário disponível neste dia (todos colidem com
-                        agendamentos já confirmados).
+                        agendamentos já agendados).
                       </p>
                     )}
 

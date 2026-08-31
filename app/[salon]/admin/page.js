@@ -152,7 +152,9 @@ function classesStatus(status) {
 // ficaria com underline na tela; o resto já é legível como veio do banco.
 function rotuloStatus(status) {
   if (!status) return "—";
-  return status === "aguardando_sinal" ? "Aguardando sinal" : status;
+  if (status === "aguardando_sinal") return "Aguardando sinal";
+  if (status === "confirmado") return "Agendado";
+  return status;
 }
 
 // Badge "Expira em Xh" da aba Pendentes (ver inbox mais abaixo): só aparece
@@ -2058,7 +2060,7 @@ export default function AdminPage() {
                     // DENTRO do card, e não como um segundo nível de bandeja.
                     <div className="mt-3 rounded-lg bg-stone-100 px-3 py-2 text-xs text-body">
                       <p className="font-bold text-heading">
-                        Agendamentos confirmados
+                        Já agendados
                       </p>
                       {/* space-y maior que o padrão da lista: com o botão
                           "Ver" em área de toque cheia, linhas coladas viram
@@ -2830,7 +2832,7 @@ export default function AdminPage() {
                   estabelecimento={estabelecimento}
                   status="confirmado"
                   clienteInicial={clienteParaAgendar}
-                  rotuloSubmit="Criar agendamento confirmado"
+                  rotuloSubmit="Criar agendamento"
                   // No admin o dono SEMPRE escolhe o profissional ao marcar,
                   // independente do toggle escolha_profissional do salão.
                   forcarEscolhaProfissional

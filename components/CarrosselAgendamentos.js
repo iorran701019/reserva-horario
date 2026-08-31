@@ -18,7 +18,7 @@ const SELO_STATUS = {
     classe: "bg-gray-100 text-gray-700 ring-gray-200",
   },
   confirmado: {
-    rotulo: "Confirmado",
+    rotulo: "Agendado",
     classe: "bg-green-100 text-green-700 ring-green-200",
   },
 };
