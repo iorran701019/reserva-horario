@@ -2413,7 +2413,7 @@ export default function AdminPage() {
               >
                 {FILTROS_HISTORICO.map((filtro) => (
                   <option key={filtro.id} value={filtro.id}>
-                    {filtro.rotulo} ({contagensHistorico[filtro.id]})
+                    {filtro.rotulo}
                   </option>
                 ))}
               </select>
