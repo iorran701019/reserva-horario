@@ -2059,9 +2059,6 @@ export default function AdminPage() {
                     // agrupamento por cliente, pra continuar lendo como algo
                     // DENTRO do card, e não como um segundo nível de bandeja.
                     <div className="mt-3 rounded-lg bg-stone-100 px-3 py-2 text-xs text-body">
-                      <p className="font-bold text-heading">
-                        Já agendados
-                      </p>
                       {/* space-y maior que o padrão da lista: com o botão
                           "Ver" em área de toque cheia, linhas coladas viram
                           alvo ambíguo no dedo. */}
@@ -2071,10 +2068,6 @@ export default function AdminPage() {
                             key={outro.id}
                             className="flex flex-wrap items-center gap-x-3 gap-y-1"
                           >
-                            <span>
-                              {formatarData(outro.data)} às{" "}
-                              {formatarHorario(outro.horario)}
-                            </span>
                             {/* Atalho pro MESMO modal de detalhe que o Painel
                                 abre no clique do evento (ver
                                 onSelecionarConfirmado): leva pra aba Dia na
@@ -2091,10 +2084,14 @@ export default function AdminPage() {
                                   { scroll: false }
                                 )
                               }
-                              className="inline-flex min-h-11 min-w-16 items-center justify-center rounded-full bg-blue-50 px-3.5 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-blue-100 transition hover:bg-blue-100"
+                              className="inline-flex min-h-11 min-w-16 items-center justify-center rounded-full bg-green-50 px-3.5 py-1.5 text-xs font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
                             >
-                              Ver
+                              Agendado
                             </button>
+                            <span>
+                              {formatarData(outro.data)} às{" "}
+                              {formatarHorario(outro.horario)}
+                            </span>
                           </li>
                         ))}
                       </ul>
