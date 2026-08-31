@@ -48,7 +48,11 @@ import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendament
 //                       nada a ver com a dona editando pelo /admin). Salvar
 //                       segue gravando um INSERT novo, igual ao fluxo
 //                       público (renova a validade de 12 meses, preserva o
-//                       histórico de respostas anteriores).
+//                       histórico de respostas anteriores). Também OMITE as
+//                       declarações e o checkbox de aceite: quem declara é o
+//                       cliente, não a dona — o aceite dele é regravado como
+//                       está (ver p_termos_aceitos em handleSubmit) e não é
+//                       exigido na validação do submit.
 export default function FormularioAnamnese({
   slug,
   estabelecimentoId,
@@ -171,8 +175,11 @@ export default function FormularioAnamnese({
       return;
     }
 
+    // Aceite de termos é coisa do CLIENTE. Em modoAdmin quem preenche é a
+    // dona, o bloco de declarações nem é renderizado (ver render abaixo), e
+    // exigir o aceite aqui travaria o salvamento por um checkbox inexistente.
     const declaracoes = modelo.declaracoes ?? [];
-    if (declaracoes.length > 0 && !aceite) {
+    if (!modoAdmin && declaracoes.length > 0 && !aceite) {
       setErro("É preciso concordar com os termos para continuar.");
       return;
     }
@@ -198,6 +205,11 @@ export default function FormularioAnamnese({
       p_modelo_id: modelo.id,
       p_respostas: respostasValidas,
       p_observacoes: observacoesValidas,
+      // Público: o que o cliente marcou agora. modoAdmin: o aceite HISTÓRICO
+      // dele — `aceite` foi pré-carregado da resposta anterior (ver o efeito
+      // de modoAdmin acima) e não há checkbox nessa tela pra alterá-lo, então
+      // a edição pela dona preserva o valor em vez de zerá-lo. Cliente que
+      // nunca preencheu segue em false, que é o correto: não houve aceite.
       p_termos_aceitos: aceite,
     });
 
@@ -290,7 +302,11 @@ export default function FormularioAnamnese({
         </div>
       ))}
 
-      {declaracoes.length > 0 && (
+      {/* Declarações + checkbox de aceite: só no fluxo público. Em modoAdmin
+          é a dona preenchendo pelo /admin, e não faz sentido ela declarar em
+          nome do cliente — o aceite já dado por ele é preservado no submit
+          (ver p_termos_aceitos em handleSubmit). */}
+      {!modoAdmin && declaracoes.length > 0 && (
         <div className="space-y-3 rounded-xl bg-surface p-4 ring-1 ring-border">
           <ul className="list-disc space-y-1 pl-5 text-sm text-body">
             {declaracoes.map((declaracao, di) => (
