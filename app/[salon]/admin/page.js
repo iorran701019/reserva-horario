@@ -2597,9 +2597,18 @@ export default function AdminPage() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="truncate font-medium text-heading">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              router.push(
+                                `${pathname}?aba=clientes&cliente=${String(item.telefone).replace(/\D/g, "")}`,
+                                { scroll: false }
+                              )
+                            }
+                            className="truncate text-left font-medium text-blue-600 underline-offset-2 hover:underline"
+                          >
                             {item.nome_cliente}
-                          </p>
+                          </button>
                           <p className="mt-0.5 text-sm text-body">
                             {item.telefone}
                           </p>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, MessageCircleOff, X } from "lucide-react";
 import NavegacaoMes from "@/components/NavegacaoMes";
 import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
@@ -939,6 +939,30 @@ export default function GerenciarClientes({
   // por cliente — ver buscarUltimasAnamnesesPorCliente em lib/anamnese.js).
   const [modeloAnamneseAtivo, setModeloAnamneseAtivo] = useState(false);
   const [ultimasAnamneses, setUltimasAnamneses] = useState(new Map());
+
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // ?cliente=<telefone normalizado> vem de um card do Histórico: assim que a
+  // lista chega, abre a ficha correspondente e limpa o parâmetro — senão o
+  // refresh de fundo reabriria a ficha depois que a dona voltasse pra lista.
+  useEffect(() => {
+    const telefoneParam = searchParams.get("cliente");
+    if (!telefoneParam || clientes.length === 0) return;
+
+    const encontrado = clientes.find(
+      (c) => String(c.whatsapp ?? "").replace(/\D/g, "") === telefoneParam
+    );
+    if (encontrado) {
+      setSelecionado(encontrado);
+    }
+    // Só ?cliente= sai: ?aba=clientes FICA, senão a aba-pai do /admin volta
+    // pra "pendentes" e desmonta esta tela no mesmo instante.
+    const params = new URLSearchParams(searchParams);
+    params.delete("cliente");
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [searchParams, clientes]);
 
   useEffect(() => {
     let ativo = true;
