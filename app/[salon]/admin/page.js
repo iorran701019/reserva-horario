@@ -24,6 +24,7 @@ import {
   ordenarHistoricoPorStatus,
 } from "@/lib/particao";
 import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
+import { useNavegacaoTrimestre } from "@/lib/useNavegacaoTrimestre";
 import { calcularVagasPorHorario, profissionaisLivresNoHorario } from "@/lib/disponibilidade";
 import { dentroDaJanelaAgendamento, diasRestantesJanela } from "@/lib/janelaAgendamento";
 import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
@@ -65,6 +66,7 @@ import IdentificacaoClienteAdmin from "@/components/IdentificacaoClienteAdmin";
 import AtivarNotificacoes from "@/components/AtivarNotificacoes";
 import ModalVincularCliente from "@/components/ModalVincularCliente";
 import NavegacaoMes from "@/components/NavegacaoMes";
+import NavegacaoTrimestre from "@/components/NavegacaoTrimestre";
 
 // URL do login do salão, carregando o destino pretendido em ?next= pra reentrar
 // no MESMO salão após autenticar. Com o slug agora no PATH, tanto o login quanto
@@ -585,6 +587,14 @@ export default function AdminPage() {
   const [okAnotHistorico, setOkAnotHistorico] = useState(null);
   // Filtro ativo da aba Histórico (ver FILTROS_HISTORICO). "todos" = sem filtro.
   const [filtroHistorico, setFiltroHistorico] = useState("todos");
+
+  // Filtro por CLIENTE da aba Histórico (independente de filtroHistorico, e
+  // com prioridade sobre ele — ver historicoVisivel). `buscaClienteHistorico`
+  // é só o texto digitado no autocomplete; `clienteFiltroHistorico` é a
+  // pessoa efetivamente escolhida ({ chave, nome, telefone } — `chave` é o
+  // telefone só com dígitos, ver clientesDoHistorico), null = sem filtro.
+  const [buscaClienteHistorico, setBuscaClienteHistorico] = useState("");
+  const [clienteFiltroHistorico, setClienteFiltroHistorico] = useState(null);
 
   // Aba Agendar: `agendarKey` remonta o FormularioAgendamento pra zerá-lo após
   // criar; `avisoAgendar` mostra a confirmação inline do último cadastro.
@@ -1400,6 +1410,39 @@ export default function AdminPage() {
       return chaveB.localeCompare(chaveA);
     });
 
+  // Clientes distintos do histórico, pro autocomplete do filtro por cliente.
+  // Derivado de `historico` (a base COMPLETA, não historicoVisivel): assim a
+  // lista de sugestões não encolhe conforme a dona troca o filtro de
+  // categoria. Mesmo padrão de chave do inboxAgrupado — telefone só com
+  // dígitos, pra unir a mesma pessoa gravada com formatações diferentes em
+  // agendamentos distintos —, guardando o telefone ORIGINAL do primeiro item.
+  // `historico` já vem do mais recente pro mais antigo, então esse primeiro
+  // item é o agendamento mais recente da pessoa, ou seja o nome mais atual.
+  const clientesDoHistorico = [];
+  {
+    const porTelefone = new Map();
+    for (const item of historico) {
+      const chave = String(item.telefone).replace(/\D/g, "");
+      if (!porTelefone.has(chave)) {
+        const novo = { chave, nome: item.nome_cliente, telefone: item.telefone };
+        porTelefone.set(chave, novo);
+        clientesDoHistorico.push(novo);
+      }
+    }
+  }
+
+  // Sugestões do autocomplete: filtro em memória (a lista inteira já está
+  // aqui, sem query), 2+ caracteres, no máximo 8 — mesmo teto do
+  // IdentificacaoClienteAdmin. Some assim que alguém é escolhido.
+  const sugestoesClienteHistorico =
+    !clienteFiltroHistorico && buscaClienteHistorico.trim().length >= 2
+      ? clientesDoHistorico
+          .filter((c) =>
+            c.nome?.toLowerCase().includes(buscaClienteHistorico.trim().toLowerCase())
+          )
+          .slice(0, 8)
+      : [];
+
   // Contagem por categoria (Concluído/Vencido/Cancelado) + "todos", pros
   // contadores do filtro.
   const contagensHistorico = {
@@ -1417,17 +1460,41 @@ export default function AdminPage() {
   // reordena por status (Expirado, Cancelado, Concluído/Vencido — ver
   // ordenarHistoricoPorStatus) preservando a ordem cronológica dentro de
   // cada grupo.
-  const historicoVisivel = ordenarHistoricoPorStatus(
-    filtroHistorico === "todos"
-      ? historico
-      : historico.filter((item) => rotuloHistorico(item) === filtroHistorico)
-  );
+  // Com cliente escolhido, o filtro por pessoa tem prioridade e o de
+  // categoria é ignorado (a UI dele fica oculta enquanto isso): a ideia é ver
+  // TUDO daquela cliente. Nesse caminho a lista também NÃO passa por
+  // ordenarHistoricoPorStatus — `historico` já vem por data/horário desc, e
+  // reagrupar por status quebraria a leitura cronológica da ficha da pessoa.
+  const historicoVisivel = clienteFiltroHistorico
+    ? historico.filter(
+        (item) =>
+          String(item.telefone).replace(/\D/g, "") === clienteFiltroHistorico.chave
+      )
+    : ordenarHistoricoPorStatus(
+        filtroHistorico === "todos"
+          ? historico
+          : historico.filter((item) => rotuloHistorico(item) === filtroHistorico)
+      );
 
-  // Navegação por trimestre da aba Histórico (ver lib/useNavegacaoTrimestre):
-  // abre no trimestre corrente, "<"/">" só andam entre trimestres com dado
-  // (considerando o filtro de categoria acima), mesmo componente/hook
-  // reaproveitado na ficha do cliente (GerenciarClientes.js).
-  const navTrimestreHistorico = useNavegacaoMes(historicoVisivel);
+  // Navegação da aba Histórico, em duas granularidades conforme o filtro por
+  // cliente (ver lib/useNavegacaoMes e lib/useNavegacaoTrimestre): sem filtro,
+  // navega por MÊS; com um cliente selecionado, por TRIMESTRE — o histórico de
+  // um cliente só é esparso, mês a mês ficaria quase sempre vazio.
+  //
+  // Os dois hooks rodam sempre (são baratos, mesmo padrão dos useMemo em
+  // cascata acima); só o resultado do relevante é renderizado.
+  const navMesHistorico = useNavegacaoMes(historicoVisivel);
+  const navTrimestreClienteHistorico = useNavegacaoTrimestre(historicoVisivel);
+
+  // Trocar o cliente filtrado volta a navegação pro trimestre corrente: sem
+  // isso a seleção do cliente anterior fica grudada (o hook tem useState
+  // próprio, não reseta sozinho) e o próximo cliente abre num trimestre
+  // arbitrário, quase sempre vazio pra ele.
+  useEffect(() => {
+    if (clienteFiltroHistorico) {
+      navTrimestreClienteHistorico.voltarParaAtual();
+    }
+  }, [clienteFiltroHistorico]);
 
   // Autenticado, mas sem perfil vinculado (conta órfã): não há salão a resolver.
   // Vem ANTES do guard de carregamento — nesse caso `estabelecimento` continua
@@ -2398,44 +2465,130 @@ export default function AdminPage() {
             É lista (não calendário) — clique aqui NÃO abre o modal do Painel. */}
         {!carregando && !erro && viewPai === "historico" && (
           <>
-            {/* Filtro por categoria como <select> (lista suspensa): cabe na
-                largura do mobile sem scroll horizontal. O contador de cada
-                categoria vai no próprio texto da opção. "todos" não filtra. */}
-            <div className="mb-4">
-              <label htmlFor="filtro-historico" className="sr-only">
-                Filtrar histórico
-              </label>
-              <select
-                id="filtro-historico"
-                value={filtroHistorico}
-                onChange={(e) => setFiltroHistorico(e.target.value)}
-                className="w-full rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading shadow-sm ring-1 ring-border transition focus:outline-none focus:ring-2 focus:ring-border"
-              >
-                {FILTROS_HISTORICO.map((filtro) => (
-                  <option key={filtro.id} value={filtro.id}>
-                    {filtro.rotulo}
-                  </option>
-                ))}
-              </select>
+            {/* Categoria e navegação por mês só existem no modo "lista
+                geral": com uma cliente escolhida a lista é a ficha completa
+                dela, sem recorte de categoria nem de período, então os dois
+                controles sairiam mentindo sobre o que está na tela. */}
+            {!clienteFiltroHistorico && (
+              <>
+                {/* Filtro por categoria como <select> (lista suspensa): cabe na
+                    largura do mobile sem scroll horizontal. O contador de cada
+                    categoria vai no próprio texto da opção. "todos" não filtra. */}
+                <div className="mb-4">
+                  <label htmlFor="filtro-historico" className="sr-only">
+                    Filtrar histórico
+                  </label>
+                  <select
+                    id="filtro-historico"
+                    value={filtroHistorico}
+                    onChange={(e) => setFiltroHistorico(e.target.value)}
+                    className="w-full rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading shadow-sm ring-1 ring-border transition focus:outline-none focus:ring-2 focus:ring-border"
+                  >
+                    {FILTROS_HISTORICO.map((filtro) => (
+                      <option key={filtro.id} value={filtro.id}>
+                        {filtro.rotulo}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+
+            {/* Filtro por cliente. Escolhida uma pessoa, o input vira um chip
+                com "Trocar" (mesmo padrão do ModalVincularCliente) — o campo
+                de busca e o dropdown deixam de existir, então não há estado de
+                aberto/fechado nem clique-fora pra manter. */}
+            <div className="relative mb-4">
+              {clienteFiltroHistorico ? (
+                <div className="flex items-center justify-between gap-2 rounded-lg bg-surface px-3 py-2 ring-1 ring-border">
+                  <span className="min-w-0 truncate text-sm font-medium text-heading">
+                    {clienteFiltroHistorico.nome}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClienteFiltroHistorico(null);
+                      setBuscaClienteHistorico("");
+                    }}
+                    className="shrink-0 text-sm font-medium text-primary hover:underline"
+                  >
+                    Trocar
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <label htmlFor="busca-cliente-historico" className="sr-only">
+                    Filtrar por cliente
+                  </label>
+                  <input
+                    id="busca-cliente-historico"
+                    type="text"
+                    autoComplete="off"
+                    value={buscaClienteHistorico}
+                    onChange={(e) => setBuscaClienteHistorico(e.target.value)}
+                    placeholder="Filtrar por cliente..."
+                    className="w-full rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  />
+                  {sugestoesClienteHistorico.length > 0 && (
+                    <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg bg-card shadow-lg ring-1 ring-border">
+                      {sugestoesClienteHistorico.map((c) => (
+                        <button
+                          key={c.chave}
+                          type="button"
+                          onClick={() => {
+                            setClienteFiltroHistorico(c);
+                            setBuscaClienteHistorico("");
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-heading transition hover:bg-surface"
+                        >
+                          {c.nome}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
 
-            <NavegacaoMes
-              rotulo={navTrimestreHistorico.rotulo}
-              temAnterior={navTrimestreHistorico.temAnterior}
-              temProximo={navTrimestreHistorico.temProximo}
-              noAtual={navTrimestreHistorico.noAtual}
-              onAnterior={navTrimestreHistorico.irParaAnterior}
-              onProximo={navTrimestreHistorico.irParaProximo}
-              onVoltarAtual={navTrimestreHistorico.voltarParaAtual}
-            />
+            {!clienteFiltroHistorico && (
+              <NavegacaoMes
+                rotulo={navMesHistorico.rotulo}
+                temAnterior={navMesHistorico.temAnterior}
+                temProximo={navMesHistorico.temProximo}
+                noAtual={navMesHistorico.noAtual}
+                onAnterior={navMesHistorico.irParaAnterior}
+                onProximo={navMesHistorico.irParaProximo}
+                onVoltarAtual={navMesHistorico.voltarParaAtual}
+              />
+            )}
 
-            {navTrimestreHistorico.itensDoMes.length === 0 ? (
+            {clienteFiltroHistorico && (
+              <NavegacaoTrimestre
+                rotulo={navTrimestreClienteHistorico.rotulo}
+                temAnterior={navTrimestreClienteHistorico.temAnterior}
+                temProximo={navTrimestreClienteHistorico.temProximo}
+                noAtual={navTrimestreClienteHistorico.noAtual}
+                onAnterior={navTrimestreClienteHistorico.irParaAnterior}
+                onProximo={navTrimestreClienteHistorico.irParaProximo}
+                onVoltarAtual={navTrimestreClienteHistorico.voltarParaAtual}
+              />
+            )}
+
+            {(clienteFiltroHistorico
+              ? navTrimestreClienteHistorico.itensDoTrimestre
+              : navMesHistorico.itensDoMes
+            ).length === 0 ? (
               <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
-                Nenhum agendamento no histórico neste mês.
+                {clienteFiltroHistorico
+                  ? "Nenhum agendamento no histórico para esse cliente neste trimestre."
+                  : "Nenhum agendamento no histórico neste mês."}
               </p>
             ) : (
               <ul className="space-y-3">
-                {navTrimestreHistorico.itensDoMes.map((item) => {
+                {(clienteFiltroHistorico
+                  ? navTrimestreClienteHistorico.itensDoTrimestre
+                  : navMesHistorico.itensDoMes
+                ).map((item) => {
                   const meta = HISTORICO_META[rotuloHistorico(item)];
                   return (
                     <li
