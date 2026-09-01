@@ -14,7 +14,8 @@ import {
   buscarAnotacoesLivres,
   criarAnotacaoLivre,
 } from "@/lib/clientesAdmin";
-import { existeModeloAtivo, buscarUltimasAnamnesesPorCliente } from "@/lib/anamnese";
+import { existeModeloAtivo } from "@/lib/anamnese";
+import { buscarConfirmadosPorTelefones } from "@/lib/agendamentosCliente";
 import { classificarAgendamento, rotuloHistorico, ordenarHistoricoPorStatus } from "@/lib/particao";
 import { buscarProgressoFidelidade } from "@/lib/fidelidade";
 import { formatarDataBR, formatarHorario } from "@/lib/data";
@@ -108,26 +109,6 @@ const HISTORICO_BADGE = {
   concluido: { rotulo: "Concluído", classe: "bg-green-100 text-green-700 ring-green-200" },
   caducado: { rotulo: "Vencido", classe: "bg-gray-100 text-gray-700 ring-gray-200" },
 };
-
-// Chip de progresso de fidelidade da linha da lista (ver BadgeFidelidade).
-// Componente próprio pra isolar o fetch por cliente sem travar a montagem da
-// lista inteira num só Promise.all.
-function ChipFidelidadeLista({ clienteId, estabelecimento }) {
-  const [progresso, setProgresso] = useState(null);
-
-  useEffect(() => {
-    let ativo = true;
-    buscarProgressoFidelidade(clienteId, estabelecimento).then((resultado) => {
-      if (ativo) setProgresso(resultado);
-    });
-    return () => {
-      ativo = false;
-    };
-  }, [clienteId, estabelecimento]);
-
-  if (!progresso) return null;
-  return <BadgeFidelidade variante="chip" atual={progresso.atual} meta={progresso.meta} />;
-}
 
 // Detalhe de um cliente: dados cadastrais + resumo do relacionamento
 // (próximo agendamento, anamnese) + três seções retráteis carregadas sob
@@ -500,6 +481,17 @@ function DetalheCliente({
           meta={progressoFidelidade.meta}
           descricaoBrinde={progressoFidelidade.descricaoBrinde}
         />
+      )}
+
+      {/* Falta a data de nascimento num salão que exige cadastro completo.
+          Substitui a tag homônima que ficava no card da lista: aqui a ficha
+          diz QUAL campo falta, e a condição lê `clienteAtual` (não a prop
+          `cliente`) pra sumir na hora se a dona preencher pelo botão
+          "Editar" acima, sem recarregar a lista. */}
+      {estabelecimento.cadastro_completo && !clienteAtual.nascimento && (
+        <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700 ring-1 ring-amber-200">
+          Cadastro incompleto — data de nascimento não preenchida.
+        </div>
       )}
 
       <dl className="space-y-1 text-sm">
@@ -933,12 +925,11 @@ export default function GerenciarClientes({
   const [busca, setBusca] = useState("");
   const [selecionado, setSelecionado] = useState(null);
 
-  // Insumos das tags "Cadastro incompleto" e "Anamnese não preenchida" (ver
-  // render da lista abaixo): se o salão tem anamnese ativa e o carimbo mais
-  // recente de cada cliente, buscados em lote (uma consulta cada, não uma
-  // por cliente — ver buscarUltimasAnamnesesPorCliente em lib/anamnese.js).
-  const [modeloAnamneseAtivo, setModeloAnamneseAtivo] = useState(false);
-  const [ultimasAnamneses, setUltimasAnamneses] = useState(new Map());
+  // Insumo da tag "Agendado"/"Sem agenda": telefones (dígitos) com algum
+  // agendamento confirmado ainda no futuro. Uma consulta pra lista toda, não
+  // uma por cliente. Set vazio = todo mundo aparece como "Sem agenda", que é
+  // o estado correto enquanto a busca não volta (e também se ela falhar).
+  const [telefonesAgendados, setTelefonesAgendados] = useState(new Set());
 
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -967,16 +958,22 @@ export default function GerenciarClientes({
   useEffect(() => {
     let ativo = true;
 
-    Promise.all([
-      buscarClientes(estabelecimento.id),
-      existeModeloAtivo(estabelecimento.id),
-      buscarUltimasAnamnesesPorCliente(estabelecimento.id),
-    ]).then(([dadosClientes, temModelo, mapaAnamneses]) => {
+    buscarClientes(estabelecimento.id).then((dadosClientes) => {
       if (!ativo) return;
       setClientes(dadosClientes);
-      setModeloAnamneseAtivo(temModelo);
-      setUltimasAnamneses(mapaAnamneses);
       setCarregando(false);
+
+      // Fora do Promise.all de propósito: a lista de telefones SÓ existe
+      // depois que buscarClientes volta. Encadeada aqui, sem segurar o
+      // setCarregando acima — a lista aparece na hora e a tag chega um
+      // instante depois, em vez de a tela inteira esperar mais uma ida ao
+      // banco.
+      buscarConfirmadosPorTelefones(
+        estabelecimento.id,
+        dadosClientes.map((cli) => cli.whatsapp).filter(Boolean)
+      ).then((telefones) => {
+        if (ativo) setTelefonesAgendados(telefones);
+      });
     });
 
     return () => {
@@ -1055,28 +1052,28 @@ export default function GerenciarClientes({
                     {cliente.nome}
                   </p>
                   <span className="flex shrink-0 items-center gap-1.5">
-                    {estabelecimento.fidelidade_ativa && (
-                      <ChipFidelidadeLista
-                        clienteId={cliente.id}
-                        estabelecimento={estabelecimento}
-                      />
+                    {/* Tem algo confirmado ainda no futuro? Regra em
+                        ehAgendamentoConfirmadoFuturo (lib/particao), a MESMA
+                        que a aba Histórico do /admin aplica sobre os
+                        agendamentos já carregados — as duas telas nunca
+                        discordam. Ao contrário das tags abaixo, esta aparece
+                        SEMPRE (verde ou cinza). */}
+                    {telefonesAgendados.has(
+                      String(cliente.whatsapp ?? "").replace(/\D/g, "")
+                    ) ? (
+                      <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700 ring-1 ring-green-200">
+                        Agendado
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-medium text-body ring-1 ring-border">
+                        Sem agenda
+                      </span>
                     )}
                     {ehAniversarianteDoMes(cliente.nascimento) && (
                       <span className="rounded-full bg-pink-50 px-2.5 py-0.5 text-xs font-medium text-pink-700 ring-1 ring-pink-100">
                         🎂 Aniversário
                       </span>
                     )}
-                    {estabelecimento.cadastro_completo && !cliente.nascimento && (
-                      <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
-                        Cadastro incompleto
-                      </span>
-                    )}
-                    {modeloAnamneseAtivo &&
-                      situacaoAnamnese(ultimasAnamneses.get(cliente.id)) !== "em_dia" && (
-                        <span className="rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-medium text-orange-700 ring-1 ring-orange-200">
-                          Anamnese não preenchida
-                        </span>
-                      )}
                   </span>
                 </div>
                 <p className="mt-0.5 text-sm text-body">{cliente.whatsapp}</p>
