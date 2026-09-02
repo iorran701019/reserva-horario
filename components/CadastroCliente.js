@@ -237,13 +237,16 @@ export default function CadastroCliente({
 
     setEnviando(true);
 
-    const temConflito = await conflitoWhatsapp.verificar(
+    const checagemWhatsapp = await conflitoWhatsapp.verificar(
       estabelecimentoId,
       digitosWhatsapp,
       clienteId
     );
-    if (temConflito) {
+    if (checagemWhatsapp.bloquear) {
       setEnviando(false);
+      // erro preenchido = a checagem falhou (o modal de conflito não abriu);
+      // sem ele, o hook já está mostrando o modal certo.
+      if (checagemWhatsapp.erro) setErro(checagemWhatsapp.erro);
       return;
     }
 

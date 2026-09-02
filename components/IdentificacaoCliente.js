@@ -6,7 +6,7 @@ import CadastroCliente from "@/components/CadastroCliente";
 import ModalConflitoWhatsapp from "@/components/ModalConflitoWhatsapp";
 import { enderecoCompleto, whatsappConfere } from "@/lib/clienteValidacao";
 import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
-import { useConflitoWhatsapp } from "@/lib/checagemWhatsapp";
+import { MSG_CHECAGEM_INDISPONIVEL, useConflitoWhatsapp } from "@/lib/checagemWhatsapp";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 import { useVoltarFisico } from "@/lib/voltarFisico";
 
@@ -175,10 +175,20 @@ export default function IdentificacaoCliente({
     }
 
     setBuscando(true);
-    const { data } = await supabase.rpc("cliente_buscar_por_whatsapp", {
+    const { data, error } = await supabase.rpc("cliente_buscar_por_whatsapp", {
       p_estabelecimento_id: estabelecimentoId,
       p_whatsapp: normalizarWhatsapp(telefone),
     });
+
+    // Falha da RPC (rede, timeout) também devolve data null: sem olhar o
+    // error, "não deu pra verificar" viraria "não encontrada" e a cliente
+    // seria empurrada pro cadastro novo, duplicando um registro que já
+    // existe. Aqui nenhum dos ramos abaixo roda — ela tenta de novo.
+    if (error) {
+      setBuscando(false);
+      setErro(MSG_CHECAGEM_INDISPONIVEL);
+      return;
+    }
 
     const encontrado = data && data.length > 0 ? data[0] : null;
 
@@ -315,13 +325,16 @@ export default function IdentificacaoCliente({
 
     setEnviandoSimples(true);
 
-    const temConflito = await conflitoWhatsapp.verificar(
+    const checagem = await conflitoWhatsapp.verificar(
       estabelecimentoId,
       digitos,
       clienteEncontrado?.id ?? null
     );
-    if (temConflito) {
+    if (checagem.bloquear) {
       setEnviandoSimples(false);
+      // erro preenchido = a checagem falhou (o modal de conflito não abriu);
+      // sem ele, o hook já está mostrando o modal certo.
+      if (checagem.erro) setErroSimples(checagem.erro);
       return;
     }
 

@@ -110,11 +110,20 @@ export default function ModalAlterarWhatsapp({
     // DEFINER como texto de constraint. Checando aqui dá pra dizer de QUEM
     // é o número. `cliente.id` fica de fora da busca — o próprio registro em
     // edição nunca é conflito consigo mesmo.
-    const conflitante = await buscarClienteConflitante(
+    const { cliente: conflitante, erro: erroChecagem } = await buscarClienteConflitante(
       estabelecimentoId,
       whatsappValidado,
       cliente.id
     );
+
+    // Checagem que não pôde ser feita não libera a troca: o UNIQUE ainda
+    // barraria um duplicado, mas o resto (número livre) passaria sem ninguém
+    // ter olhado.
+    if (erroChecagem) {
+      setSalvando(false);
+      setErro(erroChecagem);
+      return;
+    }
 
     if (conflitante) {
       setSalvando(false);
@@ -136,9 +145,8 @@ export default function ModalAlterarWhatsapp({
     setSalvando(false);
 
     if (error) {
-      // Rede de segurança: corrida entre a checagem acima e o save (ou a
-      // checagem tendo falhado — buscarClienteConflitante trata erro como
-      // "não encontrado"). Aqui não há nome pra citar, a mensagem é genérica.
+      // Rede de segurança: corrida entre a checagem acima e o save. Aqui não
+      // há nome pra citar, a mensagem é genérica.
       setErro(mensagemErroTrocaWhatsapp(error));
       return;
     }
