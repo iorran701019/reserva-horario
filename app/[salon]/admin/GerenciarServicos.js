@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { formatarPreco } from "@/components/FormularioAgendamento";
 import FotoPerfilCircular, { ZOOM_MINIMO } from "@/components/FotoPerfilCircular";
+import { mensagemFalhaSalvar, mensagemFalhaDelete } from "@/lib/erroSalvar";
 
 // Aba "Serviços" do /admin: CRUD dos serviços do salão (tabela `servicos`),
 // sempre particionado por estabelecimento_id (o consumidor já resolveu o salão
@@ -658,11 +659,24 @@ export default function GerenciarServicos({ estabelecimento }) {
   // Mesma estratégia "substitui tudo" usada na Janela C do form de profissional.
   // Devolve o erro do Supabase ou null.
   async function salvarVinculos(servicoId, profissionalIds) {
-    const { error: erroDelete } = await supabase
+    // Conta ANTES e confere contra o `.select()` do DELETE: um DELETE
+    // filtrado pelo RLS volta com error null e 0 linhas, e o INSERT abaixo
+    // somaria os vínculos novos aos antigos (duplicata real no banco). Sem
+    // confirmação, aborta antes de inserir.
+    const { count, error: erroContagem } = await supabase
+      .from("servico_profissional")
+      .select("*", { count: "exact", head: true })
+      .eq("servico_id", servicoId);
+    if (erroContagem) return erroContagem;
+
+    const { data: apagados, error: erroDelete } = await supabase
       .from("servico_profissional")
       .delete()
-      .eq("servico_id", servicoId);
-    if (erroDelete) return erroDelete;
+      .eq("servico_id", servicoId)
+      .select("profissional_id");
+    if (erroDelete || (apagados ?? []).length !== (count ?? 0)) {
+      return { message: mensagemFalhaDelete(erroDelete) };
+    }
 
     if (profissionalIds.length === 0) return null;
 
@@ -810,14 +824,15 @@ export default function GerenciarServicos({ estabelecimento }) {
       ? { ...payload, ordem: proximaOrdemNoGrupo(payload.categoria_id) }
       : payload;
 
-    const { error } = await supabase
+    const { data: linhasServico, error } = await supabase
       .from("servicos")
       .update(payloadFinal)
-      .eq("id", editando.id);
+      .eq("id", editando.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhasServico?.length) {
       setSalvando(false);
-      setErroForm(error.message);
+      setErroForm(mensagemFalhaSalvar(error));
       return;
     }
 
@@ -838,13 +853,14 @@ export default function GerenciarServicos({ estabelecimento }) {
   // handleExcluirPermanente pra isso). Roda só depois do "Confirmar
   // desativação" no modal.
   async function handleDesativar(servico) {
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("servicos")
       .update({ ativo: false })
-      .eq("id", servico.id);
+      .eq("id", servico.id)
+      .select("id");
 
-    if (error) {
-      setErro(`Não foi possível desativar o serviço: ${error.message}`);
+    if (error || !linhas?.length) {
+      setErro(`Não foi possível desativar o serviço: ${mensagemFalhaSalvar(error)}`);
       setServicoParaDesativar(null);
       return;
     }
@@ -878,14 +894,15 @@ export default function GerenciarServicos({ estabelecimento }) {
     }
 
     if ((vinculo ?? []).length > 0) {
-      const { error: erroOcultar } = await supabase
+      const { data: linhasOcultar, error: erroOcultar } = await supabase
         .from("servicos")
         .update({ oculto: true })
-        .eq("id", servico.id);
+        .eq("id", servico.id)
+        .select("id");
 
       setExcluindoPermanente(false);
-      if (erroOcultar) {
-        setErroExcluirPermanente(erroOcultar.message);
+      if (erroOcultar || !linhasOcultar?.length) {
+        setErroExcluirPermanente(mensagemFalhaSalvar(erroOcultar));
         return;
       }
 
@@ -896,14 +913,15 @@ export default function GerenciarServicos({ estabelecimento }) {
       return;
     }
 
-    const { error: erroDelete } = await supabase
+    const { data: linhasDelete, error: erroDelete } = await supabase
       .from("servicos")
       .delete()
-      .eq("id", servico.id);
+      .eq("id", servico.id)
+      .select("id");
 
     setExcluindoPermanente(false);
-    if (erroDelete) {
-      setErroExcluirPermanente(erroDelete.message);
+    if (erroDelete || !linhasDelete?.length) {
+      setErroExcluirPermanente(mensagemFalhaSalvar(erroDelete));
       return;
     }
 
@@ -913,13 +931,14 @@ export default function GerenciarServicos({ estabelecimento }) {
 
   // Reativa um serviço soft-deleted (ativo=true).
   async function handleReativar(servico) {
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("servicos")
       .update({ ativo: true })
-      .eq("id", servico.id);
+      .eq("id", servico.id)
+      .select("id");
 
-    if (error) {
-      setErro(`Não foi possível reativar o serviço: ${error.message}`);
+    if (error || !linhas?.length) {
+      setErro(`Não foi possível reativar o serviço: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -939,18 +958,26 @@ export default function GerenciarServicos({ estabelecimento }) {
 
     setReordenando(true);
     setErroReordenar("");
-    const { error: erro1 } = await supabase
+    // Os dois updates são independentes (não há transação): se um passar e o
+    // outro for filtrado pelo RLS (error null, 0 linhas), os dois serviços
+    // ficam com a MESMA ordem no banco enquanto a tela mostra a troca feita.
+    // Por isso cada um confirma as linhas afetadas no `.select()`.
+    const { data: linhas1, error: erro1 } = await supabase
       .from("servicos")
       .update({ ordem: vizinho.ordem })
-      .eq("id", servico.id);
-    const { error: erro2 } = await supabase
+      .eq("id", servico.id)
+      .select("id");
+    const { data: linhas2, error: erro2 } = await supabase
       .from("servicos")
       .update({ ordem: servico.ordem })
-      .eq("id", vizinho.id);
+      .eq("id", vizinho.id)
+      .select("id");
 
     setReordenando(false);
-    if (erro1 || erro2) {
-      setErroReordenar((erro1 || erro2).message);
+    if (erro1 || !linhas1?.length || erro2 || !linhas2?.length) {
+      setErroReordenar(
+        `${mensagemFalhaSalvar(erro1 || erro2)} — recarregue a página para garantir consistência com o banco.`
+      );
       return;
     }
     setServicos((atuais) =>
@@ -1014,14 +1041,15 @@ export default function GerenciarServicos({ estabelecimento }) {
 
     setOcupadoCategoria(true);
     setErroAcaoCategoria("");
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("categorias_servico")
       .update({ nome })
-      .eq("id", categoria.id);
+      .eq("id", categoria.id)
+      .select("id");
 
     setOcupadoCategoria(false);
-    if (error) {
-      setErroAcaoCategoria(error.message);
+    if (error || !linhas?.length) {
+      setErroAcaoCategoria(mensagemFalhaSalvar(error));
       return;
     }
     setCategorias((atuais) =>
@@ -1079,15 +1107,16 @@ export default function GerenciarServicos({ estabelecimento }) {
     // zoom salvo, respeita — trocar o arquivo não desfaz o ajuste manual.
     const zoomInicial = categoria.foto_zoom == null ? { foto_zoom: ZOOM_MINIMO } : null;
 
-    const { error: erroUpdate } = await supabase
+    const { data: linhasFoto, error: erroUpdate } = await supabase
       .from("categorias_servico")
       .update({ foto_url: urlComCache, ...zoomInicial })
-      .eq("id", categoria.id);
+      .eq("id", categoria.id)
+      .select("id");
 
     setEnviandoFotoCategoriaId(null);
 
-    if (erroUpdate) {
-      setErroFotoCategoria(`Não foi possível salvar a foto: ${erroUpdate.message}`);
+    if (erroUpdate || !linhasFoto?.length) {
+      setErroFotoCategoria(`Não foi possível salvar a foto: ${mensagemFalhaSalvar(erroUpdate)}`);
       return;
     }
 
@@ -1102,14 +1131,15 @@ export default function GerenciarServicos({ estabelecimento }) {
     setStatusFotoCategoria("salvando");
     setErroFotoCategoria("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("categorias_servico")
       .update({ foto_posicao: `${x}% ${y}%`, foto_zoom: zoom })
-      .eq("id", categoria.id);
+      .eq("id", categoria.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusFotoCategoria("");
-      setErroFotoCategoria(`Não foi possível salvar a posição: ${error.message}`);
+      setErroFotoCategoria(`Não foi possível salvar a posição: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -1127,14 +1157,15 @@ export default function GerenciarServicos({ estabelecimento }) {
     setStatusFotoCategoria("salvando");
     setErroFotoCategoria("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("categorias_servico")
       .update({ foto_url: null, foto_posicao: null, foto_zoom: null })
-      .eq("id", categoria.id);
+      .eq("id", categoria.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusFotoCategoria("");
-      setErroFotoCategoria(`Não foi possível remover a foto: ${error.message}`);
+      setErroFotoCategoria(`Não foi possível remover a foto: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -1168,18 +1199,25 @@ export default function GerenciarServicos({ estabelecimento }) {
     setOcupadoCategoria(true);
     setErroAcaoCategoria("");
 
+    // Lote sem transação: cada update confirma as próprias linhas no
+    // `.select()`, senão um deles filtrado pelo RLS (error null, 0 linhas)
+    // deixaria a ordem do banco furada com a tela mostrando a nova sequência.
     const resultados = await Promise.all(
       alteradas.map((c) =>
-        supabase.from("categorias_servico").update({ ordem: c.ordem }).eq("id", c.id)
+        supabase
+          .from("categorias_servico")
+          .update({ ordem: c.ordem })
+          .eq("id", c.id)
+          .select("id")
       )
     );
 
     setOcupadoCategoria(false);
 
-    const erro = resultados.map((r) => r.error).find(Boolean);
-    if (erro) {
+    const falha = resultados.find((r) => r.error || !r.data?.length);
+    if (falha) {
       setErroAcaoCategoria(
-        `${erro.message} — recarregue a página para garantir consistência com o banco.`
+        `${mensagemFalhaSalvar(falha.error)} — recarregue a página para garantir consistência com o banco.`
       );
       return;
     }
@@ -1200,14 +1238,15 @@ export default function GerenciarServicos({ estabelecimento }) {
   async function apagarCategoria(categoria) {
     setOcupadoCategoria(true);
     setErroAcaoCategoria("");
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("categorias_servico")
       .delete()
-      .eq("id", categoria.id);
+      .eq("id", categoria.id)
+      .select("id");
 
     setOcupadoCategoria(false);
-    if (error) {
-      setErroAcaoCategoria(error.message);
+    if (error || !linhas?.length) {
+      setErroAcaoCategoria(mensagemFalhaSalvar(error));
       setCategoriaParaExcluir(null);
       return;
     }
@@ -1539,11 +1578,18 @@ export default function GerenciarServicos({ estabelecimento }) {
       .filter((id) => !idsNoPayload.has(id));
 
     if (idsParaRemover.length > 0) {
-      const { error: erroDelete } = await supabase
+      // Aqui o esperado é conhecido (idsParaRemover), então basta conferir o
+      // `.select()` contra ele: se o RLS filtrar o DELETE, as opções
+      // removidas no form continuariam no banco e o UPDATE/INSERT abaixo as
+      // deixaria convivendo com as novas. Aborta antes de gravar.
+      const { data: apagadas, error: erroDelete } = await supabase
         .from("servico_pergunta_opcoes")
         .delete()
-        .in("id", idsParaRemover);
-      if (erroDelete) return { opcoes: [], error: erroDelete };
+        .in("id", idsParaRemover)
+        .select("id");
+      if (erroDelete || (apagadas ?? []).length !== idsParaRemover.length) {
+        return { opcoes: [], error: { message: mensagemFalhaDelete(erroDelete) } };
+      }
     }
 
     if (opcoesPayload.length === 0) return { opcoes: [], error: null };
@@ -1641,7 +1687,7 @@ export default function GerenciarServicos({ estabelecimento }) {
       return;
     }
 
-    const { error: erroPergunta } = await supabase
+    const { data: linhasPergunta, error: erroPergunta } = await supabase
       .from("servico_perguntas")
       .update({
         texto,
@@ -1649,11 +1695,12 @@ export default function GerenciarServicos({ estabelecimento }) {
         pergunta_pai_id: perguntaPaiId,
         opcao_gatilho_id: opcaoGatilhoId,
       })
-      .eq("id", editandoId);
+      .eq("id", editandoId)
+      .select("id");
 
-    if (erroPergunta) {
+    if (erroPergunta || !linhasPergunta?.length) {
       setSalvandoPergunta(false);
-      setErroFormPergunta(erroPergunta.message);
+      setErroFormPergunta(mensagemFalhaSalvar(erroPergunta));
       return;
     }
 
@@ -1692,10 +1739,14 @@ export default function GerenciarServicos({ estabelecimento }) {
     if (!perguntaParaExcluir) return;
     const { servicoId, pergunta } = perguntaParaExcluir;
 
-    const { error } = await supabase.from("servico_perguntas").delete().eq("id", pergunta.id);
+    const { data: linhas, error } = await supabase
+      .from("servico_perguntas")
+      .delete()
+      .eq("id", pergunta.id)
+      .select("id");
 
-    if (error) {
-      setErroExcluirPergunta(error.message);
+    if (error || !linhas?.length) {
+      setErroExcluirPergunta(mensagemFalhaSalvar(error));
       return;
     }
 

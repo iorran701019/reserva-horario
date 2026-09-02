@@ -6,6 +6,7 @@ import { formatarPreco } from "@/components/FormularioAgendamento";
 import { chaveMes } from "@/lib/mes";
 import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
 import NavegacaoMes from "@/components/NavegacaoMes";
+import { mensagemFalhaSalvar, mensagemFalhaDelete } from "@/lib/erroSalvar";
 
 // Aba "Profissionais" do /admin: CRUD dos profissionais do salão (tabela
 // `profissionais`), sempre particionado por estabelecimento_id (o consumidor já
@@ -1414,16 +1415,20 @@ function SecaoAusencias({
     setSalvando(true);
 
     if (liberacoesParaExcluir.length > 0) {
-      const { error: erroExclusao } = await supabase
+      const { data: liberacoesExcluidas, error: erroExclusao } = await supabase
         .from("ausencias")
         .delete()
         .in(
           "id",
           liberacoesParaExcluir.map((a) => a.id)
-        );
-      if (erroExclusao) {
+        )
+        .select("id");
+      if (
+        erroExclusao ||
+        (liberacoesExcluidas ?? []).length !== liberacoesParaExcluir.length
+      ) {
         setSalvando(false);
-        setFormErro(erroExclusao.message);
+        setFormErro(mensagemFalhaSalvar(erroExclusao));
         return;
       }
     }
@@ -1456,9 +1461,13 @@ function SecaoAusencias({
 
   async function excluir(id) {
     setErro("");
-    const { error } = await supabase.from("ausencias").delete().eq("id", id);
-    if (error) {
-      setErro(`Não foi possível excluir a ausência: ${error.message}`);
+    const { data: linhas, error } = await supabase
+      .from("ausencias")
+      .delete()
+      .eq("id", id)
+      .select("id");
+    if (error || !linhas?.length) {
+      setErro(`Não foi possível excluir a ausência: ${mensagemFalhaSalvar(error)}`);
       return;
     }
     setLista((atual) => atual.filter((a) => a.id !== id));
@@ -1468,12 +1477,13 @@ function SecaoAusencias({
   // grupo_id) — chamado só depois da confirmação em confirmarExclusaoGrupo.
   async function excluirGrupo(grupoId) {
     setErro("");
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("ausencias")
       .delete()
-      .eq("grupo_id", grupoId);
-    if (error) {
-      setErro(`Não foi possível excluir o grupo: ${error.message}`);
+      .eq("grupo_id", grupoId)
+      .select("id");
+    if (error || !linhas?.length) {
+      setErro(`Não foi possível excluir o grupo: ${mensagemFalhaSalvar(error)}`);
       return;
     }
     setLista((atual) => atual.filter((a) => a.grupo_id !== grupoId));
@@ -2738,12 +2748,31 @@ export default function GerenciarProfissionais({
   // Apaga todas as linhas de uma tabela de horário pertencentes ao
   // profissional. Usado tanto pra regravar a tabela do modo atual quanto pra
   // limpar a do modo OPOSTO ao salvar (ver salvarAgenda).
+  //
+  // Conta ANTES quantas linhas existem e confere a contagem contra as que o
+  // DELETE devolve no `.select()`: se o RLS filtrar o DELETE, ele volta com
+  // error null e 0 linhas, e quem chama seguiria inserindo a grade nova por
+  // cima da antiga (duplicata real no banco, lida errado pela
+  // disponibilidade). Só devolve null quando o banco confirma que apagou
+  // exatamente o que existia — qualquer divergência vira erro e aborta o
+  // INSERT lá em cima.
   async function apagarPorProfissional(tabela, profissionalId) {
-    const { error } = await supabase
+    const { count, error: erroContagem } = await supabase
+      .from(tabela)
+      .select("*", { count: "exact", head: true })
+      .eq("profissional_id", profissionalId);
+    if (erroContagem) return erroContagem;
+
+    const { data: apagadas, error } = await supabase
       .from(tabela)
       .delete()
-      .eq("profissional_id", profissionalId);
-    return error ?? null;
+      .eq("profissional_id", profissionalId)
+      .select("id");
+
+    if (error || (apagadas ?? []).length !== (count ?? 0)) {
+      return { message: mensagemFalhaDelete(error) };
+    }
+    return null;
   }
 
   // Regrava a grade inteira (horarios_trabalho, modo 'janela'): apaga as
@@ -2797,11 +2826,23 @@ export default function GerenciarProfissionais({
   // marcados. Mesma estratégia "substitui tudo" dos horários. Devolve o erro
   // do Supabase ou null.
   async function salvarServicos(profissionalId, servicoIds) {
-    const { error: erroDelete } = await supabase
+    // Mesma confirmação de apagarPorProfissional: sem conferir a contagem, um
+    // DELETE filtrado pelo RLS deixaria os vínculos antigos no banco e o
+    // INSERT abaixo somaria os novos por cima.
+    const { count, error: erroContagem } = await supabase
+      .from("servico_profissional")
+      .select("*", { count: "exact", head: true })
+      .eq("profissional_id", profissionalId);
+    if (erroContagem) return erroContagem;
+
+    const { data: apagados, error: erroDelete } = await supabase
       .from("servico_profissional")
       .delete()
-      .eq("profissional_id", profissionalId);
-    if (erroDelete) return erroDelete;
+      .eq("profissional_id", profissionalId)
+      .select("servico_id");
+    if (erroDelete || (apagados ?? []).length !== (count ?? 0)) {
+      return { message: mensagemFalhaDelete(erroDelete) };
+    }
 
     if (servicoIds.length === 0) return null;
 
@@ -2951,11 +2992,15 @@ export default function GerenciarProfissionais({
     }
     const modoHorario = form.modoHorario;
     executarSalvamentoSequencial(nomeFilaRef, async () => {
-      const { error } = await supabase
+      const { data: linhas, error } = await supabase
         .from("profissionais")
         .update({ nome, modo_horario: modoHorario })
-        .eq("id", editando.id);
-      if (!error) {
+        .eq("id", editando.id)
+        .select("id");
+      // Só aplica o patch otimista quando o banco confirma a linha alterada:
+      // com o RLS filtrando o UPDATE (error null, 0 linhas) a lista local
+      // mostraria o nome novo em cima de um banco que não gravou nada.
+      if (!error && linhas?.length) {
         setProfissionais((atuais) =>
           ordenar(
             atuais.map((p) =>
@@ -2963,8 +3008,9 @@ export default function GerenciarProfissionais({
             )
           )
         );
+        return null;
       }
-      return error ? `Não foi possível salvar o nome: ${error.message}` : null;
+      return `Não foi possível salvar o nome: ${mensagemFalhaSalvar(error)}`;
     });
   }
 
@@ -3013,13 +3059,14 @@ export default function GerenciarProfissionais({
   // Soft delete: marca ativo=false (nunca DELETE físico). A grade em
   // horarios_trabalho é preservada (some da UI, mas fica no banco).
   async function handleExcluir(profissional) {
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("profissionais")
       .update({ ativo: false })
-      .eq("id", profissional.id);
+      .eq("id", profissional.id)
+      .select("id");
 
-    if (error) {
-      setErro(`Não foi possível desativar o profissional: ${error.message}`);
+    if (error || !linhas?.length) {
+      setErro(`Não foi possível desativar o profissional: ${mensagemFalhaSalvar(error)}`);
       setProfissionalParaExcluir(null);
       return;
     }
@@ -3031,13 +3078,14 @@ export default function GerenciarProfissionais({
 
   // Reativa um profissional soft-deleted (ativo=true).
   async function handleReativar(profissional) {
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("profissionais")
       .update({ ativo: true })
-      .eq("id", profissional.id);
+      .eq("id", profissional.id)
+      .select("id");
 
-    if (error) {
-      setErro(`Não foi possível reativar o profissional: ${error.message}`);
+    if (error || !linhas?.length) {
+      setErro(`Não foi possível reativar o profissional: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
