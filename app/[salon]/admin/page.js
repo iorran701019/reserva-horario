@@ -3062,7 +3062,19 @@ export default function AdminPage() {
               <div className="flex justify-between gap-3">
                 <dt className="text-body">Cliente</dt>
                 <dd className="flex items-center justify-end gap-2 text-right font-medium text-heading">
-                  {selecionado.nome_cliente}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIdSelecionado(null);
+                      router.push(
+                        `${pathname}?aba=clientes&cliente=${String(selecionado.telefone).replace(/\D/g, "")}`,
+                        { scroll: false }
+                      );
+                    }}
+                    className="truncate text-left font-medium text-blue-600 underline-offset-2 hover:underline"
+                  >
+                    {selecionado.nome_cliente}
+                  </button>
                   {progressoFidelidadeModal && (
                     <BadgeFidelidade
                       variante="chip"
