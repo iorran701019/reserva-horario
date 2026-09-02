@@ -39,6 +39,13 @@
 - [x] Tag "Agendado"/"Sem agenda" na lista de Clientes, indicando se o cliente tem algum agendamento confirmado futuro (sessão 37).
 - [x] Novo indicador de "Cadastro incompleto" na ficha do cliente, reagindo em tempo real após edição (sessão 37).
 - [x] Simplificação da lista de Clientes: removidas as tags de Fidelidade e Anamnese (já cobertas na ficha); código morto removido (`ChipFidelidadeLista`, busca em lote de anamneses) — carregamento da aba caiu de 3 queries para 1 (sessão 37).
+- [x] Simplificação da lista de Clientes: removidas as tags de Fidelidade e Anamnese (já cobertas na ficha); código morto removido (`ChipFidelidadeLista`, busca em lote de anamneses) — carregamento da aba caiu de 3 queries para 1 (sessão 37).
++ [x] Simplificação da lista de Clientes: removidas as tags de Fidelidade e Anamnese (já cobertas na ficha); código morto removido (`ChipFidelidadeLista`, busca em lote de anamneses) — carregamento da aba caiu de 3 queries para 1 (sessão 37).
++ [x] Histórico do painel cliente em /agendar limitado a altura de ~4 itens com scroll interno, evitando lista crescendo indefinidamente e empurrando o rodapé (sessão 38).
++ [x] Nome da cliente no modal de detalhes do Painel Dia (admin) virou link sublinhado para a ficha em Clientes, reaproveitando a mesma lógica/navegação já usada no Histórico geral; modal fecha automaticamente ao navegar (sessão 38).
++ [x] Card "Próximos agendamentos" na ficha do cliente ganhou fundo verde sutil quando o agendamento está confirmado, em harmonia com a tag "Agendado" (sessão 38).
++ [x] Checkbox "Manutenções contam pra meta" em Fidelidade agora fica desabilitado e visualmente esmaecido quando o programa está inativo, mesma regra já aplicada ao campo de meta (sessão 38).
++ [x] Calendário do /agendar pula automaticamente para o primeiro mês com disponibilidade ao entrar na etapa de escolha de data, mantendo navegação manual livre para ver meses sem vaga; nova função `calcularPrimeiroMesComVaga` em `lib/disponibilidade.js` reaproveita a base de disponibilidade entre meses varridos (sessão 38).
 
 ## Em aberto
 - [ ] UX da configuração de pergunta condicional (mãe/filha) em `GerenciarServicos.js` — funcional, mas complexa pra configurar; considerar assistente passo-a-passo ou fluxo guiado no futuro.
