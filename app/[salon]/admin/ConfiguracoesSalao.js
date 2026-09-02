@@ -1908,12 +1908,16 @@ export default function ConfiguracoesSalao({
               />
             </div>
 
-            <label className="flex items-start gap-2 text-sm text-body">
+            <label
+              className={`flex items-start gap-2 text-sm text-body ${
+                !fidelidadeAtiva ? "opacity-60" : ""
+              }`}
+            >
               <input
                 type="checkbox"
                 checked={Boolean(fidelidadeContaManutencao)}
                 onChange={alternarFidelidadeContaManutencao}
-                disabled={carregandoFidelidade}
+                disabled={carregandoFidelidade || !fidelidadeAtiva}
                 className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
               />
               <span>
