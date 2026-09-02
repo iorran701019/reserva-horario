@@ -78,8 +78,19 @@ export default function CarrosselAgendamentos({
     );
   }
 
+  // Fundo do cartão acompanha o status do item ATUAL do carrossel: verde bem
+  // discreto (um degrau abaixo do bg-green-100 da tag "Agendado", pra não
+  // competir com ela) quando o agendamento está confirmado, e o neutro
+  // bg-surface/ring-border em qualquer outro status. Mesma condição que
+  // acende o selo verde de SELO_STATUS logo abaixo — se um mudar, o outro
+  // muda junto. O estado vazio (acima) fica sempre neutro: não há item.
+  const classeCartao =
+    atual?.status === "confirmado"
+      ? "bg-green-50 ring-green-100"
+      : "bg-surface ring-border";
+
   return (
-    <div className="w-full rounded-xl bg-surface p-3 ring-1 ring-border">
+    <div className={`w-full rounded-xl p-3 ring-1 ${classeCartao}`}>
       <div className="flex items-center justify-between gap-2">
         <button
           type="button"
