@@ -476,7 +476,15 @@ export default function PainelCliente({
           <h3 className="text-sm font-semibold text-heading">
             Histórico recente
           </h3>
-          <ul className="mt-2 space-y-1.5">
+          {/* Altura travada em ~4 itens (cada linha é ~64px: py-2 + as duas
+              linhas de texto à esquerda / rótulo + "Agendar novamente" à
+              direita, mais o space-y-1.5 entre elas). Passando disso a lista
+              rola dentro de si mesma em vez de esticar o card e empurrar o
+              rodapé da página — histórico de cliente frequente crescia
+              indefinidamente. É max-h, não h: com 1 ou 2 itens a caixa
+              continua do tamanho do conteúdo. pr-1 reserva a faixa da barra
+              de rolagem, que senão passa por cima do ring dos itens. */}
+          <ul className="mt-2 max-h-[17.5rem] space-y-1.5 overflow-y-auto pr-1">
             {historico.map((item) => (
               <li
                 key={item.id}
