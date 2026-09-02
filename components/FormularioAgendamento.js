@@ -2052,13 +2052,40 @@ export default function FormularioAgendamento({
   // na conversa) — se a gravação falhar (tabela ainda não existe, RLS etc.),
   // não bloqueia nem desfaz o agendamento já confirmado, só perde esse
   // detalhe complementar.
+  //
+  // "Melhor esforço" NÃO quer dizer silencioso: as respostas mexem em preço e
+  // duração (ver calcularAjustePerguntas/calcularAjusteDuracao), então uma
+  // falha aqui deixa a reserva de pé mas com o ajuste escolhido possivelmente
+  // não registrado — quem está na tela precisa saber disso. Vai pelo `erro`
+  // comum (renderizado nas etapas "data" e "dados"), que ninguém usa como
+  // trava: handleSubmit limpa no começo e nada checa antes de avançar.
   async function salvarRespostasPerguntas(agendamentoId) {
     const linhas = linhasRespostasPerguntas(agendamentoId);
     if (linhas.length === 0) return;
     const { error } = await supabase.from("agendamento_respostas").insert(linhas);
-    if (error) {
-      console.error("Não foi possível salvar as respostas das perguntas:", error.message);
-    }
+    if (!error) return;
+
+    console.error("Não foi possível salvar as respostas das perguntas:", error.message);
+
+    // O insert vai inteiro numa chamada só — falhou, nenhuma das linhas
+    // entrou. Dá pra nomear exatamente as perguntas afetadas (`texto`, ver
+    // buscarPerguntasServico); só cai no genérico se o texto não vier.
+    const titulos = linhas
+      .map((linha) => perguntasServico.find((p) => p.id === linha.pergunta_id)?.texto)
+      .filter(Boolean)
+      .map((texto) => `"${texto}"`);
+    const alvo =
+      titulos.length === 0
+        ? "as opções que você escolheu para este serviço"
+        : titulos.length === 1
+        ? `sua resposta em ${titulos[0]}`
+        : `suas respostas em ${titulos.slice(0, -1).join(", ")} e ${titulos.at(-1)}`;
+
+    setErro(
+      status
+        ? `O agendamento foi criado, mas não foi possível salvar ${alvo}. Confirme o ajuste com a cliente antes do atendimento.`
+        : `Seu horário está reservado, mas não conseguimos registrar ${alvo}. Isso pode mudar o preço e a duração — a dona vai confirmar os detalhes com você.`
+    );
   }
 
   // Fluxo "cliente escolhe": escolher o profissional conclui a etapa de serviço
