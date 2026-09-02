@@ -87,18 +87,27 @@ export default function AtivarNotificacoes({ estabelecimento }) {
       } = await supabase.auth.getUser();
 
       const json = assinatura.toJSON();
-      const { error } = await supabase.from("push_subscriptions").upsert(
-        {
-          endpoint: json.endpoint,
-          chave_p256dh: json.keys.p256dh,
-          chave_auth: json.keys.auth,
-          perfil_id: user?.id,
-          estabelecimento_id: estabelecimento?.id,
-          ativo: true,
-        },
-        { onConflict: "endpoint" }
-      );
-      if (error) {
+      // `.select()` não é decorativo aqui: no caminho ON CONFLICT DO UPDATE
+      // (endpoint já existente) o RLS pode filtrar a linha e o supabase-js
+      // devolve error null com 0 linhas gravadas. Sem contar as linhas, a
+      // tela mostraria "Notificações ativadas" e o push simplesmente nunca
+      // chegaria — falha que ninguém percebe, porque não acontecer nada É o
+      // estado normal de uma notificação que não dispara.
+      const { data: linhas, error } = await supabase
+        .from("push_subscriptions")
+        .upsert(
+          {
+            endpoint: json.endpoint,
+            chave_p256dh: json.keys.p256dh,
+            chave_auth: json.keys.auth,
+            perfil_id: user?.id,
+            estabelecimento_id: estabelecimento?.id,
+            ativo: true,
+          },
+          { onConflict: "endpoint" }
+        )
+        .select("endpoint");
+      if (error || !linhas?.length) {
         setMensagem("Não foi possível salvar a inscrição, tente novamente.");
         return;
       }

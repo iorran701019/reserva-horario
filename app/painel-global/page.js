@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useSessaoAdmin } from "@/hooks/useSessaoAdmin";
+import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 
 // Shell do /painel-global (Concern 1/3): só a guarda de acesso + seletor de
 // salão + as duas abas vazias. Cadastro e Anamnese ganham lógica própria nos
@@ -434,14 +435,15 @@ export default function PainelGlobalPage() {
       return;
     }
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("anamnese_modelos")
       .update(payload)
-      .eq("id", modeloAnamnese.id);
+      .eq("id", modeloAnamnese.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusModelo("");
-      setErroModelo(error.message);
+      setErroModelo(mensagemFalhaSalvar(error));
       return;
     }
 
@@ -460,15 +462,16 @@ export default function PainelGlobalPage() {
     setStatusCadastro("salvando");
     setErroCadastro("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ cadastro_completo: novoValor })
-      .eq("id", estabelecimentoId);
+      .eq("id", estabelecimentoId)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setCadastroCompleto(anterior);
       setStatusCadastro("");
-      setErroCadastro(`Não foi possível salvar: ${error.message}`);
+      setErroCadastro(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -485,15 +488,16 @@ export default function PainelGlobalPage() {
     setStatusEndereco("salvando");
     setErroEndereco("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ exigir_endereco: novoValor })
-      .eq("id", estabelecimentoId);
+      .eq("id", estabelecimentoId)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setExigirEndereco(anterior);
       setStatusEndereco("");
-      setErroEndereco(`Não foi possível salvar: ${error.message}`);
+      setErroEndereco(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -510,15 +514,16 @@ export default function PainelGlobalPage() {
     setStatusContatoEmergencia("salvando");
     setErroContatoEmergencia("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ exigir_contato_emergencia: novoValor })
-      .eq("id", estabelecimentoId);
+      .eq("id", estabelecimentoId)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setExigirContatoEmergencia(anterior);
       setStatusContatoEmergencia("");
-      setErroContatoEmergencia(`Não foi possível salvar: ${error.message}`);
+      setErroContatoEmergencia(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -535,15 +540,16 @@ export default function PainelGlobalPage() {
     setStatusInstagram("salvando");
     setErroInstagram("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ exigir_instagram: novoValor })
-      .eq("id", estabelecimentoId);
+      .eq("id", estabelecimentoId)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setExigirInstagram(anterior);
       setStatusInstagram("");
-      setErroInstagram(`Não foi possível salvar: ${error.message}`);
+      setErroInstagram(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -560,15 +566,16 @@ export default function PainelGlobalPage() {
     setStatusGranularidade("salvando");
     setErroGranularidade("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ granularidade_min: novoValor })
-      .eq("id", estabelecimentoId);
+      .eq("id", estabelecimentoId)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setGranularidadeMin(anterior);
       setStatusGranularidade("");
-      setErroGranularidade(`Não foi possível salvar: ${error.message}`);
+      setErroGranularidade(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 

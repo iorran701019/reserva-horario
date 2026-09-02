@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 
 // Importação em massa de eventos do Google Calendar pro reserva-horario (ver
 // app/api/google-calendar/calendarios/route.js e
@@ -102,14 +103,15 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
     setSalvandoCalendario(true);
     setErroCalendario("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ google_calendar_id_importacao: calendarioEscolha })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
     setSalvandoCalendario(false);
-    if (error) {
-      setErroCalendario(`Não foi possível salvar: ${error.message}`);
+    if (error || !linhas?.length) {
+      setErroCalendario(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
     setCalendarioId(calendarioEscolha);

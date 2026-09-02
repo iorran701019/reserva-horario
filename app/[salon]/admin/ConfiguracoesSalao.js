@@ -6,6 +6,7 @@ import FotoPerfilCircular, { ZOOM_MINIMO } from "@/components/FotoPerfilCircular
 import CampoMensagemWhatsapp from "@/components/CampoMensagemWhatsapp";
 import ModalImportarGoogleCalendar from "@/components/ModalImportarGoogleCalendar";
 import { MENSAGENS_WHATSAPP_CONFIG, substituirVariaveis } from "@/lib/whatsapp";
+import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 
 // Configurações do salão (tabela `estabelecimentos`) editáveis pelo dono direto
 // no admin:
@@ -576,15 +577,16 @@ export default function ConfiguracoesSalao({
     setStatus("salvando");
     setErro("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ escolha_profissional: novo })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setEscolhaProfissional(!novo);
       setStatus("");
-      setErro(`Não foi possível salvar: ${error.message}`);
+      setErro(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -602,18 +604,19 @@ export default function ConfiguracoesSalao({
     setStatusSinal("salvando");
     setErroSinal("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({
         sinal_regra: regra,
         sinal_valor_centavos: reaisParaCentavos(valor),
         sinal_chave_pix: chavePix || null,
       })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusSinal("");
-      setErroSinal(`Não foi possível salvar: ${error.message}`);
+      setErroSinal(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -631,14 +634,15 @@ export default function ConfiguracoesSalao({
     setStatusRegrasAgendamento("salvando");
     setErroRegrasAgendamento("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ aviso_regras_agendamento: avisoRegrasAgendamento || null })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusRegrasAgendamento("");
-      setErroRegrasAgendamento(`Não foi possível salvar: ${error.message}`);
+      setErroRegrasAgendamento(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -652,14 +656,15 @@ export default function ConfiguracoesSalao({
     setStatusCaducidade("salvando");
     setErroCaducidade("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ manutencao_caducidade_dias: dias })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusCaducidade("");
-      setErroCaducidade(`Não foi possível salvar: ${error.message}`);
+      setErroCaducidade(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -673,15 +678,16 @@ export default function ConfiguracoesSalao({
     setStatusValorCheio("salvando");
     setErroValorCheio("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ manutencao_valor_cheio_apos_prazo: novo })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setValorCheioAposPrazo(!novo);
       setStatusValorCheio("");
-      setErroValorCheio(`Não foi possível salvar: ${error.message}`);
+      setErroValorCheio(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -695,14 +701,15 @@ export default function ConfiguracoesSalao({
     setStatusManutencaoExterna("salvando");
     setErroManutencaoExterna("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ servico_manutencao_externa_id: novoValorStr || null })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusManutencaoExterna("");
-      setErroManutencaoExterna(`Não foi possível salvar: ${error.message}`);
+      setErroManutencaoExterna(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -724,14 +731,15 @@ export default function ConfiguracoesSalao({
     setStatusReservaExpira("salvando");
     setErroReservaExpira("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ reserva_provisoria_expira_horas: horas })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusReservaExpira("");
-      setErroReservaExpira(`Não foi possível salvar: ${error.message}`);
+      setErroReservaExpira(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -753,14 +761,15 @@ export default function ConfiguracoesSalao({
     setStatusCancelamentoPrazo("salvando");
     setErroCancelamentoPrazo("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ cancelamento_prazo_horas: horas })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusCancelamentoPrazo("");
-      setErroCancelamentoPrazo(`Não foi possível salvar: ${error.message}`);
+      setErroCancelamentoPrazo(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -773,14 +782,15 @@ export default function ConfiguracoesSalao({
     setStatusLinkLocalizacao("salvando");
     setErroLinkLocalizacao("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ link_localizacao: linkLocalizacao || null })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusLinkLocalizacao("");
-      setErroLinkLocalizacao(`Não foi possível salvar: ${error.message}`);
+      setErroLinkLocalizacao(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -790,8 +800,8 @@ export default function ConfiguracoesSalao({
   // Grava os 4 campos da fidelidade juntos (mesma linha), mesmo padrão de
   // `salvarSinal` acima — `patch` sobrepõe o state atual pra casos em que o
   // campo que disparou o save (ex.: um dos toggles) ainda não commitou no
-  // state. Retorna o erro (ou null) pra quem chamou decidir se reverte um
-  // toggle otimista.
+  // state. Retorna true quando FALHOU (erro do banco ou 0 linhas afetadas)
+  // pra quem chamou decidir se reverte um toggle otimista.
   async function salvarFidelidade(patch = {}) {
     const ativa = patch.fidelidadeAtiva ?? fidelidadeAtiva;
     const metaServicos = patch.fidelidadeMetaServicos ?? fidelidadeMetaServicos;
@@ -801,7 +811,7 @@ export default function ConfiguracoesSalao({
     setStatusFidelidade("salvando");
     setErroFidelidade("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({
         fidelidade_ativa: ativa,
@@ -809,31 +819,32 @@ export default function ConfiguracoesSalao({
         fidelidade_conta_manutencao: contaManutencao,
         fidelidade_descricao_brinde: descricaoBrinde || null,
       })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusFidelidade("");
-      setErroFidelidade(`Não foi possível salvar: ${error.message}`);
-      return error;
+      setErroFidelidade(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
+      return true;
     }
 
     setStatusFidelidade("salvo");
-    return null;
+    return false;
   }
 
   // Alterna e grava na hora, mesmo padrão otimista de `alternarValorCheioAposPrazo`.
   async function alternarFidelidadeAtiva() {
     const novo = !fidelidadeAtiva;
     setFidelidadeAtiva(novo);
-    const error = await salvarFidelidade({ fidelidadeAtiva: novo });
-    if (error) setFidelidadeAtiva(!novo);
+    const falhou = await salvarFidelidade({ fidelidadeAtiva: novo });
+    if (falhou) setFidelidadeAtiva(!novo);
   }
 
   async function alternarFidelidadeContaManutencao() {
     const novo = !fidelidadeContaManutencao;
     setFidelidadeContaManutencao(novo);
-    const error = await salvarFidelidade({ fidelidadeContaManutencao: novo });
-    if (error) setFidelidadeContaManutencao(!novo);
+    const falhou = await salvarFidelidade({ fidelidadeContaManutencao: novo });
+    if (falhou) setFidelidadeContaManutencao(!novo);
   }
 
   // Sobe o arquivo pro bucket 'fotos-perfil', sempre no mesmo caminho (não
@@ -873,15 +884,16 @@ export default function ConfiguracoesSalao({
     // respeita — trocar o arquivo não desfaz o ajuste manual.
     const zoomInicial = temZoomPerfilSalvo ? null : { foto_perfil_zoom: ZOOM_MINIMO };
 
-    const { error: erroUpdate } = await supabase
+    const { data: linhas, error: erroUpdate } = await supabase
       .from("estabelecimentos")
       .update({ foto_perfil_url: urlComCache, ...zoomInicial })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
     setEnviandoFoto(false);
 
-    if (erroUpdate) {
-      setErroFoto(`Não foi possível salvar a foto: ${erroUpdate.message}`);
+    if (erroUpdate || !linhas?.length) {
+      setErroFoto(`Não foi possível salvar a foto: ${mensagemFalhaSalvar(erroUpdate)}`);
       return;
     }
 
@@ -904,14 +916,15 @@ export default function ConfiguracoesSalao({
     setStatusFotoPosicao("salvando");
     setErroFoto("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ foto_perfil_posicao: `${x}% ${y}%`, foto_perfil_zoom: zoom })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusFotoPosicao("");
-      setErroFoto(`Não foi possível salvar a posição: ${error.message}`);
+      setErroFoto(`Não foi possível salvar a posição: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -943,18 +956,19 @@ export default function ConfiguracoesSalao({
     setStatusFotoPosicao("salvando");
     setErroFoto("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({
         foto_perfil_url: null,
         foto_perfil_posicao: null,
         foto_perfil_zoom: ZOOM_MINIMO,
       })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusFotoPosicao("");
-      setErroFoto(`Não foi possível remover a foto: ${error.message}`);
+      setErroFoto(`Não foi possível remover a foto: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -1002,15 +1016,16 @@ export default function ConfiguracoesSalao({
       return;
     }
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ google_calendar_ativo: false, google_calendar_email: null })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
     setDesconectandoGoogleCalendar(false);
 
-    if (error) {
-      setErroGoogleCalendar(`Não foi possível desconectar: ${error.message}`);
+    if (error || !linhas?.length) {
+      setErroGoogleCalendar(`Não foi possível desconectar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -1062,14 +1077,15 @@ export default function ConfiguracoesSalao({
 
     setStatusJanela("salvando");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ janela_agendamento_fim: novaData })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusJanela("");
-      setErroJanela(`Não foi possível salvar: ${error.message}`);
+      setErroJanela(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -1088,14 +1104,15 @@ export default function ConfiguracoesSalao({
     setStatusAntecedenciaMinima("salvando");
     setErroAntecedenciaMinima("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ antecedencia_minima_horas: novoValor })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusAntecedenciaMinima("");
-      setErroAntecedenciaMinima(`Não foi possível salvar: ${error.message}`);
+      setErroAntecedenciaMinima(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -1113,18 +1130,19 @@ export default function ConfiguracoesSalao({
     setStatusAntecedenciaMinima("salvando");
     setErroAntecedenciaMinima("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({
         cutoff_dia_seguinte_ativo: novo,
         cutoff_dia_seguinte_hora: novo ? Number(cutoffDiaSeguinteHora) : null,
       })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setCutoffDiaSeguinteAtivo(!novo);
       setStatusAntecedenciaMinima("");
-      setErroAntecedenciaMinima(`Não foi possível salvar: ${error.message}`);
+      setErroAntecedenciaMinima(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -1135,14 +1153,15 @@ export default function ConfiguracoesSalao({
     setStatusAntecedenciaMinima("salvando");
     setErroAntecedenciaMinima("");
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update({ cutoff_dia_seguinte_hora: Number(novaHoraStr) })
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusAntecedenciaMinima("");
-      setErroAntecedenciaMinima(`Não foi possível salvar: ${error.message}`);
+      setErroAntecedenciaMinima(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
 
@@ -1165,16 +1184,17 @@ export default function ConfiguracoesSalao({
     const colunas = config?.camposDestino ?? [campo];
     const valores = Object.fromEntries(colunas.map((coluna) => [coluna, mensagens[campo]]));
 
-    const { error } = await supabase
+    const { data: linhas, error } = await supabase
       .from("estabelecimentos")
       .update(valores)
-      .eq("id", estabelecimento.id);
+      .eq("id", estabelecimento.id)
+      .select("id");
 
-    if (error) {
+    if (error || !linhas?.length) {
       setStatusMensagens((s) => ({ ...s, [campo]: "" }));
       setErroMensagens((s) => ({
         ...s,
-        [campo]: `Não foi possível salvar: ${error.message}`,
+        [campo]: `Não foi possível salvar: ${mensagemFalhaSalvar(error)}`,
       }));
       return;
     }
