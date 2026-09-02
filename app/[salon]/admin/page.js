@@ -741,13 +741,24 @@ export default function AdminPage() {
   // janela, ou pelo popup de confirmacaoForaDaJanela quando a dona confirma
   // mesmo assim.
   async function executarConfirmacao(agendamento, notificar) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("agendamentos")
       .update({ status: "confirmado" })
-      .eq("id", agendamento.id);
+      .eq("id", agendamento.id)
+      .select("id");
 
     if (error) {
       setErro(`Não foi possível confirmar o agendamento: ${error.message}`);
+      return;
+    }
+
+    // Sem erro E sem linha afetada = o UPDATE foi filtrado pela RLS. Sem esta
+    // checagem o patch otimista abaixo mostraria na tela uma confirmação que
+    // o banco não tem, e ela sumiria no próximo F5.
+    if (!data?.length) {
+      setErro(
+        "Não foi possível confirmar o agendamento: nenhuma linha foi alterada no banco. Recarregue a página e tente de novo."
+      );
       return;
     }
 
@@ -780,13 +791,24 @@ export default function AdminPage() {
   // redirecionamento pro WhatsApp — o modal de confirmação continua rodando
   // normalmente antes de chegar aqui.
   async function handleCancelar(agendamento, notificar = true) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("agendamentos")
       .update({ status: "cancelado" })
-      .eq("id", agendamento.id);
+      .eq("id", agendamento.id)
+      .select("id");
 
     if (error) {
       setErro(`Não foi possível cancelar o agendamento: ${error.message}`);
+      setAgendamentoParaCancelar(null);
+      return;
+    }
+
+    // Sem erro E sem linha afetada = UPDATE filtrado pela RLS: não patcha o
+    // estado nem abre o WhatsApp anunciando um cancelamento que não gravou.
+    if (!data?.length) {
+      setErro(
+        "Não foi possível cancelar o agendamento: nenhuma linha foi alterada no banco. Recarregue a página e tente de novo."
+      );
       setAgendamentoParaCancelar(null);
       return;
     }
@@ -824,13 +846,23 @@ export default function AdminPage() {
     abrirWhatsApp(item.telefone, MENSAGEM_LEMBRETE(item, estabelecimento.msg_lembrete));
 
     const lembrete_enviado_em = new Date().toISOString();
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("agendamentos")
       .update({ lembrete_enviado_em })
-      .eq("id", item.id);
+      .eq("id", item.id)
+      .select("id");
 
     if (error) {
       setErro(`Não foi possível registrar o envio do lembrete: ${error.message}`);
+      return;
+    }
+
+    // Sem erro E sem linha afetada = UPDATE filtrado pela RLS. O botão não
+    // pode virar "Reenviar lembrete" se o banco não registrou o envio.
+    if (!data?.length) {
+      setErro(
+        "Não foi possível registrar o envio do lembrete: nenhuma linha foi alterada no banco. Recarregue a página e tente de novo."
+      );
       return;
     }
 
@@ -845,14 +877,24 @@ export default function AdminPage() {
     const observacao = texto || null;
     setSalvandoObservacao(true);
     setObservacaoOk(false);
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("agendamentos")
       .update({ observacao })
-      .eq("id", id);
+      .eq("id", id)
+      .select("id");
     setSalvandoObservacao(false);
 
     if (error) {
       setErro(`Não foi possível salvar a observação: ${error.message}`);
+      return false;
+    }
+
+    // Sem erro E sem linha afetada = UPDATE filtrado pela RLS: não marca
+    // observacaoOk nem patcha o texto que o banco não guardou.
+    if (!data?.length) {
+      setErro(
+        "Não foi possível salvar a observação: nenhuma linha foi alterada no banco. Recarregue a página e tente de novo."
+      );
       return false;
     }
 
@@ -870,14 +912,24 @@ export default function AdminPage() {
     const observacao = texto || null;
     setSalvandoAnotHistorico(true);
     setOkAnotHistorico(null);
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("agendamentos")
       .update({ observacao })
-      .eq("id", id);
+      .eq("id", id)
+      .select("id");
     setSalvandoAnotHistorico(false);
 
     if (error) {
       setErro(`Não foi possível salvar a anotação: ${error.message}`);
+      return;
+    }
+
+    // Sem erro E sem linha afetada = UPDATE filtrado pela RLS: mantém o card
+    // em edição em vez de fingir que a anotação foi salva.
+    if (!data?.length) {
+      setErro(
+        "Não foi possível salvar a anotação: nenhuma linha foi alterada no banco. Recarregue a página e tente de novo."
+      );
       return;
     }
 
@@ -894,10 +946,11 @@ export default function AdminPage() {
   async function handleTrocarProfissional(agendamento, profissional) {
     setErroTroca("");
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("agendamentos")
       .update({ profissional_id: profissional.id })
-      .eq("id", agendamento.id);
+      .eq("id", agendamento.id)
+      .select("id");
 
     if (error) {
       const ehOcupado =
@@ -909,6 +962,17 @@ export default function AdminPage() {
         ehOcupado
           ? "Esse profissional acabou de ficar ocupado nesse horário. Escolha outro."
           : error.message
+      );
+      return;
+    }
+
+    // Duas causas distintas para "o update não pegou": conflito real de
+    // horário chega como ERRO 23P01 (tratado acima — a constraint chegou a
+    // ser testada); linha filtrada pela RLS chega sem erro NENHUM e sem linha
+    // nenhuma, a constraint nem foi avaliada. Este caso é sempre RLS.
+    if (!data?.length) {
+      setErroTroca(
+        "Nenhuma linha foi alterada no banco — a troca de profissional não foi salva. Recarregue a página e tente de novo."
       );
       return;
     }
@@ -942,10 +1006,11 @@ export default function AdminPage() {
     setSalvandoAlterarData(true);
     setErroAlterarData("");
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("agendamentos")
       .update({ data: dataAlterarData, horario: horarioAlterarData })
-      .eq("id", agendamentoParaAlterarData.id);
+      .eq("id", agendamentoParaAlterarData.id)
+      .select("id");
 
     setSalvandoAlterarData(false);
 
@@ -960,6 +1025,16 @@ export default function AdminPage() {
         setHorarioAlterarData("");
         setVersaoAlterarData((v) => v + 1);
       }
+      return;
+    }
+
+    // Mesmo par de causas do handleTrocarProfissional: conflito real vem como
+    // ERRO 23P01 (tratado acima); zero linha SEM erro é a RLS filtrando — a
+    // exclusion constraint nem chega a ser testada. O modal segue aberto.
+    if (!data?.length) {
+      setErroAlterarData(
+        "Nenhuma linha foi alterada no banco — a nova data não foi salva. Recarregue a página e tente de novo."
+      );
       return;
     }
 
@@ -985,13 +1060,23 @@ export default function AdminPage() {
   // TIPOS_PENDENCIA): grava resolvido=true e, só se der certo, some o card da
   // tela — sem precisar recarregar a página nem refazer o fetch inteiro.
   async function handleArquivarPendencia(id) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("pendencias_admin")
       .update({ resolvido: true })
-      .eq("id", id);
+      .eq("id", id)
+      .select("id");
 
     if (error) {
       setErro(`Não foi possível arquivar a pendência: ${error.message}`);
+      return;
+    }
+
+    // Sem erro E sem linha afetada = UPDATE filtrado pela RLS: o card não
+    // pode sumir da tela se a pendência continua aberta no banco.
+    if (!data?.length) {
+      setErro(
+        "Não foi possível arquivar a pendência: nenhuma linha foi alterada no banco. Recarregue a página e tente de novo."
+      );
       return;
     }
 
@@ -1006,12 +1091,23 @@ export default function AdminPage() {
   // último resgate — e, se der certo, arquiva a pendência pelo MESMO caminho
   // de handleArquivarPendencia (sem repetir o update+patch local aqui).
   async function handleMarcarBrindeConcedido(item) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("fidelidade_resgates")
-      .insert({ cliente_id: item.cliente_id, estabelecimento_id: estabelecimento.id });
+      .insert({ cliente_id: item.cliente_id, estabelecimento_id: estabelecimento.id })
+      .select("id");
 
     if (error) {
       setErro(`Não foi possível registrar o resgate: ${error.message}`);
+      return;
+    }
+
+    // Sem erro E sem linha devolvida = INSERT filtrado pela RLS. Não arquiva
+    // a pendência: o brinde ficaria "concedido" sem resgate no banco, e a
+    // contagem de fidelidade da cliente nunca zeraria.
+    if (!data?.length) {
+      setErro(
+        "Não foi possível registrar o resgate: nenhuma linha foi gravada no banco. Recarregue a página e tente de novo."
+      );
       return;
     }
 

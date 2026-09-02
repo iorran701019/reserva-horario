@@ -215,14 +215,24 @@ export default function ModalVincularCliente({
     // que foi pedido, caso a dona não ache o serviço correspondente.
     if (!agendamento.observacao) patch.observacao = agendamento.nome_cliente;
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("agendamentos")
       .update(patch)
-      .eq("id", agendamento.id);
+      .eq("id", agendamento.id)
+      .select("id");
 
     setSalvando(false);
     if (error) {
       setErro(error.message);
+      return;
+    }
+
+    // Sem erro E sem linha afetada = UPDATE filtrado pela RLS. Não chama
+    // onVinculado: o pai patcharia o estado e o vínculo sumiria no F5.
+    if (!data?.length) {
+      setErro(
+        "Nenhuma linha foi alterada no banco — o vínculo não foi salvo. Recarregue a página e tente de novo."
+      );
       return;
     }
 
