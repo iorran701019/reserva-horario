@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, MessageCircleOff } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import {
+  calcularPrimeiroMesComVaga,
   calcularVagasDoMes,
   calcularVagasPorHorario,
   diasSemVagaDoMes,
@@ -791,6 +792,11 @@ export default function FormularioAgendamento({
     const agora = new Date();
     return new Date(agora.getFullYear(), agora.getMonth(), 1);
   });
+  // Chaves (serviço|profissional|duração) para as quais o pulo automático de
+  // mês já foi DISPARADO — ver o efeito de calcularPrimeiroMesComVaga. Ref, e
+  // não state: só serve pra não repetir a busca, mudar seu valor não deve
+  // re-renderizar nem entrar em dependência de efeito.
+  const mesAutoBuscadoRef = useRef(new Set());
 
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState("");
@@ -1430,6 +1436,98 @@ export default function FormularioAgendamento({
     modoLivre,
     perguntasServico,
     respostasPerguntas,
+  ]);
+
+  // Abre a etapa "Data" já no primeiro mês que tem pelo menos um dia
+  // agendável, em vez de num mês inteiro cinza que obrigaria a cliente a
+  // clicar ">" às cegas até achar vaga (ver calcularPrimeiroMesComVaga em
+  // lib/disponibilidade.js). É só um AJUSTE do mês inicial: enquanto a busca
+  // não responde o calendário segue mostrando o mês corrente normalmente
+  // (nada de tela de carregando nova), e uma resposta null — nenhum mês com
+  // vaga dentro da janela — não mexe em nada.
+  //
+  // Roda UMA VEZ por combinação serviço|profissional|duração (mesAutoBuscadoRef),
+  // não a cada re-render: depois que a cliente navegar no calendário, nenhuma
+  // re-renderização traz o mês de volta. E a aplicação do resultado é
+  // condicional (ver o setMesVisivel funcional abaixo), então nem uma resposta
+  // que chegue DEPOIS de um clique em "<"/">" sobrescreve a navegação manual —
+  // mesAnterior/proximoMes continuam mandando, sem precisarem saber disto.
+  useEffect(() => {
+    // modoLivre (/admin): lá nenhum dia é cinzado por falta de vaga (a dona
+    // encaixa onde quiser), então pular de mês só atrapalharia.
+    if (modoLivre || etapa !== "data" || !servicoSelecionado) return;
+
+    // Fluxo "cliente escolhe": sem profissional, "tem vaga?" dependeria de
+    // quem — mesma razão pela qual `diasSemVaga` fica desligado aqui. Mantém
+    // o mês corrente e espera a escolha (que re-dispara este efeito).
+    if (escolherProfissional && profissionalSelecionado == null) return;
+
+    // Restauração de sessão / modo edição ainda em curso, ou data já definida
+    // por ela: o mês tem de ser o da reserva que está sendo retomada, não o
+    // primeiro com vaga. Não roda por cima disso.
+    if (pendenteRestaurarRef.current || form.data) return;
+
+    const profissionalId = escolherProfissional ? profissionalSelecionado.id : null;
+    const duracao = duracaoEfetivaServico();
+    const chave = [servicoSelecionado.id, profissionalId ?? "", duracao].join("|");
+    if (mesAutoBuscadoRef.current.has(chave)) return;
+    mesAutoBuscadoRef.current.add(chave);
+
+    // Mês de onde a busca parte E contra o qual o resultado será aplicado:
+    // se `mesVisivel` já não for este quando a resposta chegar, foi a cliente
+    // que navegou no meio do caminho e a escolha dela vence.
+    const partida = mesVisivel;
+
+    let ativo = true;
+    (async () => {
+      try {
+        const primeiro = await calcularPrimeiroMesComVaga({
+          estabelecimentoId: estabelecimento.id,
+          servicoId: servicoSelecionado.id,
+          duracaoMinOverride: duracao,
+          // Mesma razão dos efeitos de vagas: a reserva antecipada do próprio
+          // cliente não pode contar como ocupada contra ele.
+          excluirAgendamentoId: reservaId,
+          profissionalId,
+          estabelecimento,
+          mesInicial: { ano: partida.getFullYear(), mes: partida.getMonth() + 1 },
+        });
+        if (!ativo || !primeiro) return;
+
+        setMesVisivel((atual) => {
+          // Navegou manualmente enquanto a busca corria: não sobrescreve.
+          if (atual !== partida) return atual;
+          const alvo = new Date(primeiro.ano, primeiro.mes - 1, 1);
+          return alvo.getTime() === atual.getTime() ? atual : alvo;
+        });
+      } catch {
+        // Falha aqui só devolve o comportamento antigo (abre no mês corrente):
+        // não é erro que a cliente precise ver.
+      }
+    })();
+
+    return () => {
+      ativo = false;
+    };
+    // `mesVisivel` de propósito NÃO entra: é lido só como ponto de partida, e
+    // listá-lo faria a navegação manual re-disparar o efeito. `duracaoEfetivaServico`
+    // também não: depende de servicoSelecionado + perguntasServico +
+    // respostasPerguntas, já listados abaixo. E entra `estabelecimento.id`, não
+    // o objeto (mesma convenção do efeito de vagas do mês acima): uma troca de
+    // identidade da prop re-dispararia o efeito e abortaria, pelo cleanup, uma
+    // busca ainda em voo — que a ref já impediria de ser refeita.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    etapa,
+    servicoSelecionado,
+    escolherProfissional,
+    profissionalSelecionado,
+    estabelecimento.id,
+    reservaId,
+    modoLivre,
+    perguntasServico,
+    respostasPerguntas,
+    form.data,
   ]);
 
   // 1) Restaura o SERVIÇO só depois que a lista de serviços ATIVOS carrega —
