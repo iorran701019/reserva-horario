@@ -1664,12 +1664,33 @@ export default function FormularioAgendamento({
         return;
       }
       if (pendente.reservaId != null) {
-        supabase
-          .from("agendamentos")
-          .update({ status: "cancelado" })
-          .eq("id", pendente.reservaId)
-          .then(() => {});
+        // O `.select("id")` é o que torna a falha VISÍVEL: sem ele, um UPDATE
+        // que não casa nenhuma linha (RLS filtrando a reserva pelo USING)
+        // volta como `{ data: null, error: null }` — indistinguível de
+        // sucesso. Com ele, `data` vazio denuncia o 0-row. Antes o retorno era
+        // descartado num `.then(() => {})` e a reserva órfã seguia viva
+        // ocupando o horário, sem ninguém (cliente, dona ou log) saber.
+        //
+        // O id é copiado ANTES do async: `pendenteRestaurarRef.current` é
+        // zerado no fim deste efeito, síncronamente, antes da resposta chegar.
+        const idReservaOrfa = pendente.reservaId;
+        (async () => {
+          const { data, error } = await supabase
+            .from("agendamentos")
+            .update({ status: "cancelado" })
+            .eq("id", idReservaOrfa)
+            .select("id");
+
+          if (error || !data || data.length === 0) {
+            setErro(
+              "Não foi possível liberar a reserva que você tinha nesse horário. Escolha outro horário normalmente; se o aviso voltar, recarregue a página e informe seu WhatsApp de novo."
+            );
+          }
+        })();
       }
+      // Segue o fluxo de restauração independentemente do cancelamento: a
+      // referência local à reserva antiga é descartada de qualquer jeito (ela
+      // já não serve pra nada aqui), e o aviso acima é só informativo.
       setReservaId(null);
       setReservaChave(null);
     }
@@ -2293,8 +2314,33 @@ export default function FormularioAgendamento({
 
     // Havia uma reserva de uma tentativa anterior (outro serviço/data/horário
     // escolhido depois de um "Voltar"): cancela ANTES de criar a nova.
+    //
+    // `.select("id")` pelo mesmo motivo do efeito de restauração: sem ele um
+    // UPDATE filtrado por RLS volta `{ data: null, error: null }` e passa por
+    // sucesso. Aqui o silêncio é pior — seguir pro insert com a reserva antiga
+    // ainda viva deixa DUAS reservas da mesma cliente no ar, e a exclusion
+    // constraint agendamentos_sem_sobreposicao recusa a nova por causa da
+    // reserva fantasma dela mesma: o 23P01 tratado lá embaixo mostraria "esse
+    // horário acabou de ser reservado" apontando pra própria cliente. Por isso
+    // aborta aqui, antes do insert.
     if (reservaId != null) {
-      await supabase.from("agendamentos").update({ status: "cancelado" }).eq("id", reservaId);
+      const { data: canceladas, error: erroCancelamentoAnterior } = await supabase
+        .from("agendamentos")
+        .update({ status: "cancelado" })
+        .eq("id", reservaId)
+        .select("id");
+
+      if (erroCancelamentoAnterior || !canceladas || canceladas.length === 0) {
+        setCriandoReserva(false);
+        setErro(
+          "Não foi possível trocar o horário da sua reserva agora. Toque no horário de novo em instantes."
+        );
+        setHorarioSelecionado("");
+        // reservaId/reservaChave ficam como estão de propósito: a reserva
+        // anterior continua de pé no banco, e o estado local precisa continuar
+        // refletindo isso pra próxima tentativa cancelá-la de novo.
+        return;
+      }
     }
 
     // Quem fica com a reserva: o escolhido pelo cliente, ou — no encaixe
