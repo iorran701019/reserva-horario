@@ -2561,18 +2561,30 @@ export default function FormularioAgendamento({
       // "aguardando_sinal" quando o submit chega — e por isso carimba
       // pendente_desde igual, senão a janela de protocolo nasceria vazia.
       if (precisaSinal && sinalDeclarado) {
-        const { error } = await supabase
+        // .select("id") pelo mesmo motivo do BlocoConfirmacaoPix: update
+        // barrado por RLS volta error null e zero linhas, e sem checar isso a
+        // tela de protocolo apareceria sobre um agendamento que continua em
+        // "aguardando_sinal". Falhou aqui, o wizard NÃO avança — a cliente
+        // segue na etapa "dados" e pode tentar de novo.
+        const { data: linhasSinal, error } = await supabase
           .from("agendamentos")
           .update({
             sinal_declarado_pago: true,
             status: "pendente",
             pendente_desde: new Date().toISOString(),
           })
-          .eq("id", reservaId);
+          .eq("id", reservaId)
+          .select("id");
 
         setEnviando(false);
         if (error) {
           setErro(error.message);
+          return;
+        }
+        if (!linhasSinal || linhasSinal.length === 0) {
+          setErro(
+            "Não foi possível registrar o pagamento do sinal. Verifique sua conexão e tente de novo."
+          );
           return;
         }
       } else {

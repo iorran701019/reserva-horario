@@ -124,18 +124,23 @@ export default function BlocoConfirmacaoPix({
     setErroStatus("");
     setMarcandoPendente(true);
 
-    const { error } = await supabase
+    // .select("id"): sem ele, um update barrado por RLS volta com error null
+    // e ZERO linhas afetadas — a tela seguiria pra confirmação com o
+    // protocolo de 24h que nunca começou a contar. Linha nenhuma de volta é
+    // falha, igual a um erro de rede.
+    const { data, error } = await supabase
       .from("agendamentos")
       .update({
         status: "pendente",
         sinal_declarado_pago: true,
         pendente_desde: new Date().toISOString(),
       })
-      .eq("id", agendamentoId);
+      .eq("id", agendamentoId)
+      .select("id");
 
     setMarcandoPendente(false);
 
-    if (error) {
+    if (error || !data || data.length === 0) {
       setErroStatus(
         "Não foi possível registrar o envio do comprovante. Verifique sua conexão e tente de novo."
       );
@@ -225,17 +230,21 @@ export default function BlocoConfirmacaoPix({
     }
 
     const enviadoEm = new Date().toISOString();
-    const { error: erroUpdate } = await supabase
+    // Mesmo motivo do .select("id") em marcarPendente: o arquivo até subiu no
+    // bucket, mas se a linha não recebeu o caminho ninguém no /admin vai
+    // achar o comprovante — não pode passar por enviado.
+    const { data: linhasComprovante, error: erroUpdate } = await supabase
       .from("agendamentos")
       .update({
         comprovante_pix_url: caminho,
         comprovante_pix_enviado_em: enviadoEm,
       })
-      .eq("id", agendamentoId);
+      .eq("id", agendamentoId)
+      .select("id");
 
     setEnviandoComprovante(false);
 
-    if (erroUpdate) {
+    if (erroUpdate || !linhasComprovante || linhasComprovante.length === 0) {
       setErroComprovante(
         "Não foi possível salvar o comprovante. Você pode enviá-lo pelo WhatsApp."
       );
