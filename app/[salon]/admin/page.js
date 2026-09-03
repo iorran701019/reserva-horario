@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
@@ -60,6 +60,11 @@ import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
 import GerenciarProfissionais from "./GerenciarProfissionais";
 import GerenciarClientes from "@/components/GerenciarClientes";
+import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
+import {
+  buscarEtiquetasPorTelefones,
+  contarAgendamentosConfirmados,
+} from "@/lib/clientesAdmin";
 import ConfiguracoesSalao from "./ConfiguracoesSalao";
 import FormularioAgendamento, { CalendarioDias } from "@/components/FormularioAgendamento";
 import IdentificacaoClienteAdmin from "@/components/IdentificacaoClienteAdmin";
@@ -274,6 +279,14 @@ const TIPO_PENDENCIA_PADRAO = {
   acoes: (item, ctx) => [acaoArquivarPendencia(item, ctx.arquivar)],
 };
 
+// Nome da etiqueta que marca cliente em primeiro atendimento. O gate do inbox
+// (ver comGateDeEtiqueta) compara por nome porque a etiqueta é criada pela
+// dona na tela de Etiquetas — não existe id fixo pra ancorar. Comparação
+// normalizada (trim + minúsculas) pra sobreviver a "cliente nova" digitado com
+// outra caixa. Se a dona renomear a etiqueta, o aviso deixa de disparar: é o
+// comportamento certo, porque o rótulo deixou de significar isso.
+const NOME_ETIQUETA_CLIENTE_NOVA = "cliente nova";
+
 // Abas-pai do topo, partição DERIVADA (lib/particao) — nenhum status novo no
 // banco. "Pendentes" é o inbox (pendentes futuros que precisam de ação);
 // "Painel" mostra o calendário; "Histórico" e "Agendar" entram em breve.
@@ -453,6 +466,46 @@ export default function AdminPage() {
   const [pendentesComListaExpandida, setPendentesComListaExpandida] = useState(
     () => new Set()
   );
+
+  // Etiqueta (e id do cliente) por telefone, pros cards do inbox — os
+  // agendamentos não guardam cliente_id, então a ligação vem por telefone
+  // normalizado (ver buscarEtiquetasPorTelefones em lib/clientesAdmin.js).
+  // Map vazio = ainda não voltou (ou falhou): os cards simplesmente não
+  // mostram nada de etiqueta, e o resto da aba funciona igual.
+  const [etiquetasPorTelefone, setEtiquetasPorTelefone] = useState(new Map());
+
+  // Qual `chaveTelefonesPendentes` o Map acima corresponde. É isto, e não um
+  // booleano "carregando", que diz se o dado em mãos serve pra tela ATUAL:
+  // um Map vazio é resposta final legítima (nenhum telefone casou com cliente
+  // cadastrado), então "Map vazio" sozinho não distingue "ainda não buscou" de
+  // "buscou e não achou nada". Comparar a chave resolve os dois de uma vez e
+  // sem frame de atraso — quando a lista de pendentes muda, a chave nova já
+  // difere da carregada no MESMO render, antes de o efeito rodar.
+  // null = nada carregado ainda.
+  const [chaveEtiquetasCarregada, setChaveEtiquetasCarregada] = useState(null);
+
+  // Gate de etiqueta do inbox: segura o Confirmar/Cancelar quando a etiqueta
+  // da cliente pede atenção. null = nenhum aviso na tela. Guarda a ação
+  // original em `executar` pra poder rodá-la intacta se a dona escolher seguir
+  // — o gate não reimplementa confirmar/cancelar, só adia.
+  const [gateEtiqueta, setGateEtiqueta] = useState(null);
+
+  // Id do agendamento cujo gate está consultando o banco (a contagem de
+  // confirmados). Desabilita os botões DAQUELE card só, pra dona não disparar
+  // a mesma ação duas vezes enquanto a checagem não volta.
+  const [checandoGateId, setChecandoGateId] = useState(null);
+
+  // Telefone (dígitos) cujo popover de etiqueta deve abrir sozinho — vem do
+  // botão "Definir/Atualizar etiqueta" do gate. Cada telefone tem no máximo um
+  // seletor renderizado na aba (o card quando solto, a bandeja quando em
+  // grupo), então a flag nunca abre dois de uma vez.
+  const [etiquetaParaAbrir, setEtiquetaParaAbrir] = useState(null);
+
+  // Estável (useCallback sem deps) porque vira `onFechar` do
+  // SeletorEtiquetaRapido, que a usa como dependência dos listeners de
+  // document/window: uma arrow inline aqui mudaria de identidade a cada render
+  // do painel e faria aquele efeito re-registrar os listeners sem parar.
+  const fecharPopoverEtiqueta = useCallback(() => setEtiquetaParaAbrir(null), []);
 
   const alternarListaConfirmados = (id) =>
     setPendentesComListaExpandida((atual) => {
@@ -1594,6 +1647,102 @@ export default function AdminPage() {
     }
   }, [clienteFiltroHistorico]);
 
+  // Telefones que podem aparecer na aba Pendentes, pra buscar as etiquetas
+  // deles. Precisa ficar ACIMA dos early returns abaixo (semPerfil /
+  // autenticado / estabelecimento null) — é hook, então não pode rodar
+  // condicionalmente; por isso não dá pra derivar de `inbox`/`foraDaJanela`,
+  // que só existem lá embaixo, depois das guardas.
+  //
+  // O filtro aqui é de propósito um SUPERCONJUNTO dos dois: `inbox` é
+  // classificarAgendamento === "inbox", que por construção só devolve isso
+  // pra status pendente/aguardando_sinal (ver lib/particao.js), e
+  // `foraDaJanela` filtra exatamente esses mesmos dois status. Ou seja, todo
+  // telefone que a aba exibe está aqui dentro — sem reimplementar as regras
+  // finas (fimDoAtendimento, dentroDaJanelaAgendamento), que continuam num
+  // lugar só. Sobra alguma entrada no Map que nenhum card lê: inofensivo, o
+  // render busca por telefone e ignora o resto.
+  //
+  // String ordenada em vez do array cru porque a lista é recalculada a cada
+  // render (identidade nova sempre): como dependência de efeito, o array
+  // dispararia a busca em loop.
+  const chaveTelefonesPendentes = [
+    ...new Set(
+      agendamentos
+        .filter(
+          (item) =>
+            item.finalizado &&
+            item.telefone &&
+            (item.status === "pendente" || item.status === "aguardando_sinal")
+        )
+        .map((item) => String(item.telefone).replace(/\D/g, ""))
+        .filter(Boolean)
+    ),
+  ]
+    .sort()
+    .join(",");
+
+  // Busca as etiquetas desses telefones. Roda DEPOIS do fetch principal e não
+  // segura nada: a lista de pendentes já está na tela, e os badges aparecem um
+  // instante depois — mesmo padrão da tag "Agendado" da aba Clientes (ver
+  // buscarConfirmadosPorTelefones em GerenciarClientes.js).
+  useEffect(() => {
+    if (!estabelecimento?.id) {
+      setEtiquetasPorTelefone(new Map());
+      setChaveEtiquetasCarregada(null);
+      return;
+    }
+
+    // Nenhum pendente na tela: não há o que buscar, e o Map vazio já É a
+    // resposta final. Marca a chave vazia como carregada pra que os botões
+    // (que nem existem neste caso) não fiquem presos num "carregando" eterno
+    // se algum aparecer no mesmo tick.
+    if (!chaveTelefonesPendentes) {
+      setEtiquetasPorTelefone(new Map());
+      setChaveEtiquetasCarregada("");
+      return;
+    }
+
+    let ativo = true;
+    buscarEtiquetasPorTelefones(
+      estabelecimento.id,
+      chaveTelefonesPendentes.split(",")
+    ).then((mapa) => {
+      if (!ativo) return;
+      setEtiquetasPorTelefone(mapa);
+      setChaveEtiquetasCarregada(chaveTelefonesPendentes);
+    });
+
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento?.id, chaveTelefonesPendentes]);
+
+  // O Map em mãos corresponde à lista de pendentes que está na tela? Enquanto
+  // for false, Confirmar/Cancelar do inbox ficam desabilitados: sem o Map,
+  // comGateDeEtiqueta leria `entrada === undefined` e deixaria a ação passar
+  // direto, exatamente o clique rápido que escaparia do aviso de etiqueta.
+  // Falha de rede não trava a tela pra sempre: buscarEtiquetasPorTelefones
+  // resolve com Map vazio em erro, então a chave é marcada como carregada e os
+  // botões liberam (sem gate, que é o comportamento anterior à feature).
+  const etiquetasProntas = chaveEtiquetasCarregada === chaveTelefonesPendentes;
+
+  // Patch do Map depois que o popover grava, pra não refazer a busca inteira
+  // só pra refletir um badge. Mantém o clienteId da entrada (o alvo do
+  // próximo update) e troca só a etiqueta.
+  function patchEtiquetaPorTelefone(telefone, nova) {
+    const chave = String(telefone ?? "").replace(/\D/g, "");
+    setEtiquetasPorTelefone((atual) => {
+      const anterior = atual.get(chave);
+      if (!anterior) return atual;
+      const proximo = new Map(atual);
+      proximo.set(chave, {
+        ...anterior,
+        etiqueta: nova ? { nome: nova.nome, emoji: nova.emoji } : null,
+      });
+      return proximo;
+    });
+  }
+
   // Autenticado, mas sem perfil vinculado (conta órfã): não há salão a resolver.
   // Vem ANTES do guard de carregamento — nesse caso `estabelecimento` continua
   // undefined, então checar aqui evita ficar preso no "Carregando...".
@@ -1749,6 +1898,59 @@ export default function AdminPage() {
       const chaveB = `${b.data ?? ""} ${b.horario ?? ""}`;
       return chaveA.localeCompare(chaveB);
     });
+
+  // Intercepta Confirmar/Cancelar do inbox pra checar a etiqueta da cliente
+  // ANTES de agir. `executar` é a ação original (o mesmo callback que o botão
+  // rodaria sozinho): o gate ou a chama na hora, ou a guarda pro modal.
+  //
+  // Os dois avisos são MUTUAMENTE EXCLUSIVOS por construção, não por sorte: o
+  // ramo "sem etiqueta" sai da função com `return`, então o teste de "Cliente
+  // Nova" só é alcançado quando JÁ existe etiqueta. Não há entrada possível em
+  // que os dois valham ao mesmo tempo — "Cliente Nova" pressupõe etiqueta
+  // definida, e o código reflete isso na ordem dos ramos.
+  async function comGateDeEtiqueta(item, acao, executar) {
+    const chave = String(item.telefone ?? "").replace(/\D/g, "");
+    const entrada = etiquetasPorTelefone.get(chave);
+
+    // Nenhum cliente cadastrado casa com este telefone (ver
+    // buscarEtiquetasPorTelefones): não há linha pra etiquetar, então pedir
+    // etiqueta seria um beco sem saída. Segue direto.
+    if (!entrada) {
+      executar();
+      return;
+    }
+
+    if (!entrada.etiqueta) {
+      setGateEtiqueta({ item, chave, acao, motivo: "sem_etiqueta", executar });
+      return;
+    }
+
+    if (
+      String(entrada.etiqueta.nome ?? "").trim().toLowerCase() ===
+      NOME_ETIQUETA_CLIENTE_NOVA
+    ) {
+      setChecandoGateId(item.id);
+      const confirmados = await contarAgendamentosConfirmados(
+        estabelecimento.id,
+        item.telefone
+      );
+      setChecandoGateId(null);
+
+      if (confirmados >= 1) {
+        setGateEtiqueta({
+          item,
+          chave,
+          acao,
+          motivo: "cliente_nova",
+          confirmados,
+          executar,
+        });
+        return;
+      }
+    }
+
+    executar();
+  }
 
   // Item do modal de detalhe, sempre lido VIVO de `agendamentos` pelo id — assim
   // o patch do lembrete (atualizarItemLocal) aparece sem reabrir o modal.
@@ -2005,6 +2207,12 @@ export default function AdminPage() {
                 const mostrarBadgeExpira =
                   horasRestantes != null && horasRestantes <= LIMITE_BADGE_EXPIRA_HORAS;
 
+                // { clienteId, etiqueta } do telefone deste card, ou undefined
+                // se nenhum cliente cadastrado casa com ele.
+                const entradaEtiqueta = etiquetasPorTelefone.get(
+                  String(item.telefone ?? "").replace(/\D/g, "")
+                );
+
                 return (
                 <li
                   key={item.id}
@@ -2038,6 +2246,31 @@ export default function AdminPage() {
                         sem ele, justify-between com um filho só jogaria os
                         badges pra esquerda. */}
                     <div className="ml-auto flex shrink-0 flex-col items-end gap-1">
+                      {/* Etiqueta: mesma regra de eco do nome/telefone acima —
+                          em grupo ela já aparece uma vez na bandeja, então
+                          repetir por card seria ruído. `entradaEtiqueta` é
+                          undefined quando nenhum cliente casa com o telefone
+                          (ver buscarEtiquetasPorTelefones): aí não há linha
+                          pra gravar, e o seletor não renderiza nada. */}
+                      {!emGrupo && entradaEtiqueta && (
+                        <SeletorEtiquetaRapido
+                          estabelecimentoId={estabelecimento.id}
+                          clienteId={entradaEtiqueta.clienteId}
+                          etiqueta={entradaEtiqueta.etiqueta}
+                          onEtiquetaAlterada={(nova) =>
+                            patchEtiquetaPorTelefone(item.telefone, nova)
+                          }
+                          // Abertura vinda do gate (ver etiquetaParaAbrir):
+                          // este card só renderiza o seletor quando o cliente
+                          // NÃO está agrupado, e a bandeja só quando está —
+                          // então a flag nunca abre dois popovers.
+                          abrirAgora={
+                            etiquetaParaAbrir ===
+                            String(item.telefone ?? "").replace(/\D/g, "")
+                          }
+                          onFechar={fecharPopoverEtiqueta}
+                        />
+                      )}
                       <span
                         className={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classesStatus(
                           item.status
@@ -2222,21 +2455,42 @@ export default function AdminPage() {
                         cor de fundo dos dois lados — só uma borda fina (mesma
                         cor do ring já usado no botão) separa as zonas, sem
                         criar elemento/cor novos. */}
+                    {/* As QUATRO zonas passam por comGateDeEtiqueta: fossem
+                        só as duas maiores, o atalho "sem notificar" seria um
+                        desvio silencioso do aviso de etiqueta. O gate não
+                        muda o que cada zona faz — só decide se roda agora ou
+                        depois do modal. Consequência aceita: nas zonas
+                        pequenas, seguir pelo aviso abre em seguida o popup de
+                        "sem notificar" que já existia, dois modais em
+                        sequência. */}
                     <div className="flex items-stretch overflow-hidden rounded-lg bg-green-50 ring-1 ring-green-100">
                       <button
                         type="button"
-                        onClick={() => handleConfirmar(item)}
-                        className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100"
+                        onClick={() =>
+                          comGateDeEtiqueta(item, "confirmar", () => handleConfirmar(item))
+                        }
+                        disabled={checandoGateId === item.id || !etiquetasProntas}
+                        title={!etiquetasProntas ? "Carregando etiquetas..." : undefined}
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <IconeWhatsApp />
                         Confirmar agendamento
                       </button>
                       <button
                         type="button"
-                        onClick={() => setAgendamentoParaConfirmar(item)}
+                        onClick={() =>
+                          comGateDeEtiqueta(item, "confirmar", () =>
+                            setAgendamentoParaConfirmar(item)
+                          )
+                        }
+                        disabled={checandoGateId === item.id || !etiquetasProntas}
                         aria-label="Confirmar sem notificar cliente"
-                        title="Confirmar sem notificar cliente"
-                        className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-green-100 text-green-700 transition hover:bg-green-100"
+                        title={
+                          !etiquetasProntas
+                            ? "Carregando etiquetas..."
+                            : "Confirmar sem notificar cliente"
+                        }
+                        className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-green-100 text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <Check className="h-4 w-4" aria-hidden="true" />
                         <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
@@ -2246,24 +2500,35 @@ export default function AdminPage() {
                     <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
                       <button
                         type="button"
-                        onClick={() => {
-                          setAgendamentoParaCancelar(item);
-                          setNotificarAoCancelar(true);
-                        }}
-                        className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                        onClick={() =>
+                          comGateDeEtiqueta(item, "cancelar", () => {
+                            setAgendamentoParaCancelar(item);
+                            setNotificarAoCancelar(true);
+                          })
+                        }
+                        disabled={checandoGateId === item.id || !etiquetasProntas}
+                        title={!etiquetasProntas ? "Carregando etiquetas..." : undefined}
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <IconeWhatsApp />
                         Cancelar agendamento
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          setAgendamentoParaCancelar(item);
-                          setNotificarAoCancelar(false);
-                        }}
+                        onClick={() =>
+                          comGateDeEtiqueta(item, "cancelar", () => {
+                            setAgendamentoParaCancelar(item);
+                            setNotificarAoCancelar(false);
+                          })
+                        }
+                        disabled={checandoGateId === item.id || !etiquetasProntas}
                         aria-label="Cancelar sem notificar cliente"
-                        title="Cancelar sem notificar cliente"
-                        className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-red-200 text-red-600 transition hover:bg-red-50"
+                        title={
+                          !etiquetasProntas
+                            ? "Carregando etiquetas..."
+                            : "Cancelar sem notificar cliente"
+                        }
+                        className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-red-200 text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <X className="h-4 w-4" aria-hidden="true" />
                         <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
@@ -2336,6 +2601,30 @@ export default function AdminPage() {
                         {grupo.nome}
                       </p>
                       <p className="text-xs text-body">{grupo.telefone}</p>
+                      {/* Etiqueta do grupo: uma vez só, junto do nome — os
+                          cards de dentro não a repetem (ver `emGrupo`). */}
+                      {(() => {
+                        const entrada = etiquetasPorTelefone.get(
+                          String(grupo.telefone ?? "").replace(/\D/g, "")
+                        );
+                        if (!entrada) return null;
+                        const chaveGrupo = String(grupo.telefone ?? "").replace(
+                          /\D/g,
+                          ""
+                        );
+                        return (
+                          <SeletorEtiquetaRapido
+                            estabelecimentoId={estabelecimento.id}
+                            clienteId={entrada.clienteId}
+                            etiqueta={entrada.etiqueta}
+                            onEtiquetaAlterada={(nova) =>
+                              patchEtiquetaPorTelefone(grupo.telefone, nova)
+                            }
+                            abrirAgora={etiquetaParaAbrir === chaveGrupo}
+                            onFechar={fecharPopoverEtiqueta}
+                          />
+                        );
+                      })()}
                       <span className="ml-auto shrink-0 text-xs text-body">
                         {grupo.itens.length} pendentes
                       </span>
@@ -2425,22 +2714,46 @@ export default function AdminPage() {
                             "Confirmar mesmo assim?" quando necessário — faz
                             sentido aqui já que este card É o caso fora da
                             janela); a menor abre o popup "Confirmar sem
-                            notificar?" já existente. */}
+                            notificar?" já existente.
+
+                            As quatro zonas desta seção passam por
+                            comGateDeEtiqueta igual às do inbox: é a MESMA aba
+                            Pendentes e a mesma gravação no fim, então deixar
+                            só o inbox gateado seria um caminho paralelo por
+                            onde o aviso de etiqueta nunca apareceria. Os
+                            popups do gate empilham com os que já existem aqui
+                            (fora da janela / sem notificar) — o gate vem
+                            primeiro e só libera a ação original depois. */}
                         <div className="flex items-stretch overflow-hidden rounded-lg bg-green-50 ring-1 ring-green-100">
                           <button
                             type="button"
-                            onClick={() => handleConfirmar(item)}
-                            className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100"
+                            onClick={() =>
+                              comGateDeEtiqueta(item, "confirmar", () =>
+                                handleConfirmar(item)
+                              )
+                            }
+                            disabled={checandoGateId === item.id || !etiquetasProntas}
+                            title={!etiquetasProntas ? "Carregando etiquetas..." : undefined}
+                            className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             <IconeWhatsApp />
                             Confirmar agendamento
                           </button>
                           <button
                             type="button"
-                            onClick={() => setAgendamentoParaConfirmar(item)}
+                            onClick={() =>
+                              comGateDeEtiqueta(item, "confirmar", () =>
+                                setAgendamentoParaConfirmar(item)
+                              )
+                            }
+                            disabled={checandoGateId === item.id || !etiquetasProntas}
                             aria-label="Confirmar sem notificar cliente"
-                            title="Confirmar sem notificar cliente"
-                            className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-green-100 text-green-700 transition hover:bg-green-100"
+                            title={
+                              !etiquetasProntas
+                                ? "Carregando etiquetas..."
+                                : "Confirmar sem notificar cliente"
+                            }
+                            className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-green-100 text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             <Check className="h-4 w-4" aria-hidden="true" />
                             <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
@@ -2453,24 +2766,35 @@ export default function AdminPage() {
                         <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
                           <button
                             type="button"
-                            onClick={() => {
-                              setAgendamentoParaCancelar(item);
-                              setNotificarAoCancelar(true);
-                            }}
-                            className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                            onClick={() =>
+                              comGateDeEtiqueta(item, "cancelar", () => {
+                                setAgendamentoParaCancelar(item);
+                                setNotificarAoCancelar(true);
+                              })
+                            }
+                            disabled={checandoGateId === item.id || !etiquetasProntas}
+                            title={!etiquetasProntas ? "Carregando etiquetas..." : undefined}
+                            className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             <IconeWhatsApp />
                             Cancelar agendamento
                           </button>
                           <button
                             type="button"
-                            onClick={() => {
-                              setAgendamentoParaCancelar(item);
-                              setNotificarAoCancelar(false);
-                            }}
+                            onClick={() =>
+                              comGateDeEtiqueta(item, "cancelar", () => {
+                                setAgendamentoParaCancelar(item);
+                                setNotificarAoCancelar(false);
+                              })
+                            }
+                            disabled={checandoGateId === item.id || !etiquetasProntas}
                             aria-label="Cancelar sem notificar cliente"
-                            title="Cancelar sem notificar cliente"
-                            className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-red-200 text-red-600 transition hover:bg-red-50"
+                            title={
+                              !etiquetasProntas
+                                ? "Carregando etiquetas..."
+                                : "Cancelar sem notificar cliente"
+                            }
+                            className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-red-200 text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             <X className="h-4 w-4" aria-hidden="true" />
                             <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
@@ -2911,6 +3235,19 @@ export default function AdminPage() {
                       {clienteParaAgendar.nome}
                     </span>
                   </p>
+                  {/* Etiqueta do cliente escolhido, já trazida pelo
+                      IdentificacaoClienteAdmin (campo `etiqueta` do objeto) —
+                      sem consulta nova aqui. */}
+                  <SeletorEtiquetaRapido
+                    estabelecimentoId={estabelecimento.id}
+                    clienteId={clienteParaAgendar.id}
+                    etiqueta={clienteParaAgendar.etiqueta ?? null}
+                    onEtiquetaAlterada={(nova) =>
+                      setClienteParaAgendar((atual) =>
+                        atual ? { ...atual, etiqueta: nova } : atual
+                      )
+                    }
+                  />
                   <button
                     type="button"
                     onClick={() => setClienteParaAgendar(null)}
@@ -2926,6 +3263,15 @@ export default function AdminPage() {
                   status="confirmado"
                   clienteInicial={clienteParaAgendar}
                   rotuloSubmit="Criar agendamento"
+                  // Etiqueta é informação interna do salão: o wizard só a
+                  // mostra porque o /admin liga explicitamente (o fluxo
+                  // público em app/[salon]/page.js não passa nada disso).
+                  mostrarEtiquetaAdmin
+                  onEtiquetaAlterada={(nova) =>
+                    setClienteParaAgendar((atual) =>
+                      atual ? { ...atual, etiqueta: nova } : atual
+                    )
+                  }
                   // No admin o dono SEMPRE escolhe o profissional ao marcar,
                   // independente do toggle escolha_profissional do salão.
                   forcarEscolhaProfissional
@@ -3382,6 +3728,90 @@ export default function AdminPage() {
                 className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Gate de etiqueta do inbox (ver comGateDeEtiqueta): trava o
+          Confirmar/Cancelar quando a etiqueta da cliente pede atenção. Duas
+          saídas e SÓ duas — seguir sem mexer na etiqueta, ou ir etiquetar.
+          Não há X, clique no fundo nem Esc de propósito: fechar sem escolher
+          deixaria a dona achando que confirmou quando não confirmou. O
+          backdrop é uma <div> sem onClick justamente por isso. */}
+      {gateEtiqueta && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-gate-etiqueta"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border">
+            <h2 id="titulo-gate-etiqueta" className="text-lg font-semibold text-heading">
+              {gateEtiqueta.motivo === "sem_etiqueta"
+                ? "Cliente sem etiqueta"
+                : "Cliente Nova, já no 2º serviço"}
+            </h2>
+
+            <p className="mt-2 text-sm text-body">
+              {gateEtiqueta.motivo === "sem_etiqueta" ? (
+                <>
+                  <span className="font-medium text-heading">
+                    {gateEtiqueta.item.nome_cliente}
+                  </span>{" "}
+                  ainda não tem etiqueta definida. Quer definir uma antes de{" "}
+                  {gateEtiqueta.acao === "confirmar" ? "confirmar" : "cancelar"} este
+                  agendamento?
+                </>
+              ) : (
+                <>
+                  <span className="font-medium text-heading">
+                    {gateEtiqueta.item.nome_cliente}
+                  </span>{" "}
+                  está marcada como <strong>Cliente Nova</strong>, mas já tem{" "}
+                  {gateEtiqueta.confirmados}{" "}
+                  {gateEtiqueta.confirmados === 1
+                    ? "agendamento confirmado"
+                    : "agendamentos confirmados"}{" "}
+                  — este seria o {gateEtiqueta.confirmados + 1}º atendimento. A
+                  etiqueta pode estar desatualizada.
+                </>
+              )}
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2">
+              {/* Ir etiquetar: fecha o aviso, abre o popover do seletor DESTA
+                  cliente e NÃO roda a ação original — a dona clica
+                  Confirmar/Cancelar de novo depois, se ainda quiser. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setEtiquetaParaAbrir(gateEtiqueta.chave);
+                  setGateEtiqueta(null);
+                }}
+                className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:opacity-90"
+              >
+                {gateEtiqueta.motivo === "sem_etiqueta"
+                  ? "Definir etiqueta"
+                  : "Atualizar etiqueta"}
+              </button>
+
+              {/* Seguir: roda a ação original intacta (o mesmo callback que o
+                  botão rodaria sem o gate). */}
+              <button
+                type="button"
+                onClick={() => {
+                  const seguir = gateEtiqueta.executar;
+                  setGateEtiqueta(null);
+                  seguir();
+                }}
+                className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                {gateEtiqueta.acao === "confirmar" ? "Confirmar" : "Cancelar"}{" "}
+                {gateEtiqueta.motivo === "sem_etiqueta"
+                  ? "sem definir etiqueta"
+                  : "sem atualizar etiqueta"}
               </button>
             </div>
           </div>

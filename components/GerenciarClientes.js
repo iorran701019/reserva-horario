@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, MessageCircleOff, X } from "lucide-react";
+import { CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MessageCircleOff, X } from "lucide-react";
 import NavegacaoMes from "@/components/NavegacaoMes";
 import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
 import {
@@ -13,7 +13,10 @@ import {
   buscarObservacoes,
   buscarAnotacoesLivres,
   criarAnotacaoLivre,
+  buscarTodasEtiquetas,
 } from "@/lib/clientesAdmin";
+import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
+import { supabase } from "@/lib/supabaseClient";
 import { existeModeloAtivo } from "@/lib/anamnese";
 import { buscarConfirmadosPorTelefones } from "@/lib/agendamentosCliente";
 import { classificarAgendamento, rotuloHistorico, ordenarHistoricoPorStatus } from "@/lib/particao";
@@ -30,6 +33,7 @@ import AtualizarDadosCliente from "@/components/AtualizarDadosCliente";
 import FormularioAnamnese from "@/components/FormularioAnamnese";
 import ModalAlterarWhatsapp from "@/components/ModalAlterarWhatsapp";
 import CarrosselAgendamentos from "@/components/CarrosselAgendamentos";
+import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 
 // Aba "Clientes" do /admin: lista somente-leitura dos clientes do salão
 // (tabela `clientes`, particionada por estabelecimento_id) com busca por nome
@@ -123,6 +127,7 @@ function DetalheCliente({
   onAgendarPara,
   onCancelarAgendamento,
   ultimoCancelamento,
+  onEtiquetaAlterada,
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -382,7 +387,28 @@ function DetalheCliente({
       </button>
 
       <div>
-        <h3 className="min-w-0 truncate text-base font-semibold text-heading">{clienteAtual.nome}</h3>
+        {/* Nome + etiqueta na MESMA linha: a etiqueta é um qualificador do
+            cliente, não um dado de contato — separá-la do nome (jogando pro
+            bloco de WhatsApp/emergência abaixo) a leria como mais um campo
+            cadastral. `clienteAtual` é a cópia local da ficha, então trocar a
+            etiqueta aqui reflete na hora; onEtiquetaAlterada leva a mesma
+            troca pra lista por trás, que não seria refeita ao voltar. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="min-w-0 truncate text-base font-semibold text-heading">{clienteAtual.nome}</h3>
+          <SeletorEtiquetaRapido
+            estabelecimentoId={estabelecimento.id}
+            clienteId={clienteAtual.id}
+            etiqueta={clienteAtual.etiquetas_cliente ?? null}
+            onEtiquetaAlterada={(nova) => {
+              setClienteAtual((anterior) => ({
+                ...anterior,
+                etiqueta_id: nova?.id ?? null,
+                etiquetas_cliente: nova ? { nome: nova.nome, emoji: nova.emoji } : null,
+              }));
+              onEtiquetaAlterada?.(clienteAtual.id, nova);
+            }}
+          />
+        </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
           <a
             href={linkWhatsApp(
@@ -931,6 +957,37 @@ export default function GerenciarClientes({
   // o estado correto enquanto a busca não volta (e também se ela falhar).
   const [telefonesAgendados, setTelefonesAgendados] = useState(new Set());
 
+  // ---- Bloco "Etiquetas" (CRUD da tabela `etiquetas_cliente`) -------------
+  // Lista COMPLETA (ativas + desativadas): a dona precisa ver as desativadas
+  // pra reativar. O popover de escolha (SeletorEtiquetaRapido) usa a lista só
+  // das ativas, buscada por ele mesmo — este state não alimenta aquele.
+  const [etiquetas, setEtiquetas] = useState([]);
+  const [carregandoEtiquetas, setCarregandoEtiquetas] = useState(true);
+  const [blocoEtiquetasAberto, setBlocoEtiquetasAberto] = useState(false);
+
+  // Criar: form inline, aberto sob demanda dentro do bloco.
+  const [criandoEtiqueta, setCriandoEtiqueta] = useState(false);
+  const [novoNomeEtiqueta, setNovoNomeEtiqueta] = useState("");
+  const [novoEmojiEtiqueta, setNovoEmojiEtiqueta] = useState("");
+  const [salvandoEtiqueta, setSalvandoEtiqueta] = useState(false);
+  const [erroCriarEtiqueta, setErroCriarEtiqueta] = useState("");
+
+  // Renomear: inline, na própria linha da etiqueta (mesmo padrão do
+  // renomear-categoria em GerenciarServicos.js).
+  const [etiquetaEditandoId, setEtiquetaEditandoId] = useState(null);
+  const [nomeEdicaoEtiqueta, setNomeEdicaoEtiqueta] = useState("");
+  const [emojiEdicaoEtiqueta, setEmojiEdicaoEtiqueta] = useState("");
+
+  // Etiqueta "armada" pra desativação (modal de confirmação) — soft delete via
+  // `ativa=false`, nunca DELETE: quem já foi marcado com ela continua
+  // mostrando o rótulo (ver buscarClientes em lib/clientesAdmin.js).
+  const [etiquetaParaDesativar, setEtiquetaParaDesativar] = useState(null);
+
+  // Trava as ações do bloco (renomear/mover/desativar/reativar) enquanto uma
+  // gravação está em voo, pra não disparar duas de uma vez.
+  const [ocupadoEtiqueta, setOcupadoEtiqueta] = useState(false);
+  const [erroAcaoEtiqueta, setErroAcaoEtiqueta] = useState("");
+
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -981,6 +1038,207 @@ export default function GerenciarClientes({
     };
   }, [estabelecimento.id]);
 
+  // Carrega a lista de etiquetas do salão. Independente do carregamento dos
+  // clientes: uma falha aqui não segura a lista principal (e vice-versa).
+  useEffect(() => {
+    let ativo = true;
+
+    buscarTodasEtiquetas(estabelecimento.id).then((lista) => {
+      if (!ativo) return;
+      setEtiquetas(lista);
+      setCarregandoEtiquetas(false);
+    });
+
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento.id]);
+
+  // Patch da etiqueta de um cliente na lista em memória, sem refetch. Chamado
+  // tanto pelo badge do card quanto pela ficha (ver onEtiquetaAlterada do
+  // DetalheCliente): sem isto, voltar da ficha pra lista mostraria a etiqueta
+  // antiga até a próxima montagem.
+  function patchEtiquetaDoCliente(clienteId, nova) {
+    setClientes((atuais) =>
+      atuais.map((c) =>
+        c.id === clienteId
+          ? {
+              ...c,
+              etiqueta_id: nova?.id ?? null,
+              etiquetas_cliente: nova ? { nome: nova.nome, emoji: nova.emoji } : null,
+            }
+          : c
+      )
+    );
+    // `selecionado` é a prop que abre a ficha: se a troca veio do card e a
+    // ficha for aberta em seguida, ela precisa nascer já com o valor novo.
+    setSelecionado((atual) =>
+      atual && atual.id === clienteId
+        ? {
+            ...atual,
+            etiqueta_id: nova?.id ?? null,
+            etiquetas_cliente: nova ? { nome: nova.nome, emoji: nova.emoji } : null,
+          }
+        : atual
+    );
+  }
+
+  // Nova etiqueta vai pro fim da ordem (maior `ordem` atual + 1) — mesma
+  // convenção de criarCategoria em GerenciarServicos.js. O emoji é opcional:
+  // string vazia vira null pra não gravar "" no banco.
+  async function criarEtiqueta(e) {
+    e.preventDefault();
+    const nome = novoNomeEtiqueta.trim();
+    if (!nome) return;
+
+    setSalvandoEtiqueta(true);
+    setErroCriarEtiqueta("");
+    const proximaOrdem = etiquetas.reduce((max, et) => Math.max(max, et.ordem), -1) + 1;
+    const { data, error } = await supabase
+      .from("etiquetas_cliente")
+      .insert({
+        estabelecimento_id: estabelecimento.id,
+        nome,
+        emoji: novoEmojiEtiqueta.trim() || null,
+        ordem: proximaOrdem,
+        ativa: true,
+      })
+      .select("id, nome, emoji, ordem, ativa")
+      .single();
+
+    setSalvandoEtiqueta(false);
+    if (error) {
+      setErroCriarEtiqueta(error.message);
+      return;
+    }
+    setEtiquetas((atuais) => [...atuais, data]);
+    setNovoNomeEtiqueta("");
+    setNovoEmojiEtiqueta("");
+    setCriandoEtiqueta(false);
+  }
+
+  function abrirRenomearEtiqueta(etiqueta) {
+    setEtiquetaEditandoId(etiqueta.id);
+    setNomeEdicaoEtiqueta(etiqueta.nome);
+    setEmojiEdicaoEtiqueta(etiqueta.emoji ?? "");
+    setErroAcaoEtiqueta("");
+  }
+
+  async function salvarRenomeEtiqueta(etiqueta) {
+    const nome = nomeEdicaoEtiqueta.trim();
+    const emoji = emojiEdicaoEtiqueta.trim() || null;
+    if (!nome) return;
+    if (nome === etiqueta.nome && emoji === (etiqueta.emoji ?? null)) {
+      setEtiquetaEditandoId(null);
+      return;
+    }
+
+    setOcupadoEtiqueta(true);
+    setErroAcaoEtiqueta("");
+    const { data: linhas, error } = await supabase
+      .from("etiquetas_cliente")
+      .update({ nome, emoji })
+      .eq("id", etiqueta.id)
+      .select("id");
+
+    setOcupadoEtiqueta(false);
+    if (error || !linhas?.length) {
+      setErroAcaoEtiqueta(mensagemFalhaSalvar(error));
+      return;
+    }
+    setEtiquetas((atuais) =>
+      atuais.map((et) => (et.id === etiqueta.id ? { ...et, nome, emoji } : et))
+    );
+    setEtiquetaEditandoId(null);
+
+    // A lista de clientes carrega o nome/emoji embedados: renomear a etiqueta
+    // sem patchar aqui deixaria os badges com o texto antigo até o refetch.
+    setClientes((atuais) =>
+      atuais.map((c) =>
+        c.etiqueta_id === etiqueta.id ? { ...c, etiquetas_cliente: { nome, emoji } } : c
+      )
+    );
+  }
+
+  // Reordena trocando com o vizinho e reescrevendo `ordem` de todas as
+  // alteradas — mesmo template de moverCategoria (GerenciarServicos.js:1186),
+  // incluindo o lote sem transação com `.select()` por update: um deles
+  // filtrado pelo RLS volta com error null e 0 linhas, e sem a checagem a
+  // ordem do banco ficaria furada com a tela mostrando a troca já feita.
+  async function moverEtiqueta(etiqueta, direcao) {
+    const ordenadas = [...etiquetas].sort((a, b) => a.ordem - b.ordem);
+    const i = ordenadas.findIndex((et) => et.id === etiqueta.id);
+    const j = i + direcao;
+    if (j < 0 || j >= ordenadas.length) return;
+
+    const reordenadas = [...ordenadas];
+    [reordenadas[i], reordenadas[j]] = [reordenadas[j], reordenadas[i]];
+    const comNovaOrdem = reordenadas.map((et, indice) => ({ ...et, ordem: indice + 1 }));
+
+    const ordemOriginalPorId = new Map(ordenadas.map((et) => [et.id, et.ordem]));
+    const alteradas = comNovaOrdem.filter((et) => ordemOriginalPorId.get(et.id) !== et.ordem);
+
+    setOcupadoEtiqueta(true);
+    setErroAcaoEtiqueta("");
+
+    const resultados = await Promise.all(
+      alteradas.map((et) =>
+        supabase
+          .from("etiquetas_cliente")
+          .update({ ordem: et.ordem })
+          .eq("id", et.id)
+          .select("id")
+      )
+    );
+
+    setOcupadoEtiqueta(false);
+
+    const falha = resultados.find((r) => r.error || !r.data?.length);
+    if (falha) {
+      setErroAcaoEtiqueta(
+        `${mensagemFalhaSalvar(falha.error)} — recarregue a página para garantir consistência com o banco.`
+      );
+      return;
+    }
+
+    const novaOrdemPorId = new Map(comNovaOrdem.map((et) => [et.id, et.ordem]));
+    setEtiquetas((atuais) =>
+      [...atuais.map((et) =>
+        novaOrdemPorId.has(et.id) ? { ...et, ordem: novaOrdemPorId.get(et.id) } : et
+      )].sort((a, b) => a.ordem - b.ordem)
+    );
+  }
+
+  // Soft delete (ativa=false) e reativação, no MESMO handler — nunca DELETE
+  // físico: os clientes já marcados guardam a FK, e apagar a linha derrubaria
+  // o rótulo do histórico deles. Desativar só tira a etiqueta das escolhas
+  // novas (o popover lê `ativa=true`).
+  async function alternarAtivaEtiqueta(etiqueta, ativa) {
+    setOcupadoEtiqueta(true);
+    setErroAcaoEtiqueta("");
+    const { data: linhas, error } = await supabase
+      .from("etiquetas_cliente")
+      .update({ ativa })
+      .eq("id", etiqueta.id)
+      .select("id");
+
+    setOcupadoEtiqueta(false);
+    if (error || !linhas?.length) {
+      setErroAcaoEtiqueta(mensagemFalhaSalvar(error));
+      setEtiquetaParaDesativar(null);
+      return;
+    }
+    setEtiquetas((atuais) =>
+      atuais.map((et) => (et.id === etiqueta.id ? { ...et, ativa } : et))
+    );
+    setEtiquetaParaDesativar(null);
+  }
+
+  const etiquetasOrdenadas = useMemo(
+    () => [...etiquetas].sort((a, b) => a.ordem - b.ordem),
+    [etiquetas]
+  );
+
   const clientesFiltrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     if (!termo) return clientes;
@@ -1020,6 +1278,209 @@ export default function GerenciarClientes({
 
   return (
     <>
+      {/* Bloco "Etiquetas": CRUD da taxonomia (tabela `etiquetas_cliente`),
+          acordeão fechado por padrão — é configuração, mexida de vez em
+          quando, então não pode empurrar a busca e a lista pra baixo no uso
+          diário. Mesmo lugar estrutural que as Categorias ocupam dentro da
+          aba Serviços: a taxonomia mora junto do que ela classifica, sem
+          virar uma aba própria no menu. */}
+      <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+        <CabecalhoRetratil
+          titulo="Etiquetas"
+          contador={carregandoEtiquetas ? undefined : etiquetas.length}
+          aberto={blocoEtiquetasAberto}
+          onClick={() => setBlocoEtiquetasAberto((atual) => !atual)}
+        />
+
+        {blocoEtiquetasAberto && (
+          <div className="mt-3 space-y-3">
+            {carregandoEtiquetas ? (
+              <p className="text-sm text-body">Carregando etiquetas...</p>
+            ) : (
+              <>
+                {erroAcaoEtiqueta && (
+                  <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                    {erroAcaoEtiqueta}
+                  </p>
+                )}
+
+                {etiquetasOrdenadas.length === 0 ? (
+                  <p className="text-sm text-body">Nenhuma etiqueta cadastrada ainda.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {etiquetasOrdenadas.map((etiqueta, indice) => (
+                      <li
+                        key={etiqueta.id}
+                        className={`rounded-lg px-3 py-2 ring-1 ring-border ${
+                          etiqueta.ativa ? "bg-surface" : "bg-surface opacity-60"
+                        }`}
+                      >
+                        {etiquetaEditandoId === etiqueta.id ? (
+                          /* Renomear inline, na própria linha (mesmo padrão do
+                             renomear-categoria em GerenciarServicos.js). O
+                             emoji é um campo curto ao lado do nome, opcional. */
+                          <div className="flex flex-wrap items-center gap-2">
+                            <input
+                              type="text"
+                              value={emojiEdicaoEtiqueta}
+                              onChange={(e) => setEmojiEdicaoEtiqueta(e.target.value)}
+                              maxLength={4}
+                              aria-label="Emoji da etiqueta"
+                              className="w-14 rounded-lg border border-border px-2 py-1.5 text-center text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                            />
+                            <input
+                              type="text"
+                              value={nomeEdicaoEtiqueta}
+                              onChange={(e) => setNomeEdicaoEtiqueta(e.target.value)}
+                              aria-label="Nome da etiqueta"
+                              className="min-w-0 flex-1 rounded-lg border border-border px-3 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => salvarRenomeEtiqueta(etiqueta)}
+                              disabled={ocupadoEtiqueta || !nomeEdicaoEtiqueta.trim()}
+                              className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Salvar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEtiquetaEditandoId(null)}
+                              className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-heading">
+                              {etiqueta.emoji ? `${etiqueta.emoji} ` : ""}
+                              {etiqueta.nome}
+                            </span>
+
+                            {!etiqueta.ativa && (
+                              <span className="shrink-0 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-body ring-1 ring-border">
+                                desativada
+                              </span>
+                            )}
+
+                            {/* Mover para cima/baixo: desabilitado nas pontas,
+                                mesmo comportamento do reordenar de categorias. */}
+                            <button
+                              type="button"
+                              onClick={() => moverEtiqueta(etiqueta, -1)}
+                              disabled={ocupadoEtiqueta || indice === 0}
+                              aria-label={`Mover ${etiqueta.nome} para cima`}
+                              className="shrink-0 rounded-lg p-1.5 text-body transition hover:bg-card disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <ChevronUp className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moverEtiqueta(etiqueta, 1)}
+                              disabled={
+                                ocupadoEtiqueta || indice === etiquetasOrdenadas.length - 1
+                              }
+                              aria-label={`Mover ${etiqueta.nome} para baixo`}
+                              className="shrink-0 rounded-lg p-1.5 text-body transition hover:bg-card disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <ChevronDown className="h-4 w-4" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => abrirRenomearEtiqueta(etiqueta)}
+                              disabled={ocupadoEtiqueta}
+                              className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Renomear
+                            </button>
+
+                            {etiqueta.ativa ? (
+                              <button
+                                type="button"
+                                onClick={() => setEtiquetaParaDesativar(etiqueta)}
+                                disabled={ocupadoEtiqueta}
+                                className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Desativar
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => alternarAtivaEtiqueta(etiqueta, true)}
+                                disabled={ocupadoEtiqueta}
+                                className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Reativar
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {criandoEtiqueta ? (
+                  <form onSubmit={criarEtiqueta} className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        value={novoEmojiEtiqueta}
+                        onChange={(e) => setNovoEmojiEtiqueta(e.target.value)}
+                        maxLength={4}
+                        aria-label="Emoji da etiqueta (opcional)"
+                        className="w-14 rounded-lg border border-border px-2 py-1.5 text-center text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                      />
+                      <input
+                        type="text"
+                        value={novoNomeEtiqueta}
+                        onChange={(e) => setNovoNomeEtiqueta(e.target.value)}
+                        aria-label="Nome da etiqueta"
+                        placeholder="Nome da etiqueta"
+                        autoFocus
+                        className="min-w-0 flex-1 rounded-lg border border-border px-3 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                      />
+                      <button
+                        type="submit"
+                        disabled={salvandoEtiqueta || !novoNomeEtiqueta.trim()}
+                        className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Criar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCriandoEtiqueta(false);
+                          setNovoNomeEtiqueta("");
+                          setNovoEmojiEtiqueta("");
+                          setErroCriarEtiqueta("");
+                        }}
+                        className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                    {erroCriarEtiqueta && (
+                      <p className="text-sm text-red-700">{erroCriarEtiqueta}</p>
+                    )}
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setCriandoEtiqueta(true)}
+                    className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface"
+                  >
+                    Nova etiqueta
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </section>
+
       <div className="mb-4">
         <label htmlFor="busca-cliente" className="sr-only">
           Buscar cliente
@@ -1042,45 +1503,113 @@ export default function GerenciarClientes({
         <ul className="space-y-3">
           {clientesFiltrados.map((cliente) => (
             <li key={cliente.id}>
-              <button
-                type="button"
-                onClick={() => setSelecionado(cliente)}
-                className="w-full rounded-2xl bg-card p-4 text-left shadow-sm ring-1 ring-border transition hover:bg-surface"
-              >
-                <div className="flex items-center justify-between gap-3">
+              {/* O card é um <div>, não um <button>: o badge de etiqueta é
+                  interativo (abre o popover) e um <button> dentro de outro é
+                  HTML inválido — o React reclama na hidratação. A zona
+                  clicável que abre a ficha virou um <button> IRMÃO do bloco de
+                  badges, cobrindo nome + WhatsApp; as classes de card (e o
+                  hover) subiram pro <div> pra que o visual não mude. */}
+              <div className="flex w-full items-center justify-between gap-3 rounded-2xl bg-card p-4 text-left shadow-sm ring-1 ring-border transition hover:bg-surface">
+                <button
+                  type="button"
+                  onClick={() => setSelecionado(cliente)}
+                  className="min-w-0 flex-1 text-left"
+                >
                   <p className="min-w-0 truncate font-medium text-heading">
                     {cliente.nome}
                   </p>
-                  <span className="flex shrink-0 items-center gap-1.5">
-                    {/* Tem algo confirmado ainda no futuro? Regra em
-                        ehAgendamentoConfirmadoFuturo (lib/particao), a MESMA
-                        que a aba Histórico do /admin aplica sobre os
-                        agendamentos já carregados — as duas telas nunca
-                        discordam. Ao contrário das tags abaixo, esta aparece
-                        SEMPRE (verde ou cinza). */}
-                    {telefonesAgendados.has(
-                      String(cliente.whatsapp ?? "").replace(/\D/g, "")
-                    ) ? (
-                      <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700 ring-1 ring-green-200">
-                        Agendado
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-medium text-body ring-1 ring-border">
-                        Sem agenda
-                      </span>
-                    )}
-                    {ehAniversarianteDoMes(cliente.nascimento) && (
-                      <span className="rounded-full bg-pink-50 px-2.5 py-0.5 text-xs font-medium text-pink-700 ring-1 ring-pink-100">
-                        🎂 Aniversário
-                      </span>
-                    )}
-                  </span>
-                </div>
-                <p className="mt-0.5 text-sm text-body">{cliente.whatsapp}</p>
-              </button>
+                  <p className="mt-0.5 text-sm text-body">{cliente.whatsapp}</p>
+                </button>
+
+                <span className="flex shrink-0 items-center gap-1.5">
+                  {/* Tem algo confirmado ainda no futuro? Regra em
+                      ehAgendamentoConfirmadoFuturo (lib/particao), a MESMA
+                      que a aba Histórico do /admin aplica sobre os
+                      agendamentos já carregados — as duas telas nunca
+                      discordam. Ao contrário das tags abaixo, esta aparece
+                      SEMPRE (verde ou cinza). */}
+                  {telefonesAgendados.has(
+                    String(cliente.whatsapp ?? "").replace(/\D/g, "")
+                  ) ? (
+                    <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700 ring-1 ring-green-200">
+                      Agendado
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-medium text-body ring-1 ring-border">
+                      Sem agenda
+                    </span>
+                  )}
+                  {ehAniversarianteDoMes(cliente.nascimento) && (
+                    <span className="rounded-full bg-pink-50 px-2.5 py-0.5 text-xs font-medium text-pink-700 ring-1 ring-pink-100">
+                      🎂 Aniversário
+                    </span>
+                  )}
+                  {/* Etiqueta: badge violeta quando houver, chip âmbar "Sem
+                      etiqueta" quando não. Fica FORA do botão que abre a
+                      ficha (ver o <div> do card acima), então clicar no
+                      badge abre só o popover. */}
+                  <SeletorEtiquetaRapido
+                    estabelecimentoId={estabelecimento.id}
+                    clienteId={cliente.id}
+                    etiqueta={cliente.etiquetas_cliente ?? null}
+                    onEtiquetaAlterada={(nova) =>
+                      patchEtiquetaDoCliente(cliente.id, nova)
+                    }
+                  />
+                </span>
+              </div>
             </li>
           ))}
         </ul>
+      )}
+
+      {/* Confirmação da desativação. Soft delete (ativa=false): o texto diz
+          explicitamente o que acontece com quem já usa a etiqueta, porque o
+          botão "Desativar" ao lado de uma lista dá a entender que some tudo. */}
+      {etiquetaParaDesativar && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-desativar-etiqueta"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setEtiquetaParaDesativar(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="titulo-desativar-etiqueta" className="text-lg font-semibold text-heading">
+              Desativar etiqueta
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Tem certeza que deseja desativar{" "}
+              <span className="font-medium text-heading">
+                {etiquetaParaDesativar.nome}
+              </span>
+              ? Ela deixa de aparecer nas escolhas, mas os clientes que já estão
+              marcados com ela continuam mostrando a etiqueta. Dá pra reativar
+              depois.
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={() => alternarAtivaEtiqueta(etiquetaParaDesativar, false)}
+                disabled={ocupadoEtiqueta}
+                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Desativar etiqueta
+              </button>
+              <button
+                type="button"
+                onClick={() => setEtiquetaParaDesativar(null)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

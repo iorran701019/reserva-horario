@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
 import { buscarPendentesPorTelefones } from "@/lib/agendamentosCliente";
 import ModalClientePendente from "@/components/ModalClientePendente";
+import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 
 // Pré-passo do admin (aba Agendar) antes de montar o FormularioAgendamento —
 // identifica o cliente por NOME (diferente do público, que identifica por
@@ -24,8 +25,12 @@ import ModalClientePendente from "@/components/ModalClientePendente";
 //
 // Props:
 //   estabelecimentoId – particiona a busca e o upsert.
-//   onIdentificado    – recebe { id, nome, telefone }, pronto pra virar
-//                       clienteInicial do FormularioAgendamento.
+//   onIdentificado    – recebe { id, nome, telefone, etiqueta }, pronto pra
+//                       virar clienteInicial do FormularioAgendamento.
+//                       `etiqueta` ({ nome, emoji } ou null) só acompanha pra
+//                       o /admin poder repetir o badge na linha "Agendando
+//                       para X" sem uma consulta nova — o wizard não usa o
+//                       campo pra nada além de exibir.
 //   onIrParaPendentes – recebe o telefone (dígitos) da cliente escolhida no
 //                       modal de pendência; quem monta troca pra aba
 //                       Pendentes e destaca o item (ver page.js).
@@ -85,7 +90,10 @@ export default function IdentificacaoClienteAdmin({
     const timer = setTimeout(async () => {
       const { data, error } = await supabase
         .from("clientes")
-        .select("id, nome, whatsapp")
+        // etiqueta_id + o embed alimentam o badge do dropdown (ver JSX): a
+        // dona reconhece a cliente certa pela etiqueta quando dois nomes
+        // parecidos aparecem juntos na busca.
+        .select("id, nome, whatsapp, etiqueta_id, etiquetas_cliente(nome, emoji)")
         .eq("estabelecimento_id", estabelecimentoId)
         .ilike("nome", `%${termo}%`)
         .order("nome", { ascending: true })
@@ -129,6 +137,7 @@ export default function IdentificacaoClienteAdmin({
       id: cliente.id,
       nome: cliente.nome,
       telefone: cliente.whatsapp ?? "",
+      etiqueta: cliente.etiquetas_cliente ?? null,
     };
 
     if (escolhido.telefone && pendentesPorTelefone.has(escolhido.telefone)) {
@@ -161,7 +170,10 @@ export default function IdentificacaoClienteAdmin({
       return;
     }
 
-    onIdentificado({ id: data.id, nome: data.nome, telefone: whatsapp });
+    // Cliente recém-criado/atualizado pelo upsert nunca tem etiqueta ainda
+    // (a coluna nem entra no payload) — `null` explícito faz a linha
+    // "Agendando para X" já oferecer o chip "Sem etiqueta".
+    onIdentificado({ id: data.id, nome: data.nome, telefone: whatsapp, etiqueta: null });
   }
 
   async function cadastrarNovo(e) {
@@ -267,19 +279,57 @@ export default function IdentificacaoClienteAdmin({
                   !!cliente.whatsapp && pendentesPorTelefone.has(cliente.whatsapp);
 
                 return (
-                  <button
+                  // <div>, não <button>: o badge de etiqueta abaixo é
+                  // interativo, e <button> dentro de <button> é HTML inválido
+                  // (quebra a hidratação). O botão que seleciona a cliente
+                  // cobre só o nome e é IRMÃO do bloco de selos; o hover da
+                  // linha inteira subiu pra cá pra não mudar o visual.
+                  <div
                     key={cliente.id}
-                    type="button"
-                    onClick={() => selecionarCliente(cliente)}
                     className="flex w-full items-center justify-between gap-2 bg-card px-3 py-2 text-left text-sm text-heading transition hover:bg-surface"
                   >
-                    <span className="min-w-0 truncate">{cliente.nome}</span>
-                    {temPendente && (
-                      <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
-                        pendente
-                      </span>
-                    )}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => selecionarCliente(cliente)}
+                      className="min-w-0 flex-1 truncate text-left"
+                    >
+                      {cliente.nome}
+                    </button>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {temPendente && (
+                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
+                          pendente
+                        </span>
+                      )}
+                      {/* Etiqueta da cliente, com o popover de troca ligado —
+                          a dona pode etiquetar já na busca, sem entrar na aba
+                          Clientes. O badge está FORA do botão que seleciona a
+                          cliente (ver o <div> da linha acima), então mexer na
+                          etiqueta aqui não empurra ninguém pro wizard. Patch
+                          local em `resultados` porque a lista veio de uma
+                          busca com debounce que não vai rodar de novo. */}
+                      <SeletorEtiquetaRapido
+                        estabelecimentoId={estabelecimentoId}
+                        clienteId={cliente.id}
+                        etiqueta={cliente.etiquetas_cliente ?? null}
+                        onEtiquetaAlterada={(nova) =>
+                          setResultados((atuais) =>
+                            atuais.map((c) =>
+                              c.id === cliente.id
+                                ? {
+                                    ...c,
+                                    etiqueta_id: nova?.id ?? null,
+                                    etiquetas_cliente: nova
+                                      ? { nome: nova.nome, emoji: nova.emoji }
+                                      : null,
+                                  }
+                                : c
+                            )
+                          )
+                        }
+                      />
+                    </span>
+                  </div>
                 );
               })}
             </div>

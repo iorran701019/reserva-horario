@@ -14,6 +14,7 @@ import { buscarTema } from "@/lib/temas";
 import PopupRegrasAgendamento from "@/components/PopupRegrasAgendamento";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
 import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
+import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 import { formatarPreco } from "@/lib/preco";
 import { formatarData } from "@/lib/data";
 import {
@@ -532,6 +533,19 @@ export function CalendarioDias({
 //                   escolher outro horário cai no cancela-e-recria de
 //                   selecionarHorario, e sair sem escolher nada deixa o
 //                   agendamento original intacto.
+//   mostrarEtiquetaAdmin – SÓ /admin. Liga o badge de etiqueta do cliente na
+//                   linha "Agendando para X" da etapa "dados", lendo
+//                   clienteInicial.etiqueta. Etiqueta é informação interna do
+//                   salão: o fluxo público NUNCA passa esta prop, e o default
+//                   false garante que nada aparece lá mesmo que um
+//                   clienteInicial venha a carregar o campo um dia. É um
+//                   booleano explícito de propósito — inferir "é admin" da
+//                   presença de clienteInicial.etiqueta deixaria a vedação
+//                   dependendo do formato de um objeto montado noutro arquivo.
+//   onEtiquetaAlterada – SÓ /admin, par de mostrarEtiquetaAdmin. Recebe a
+//                   etiqueta nova (ou null) depois do popover gravar, pra quem
+//                   monta patchar o próprio clienteInicial — este componente
+//                   não guarda cópia do valor.
 //   onCancelado    – só fluxo público (ignorado com `status`). Chamado (sem
 //                   args) depois que a cliente cancela, pela etapa "dados", a
 //                   reserva que ainda aguarda o sinal (ver
@@ -555,6 +569,8 @@ export default function FormularioAgendamento({
   onVoltarAntes = null,
   agendamentoEmEdicao = null,
   onCancelado = null,
+  mostrarEtiquetaAdmin = false,
+  onEtiquetaAlterada = null,
 }) {
   const [form, setForm] = useState(() => ({
     ...ESTADO_INICIAL,
@@ -3302,10 +3318,23 @@ export default function FormularioAgendamento({
                 eram repetição. Sem sinal não existe bloco de Pix nenhum — aqui
                 é o único lugar que mostra o nome. */}
             {clienteInicial && !precisaSinal && (
-              <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
-                Agendando para{" "}
-                <span className="font-medium text-heading">{form.nome}</span>.
-              </p>
+              <div className="flex flex-wrap items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm text-body">
+                <span>
+                  Agendando para{" "}
+                  <span className="font-medium text-heading">{form.nome}</span>.
+                </span>
+                {/* Etiqueta: só no /admin (ver mostrarEtiquetaAdmin). No
+                    público esta condição é sempre falsa, então nem o badge nem
+                    o chip "Sem etiqueta" chegam à cliente. */}
+                {mostrarEtiquetaAdmin && (
+                  <SeletorEtiquetaRapido
+                    estabelecimentoId={estabelecimento.id}
+                    clienteId={clienteInicial.id}
+                    etiqueta={clienteInicial.etiqueta ?? null}
+                    onEtiquetaAlterada={onEtiquetaAlterada}
+                  />
+                )}
+              </div>
             )}
 
             {!clienteInicial && (

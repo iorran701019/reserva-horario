@@ -39,13 +39,20 @@
 - [x] Tag "Agendado"/"Sem agenda" na lista de Clientes, indicando se o cliente tem algum agendamento confirmado futuro (sessão 37).
 - [x] Novo indicador de "Cadastro incompleto" na ficha do cliente, reagindo em tempo real após edição (sessão 37).
 - [x] Simplificação da lista de Clientes: removidas as tags de Fidelidade e Anamnese (já cobertas na ficha); código morto removido (`ChipFidelidadeLista`, busca em lote de anamneses) — carregamento da aba caiu de 3 queries para 1 (sessão 37).
-- [x] Simplificação da lista de Clientes: removidas as tags de Fidelidade e Anamnese (já cobertas na ficha); código morto removido (`ChipFidelidadeLista`, busca em lote de anamneses) — carregamento da aba caiu de 3 queries para 1 (sessão 37).
 + [x] Simplificação da lista de Clientes: removidas as tags de Fidelidade e Anamnese (já cobertas na ficha); código morto removido (`ChipFidelidadeLista`, busca em lote de anamneses) — carregamento da aba caiu de 3 queries para 1 (sessão 37).
 + [x] Histórico do painel cliente em /agendar limitado a altura de ~4 itens com scroll interno, evitando lista crescendo indefinidamente e empurrando o rodapé (sessão 38).
 + [x] Nome da cliente no modal de detalhes do Painel Dia (admin) virou link sublinhado para a ficha em Clientes, reaproveitando a mesma lógica/navegação já usada no Histórico geral; modal fecha automaticamente ao navegar (sessão 38).
 + [x] Card "Próximos agendamentos" na ficha do cliente ganhou fundo verde sutil quando o agendamento está confirmado, em harmonia com a tag "Agendado" (sessão 38).
 + [x] Checkbox "Manutenções contam pra meta" em Fidelidade agora fica desabilitado e visualmente esmaecido quando o programa está inativo, mesma regra já aplicada ao campo de meta (sessão 38).
 + [x] Calendário do /agendar pula automaticamente para o primeiro mês com disponibilidade ao entrar na etapa de escolha de data, mantendo navegação manual livre para ver meses sem vaga; nova função `calcularPrimeiroMesComVaga` em `lib/disponibilidade.js` reaproveita a base de disponibilidade entre meses varridos (sessão 38).
++ - [x] RLS: policy de DELETE em `agendamentos` criada (authenticated, isolado por tenant, só permite excluir agendamento não-confirmado) (sessão 39)
++ - [x] RLS/Storage: reconfirmado que Grupo 1+2 da auditoria seguem intactos em produção após as sessões 29-38 (sessão 39)
++ - [x] RLS/Storage: policy de UPDATE em `comprovantes-pix` confirmada correta em produção (o gap era só em staging) (sessão 39)
++ - [x] RLS/Storage: confirmado que `expirar_reservas_pendentes` já cobre `aguardando_sinal`, sem gap de expiração (sessão 39)
++ - [x] Raio-x de risco silencioso — Severidade 1 completa: 6 frentes de gravação de dado de cliente/agendamento corrigidas (`.select()` + checagem de 0-row + aviso visível) (sessão 39)
++ - [x] Raio-x de risco silencioso — Severidade 2 completa: 27 pontos de configuração/preferências corrigidos, novo helper `lib/erroSalvar.js` (sessão 39)
++ - [x] Raio-x de risco silencioso — Severidade 3 completa: 23 pontos em Serviços/Profissionais corrigidos, incluindo proteção contra grade duplicada em 4 pontos de delete+insert em cascata (sessão 39)
++ - [x] Bug de duplicidade de pendência de cancelamento (staging): causa raiz real encontrada (URL de webhook hardcoded pra deployment Preview congelado) e corrigida com branch `staging` permanente + triggers atualizados (sessão 39
 
 ## Em aberto
 - [ ] UX da configuração de pergunta condicional (mãe/filha) em `GerenciarServicos.js` — funcional, mas complexa pra configurar; considerar assistente passo-a-passo ou fluxo guiado no futuro.
@@ -56,6 +63,10 @@
 - [ ] Verificar no dashboard da Vercel qual commit está publicado no ambiente de staging — suspeita de deploy preso numa branch antiga, causando bugs "fantasma" já corrigidos em `main` (sessão 37).
 - [ ] Popup de renovação de anamnese (renovar por 12 meses vs. manter o prazo já editado pelo cliente) — não implementado; precisa de duas colunas novas via SQL antes de qualquer código: vencimento explícito em `anamnese_respostas` (hoje sempre derivado de `criado_em` + 12 meses) e prazo configurável em `estabelecimentos` (sessão 37).
 - [ ] `buscarUltimasAnamnesesPorCliente` (`lib/anamnese.js`) ficou sem nenhum consumidor no repo após a simplificação da lista de Clientes — não é urgente, candidata a limpeza futura (sessão 37).
++ - [ ] Divergência de `roles` na policy "Público pode cancelar próprio agendamento" entre staging e produção — confirmar se é intencional (sessão 39)
++ - [ ] Limpar lixo de teste (`Cancelamento: {nome}`) em `pendencias_admin` de staging (sessão 39)
++ - [ ] Sincronizar branch `staging` com `main` após cada merge relevante, daqui pra frente (protocolo novo, sessão 39)
+- PENDENTE, alta prioridade (achado 03/09): pergunta condicional (filha) é salva com pergunta_pai_id e opcao_gatilho_id NULL mesmo com checkbox "depende de outra" marcado e os dois selects preenchidos na tela — reproduzido em produção (tenant Júnior, serviços 148 e 150), em aba anônima (não é cache), com produção já rodando o fix bb37040 (não é deploy desatualizado). Investigação de código não encontrou caminho no state/payload capaz de gerar esse NULL com o checkbox marcado — contradição ainda não resolvida entre o código revisado e o comportamento real. Hipótese em aberto: dado do Network pode ter sido lido da Response em vez do Request Payload (precisa reconfirmar), ou corrida de timing entre o clique na opção-gatilho e o clique em salvar. Handoff detalhado com histórico completo da investigação e próximos passos: reserva-horario_Handoff_Bug_Pergunta_Condicional_Nao_Salva.md.
 
 ## Segurança — auditoria RLS/Storage (retomar semana que vem)
 - [ ] Upload de comprovante Pix quebrado em staging: bucket `comprovantes-pix` aceita INSERT anônimo, mas falta policy de UPDATE que o `upsert:true` do app exige — hoje toda cliente que anexa arquivo real provavelmente cai silenciosamente no caminho do checkbox.
