@@ -64,7 +64,8 @@ import { useVoltarFisico } from "@/lib/voltarFisico";
 //                       "completarEndereco".
 //   msgFalhaCadastro  – texto personalizado (estabelecimentos.
 //                       msg_falha_cadastro) repassado pro mesmo modal.
-//   onIdentificado    – recebe { id, nome, telefone, clienteNovo } pronto
+//   onIdentificado    – recebe { id, nome, telefone, clienteNovo, etiqueta_id }
+//                       pronto
 //                       pra virar clienteInicial do FormularioAgendamento.
 //   onEtapaChange     – opcional; recebe a etapa interna atual sempre que ela
 //                       mudar (inclusive no mount, com "telefone"). Permite o
@@ -241,6 +242,12 @@ export default function IdentificacaoCliente({
       nome: clienteEncontrado.nome,
       telefone,
       clienteNovo: false,
+      // Etiqueta da cliente (clientes.etiqueta_id), devolvida pela RPC
+      // cliente_buscar_por_whatsapp. Trafega SÓ como id, pra decidir quais
+      // dias a restrição de agenda libera (ver diaLiberadoPorEtiqueta em
+      // lib/janelaAgendamento.js). Nenhuma tela pública mostra nome/emoji de
+      // etiqueta — isso é informação interna do salão.
+      etiqueta_id: clienteEncontrado.etiqueta_id ?? null,
     });
   }
 
@@ -366,6 +373,10 @@ export default function IdentificacaoCliente({
       nome: resultado.data.nome,
       telefone: whatsappSimples,
       clienteNovo: !clienteEncontrado,
+      // Ver o mesmo campo em handleConfirmarSim: a RPC
+      // cliente_identificar_ou_criar devolve etiqueta_id junto. Cadastro novo
+      // vem null (ninguém nasce etiquetado), o que é exatamente o esperado.
+      etiqueta_id: resultado.data.etiqueta_id ?? null,
     });
   }
 
@@ -572,6 +583,8 @@ export default function IdentificacaoCliente({
             // CadastroCliente.js) — os dois passam por aqui.
             voltarFisicoCompletarEndereco();
             limparFatia(slug, "identificacao");
+            // `dados` já vem com etiqueta_id do CadastroCliente (ver
+            // onCadastrado lá) — repassado inteiro, sem remontar o objeto.
             onIdentificado(dados);
           }}
         />

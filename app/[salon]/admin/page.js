@@ -25,8 +25,17 @@ import {
 } from "@/lib/particao";
 import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
 import { useNavegacaoTrimestre } from "@/lib/useNavegacaoTrimestre";
-import { calcularVagasPorHorario, profissionaisLivresNoHorario } from "@/lib/disponibilidade";
-import { dentroDaJanelaAgendamento, diasRestantesJanela } from "@/lib/janelaAgendamento";
+import {
+  buscarRestricoesAtivas,
+  calcularVagasPorHorario,
+  profissionaisLivresNoHorario,
+} from "@/lib/disponibilidade";
+import {
+  dentroDaJanelaAgendamento,
+  diasRestantesJanela,
+  restricaoAbertaParaTodos,
+  restricoesVigentesOuFuturas,
+} from "@/lib/janelaAgendamento";
 import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
 import { verificarFidelidadeClientes, buscarProgressoFidelidade } from "@/lib/fidelidade";
 import LinkComprovantePix from "@/components/LinkComprovantePix";
@@ -60,7 +69,10 @@ import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
 import GerenciarProfissionais from "./GerenciarProfissionais";
 import GerenciarClientes from "@/components/GerenciarClientes";
-import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
+import SeletorEtiquetaRapido, {
+  rotuloEtiqueta,
+} from "@/components/SeletorEtiquetaRapido";
+import { buscarTodasEtiquetas } from "@/lib/clientesAdmin";
 import {
   buscarEtiquetasPorTelefones,
   contarAgendamentosConfirmados,
@@ -665,6 +677,47 @@ export default function AdminPage() {
   // clienteInicial do wizard assim que preenchido; zerado ao concluir um
   // agendamento (próximo cadastro recomeça do zero) e ao sair da aba.
   const [clienteParaAgendar, setClienteParaAgendar] = useState(null);
+
+  // Restrições de agenda por etiqueta ATIVAS do salão (tabela
+  // `restricoes_agenda`), só pro banner do Painel abaixo do "Agenda aberta
+  // até". Carregadas uma vez ao resolver o estabelecimento e PATCHADAS por
+  // ConfiguracoesSalao (ver onRestricoesAtualizadas) — sem esse patch o banner
+  // ficaria com a lista do mount até um reload, exatamente o problema que
+  // onJanelaAgendamentoFimAtualizada resolve pra janela.
+  const [restricoesAgenda, setRestricoesAgenda] = useState([]);
+
+  useEffect(() => {
+    if (!estabelecimento?.id) return;
+    let ativo = true;
+    buscarRestricoesAtivas(estabelecimento.id).then((lista) => {
+      if (ativo) setRestricoesAgenda(lista);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento?.id]);
+
+  // Etiquetas do salão indexadas por id, só pra resolver o NOME que o banner
+  // de restrição exibe. buscarTodasEtiquetas (e não buscarEtiquetasAtivas)
+  // porque uma restrição pode apontar pra uma etiqueta já desativada — o
+  // período continua valendo, e o banner precisa dizer qual é.
+  const [etiquetasPorId, setEtiquetasPorId] = useState(new Map());
+
+  useEffect(() => {
+    if (!estabelecimento?.id) return;
+    let ativo = true;
+    buscarTodasEtiquetas(estabelecimento.id).then((lista) => {
+      if (ativo) setEtiquetasPorId(new Map(lista.map((e) => [e.id, e])));
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento?.id]);
+
+  // Restrições que o banner mostra: as ativas que cobrem hoje ou ainda vão
+  // começar (ver restricoesVigentesOuFuturas). Períodos já vencidos somem
+  // sozinhos, sem a dona precisar apagá-los.
+  const restricoesEmDestaque = restricoesVigentesOuFuturas(restricoesAgenda);
 
   // Cliente do atalho "Novo agendamento" (aba Histórico) que TEM pendente,
   // segurando o modal de aviso antes de abrir o wizard — mesmo papel que
@@ -2076,9 +2129,33 @@ export default function AdminPage() {
                 : "bg-green-50 text-green-700 ring-green-300 hover:bg-green-100"
             }`}
           >
-            <span className="text-base font-bold leading-snug sm:text-lg">
+            <span className="min-w-0 text-base font-bold leading-snug sm:text-lg">
               Agenda aberta até{" "}
               {formatarDataComAno(estabelecimento.janela_agendamento_fim)}
+              {/* Segunda linha: restrições por etiqueta vigentes ou a começar
+                  (ver restricoesVigentesOuFuturas). Fonte normal/menor pra
+                  ficar claro que é um detalhe DA janela, não um segundo botão.
+                  O clique é o do banner inteiro — leva ao mesmo bloco "Janela
+                  de agendamento", onde as restrições agora moram. */}
+              {restricoesEmDestaque.map((restricao) => (
+                <span
+                  key={restricao.id}
+                  className="mt-1 block text-sm font-medium leading-snug opacity-90"
+                >
+                  {restricao.nome || "Período restrito"}
+                  {restricaoAbertaParaTodos(restricao)
+                    ? ` aberto pra todos desde ${formatarDataComAno(
+                        restricao.abre_para_todos_em
+                      )}`
+                    : ` restrito a ${
+                        etiquetasPorId.get(restricao.etiqueta_liberada_id)
+                          ? rotuloEtiqueta(
+                              etiquetasPorId.get(restricao.etiqueta_liberada_id)
+                            )
+                          : "uma etiqueta"
+                      }`}
+                </span>
+              ))}
             </span>
             <ChevronRight aria-hidden="true" className="h-6 w-6 shrink-0" />
           </button>
@@ -3364,6 +3441,10 @@ export default function AdminPage() {
             onMensagemAtualizada={(coluna, valor) =>
               setEstabelecimento((atual) => (atual ? { ...atual, [coluna]: valor } : atual))
             }
+            // Mesmo motivo dos dois patches acima, agora pras restrições de
+            // agenda por etiqueta: o banner do Painel (acima) lê
+            // `restricoesAgenda` deste state, buscado uma vez ao montar.
+            onRestricoesAtualizadas={setRestricoesAgenda}
             focarBlocoJanela={focarJanelaAgendamento}
             onFocarBlocoJanelaConsumido={() => setFocarJanelaAgendamento(false)}
             onCadastrarProfissional={irParaCadastroProfissional}

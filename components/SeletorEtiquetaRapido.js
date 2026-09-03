@@ -21,7 +21,11 @@ const CLASSE_CHIP_VAZIO =
 
 // Texto do badge: emoji é opcional na tabela, então o espaço só entra quando
 // há emoji (senão o badge nasce com um espaço solto antes do nome).
-function rotuloEtiqueta(etiqueta) {
+// Exportado porque outros pontos do /admin precisam do MESMO rótulo fora de um
+// badge — ver o banner de restrição de agenda em app/[salon]/admin/page.js e o
+// CRUD de restrições em ConfiguracoesSalao.js. Continua sendo informação
+// EXCLUSIVA do /admin: nada no fluxo público chama isto.
+export function rotuloEtiqueta(etiqueta) {
   if (!etiqueta) return "";
   return etiqueta.emoji ? `${etiqueta.emoji} ${etiqueta.nome}` : etiqueta.nome;
 }

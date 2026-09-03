@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, MessageCircleOff } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import {
+  buscarRestricoesAtivas,
   calcularPrimeiroMesComVaga,
   calcularVagasDoMes,
   calcularVagasPorHorario,
@@ -24,7 +25,10 @@ import {
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
 import { useVoltarFisico } from "@/lib/voltarFisico";
-import { dentroDaJanelaAgendamento } from "@/lib/janelaAgendamento";
+import {
+  dentroDaJanelaAgendamento,
+  diaLiberadoPorEtiqueta,
+} from "@/lib/janelaAgendamento";
 import { linkWhatsApp, MENSAGEM_CONFIRMACAO } from "@/lib/whatsapp";
 import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
 import FotoPerfilCircular from "@/components/FotoPerfilCircular";
@@ -119,6 +123,11 @@ const DIAS_SEMANA_CURTO = ["D", "S", "T", "Q", "Q", "S", "S"];
 // módulo em vez de `new Set()` no parâmetro, que criaria um objeto novo a
 // cada render.
 const NENHUM_DIA_SEM_VAGA = new Set();
+
+// Mesmo motivo do default acima, agora pra prop `restricoes` de CalendarioDias
+// (ver restrições de agenda por etiqueta em lib/janelaAgendamento.js): array
+// vazio de módulo, estável entre renders.
+const NENHUMA_RESTRICAO = [];
 
 // "YYYY-MM-DD" -> "dd/mm · dia da semana". Mora em lib/data.js desde que
 // BlocoConfirmacaoPix passou a usá-la também (importar de volta daqui fecharia
@@ -286,6 +295,14 @@ function perguntaDeveAparecer(pergunta, respostas) {
 //   onPrev/onNext    – navegação de mês. podeVoltar trava o passado.
 //   estabelecimento  – salão atual, lido só por janela_agendamento_fim (ver
 //                   dentroDaJanelaAgendamento acima).
+//   restricoes       – restrições de agenda por etiqueta ATIVAS do salão (ver
+//                   buscarRestricoesAtivas em lib/disponibilidade.js). Um dia
+//                   coberto por uma restrição que NÃO libera esta cliente fica
+//                   cinza igual a `foraDaJanela` — e, no modoLivre, ganha o
+//                   mesmo selo tracejado. O rótulo da etiqueta NUNCA aparece
+//                   aqui: no público a etiqueta é invisível, só o id decide.
+//   etiquetaClienteId – clientes.etiqueta_id de quem está agendando (null =
+//                   sem cliente identificado ou sem etiqueta).
 //   vencimentoManutencao – Date (meia-noite local) do vencimento da manutenção
 //                   selecionada, ou null. Quando presente, só INFORMA (não
 //                   bloqueia): dias até e incluindo o vencimento ganham um
@@ -318,6 +335,8 @@ export function CalendarioDias({
   onNext,
   podeVoltar,
   estabelecimento,
+  restricoes = NENHUMA_RESTRICAO,
+  etiquetaClienteId = null,
   vencimentoManutencao,
   modoLivre = false,
 }) {
@@ -402,6 +421,11 @@ export function CalendarioDias({
           const passado = iso < min;
           const fechado = !diasSemanaAtivos.has(date.getDay());
           const foraDaJanela = !dentroDaJanelaAgendamento(iso, estabelecimento);
+          // Segunda checagem de dia, independente da janela: o dia só é
+          // selecionável se passar nas DUAS (ver diaLiberadoPorEtiqueta em
+          // lib/janelaAgendamento.js — a MESMA regra que lib/disponibilidade.js
+          // aplica, pro calendário e a grade nunca divergirem).
+          const restrito = !diaLiberadoPorEtiqueta(iso, restricoes, etiquetaClienteId);
           // Dia que abre, está dentro da janela, mas não sobrou nenhum
           // horário nele (ver a prop diasSemVaga). Mesmo tratamento visual de
           // `fechado`: pro cliente as duas situações são "não dá pra esse
@@ -411,10 +435,13 @@ export function CalendarioDias({
           // só continuam existindo pra saber quando aplicar o selo (abaixo).
           // `passado` nunca é dispensado, nos dois modos.
           const desabilitado =
-            passado || semVaga || (!modoLivre && (fechado || foraDaJanela));
+            passado ||
+            semVaga ||
+            (!modoLivre && (fechado || foraDaJanela || restrito));
           // Dia que só está clicável PORQUE está em modo livre (normalmente
           // seria cinza) — ganha o selo/borda tracejada distintos.
-          const liberado = modoLivre && !desabilitado && (fechado || foraDaJanela);
+          const liberado =
+            modoLivre && !desabilitado && (fechado || foraDaJanela || restrito);
           const sel = iso === selecionado;
           const dentroDoPrazo =
             vencimentoManutencao != null && date <= vencimentoManutencao;
@@ -482,7 +509,8 @@ export function CalendarioDias({
 //                   toggle escolha_profissional do salão. Usado no /admin, onde o
 //                   dono sempre escolhe o profissional ao marcar. No público fica
 //                   false, então lá o modo continua vindo só do banco.
-//   clienteInicial – { id, nome, telefone } de um cliente já identificado antes
+//   clienteInicial – { id, nome, telefone, etiqueta_id } de um cliente já
+//                   identificado antes
 //                   do formulário (público: IdentificacaoCliente, busca por
 //                   WhatsApp; admin: IdentificacaoClienteAdmin, busca por
 //                   nome — ver app/[salon]/admin/page.js). Sempre presente nos
@@ -491,6 +519,11 @@ export function CalendarioDias({
 //                   confirmação; o insert continua lendo form.nome/
 //                   form.telefone normalmente. Omitido, a etapa pede
 //                   nome/WhatsApp como formulário livre (sem consumidor atual).
+//                   `etiqueta_id` (público, vindo das RPCs de identificação) e
+//                   `etiqueta` (objeto, só /admin) alimentam a restrição de
+//                   agenda por etiqueta — ver etiquetaClienteId abaixo. No
+//                   público o id trafega mas NUNCA é exibido: nome/emoji da
+//                   etiqueta são informação interna do salão.
 //   clienteEhNovo – true quando o cliente identificado acabou de se cadastrar
 //                   agora (veio do CadastroCliente, não de um número já
 //                   conhecido). Alimenta precisaSinal (sinal_regra === 'novos'),
@@ -908,6 +941,41 @@ export default function FormularioAgendamento({
   // grande ou "sem notificar") pra reaplicar depois que a dona confirmar.
   const [mostrarPopupForaDaJanela, setMostrarPopupForaDaJanela] = useState(false);
   const [notificarForaDaJanela, setNotificarForaDaJanela] = useState(true);
+
+  // Restrição de agenda por etiqueta (admin, modoLivre): mesmo par de estados
+  // do popup acima, pro segundo tipo de bloqueio de dia. Os dois são
+  // independentes e podem aparecer em sequência num dia que viola as duas
+  // regras (ver finalizarAgendamento).
+  const [mostrarPopupRestricao, setMostrarPopupRestricao] = useState(false);
+  const [notificarRestricao, setNotificarRestricao] = useState(true);
+
+  // Restrições de agenda por etiqueta ATIVAS do salão (tabela
+  // restricoes_agenda). Alimentam o calendário — que precisa delas ANTES de
+  // qualquer clique, pra cinzar os dias restritos — e o popup consciente do
+  // /admin. Falha de carga devolve [] (ver buscarRestricoesAtivas): nenhum dia
+  // é bloqueado por esta regra, mesma escolha da janela sem valor. A regra de
+  // verdade continua sendo reaplicada dentro de lib/disponibilidade.js, então
+  // uma lista velha aqui nunca abre um horário que o cálculo fecharia.
+  const [restricoesAgenda, setRestricoesAgenda] = useState(NENHUMA_RESTRICAO);
+
+  // Etiqueta da cliente que está agendando. No público vem de
+  // clienteInicial.etiqueta_id, propagado pelas RPCs de identificação/cadastro
+  // (SÓ o id trafega: nenhuma tela pública mostra nome/emoji de etiqueta). No
+  // /admin, IdentificacaoClienteAdmin já entrega o objeto `etiqueta` inteiro —
+  // os dois formatos são aceitos aqui pra este componente não depender de qual
+  // dos dois consumidores o montou.
+  const etiquetaClienteId =
+    clienteInicial?.etiqueta_id ?? clienteInicial?.etiqueta?.id ?? null;
+
+  useEffect(() => {
+    let ativo = true;
+    buscarRestricoesAtivas(estabelecimento.id).then((lista) => {
+      if (ativo) setRestricoesAgenda(lista.length > 0 ? lista : NENHUMA_RESTRICAO);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento.id]);
 
   // Ao montar, busca em paralelo os serviços ativos (ordenados por
   // categoria_id, ordem — mesmo critério configurado na aba Serviços do
@@ -1336,6 +1404,7 @@ export default function FormularioAgendamento({
           // aparecer como "ocupada" — senão, ao voltar pra "data", o próprio
           // horário escolhido sumiria da grade.
           excluirAgendamentoId: reservaId,
+          etiquetaClienteId,
           contexto: modoLivre ? "admin" : "publico",
           // Duração efetiva (base + ajustes de duração das perguntas já
           // respondidas, ver calcularAjusteDuracao): as respostas já estão
@@ -1373,6 +1442,7 @@ export default function FormularioAgendamento({
     estabelecimento.id,
     reservaId,
     modoLivre,
+    etiquetaClienteId,
     perguntasServico,
     respostasPerguntas,
   ]);
@@ -1405,6 +1475,10 @@ export default function FormularioAgendamento({
         servicoSelecionado.id,
         duracao,
         reservaId ?? "",
+        // A etiqueta entra na chave porque muda o RESULTADO do mês (dias
+        // restritos): no /admin ela pode ser trocada sem desmontar o wizard
+        // (ver SeletorEtiquetaRapido na linha "Agendando para X").
+        etiquetaClienteId ?? "",
         ano,
         mes,
       ].join("|");
@@ -1425,6 +1499,7 @@ export default function FormularioAgendamento({
           // cliente não pode contar como ocupada contra ele.
           excluirAgendamentoId: reservaId,
           duracaoMinOverride: duracao,
+          etiquetaClienteId,
         });
         if (!ativo) return;
         cacheVagasDoMesRef.current.set(chave, porData);
@@ -1450,6 +1525,7 @@ export default function FormularioAgendamento({
     estabelecimento.id,
     reservaId,
     modoLivre,
+    etiquetaClienteId,
     perguntasServico,
     respostasPerguntas,
   ]);
@@ -1485,7 +1561,12 @@ export default function FormularioAgendamento({
 
     const profissionalId = escolherProfissional ? profissionalSelecionado.id : null;
     const duracao = duracaoEfetivaServico();
-    const chave = [servicoSelecionado.id, profissionalId ?? "", duracao].join("|");
+    const chave = [
+      servicoSelecionado.id,
+      profissionalId ?? "",
+      duracao,
+      etiquetaClienteId ?? "",
+    ].join("|");
     if (mesAutoBuscadoRef.current.has(chave)) return;
     mesAutoBuscadoRef.current.add(chave);
 
@@ -1506,6 +1587,7 @@ export default function FormularioAgendamento({
           excluirAgendamentoId: reservaId,
           profissionalId,
           estabelecimento,
+          etiquetaClienteId,
           mesInicial: { ano: partida.getFullYear(), mes: partida.getMonth() + 1 },
         });
         if (!ativo || !primeiro) return;
@@ -2450,6 +2532,7 @@ export default function FormularioAgendamento({
             servicoId: servicoSelecionado.id,
             data: form.data,
             duracaoMinOverride: duracaoEfetivaServico(),
+            etiquetaClienteId,
           });
           setVagas(mapa);
         } catch {
@@ -2583,6 +2666,18 @@ export default function FormularioAgendamento({
     await finalizarAgendamento(notificarForaDaJanela, { ignorarJanela: true });
   }
 
+  // Idem para a restrição de agenda por etiqueta (ver diaLiberadoPorEtiqueta em
+  // lib/janelaAgendamento.js). Reinvoca preservando ignorarJanela: um dia pode
+  // violar as DUAS regras, e a dona já respondeu à primeira — sem isso o popup
+  // da janela reabriria em loop.
+  async function confirmarRestricao() {
+    setMostrarPopupRestricao(false);
+    await finalizarAgendamento(notificarRestricao, {
+      ignorarJanela: true,
+      ignorarRestricao: true,
+    });
+  }
+
   // Submit final ("Confirmar agendamento").
   //
   // /admin (status truthy): comportamento de sempre — faz o INSERT aqui, na
@@ -2594,7 +2689,10 @@ export default function FormularioAgendamento({
   // pagamento e liberando o status; qualquer outro caso (sem sinal, ou com
   // sinal mas caixa desmarcada) -> nada a gravar, só avança a UI, já que o
   // registro existe do jeito certo desde que a etapa foi alcançada.
-  async function finalizarAgendamento(notificar = true, { ignorarJanela = false } = {}) {
+  async function finalizarAgendamento(
+    notificar = true,
+    { ignorarJanela = false, ignorarRestricao = false } = {}
+  ) {
     if (!status) {
       setEnviando(true);
 
@@ -2657,6 +2755,20 @@ export default function FormularioAgendamento({
     if (!ignorarJanela && !dentroDaJanelaAgendamento(form.data, estabelecimento)) {
       setNotificarForaDaJanela(notificar);
       setMostrarPopupForaDaJanela(true);
+      return;
+    }
+
+    // MESMO padrão para a restrição de agenda por etiqueta: no /admin ela
+    // nunca bloqueia (diaLiberadoPorEtiqueta com contexto:'admin' devolve
+    // sempre true — é por isso que a checagem aqui é feita SEM o contexto), só
+    // vira decisão consciente antes do insert. Os dois popups podem aparecer
+    // em sequência num dia que viola as duas regras.
+    if (
+      !ignorarRestricao &&
+      !diaLiberadoPorEtiqueta(form.data, restricoesAgenda, etiquetaClienteId)
+    ) {
+      setNotificarRestricao(notificar);
+      setMostrarPopupRestricao(true);
       return;
     }
 
@@ -2761,6 +2873,7 @@ export default function FormularioAgendamento({
             data: form.data,
             contexto: modoLivre ? "admin" : "publico",
             duracaoMinOverride: duracaoEfetivaServico(),
+            etiquetaClienteId,
           });
           setVagas(mapa);
         } catch {
@@ -3134,6 +3247,8 @@ export default function FormularioAgendamento({
                   onNext={proximoMes}
                   podeVoltar={podeVoltarMes}
                   estabelecimento={estabelecimento}
+                  restricoes={restricoesAgenda}
+                  etiquetaClienteId={etiquetaClienteId}
                   vencimentoManutencao={vencimentoManutencao}
                   modoLivre={modoLivre}
                 />
@@ -3870,6 +3985,56 @@ export default function FormularioAgendamento({
               <button
                 type="button"
                 onClick={() => setMostrarPopupForaDaJanela(false)}
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dia dentro de uma restrição de agenda por etiqueta, com um cliente que
+          não tem a etiqueta liberada (só /admin, modoLivre — ver
+          finalizarAgendamento/confirmarRestricao acima). Mesmo padrão
+          Confirmar/Cancelar dos dois popups acima: avisa, não trava. O nome da
+          etiqueta não é dito aqui porque este popup fala do DIA, não da
+          cliente — a dona vê a regra inteira no bloco "Janela de agendamento"
+          das Regras de negócio. */}
+      {mostrarPopupRestricao && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-restricao-etiqueta"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setMostrarPopupRestricao(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-restricao-etiqueta"
+              className="text-lg font-semibold text-heading"
+            >
+              Dia com restrição de agenda
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Esse dia está restrito a clientes de uma etiqueta específica, e
+              este cliente não tem essa etiqueta. Deseja confirmar mesmo assim?
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarRestricao}
+                className="flex-1 rounded-lg bg-green-600 px-4 py-2.5 font-medium text-white transition hover:bg-green-700"
+              >
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={() => setMostrarPopupRestricao(false)}
                 className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Cancelar

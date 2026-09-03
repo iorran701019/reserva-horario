@@ -78,7 +78,8 @@ import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendament
 //                            não valida, não chama ViaCEP) e mostra no lugar
 //                            um campo opcional "Contato de emergência
 //                            (WhatsApp)", salvo em clientes.contato_emergencia.
-//   onCadastrado           – recebe { id, nome, telefone, clienteNovo }
+//   onCadastrado           – recebe { id, nome, telefone, clienteNovo,
+//                            etiqueta_id }
 //                            pronto pra virar clienteInicial do
 //                            FormularioAgendamento. Também usado (via modal
 //                            de conflito) pra pular direto pro agendamento
@@ -288,6 +289,15 @@ export default function CadastroCliente({
       nome: data.nome,
       telefone: form.whatsapp,
       clienteNovo: Boolean(clienteNovo),
+      // Etiqueta da cliente (clientes.etiqueta_id), só pra decidir quais dias
+      // a restrição de agenda libera (ver diaLiberadoPorEtiqueta em
+      // lib/janelaAgendamento.js). NUNCA exibida no fluxo público.
+      //
+      // O cadastro completo não mexe em etiqueta_id, então o valor certo é o
+      // que a linha já tinha: preferimos o que a RPC devolver e caímos em
+      // valoresIniciais (trazido por cliente_buscar_por_whatsapp na etapa
+      // anterior) quando ela não devolve o campo. Cadastro novo fica null.
+      etiqueta_id: data.etiqueta_id ?? valoresIniciais?.etiqueta_id ?? null,
     });
   }
 

@@ -7,6 +7,8 @@ import CampoMensagemWhatsapp from "@/components/CampoMensagemWhatsapp";
 import ModalImportarGoogleCalendar from "@/components/ModalImportarGoogleCalendar";
 import { MENSAGENS_WHATSAPP_CONFIG, substituirVariaveis } from "@/lib/whatsapp";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
+import { buscarEtiquetasAtivas } from "@/lib/clientesAdmin";
+import { rotuloEtiqueta } from "@/components/SeletorEtiquetaRapido";
 
 // Configurações do salão (tabela `estabelecimentos`) editáveis pelo dono direto
 // no admin:
@@ -71,6 +73,11 @@ export default function ConfiguracoesSalao({
   // o banner/popup e o calendário da aba Agendar. Opcional (no-op por
   // padrão): nada além do /admin passa isso hoje.
   onJanelaAgendamentoFimAtualizada = () => {},
+  // Mesmo padrão de onJanelaAgendamentoFimAtualizada, para as restrições de
+  // agenda por etiqueta (bloco dentro de "Janela de agendamento"): chamado com
+  // a lista ATIVA sempre que ela muda, pro banner do Painel não ficar preso na
+  // lista carregada no mount do /admin. Opcional (no-op por padrão).
+  onRestricoesAtualizadas = () => {},
   // Mesmo padrão acima, para as mensagens de WhatsApp editáveis (ver
   // salvarMensagem abaixo): chamado com (coluna, valor) por coluna gravada
   // com sucesso, pra AdminPage patchar sua própria cópia de `estabelecimento`
@@ -123,6 +130,28 @@ export default function ConfiguracoesSalao({
   // data + a contagem encontrada, pro botão "Confirmar" gravar sem repetir a
   // consulta.
   const [confirmandoReducaoJanela, setConfirmandoReducaoJanela] = useState(null);
+
+  // Restrições de agenda por etiqueta (tabela `restricoes_agenda`): períodos em
+  // que só quem tem uma etiqueta específica consegue agendar (ver
+  // diaLiberadoPorEtiqueta em lib/janelaAgendamento.js, aplicada no calendário
+  // do wizard e em lib/disponibilidade.js). Ficam DENTRO do bloco "Janela de
+  // agendamento" de propósito: são a segunda regra de "que dias existem", e um
+  // acordeão próprio fecharia o bloco pai a cada abertura.
+  //
+  // null = ainda carregando; [] = carregou e não há nenhuma.
+  const [restricoes, setRestricoes] = useState(null);
+  const [erroRestricoes, setErroRestricoes] = useState("");
+  // Status/erro POR RESTRIÇÃO e por campo ("<id>:<campo>" -> "salvando"|"salvo"),
+  // mesmo padrão de statusMensagens: várias linhas na tela, cada uma com o seu
+  // próprio feedback, sem um status global piscando na linha errada.
+  const [statusRestricao, setStatusRestricao] = useState({});
+  const [erroRestricaoCampo, setErroRestricaoCampo] = useState({});
+  // Etiquetas do <select>. Carrega as ATIVAS (buscarEtiquetasAtivas) e junta as
+  // que estão salvas em alguma restrição mas já foram desativadas — senão a
+  // etiqueta escolhida sumiria do <select> e a linha pareceria "sem etiqueta",
+  // quando na verdade a regra continua valendo no banco.
+  const [etiquetasSelect, setEtiquetasSelect] = useState([]);
+  const [criandoRestricao, setCriandoRestricao] = useState(false);
 
   // Texto das regras do agendamento, mostrado num popup pra cliente, no
   // fluxo público, na etapa final de confirmação — sempre, com ou sem sinal
@@ -483,6 +512,13 @@ export default function ConfiguracoesSalao({
     const query = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
   }, []);
+
+  // Carga inicial das restrições de agenda + do <select> de etiquetas (ver
+  // recarregarRestricoes, que também é reusada depois de cada criar/excluir).
+  useEffect(() => {
+    recarregarRestricoes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estabelecimento.id]);
 
   // "Salvo ✓" some sozinho depois de um instante, pra não ficar preso na tela.
   useEffect(() => {
@@ -1095,6 +1131,151 @@ export default function ConfiguracoesSalao({
     onJanelaAgendamentoFimAtualizada(novaData);
   }
 
+  // --- Restrições de agenda por etiqueta (tabela `restricoes_agenda`) -------
+
+  // Recarrega a lista do banco E o <select> de etiquetas, mantendo os dois
+  // coerentes: as ATIVAS mais as etiquetas já escolhidas por alguma restrição,
+  // mesmo desativadas (ver etiquetasSelect). Também é quem avisa o pai (ver
+  // onRestricoesAtualizadas): sem isso o banner do Painel ficaria com a lista
+  // do mount até um reload, igual acontecia com janela_agendamento_fim.
+  async function recarregarRestricoes() {
+    const [{ data, error }, ativas] = await Promise.all([
+      supabase
+        .from("restricoes_agenda")
+        .select("id, nome, data_inicio, data_fim, etiqueta_liberada_id, abre_para_todos_em, ativa")
+        .eq("estabelecimento_id", estabelecimento.id)
+        .order("data_inicio", { ascending: true }),
+      buscarEtiquetasAtivas(estabelecimento.id),
+    ]);
+
+    if (error) {
+      setErroRestricoes(`Não foi possível carregar as restrições: ${error.message}`);
+      setRestricoes((atual) => atual ?? []);
+      return;
+    }
+
+    const lista = data ?? [];
+    setErroRestricoes("");
+    setRestricoes(lista);
+    onRestricoesAtualizadas(lista.filter((r) => r.ativa));
+
+    // Etiquetas desativadas que alguma restrição ainda usa: buscadas à parte
+    // pra entrarem no <select> com o nome de verdade (sem isso, a opção
+    // selecionada não existiria e o campo apareceria vazio).
+    const idsAtivas = new Set(ativas.map((e) => e.id));
+    const idsFaltando = [
+      ...new Set(
+        lista
+          .map((r) => r.etiqueta_liberada_id)
+          .filter((id) => id != null && !idsAtivas.has(id))
+      ),
+    ];
+
+    if (idsFaltando.length === 0) {
+      setEtiquetasSelect(ativas);
+      return;
+    }
+
+    const { data: desativadas } = await supabase
+      .from("etiquetas_cliente")
+      .select("id, nome, emoji, ordem")
+      .in("id", idsFaltando);
+
+    setEtiquetasSelect([...ativas, ...(desativadas ?? [])]);
+  }
+
+  // Cria uma restrição em branco (período = hoje, sem etiqueta), pra dona
+  // preencher campo a campo com o mesmo autosave das demais. Nasce INATIVA de
+  // propósito: uma linha meio preenchida não pode começar a fechar dias da
+  // agenda pública.
+  async function adicionarRestricao() {
+    setCriandoRestricao(true);
+    setErroRestricoes("");
+
+    const hoje = dataMaisDias(0);
+    const { data, error } = await supabase
+      .from("restricoes_agenda")
+      .insert({
+        estabelecimento_id: estabelecimento.id,
+        nome: "",
+        data_inicio: hoje,
+        data_fim: hoje,
+        etiqueta_liberada_id: null,
+        abre_para_todos_em: null,
+        ativa: false,
+      })
+      .select("id");
+
+    setCriandoRestricao(false);
+
+    if (error || !data?.length) {
+      setErroRestricoes(`Não foi possível criar: ${mensagemFalhaSalvar(error)}`);
+      return;
+    }
+
+    await recarregarRestricoes();
+  }
+
+  // Autosave de UM campo de UMA restrição. Mesmo padrão das demais gravações
+  // desta tela: .select() + checagem de 0 linhas (update barrado por RLS volta
+  // error null e zero linhas — sem isso a tela diria "salvo" sobre nada) e
+  // patch otimista só DEPOIS da confirmação.
+  async function salvarCampoRestricao(id, campo, valor) {
+    const chave = `${id}:${campo}`;
+    setStatusRestricao((s) => ({ ...s, [chave]: "salvando" }));
+    setErroRestricaoCampo((s) => ({ ...s, [chave]: "" }));
+
+    const { data: linhas, error } = await supabase
+      .from("restricoes_agenda")
+      .update({ [campo]: valor })
+      .eq("id", id)
+      .eq("estabelecimento_id", estabelecimento.id)
+      .select("id");
+
+    if (error || !linhas?.length) {
+      setStatusRestricao((s) => ({ ...s, [chave]: "" }));
+      setErroRestricaoCampo((s) => ({
+        ...s,
+        [chave]: `Não foi possível salvar: ${mensagemFalhaSalvar(error)}`,
+      }));
+      return;
+    }
+
+    setRestricoes((atual) =>
+      (atual ?? []).map((r) => (r.id === id ? { ...r, [campo]: valor } : r))
+    );
+    setStatusRestricao((s) => ({ ...s, [chave]: "salvo" }));
+    setTimeout(() => {
+      setStatusRestricao((s) => (s[chave] === "salvo" ? { ...s, [chave]: "" } : s));
+    }, 2500);
+
+    // O banner do Painel lê a lista ATIVA — qualquer campo gravado pode mudar
+    // o que ele mostra (nome, período, etiqueta, abertura, o próprio toggle).
+    onRestricoesAtualizadas(
+      (restricoes ?? [])
+        .map((r) => (r.id === id ? { ...r, [campo]: valor } : r))
+        .filter((r) => r.ativa)
+    );
+  }
+
+  async function removerRestricao(id) {
+    setErroRestricoes("");
+
+    const { data: linhas, error } = await supabase
+      .from("restricoes_agenda")
+      .delete()
+      .eq("id", id)
+      .eq("estabelecimento_id", estabelecimento.id)
+      .select("id");
+
+    if (error || !linhas?.length) {
+      setErroRestricoes(`Não foi possível excluir: ${mensagemFalhaSalvar(error)}`);
+      return;
+    }
+
+    await recarregarRestricoes();
+  }
+
   // Grava a antecedência mínima (select "Nenhum"/12/24/48 — ver
   // filtrarPorAntecedenciaMinima em lib/disponibilidade.js). Regra
   // independente do corte do dia seguinte — não mexe nos campos de cutoff.
@@ -1414,6 +1595,203 @@ export default function ConfiguracoesSalao({
               )}
               {erroAntecedenciaMinima && (
                 <p className="mt-2 text-xs text-red-600">{erroAntecedenciaMinima}</p>
+              )}
+            </div>
+
+            {/* Sub-bloco: restrições de agenda por etiqueta. Não é um acordeão
+                próprio de propósito — `blocoAberto` guarda UM bloco só, então
+                uma chave nova aqui fecharia "Janela de agendamento" ao ser
+                aberta. É a segunda regra de "que dias existem" (a primeira é a
+                janela acima), por isso mora junto. Cada campo grava sozinho
+                (autosave), com status/erro próprios. */}
+            <div className="border-t border-border pt-4">
+              <span className="mb-1 block text-sm font-medium text-body">
+                Restrições por etiqueta
+              </span>
+              <p className="mb-3 text-xs text-muted">
+                Períodos em que só clientes de uma etiqueta conseguem agendar.
+                Fora desses períodos nada muda. Opcionalmente, defina uma data
+                em que o período abre para todo mundo.
+              </p>
+
+              {restricoes === null ? (
+                <p className="text-xs text-muted">Carregando…</p>
+              ) : restricoes.length === 0 ? (
+                <p className="text-xs text-muted">Nenhuma restrição cadastrada.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {restricoes.map((restricao) => {
+                    const statusDe = (campo) => statusRestricao[`${restricao.id}:${campo}`];
+                    const erroDe = (campo) => erroRestricaoCampo[`${restricao.id}:${campo}`];
+                    // Feedback agregado da linha: qualquer campo salvando/salvo
+                    // acende um único aviso no rodapé dela, em vez de espalhar
+                    // seis "Salvo ✓" pelos seis campos.
+                    const campos = [
+                      "nome",
+                      "data_inicio",
+                      "data_fim",
+                      "etiqueta_liberada_id",
+                      "abre_para_todos_em",
+                      "ativa",
+                    ];
+                    const salvando = campos.some((c) => statusDe(c) === "salvando");
+                    const salvo = campos.some((c) => statusDe(c) === "salvo");
+                    const erroLinha = campos.map(erroDe).find(Boolean);
+
+                    return (
+                      <li
+                        key={restricao.id}
+                        className="rounded-xl bg-surface p-3 ring-1 ring-border"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <input
+                            type="text"
+                            defaultValue={restricao.nome ?? ""}
+                            onBlur={(e) => {
+                              const valor = e.target.value.trim();
+                              if (valor === (restricao.nome ?? "")) return;
+                              salvarCampoRestricao(restricao.id, "nome", valor);
+                            }}
+                            placeholder="Nome (ex.: Dezembro)"
+                            className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removerRestricao(restricao.id)}
+                            className="shrink-0 rounded-lg px-2 py-2 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                          >
+                            Excluir
+                          </button>
+                        </div>
+
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <label className="block text-xs text-muted">
+                            De
+                            <input
+                              type="date"
+                              value={restricao.data_inicio ?? ""}
+                              onChange={(e) =>
+                                salvarCampoRestricao(
+                                  restricao.id,
+                                  "data_inicio",
+                                  e.target.value || null
+                                )
+                              }
+                              className="mt-1 w-full rounded-lg border border-border bg-card px-2 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                            />
+                          </label>
+                          <label className="block text-xs text-muted">
+                            Até
+                            <input
+                              type="date"
+                              value={restricao.data_fim ?? ""}
+                              onChange={(e) =>
+                                salvarCampoRestricao(
+                                  restricao.id,
+                                  "data_fim",
+                                  e.target.value || null
+                                )
+                              }
+                              className="mt-1 w-full rounded-lg border border-border bg-card px-2 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                            />
+                          </label>
+                        </div>
+
+                        <label className="mt-2 block text-xs text-muted">
+                          Liberado para a etiqueta
+                          <select
+                            value={restricao.etiqueta_liberada_id ?? ""}
+                            // O id da etiqueta é uuid (texto): grava a string
+                            // CRUA, nunca Number()/parseInt — converter devolvia
+                            // NaN e o React reclamava ("Received NaN for the
+                            // value attribute") antes mesmo de a linha chegar ao
+                            // banco. Mesmo padrão de todo write de etiqueta do
+                            // projeto (ver `etiqueta_id: nova?.id ?? null` em
+                            // SeletorEtiquetaRapido/GerenciarClientes). "" = a
+                            // opção "Nenhuma", que grava null.
+                            onChange={(e) =>
+                              salvarCampoRestricao(
+                                restricao.id,
+                                "etiqueta_liberada_id",
+                                e.target.value || null
+                              )
+                            }
+                            className="mt-1 w-full rounded-lg border border-border bg-card px-2 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                          >
+                            <option value="">Nenhuma (ninguém agenda)</option>
+                            {etiquetasSelect.map((etiqueta) => (
+                              <option key={etiqueta.id} value={etiqueta.id}>
+                                {rotuloEtiqueta(etiqueta)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="mt-2 block text-xs text-muted">
+                          Abre para todos em (opcional)
+                          <input
+                            type="date"
+                            value={restricao.abre_para_todos_em ?? ""}
+                            onChange={(e) =>
+                              salvarCampoRestricao(
+                                restricao.id,
+                                "abre_para_todos_em",
+                                e.target.value || null
+                              )
+                            }
+                            className="mt-1 w-full rounded-lg border border-border bg-card px-2 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                          />
+                        </label>
+
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                          <label
+                            htmlFor={`restricao-ativa-${restricao.id}`}
+                            className="text-sm text-body"
+                          >
+                            Restrição ativa
+                          </label>
+                          <button
+                            id={`restricao-ativa-${restricao.id}`}
+                            type="button"
+                            role="switch"
+                            aria-checked={Boolean(restricao.ativa)}
+                            onClick={() =>
+                              salvarCampoRestricao(restricao.id, "ativa", !restricao.ativa)
+                            }
+                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${
+                              restricao.ativa ? "bg-primary" : "bg-border"
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                                restricao.ativa ? "translate-x-5" : "translate-x-0.5"
+                              }`}
+                            />
+                          </button>
+                        </div>
+
+                        {salvando && <p className="mt-2 text-xs text-muted">Salvando…</p>}
+                        {!salvando && salvo && !erroLinha && (
+                          <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+                        )}
+                        {erroLinha && <p className="mt-2 text-xs text-red-600">{erroLinha}</p>}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              <button
+                type="button"
+                onClick={adicionarRestricao}
+                disabled={criandoRestricao || restricoes === null}
+                className="mt-3 rounded-lg bg-surface px-3 py-2 text-sm font-medium text-heading ring-1 ring-border transition hover:bg-border/40 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {criandoRestricao ? "Criando…" : "Adicionar restrição"}
+              </button>
+
+              {erroRestricoes && (
+                <p className="mt-2 text-xs text-red-600">{erroRestricoes}</p>
               )}
             </div>
           </div>
