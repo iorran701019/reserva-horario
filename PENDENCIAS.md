@@ -67,6 +67,8 @@
 + [x] Popup de confirmação antes de cancelar agendamento em /agendar, nos 4 pontos onde a cliente cancela (Painel, tela de sinal/Pix, tela de protocolo, wizard) — novo ModalConfirmarCancelamento.js (sessão 43).
 - Resumo completo (cliente, serviço, data, horário, profissional quando 2+) na etapa "dados" do wizard de agendamento, reaproveitado no admin e no fluxo público sem sinal (Sessão 44).
 - Filtros de status (Agendado/Sem agenda) e etiqueta (incluindo "Sem etiqueta") na aba Clientes do admin (Sessão 44).
++ - [x] Card de agendamento pendente no /admin refatorado: hierarquia visual limpa com progressive disclosure — pílula "Entrar em contato" (WhatsApp) abaixo do telefone, tag "Pendente" removida (redundante na aba), data/horário em destaque, bloco de pagamento com 3 estados mutuamente exclusivos (comprovante anexado=verde, declarado sem arquivo=neutro, aguardando sinal=âmbar), detalhes secundários (formato de unha, histórico de confirmados) ocultos em accordion "Ver detalhes do agendamento", rodapé reduzido a Confirmar/Cancelar mantendo as ações "sem notificar" e "trocar profissional" dentro do accordion. Modo agrupado (2+ pendentes do mesmo cliente) ganhou a mesma pílula de contato na bandeja, sem duplicar por card (sessão 45).
++ - [x] Badge do comprovante Pix (LinkComprovantePix.js) recolorido de verde e documentado com comentário explicando a decisão: verde só quando existe arquivo real anexado no bucket; declaração "enviei pelo WhatsApp" sem arquivo continua neutra, por ser a palavra da cliente e não um comprovante conferido (sessão 45).
 
 
 ## Em aberto
