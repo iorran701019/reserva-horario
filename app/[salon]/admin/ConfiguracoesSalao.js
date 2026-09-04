@@ -17,7 +17,7 @@ import {
   mesesJanelaIndisponiveis,
   MESES_ALCANCE_PADRAO,
 } from "@/lib/janelaAgendamento";
-import { rotuloMesCurto } from "@/lib/mes";
+import { rotuloMesLongo } from "@/lib/mes";
 
 // Configurações do salão (tabela `estabelecimentos`) editáveis pelo dono direto
 // no admin:
@@ -1898,12 +1898,12 @@ export default function ConfiguracoesSalao({
                       key={chave}
                       className={`flex flex-col gap-3 rounded-lg px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2 sm:py-2 ${estiloMes}`}
                     >
-                      <span className="w-full text-sm font-medium capitalize text-heading sm:w-20 sm:shrink-0">
-                        {rotuloMesCurto(ano, mes)}
+                      <span className="w-full text-sm font-medium capitalize text-heading sm:w-28 sm:shrink-0">
+                        {rotuloMesLongo(ano, mes)}
                       </span>
 
                       <select
-                        aria-label={`Status de ${rotuloMesCurto(ano, mes)}`}
+                        aria-label={`Status de ${rotuloMesLongo(ano, mes)}`}
                         value={statusAtual}
                         onChange={(e) =>
                           aplicarStatusMes(ano, mes, e.target.value)
@@ -1935,7 +1935,7 @@ export default function ConfiguracoesSalao({
                               if (el) etiquetaMesRefs.current.set(chave, el);
                               else etiquetaMesRefs.current.delete(chave);
                             }}
-                            aria-label={`Etiqueta liberada em ${rotuloMesCurto(ano, mes)}`}
+                            aria-label={`Etiqueta liberada em ${rotuloMesLongo(ano, mes)}`}
                             value={
                               etiquetaMesVazia[chave]
                                 ? ""
@@ -1988,7 +1988,7 @@ export default function ConfiguracoesSalao({
                             Abre pra todos em (opcional)
                             <input
                               type="date"
-                              aria-label={`Abre pra todos em ${rotuloMesCurto(ano, mes)}`}
+                              aria-label={`Abre pra todos em ${rotuloMesLongo(ano, mes)}`}
                               value={registro?.abre_para_todos_em ?? ""}
                               onChange={(e) =>
                                 salvarMes(ano, mes, {
