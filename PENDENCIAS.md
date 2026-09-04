@@ -52,7 +52,10 @@
 + - [x] Raio-x de risco silencioso — Severidade 1 completa: 6 frentes de gravação de dado de cliente/agendamento corrigidas (`.select()` + checagem de 0-row + aviso visível) (sessão 39)
 + - [x] Raio-x de risco silencioso — Severidade 2 completa: 27 pontos de configuração/preferências corrigidos, novo helper `lib/erroSalvar.js` (sessão 39)
 + - [x] Raio-x de risco silencioso — Severidade 3 completa: 23 pontos em Serviços/Profissionais corrigidos, incluindo proteção contra grade duplicada em 4 pontos de delete+insert em cascata (sessão 39)
-+ - [x] Bug de duplicidade de pendência de cancelamento (staging): causa raiz real encontrada (URL de webhook hardcoded pra deployment Preview congelado) e corrigida com branch `staging` permanente + triggers atualizados (sessão 39
++ - [x] Bug de duplicidade de pendência de cancelamento (staging): causa raiz real encontrada (URL de webhook hardcoded pra deployment Preview congelado) e corrigida com branch `staging` permanente + triggers atualizados (sessão 39)
++ - [x] Sistema de etiquetas de cliente: CRUD, seletor rápido, badges em Pendentes/wizard admin/ficha de cliente (Sessão 40)
++ - [x] Gate obrigatório de etiqueta ao Confirmar/Cancelar em Pendentes (etiqueta ausente + "Cliente Nova" recorrente), cobrindo as 8 zonas de Pendentes (Sessão 40)
++ - [x] Regra de restrição de agenda por etiqueta ("Agenda de Dezembro"), incluindo propagação de etiqueta_id no fluxo público de identificação (Sessão 40)
 
 ## Em aberto
 - [ ] UX da configuração de pergunta condicional (mãe/filha) em `GerenciarServicos.js` — funcional, mas complexa pra configurar; considerar assistente passo-a-passo ou fluxo guiado no futuro.
@@ -67,6 +70,8 @@
 + - [ ] Limpar lixo de teste (`Cancelamento: {nome}`) em `pendencias_admin` de staging (sessão 39)
 + - [ ] Sincronizar branch `staging` com `main` após cada merge relevante, daqui pra frente (protocolo novo, sessão 39)
 - PENDENTE, alta prioridade (achado 03/09): pergunta condicional (filha) é salva com pergunta_pai_id e opcao_gatilho_id NULL mesmo com checkbox "depende de outra" marcado e os dois selects preenchidos na tela — reproduzido em produção (tenant Júnior, serviços 148 e 150), em aba anônima (não é cache), com produção já rodando o fix bb37040 (não é deploy desatualizado). Investigação de código não encontrou caminho no state/payload capaz de gerar esse NULL com o checkbox marcado — contradição ainda não resolvida entre o código revisado e o comportamento real. Hipótese em aberto: dado do Network pode ter sido lido da Response em vez do Request Payload (precisa reconfirmar), ou corrida de timing entre o clique na opção-gatilho e o clique em salvar. Handoff detalhado com histórico completo da investigação e próximos passos: reserva-horario_Handoff_Bug_Pergunta_Condicional_Nao_Salva.md.
+- [ ] Bloqueio temporário de novembro (Laysla): bloquear mês inteiro com liberação automática numa data (Sessão 40)
+- [ ] Slots de dezembro da Flávia — 3 abordagens mapeadas (Sessão 38); **substituída pela regra de restrição por etiqueta, item resolvido acima**
 
 ## Segurança — auditoria RLS/Storage (retomar semana que vem)
 - [ ] Upload de comprovante Pix quebrado em staging: bucket `comprovantes-pix` aceita INSERT anônimo, mas falta policy de UPDATE que o `upsert:true` do app exige — hoje toda cliente que anexa arquivo real provavelmente cai silenciosamente no caminho do checkbox.
