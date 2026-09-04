@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { formatarPreco } from "@/lib/preco";
-import { formatarData } from "@/lib/data";
+import { montarResumoAgendamento } from "@/lib/data";
 import { comprimirImagem } from "@/lib/comprimirImagem";
 
 // Bucket PRIVADO (anon só faz INSERT; leitura é só do lado autenticado, no
@@ -162,18 +162,16 @@ export default function BlocoConfirmacaoPix({
   }
 
   // Linha de resumo do topo: "Nome · Serviço · 27/08 · quarta-feira às
-  // 14:00". Data e horário andam JUNTOS num único trecho porque formatarData
-  // já traz um "·" dentro (dd/mm · dia da semana) e separar os dois com outro
-  // "·" viraria uma fileira de pontos. Cada trecho ausente é descartado em
-  // vez de virar vazio — daí o filter, e não um template fixo; o "às" também
-  // só entra se houver data, senão sobraria um "às 14:00" solto.
-  const dataFormatada = formatarData(data);
-  const horarioCurto = horario ? String(horario).slice(0, 5) : "";
-  const horarioTrecho = dataFormatada ? `às ${horarioCurto}` : horarioCurto;
-  const quando = [dataFormatada, horarioCurto && horarioTrecho]
-    .filter(Boolean)
-    .join(" ");
-  const resumo = [nomeCliente, servicoNome, quando].filter(Boolean).join(" · ");
+  // 14:00" (ver montarResumoAgendamento em lib/data.js, compartilhada com a
+  // etapa "dados" do wizard). SEM profissionalNome de propósito: quem atende
+  // não é informação do fluxo público — a cliente pode nem ter escolhido
+  // (encaixe automático), e o /admin é o único que mostra esse trecho.
+  const resumo = montarResumoAgendamento({
+    nomeCliente,
+    servicoNome,
+    data,
+    horario,
+  });
 
   async function copiarChavePix() {
     try {

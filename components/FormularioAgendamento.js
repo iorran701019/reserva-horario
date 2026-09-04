@@ -18,7 +18,7 @@ import IconeWhatsApp from "@/components/IconeWhatsApp";
 import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 import { formatarPreco } from "@/lib/preco";
-import { formatarData } from "@/lib/data";
+import { formatarData, montarResumoAgendamento } from "@/lib/data";
 import {
   calcularPrecoManutencao,
   buscarVencimentoManutencao,
@@ -594,6 +594,13 @@ export function CalendarioDias({
 //                   booleano explícito de propósito — inferir "é admin" da
 //                   presença de clienteInicial.etiqueta deixaria a vedação
 //                   dependendo do formato de um objeto montado noutro arquivo.
+//   qtdProfissionaisAtivos – SÓ /admin. Quantos profissionais ATIVOS o salão
+//                   tem, contado uma vez lá (app/[salon]/admin/page.js) e
+//                   repassado pra cá em vez de recontado. Decide UNICAMENTE se
+//                   o nome de quem atende entra no resumo da etapa "dados"
+//                   (2+ => entra; 1, 0 ou null => omitido). Não confundir com
+//                   `profissionaisDoServico`, que é a lista de quem atende o
+//                   SERVIÇO escolhido e existe pra outra coisa (o seletor).
 //   onEtiquetaAlterada – SÓ /admin, par de mostrarEtiquetaAdmin. Recebe a
 //                   etiqueta nova (ou null) depois do popover gravar, pra quem
 //                   monta patchar o próprio clienteInicial — este componente
@@ -623,6 +630,7 @@ export default function FormularioAgendamento({
   onCancelado = null,
   mostrarEtiquetaAdmin = false,
   onEtiquetaAlterada = null,
+  qtdProfissionaisAtivos = null,
 }) {
   const [form, setForm] = useState(() => ({
     ...ESTADO_INICIAL,
@@ -2989,6 +2997,28 @@ export default function FormularioAgendamento({
       ? precoManutencao.centavos
       : (servicoSelecionado?.preco_centavos ?? 0);
 
+  // Resumo de uma linha da etapa "dados" (ver JSX) — mesma função que monta o
+  // resumo do topo do BlocoConfirmacaoPix, pra as duas telas nunca divergirem
+  // de formato.
+  //
+  // O profissional só entra com 2+ ATIVOS no salão (`qtdProfissionaisAtivos`,
+  // contado uma vez em app/[salon]/admin/page.js e repassado — nada de query
+  // nova aqui): num salão de uma pessoa só, dizer "com Fulana" é ruído, sempre
+  // a mesma. `null` (ainda carregando, ou fluxo público, que não passa a prop)
+  // cai no mesmo lado do `>= 2` e omite — preferimos um resumo a menos que um
+  // resumo que pisca com o nome aparecendo depois.
+  const mostrarProfissionalNoResumo =
+    qtdProfissionaisAtivos != null && qtdProfissionaisAtivos >= 2;
+  const resumoAgendamento = montarResumoAgendamento({
+    nomeCliente: form.nome,
+    servicoNome: servicoSelecionado?.nome ?? "",
+    data: form.data,
+    horario: horarioSelecionado,
+    profissionalNome: mostrarProfissionalNoResumo
+      ? (profissionalSelecionado?.nome ?? "")
+      : "",
+  });
+
   return (
     <>
       {/* Indicador de progresso do wizard. Etapa atual destacada, etapas
@@ -3477,17 +3507,19 @@ export default function FormularioAgendamento({
             estão em form.nome/form.telefone. */}
         {etapa === "dados" && (
           <>
-            {/* Confirmação de pra QUEM é o agendamento. Some quando há sinal:
-                nesse caso o resumo do BlocoConfirmacaoPix (logo abaixo, na
-                mesma caixa cinza) já abre com o nome, e as duas linhas juntas
-                eram repetição. Sem sinal não existe bloco de Pix nenhum — aqui
-                é o único lugar que mostra o nome. */}
+            {/* Resumo do que está prestes a ser confirmado — nome, serviço,
+                (quem atende) e quando. Substituiu a linha "Agendando para X"
+                que só trazia o nome: no /admin esta etapa era a única sem
+                nenhuma referência à data/horário escolhidos, e o botão logo
+                abaixo já dispara a confirmação no WhatsApp da cliente.
+
+                Some quando há sinal: nesse caso o resumo do
+                BlocoConfirmacaoPix (logo abaixo, na mesma caixa cinza) é a
+                MESMA string, montada pela mesma função — as duas juntas eram
+                repetição literal. Sem sinal não existe bloco de Pix nenhum. */}
             {clienteInicial && !precisaSinal && (
               <div className="flex flex-wrap items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm text-body">
-                <span>
-                  Agendando para{" "}
-                  <span className="font-medium text-heading">{form.nome}</span>.
-                </span>
+                <span className="font-medium text-heading">{resumoAgendamento}</span>
                 {/* Etiqueta: só no /admin (ver mostrarEtiquetaAdmin). No
                     público esta condição é sempre falsa, então nem o badge nem
                     o chip "Sem etiqueta" chegam à cliente. */}

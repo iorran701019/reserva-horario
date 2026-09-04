@@ -3473,6 +3473,10 @@ export default function AdminPage() {
                   // No admin o dono SEMPRE escolhe o profissional ao marcar,
                   // independente do toggle escolha_profissional do salão.
                   forcarEscolhaProfissional
+                  // Só pro resumo da etapa "dados" decidir se cita quem
+                  // atende — a contagem já está em memória (mesmo estado que
+                  // esconde "Trocar profissional"), então não custa uma query.
+                  qtdProfissionaisAtivos={qtdProfissionaisAtivos}
                   onSucesso={async ({ form, horario }) => {
                     setAvisoAgendar(
                       `Agendamento de ${form.nome} criado para ${formatarData(
