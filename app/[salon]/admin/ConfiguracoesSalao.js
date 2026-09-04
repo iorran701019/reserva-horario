@@ -1831,12 +1831,22 @@ export default function ConfiguracoesSalao({
                         ? "bg-yellow-50 ring-1 ring-yellow-200"
                         : "bg-gray-200 ring-1 ring-gray-300";
 
+                  // No mobile os 4 campos do mês restrito (status, etiqueta,
+                  // data e Limpar) não cabem lado a lado: o flex-wrap os
+                  // quebrava em linhas irregulares, com o rótulo da data
+                  // colado no campo. Abaixo de `sm` cada campo ocupa a linha
+                  // inteira, empilhado com gap-3 — `sm` porque é o ÚNICO
+                  // breakpoint que o projeto usa (o padrão `flex flex-col
+                  // gap-2 sm:flex-row` aparece em GerenciarServicos /
+                  // GerenciarProfissionais e no modal deste mesmo arquivo). De
+                  // `sm` pra cima nada muda: volta a ser a fileira com wrap
+                  // que já funciona no desktop.
                   return (
                     <div
                       key={chave}
-                      className={`flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 ${estiloMes}`}
+                      className={`flex flex-col gap-3 rounded-lg px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2 sm:py-2 ${estiloMes}`}
                     >
-                      <span className="w-20 shrink-0 text-sm font-medium capitalize text-heading">
+                      <span className="w-full text-sm font-medium capitalize text-heading sm:w-20 sm:shrink-0">
                         {rotuloMesCurto(ano, mes)}
                       </span>
 
@@ -1846,7 +1856,7 @@ export default function ConfiguracoesSalao({
                         onChange={(e) =>
                           aplicarStatusMes(ano, mes, e.target.value)
                         }
-                        className="rounded-lg border border-border bg-card px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                        className="w-full rounded-lg border border-border bg-card px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 sm:w-auto"
                       >
                         {/* "" só existe enquanto o mês não tem registro, e
                             não é salvável (voltar pra "sem registro" seria
@@ -1895,7 +1905,7 @@ export default function ConfiguracoesSalao({
                             // isto é só o campo parando de mentir sobre o que
                             // está no banco.
                             onBlur={() => limparEtiquetaMesVazia(chave)}
-                            className={`rounded-lg border bg-card px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 ${
+                            className={`w-full rounded-lg border bg-card px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 sm:w-auto ${
                               pendente ? "border-red-400" : "border-border"
                             }`}
                           >
@@ -1914,7 +1924,7 @@ export default function ConfiguracoesSalao({
                               reusa a MESMA checagem das restrições por
                               etiqueta). Opcional — vazio grava null e o mês
                               segue restrito por tempo indeterminado. */}
-                          <label className="flex items-center gap-1 text-xs text-muted">
+                          <label className="flex w-full flex-col gap-1 text-xs text-muted sm:w-auto sm:flex-row sm:items-center">
                             Abre pra todos em (opcional)
                             <input
                               type="date"
@@ -1925,7 +1935,7 @@ export default function ConfiguracoesSalao({
                                   abre_para_todos_em: e.target.value || null,
                                 })
                               }
-                              className="rounded-lg border border-border bg-card px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                              className="w-full rounded-lg border border-border bg-card px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 sm:w-auto"
                             />
                           </label>
 
@@ -1943,7 +1953,7 @@ export default function ConfiguracoesSalao({
                                   abre_para_todos_em: null,
                                 })
                               }
-                              className="rounded-lg px-2 py-1 text-xs font-medium text-body underline transition hover:text-heading"
+                              className="-ml-2 self-start rounded-lg px-2 py-1 text-xs font-medium text-body underline transition hover:text-heading sm:ml-0 sm:self-auto"
                             >
                               Limpar
                             </button>
