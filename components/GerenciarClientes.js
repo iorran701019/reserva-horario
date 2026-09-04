@@ -33,7 +33,11 @@ import AtualizarDadosCliente from "@/components/AtualizarDadosCliente";
 import FormularioAnamnese from "@/components/FormularioAnamnese";
 import ModalAlterarWhatsapp from "@/components/ModalAlterarWhatsapp";
 import CarrosselAgendamentos from "@/components/CarrosselAgendamentos";
-import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
+import SeletorEtiquetaRapido, {
+  CORES_ETIQUETA,
+  COR_ETIQUETA_PADRAO,
+  corEtiqueta,
+} from "@/components/SeletorEtiquetaRapido";
 
 // Aba "Clientes" do /admin: lista somente-leitura dos clientes do salão
 // (tabela `clientes`, particionada por estabelecimento_id) com busca por nome
@@ -42,6 +46,41 @@ import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 // padrão visual/estrutural de GerenciarProfissionais.js: cards
 // `rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border`, clique abre o
 // detalhe substituindo a lista, botão "Voltar" fecha.
+
+// Paleta de cores da etiqueta: os 8 swatches de CORES_ETIQUETA como botões de
+// rádio. Substituiu o campinho de emoji — a cor é o que distingue uma etiqueta
+// da outra na tela agora (ver SeletorEtiquetaRapido.js).
+//
+// É um componente próprio porque aparece DUAS vezes no CRUD, em contextos
+// diferentes: no form "Nova etiqueta" e no renomear inline.
+//
+// role="radiogroup" + aria-checked em vez de <input type="radio"> porque os
+// dois usos ficam dentro do mesmo <form>/lista e radios nativos precisariam de
+// `name` único por linha pra não se agruparem entre si.
+function PaletaCorEtiqueta({ valor, onChange, disabled }) {
+  return (
+    <div role="radiogroup" aria-label="Cor da etiqueta" className="flex flex-wrap gap-1.5">
+      {Object.entries(CORES_ETIQUETA).map(([chave, { rotulo, swatch }]) => {
+        const selecionada = chave === valor;
+        return (
+          <button
+            key={chave}
+            type="button"
+            role="radio"
+            aria-checked={selecionada}
+            aria-label={rotulo}
+            title={rotulo}
+            disabled={disabled}
+            onClick={() => onChange(chave)}
+            className={`h-7 w-7 rounded-full ring-offset-2 ring-offset-surface transition disabled:cursor-not-allowed disabled:opacity-60 ${swatch} ${
+              selecionada ? "ring-2 ring-heading" : "ring-1 ring-border hover:brightness-95"
+            }`}
+          />
+        );
+      })}
+    </div>
+  );
+}
 
 // true se o mês de `nascimento` (date "YYYY-MM-DD") for o mês atual — decide o
 // badge "🎂 Aniversário" do card. Lê o mês por partes (sem construir Date),
@@ -403,7 +442,7 @@ function DetalheCliente({
               setClienteAtual((anterior) => ({
                 ...anterior,
                 etiqueta_id: nova?.id ?? null,
-                etiquetas_cliente: nova ? { nome: nova.nome, emoji: nova.emoji } : null,
+                etiquetas_cliente: nova ? { nome: nova.nome, cor: nova.cor } : null,
               }));
               onEtiquetaAlterada?.(clienteAtual.id, nova);
             }}
@@ -968,7 +1007,7 @@ export default function GerenciarClientes({
   // Criar: form inline, aberto sob demanda dentro do bloco.
   const [criandoEtiqueta, setCriandoEtiqueta] = useState(false);
   const [novoNomeEtiqueta, setNovoNomeEtiqueta] = useState("");
-  const [novoEmojiEtiqueta, setNovoEmojiEtiqueta] = useState("");
+  const [novaCorEtiqueta, setNovaCorEtiqueta] = useState(COR_ETIQUETA_PADRAO);
   const [salvandoEtiqueta, setSalvandoEtiqueta] = useState(false);
   const [erroCriarEtiqueta, setErroCriarEtiqueta] = useState("");
 
@@ -976,7 +1015,7 @@ export default function GerenciarClientes({
   // renomear-categoria em GerenciarServicos.js).
   const [etiquetaEditandoId, setEtiquetaEditandoId] = useState(null);
   const [nomeEdicaoEtiqueta, setNomeEdicaoEtiqueta] = useState("");
-  const [emojiEdicaoEtiqueta, setEmojiEdicaoEtiqueta] = useState("");
+  const [corEdicaoEtiqueta, setCorEdicaoEtiqueta] = useState(COR_ETIQUETA_PADRAO);
 
   // Etiqueta "armada" pra desativação (modal de confirmação) — soft delete via
   // `ativa=false`, nunca DELETE: quem já foi marcado com ela continua
@@ -1065,7 +1104,7 @@ export default function GerenciarClientes({
           ? {
               ...c,
               etiqueta_id: nova?.id ?? null,
-              etiquetas_cliente: nova ? { nome: nova.nome, emoji: nova.emoji } : null,
+              etiquetas_cliente: nova ? { nome: nova.nome, cor: nova.cor } : null,
             }
           : c
       )
@@ -1077,15 +1116,20 @@ export default function GerenciarClientes({
         ? {
             ...atual,
             etiqueta_id: nova?.id ?? null,
-            etiquetas_cliente: nova ? { nome: nova.nome, emoji: nova.emoji } : null,
+            etiquetas_cliente: nova ? { nome: nova.nome, cor: nova.cor } : null,
           }
         : atual
     );
   }
 
   // Nova etiqueta vai pro fim da ordem (maior `ordem` atual + 1) — mesma
-  // convenção de criarCategoria em GerenciarServicos.js. O emoji é opcional:
-  // string vazia vira null pra não gravar "" no banco.
+  // convenção de criarCategoria em GerenciarServicos.js. A cor sempre tem
+  // valor (o seletor nasce em violeta), então nunca grava null aqui — cor
+  // nula só existe nas etiquetas criadas ANTES desta troca, e o
+  // SeletorEtiquetaRapido as trata como violeta.
+  //
+  // A coluna `emoji` continua existindo no banco, mas não é mais lida nem
+  // escrita por nenhum ponto do app.
   async function criarEtiqueta(e) {
     e.preventDefault();
     const nome = novoNomeEtiqueta.trim();
@@ -1099,11 +1143,11 @@ export default function GerenciarClientes({
       .insert({
         estabelecimento_id: estabelecimento.id,
         nome,
-        emoji: novoEmojiEtiqueta.trim() || null,
+        cor: novaCorEtiqueta,
         ordem: proximaOrdem,
         ativa: true,
       })
-      .select("id, nome, emoji, ordem, ativa")
+      .select("id, nome, emoji, cor, ordem, ativa")
       .single();
 
     setSalvandoEtiqueta(false);
@@ -1113,22 +1157,24 @@ export default function GerenciarClientes({
     }
     setEtiquetas((atuais) => [...atuais, data]);
     setNovoNomeEtiqueta("");
-    setNovoEmojiEtiqueta("");
+    setNovaCorEtiqueta(COR_ETIQUETA_PADRAO);
     setCriandoEtiqueta(false);
   }
 
   function abrirRenomearEtiqueta(etiqueta) {
     setEtiquetaEditandoId(etiqueta.id);
     setNomeEdicaoEtiqueta(etiqueta.nome);
-    setEmojiEdicaoEtiqueta(etiqueta.emoji ?? "");
+    // Etiqueta antiga sem cor abre já com o violeta selecionado — que é como
+    // ela vinha sendo exibida.
+    setCorEdicaoEtiqueta(etiqueta.cor ?? COR_ETIQUETA_PADRAO);
     setErroAcaoEtiqueta("");
   }
 
   async function salvarRenomeEtiqueta(etiqueta) {
     const nome = nomeEdicaoEtiqueta.trim();
-    const emoji = emojiEdicaoEtiqueta.trim() || null;
+    const cor = corEdicaoEtiqueta;
     if (!nome) return;
-    if (nome === etiqueta.nome && emoji === (etiqueta.emoji ?? null)) {
+    if (nome === etiqueta.nome && cor === (etiqueta.cor ?? COR_ETIQUETA_PADRAO)) {
       setEtiquetaEditandoId(null);
       return;
     }
@@ -1137,7 +1183,7 @@ export default function GerenciarClientes({
     setErroAcaoEtiqueta("");
     const { data: linhas, error } = await supabase
       .from("etiquetas_cliente")
-      .update({ nome, emoji })
+      .update({ nome, cor })
       .eq("id", etiqueta.id)
       .select("id");
 
@@ -1147,15 +1193,16 @@ export default function GerenciarClientes({
       return;
     }
     setEtiquetas((atuais) =>
-      atuais.map((et) => (et.id === etiqueta.id ? { ...et, nome, emoji } : et))
+      atuais.map((et) => (et.id === etiqueta.id ? { ...et, nome, cor } : et))
     );
     setEtiquetaEditandoId(null);
 
-    // A lista de clientes carrega o nome/emoji embedados: renomear a etiqueta
-    // sem patchar aqui deixaria os badges com o texto antigo até o refetch.
+    // A lista de clientes carrega o nome/cor embedados: renomear a etiqueta
+    // sem patchar aqui deixaria os badges com o texto e a cor antigos até o
+    // refetch.
     setClientes((atuais) =>
       atuais.map((c) =>
-        c.etiqueta_id === etiqueta.id ? { ...c, etiquetas_cliente: { nome, emoji } } : c
+        c.etiqueta_id === etiqueta.id ? { ...c, etiquetas_cliente: { nome, cor } } : c
       )
     );
   }
@@ -1317,104 +1364,125 @@ export default function GerenciarClientes({
                       >
                         {etiquetaEditandoId === etiqueta.id ? (
                           /* Renomear inline, na própria linha (mesmo padrão do
-                             renomear-categoria em GerenciarServicos.js). O
-                             emoji é um campo curto ao lado do nome, opcional. */
-                          <div className="flex flex-wrap items-center gap-2">
-                            <input
-                              type="text"
-                              value={emojiEdicaoEtiqueta}
-                              onChange={(e) => setEmojiEdicaoEtiqueta(e.target.value)}
-                              maxLength={4}
-                              aria-label="Emoji da etiqueta"
-                              className="w-14 rounded-lg border border-border px-2 py-1.5 text-center text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                             renomear-categoria em GerenciarServicos.js). A
+                             paleta fica na linha de baixo: 8 swatches numa
+                             linha só não caberiam ao lado do nome + 3 botões
+                             sem quebrar feio no mobile. */
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <input
+                                type="text"
+                                value={nomeEdicaoEtiqueta}
+                                onChange={(e) => setNomeEdicaoEtiqueta(e.target.value)}
+                                aria-label="Nome da etiqueta"
+                                className="min-w-0 flex-1 rounded-lg border border-border px-3 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => salvarRenomeEtiqueta(etiqueta)}
+                                disabled={ocupadoEtiqueta || !nomeEdicaoEtiqueta.trim()}
+                                className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Salvar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEtiquetaEditandoId(null)}
+                                className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                            <PaletaCorEtiqueta
+                              valor={corEdicaoEtiqueta}
+                              onChange={setCorEdicaoEtiqueta}
+                              disabled={ocupadoEtiqueta}
                             />
-                            <input
-                              type="text"
-                              value={nomeEdicaoEtiqueta}
-                              onChange={(e) => setNomeEdicaoEtiqueta(e.target.value)}
-                              aria-label="Nome da etiqueta"
-                              className="min-w-0 flex-1 rounded-lg border border-border px-3 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => salvarRenomeEtiqueta(etiqueta)}
-                              disabled={ocupadoEtiqueta || !nomeEdicaoEtiqueta.trim()}
-                              className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              Salvar
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEtiquetaEditandoId(null)}
-                              className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
-                            >
-                              Cancelar
-                            </button>
                           </div>
                         ) : (
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-heading">
-                              {etiqueta.emoji ? `${etiqueta.emoji} ` : ""}
-                              {etiqueta.nome}
-                            </span>
-
-                            {!etiqueta.ativa && (
-                              <span className="shrink-0 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-body ring-1 ring-border">
-                                desativada
+                            {/* Nome + selo "desativada" formam um grupo só.
+                                Sem flex-wrap aqui de propósito: num container
+                                que quebra, o nome longo pularia de linha em vez
+                                de truncar e deixaria o ponto colorido sozinho.
+                                Quem absorve a falta de espaço é o truncate,
+                                mas só até o piso de 10rem: abaixo disso o nome
+                                sumiria atrás do selo, então quem quebra pra
+                                linha de baixo é a barra de ações — inteira. */}
+                            <div className="flex min-w-[10rem] flex-1 items-center gap-2">
+                              {/* O ponto colorido é a única pista da cor nesta
+                                  lista — aqui a etiqueta não é mostrada como
+                                  badge. */}
+                              <span
+                                aria-hidden="true"
+                                className={`h-3 w-3 shrink-0 rounded-full ${corEtiqueta(etiqueta.cor).swatch}`}
+                              />
+                              <span className="min-w-0 truncate text-sm font-medium text-heading">
+                                {etiqueta.nome}
                               </span>
-                            )}
 
-                            {/* Mover para cima/baixo: desabilitado nas pontas,
-                                mesmo comportamento do reordenar de categorias. */}
-                            <button
-                              type="button"
-                              onClick={() => moverEtiqueta(etiqueta, -1)}
-                              disabled={ocupadoEtiqueta || indice === 0}
-                              aria-label={`Mover ${etiqueta.nome} para cima`}
-                              className="shrink-0 rounded-lg p-1.5 text-body transition hover:bg-card disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              <ChevronUp className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => moverEtiqueta(etiqueta, 1)}
-                              disabled={
-                                ocupadoEtiqueta || indice === etiquetasOrdenadas.length - 1
-                              }
-                              aria-label={`Mover ${etiqueta.nome} para baixo`}
-                              className="shrink-0 rounded-lg p-1.5 text-body transition hover:bg-card disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              <ChevronDown className="h-4 w-4" />
-                            </button>
+                              {!etiqueta.ativa && (
+                                <span className="shrink-0 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-body ring-1 ring-border">
+                                  desativada
+                                </span>
+                              )}
+                            </div>
 
-                            <button
-                              type="button"
-                              onClick={() => abrirRenomearEtiqueta(etiqueta)}
-                              disabled={ocupadoEtiqueta}
-                              className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              Renomear
-                            </button>
-
-                            {etiqueta.ativa ? (
+                            {/* Barra de ações: sempre os mesmos 4 controles,
+                                etiqueta ativa ou não. */}
+                            <div className="flex shrink-0 items-center gap-2">
+                              {/* Mover para cima/baixo: desabilitado nas pontas,
+                                  mesmo comportamento do reordenar de categorias. */}
                               <button
                                 type="button"
-                                onClick={() => setEtiquetaParaDesativar(etiqueta)}
-                                disabled={ocupadoEtiqueta}
-                                className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                onClick={() => moverEtiqueta(etiqueta, -1)}
+                                disabled={ocupadoEtiqueta || indice === 0}
+                                aria-label={`Mover ${etiqueta.nome} para cima`}
+                                className="shrink-0 rounded-lg p-1.5 text-body transition hover:bg-card disabled:cursor-not-allowed disabled:opacity-40"
                               >
-                                Desativar
+                                <ChevronUp className="h-4 w-4" />
                               </button>
-                            ) : (
                               <button
                                 type="button"
-                                onClick={() => alternarAtivaEtiqueta(etiqueta, true)}
+                                onClick={() => moverEtiqueta(etiqueta, 1)}
+                                disabled={
+                                  ocupadoEtiqueta || indice === etiquetasOrdenadas.length - 1
+                                }
+                                aria-label={`Mover ${etiqueta.nome} para baixo`}
+                                className="shrink-0 rounded-lg p-1.5 text-body transition hover:bg-card disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                <ChevronDown className="h-4 w-4" />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => abrirRenomearEtiqueta(etiqueta)}
                                 disabled={ocupadoEtiqueta}
                                 className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
                               >
-                                Reativar
+                                Editar
                               </button>
-                            )}
+
+                              {etiqueta.ativa ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setEtiquetaParaDesativar(etiqueta)}
+                                  disabled={ocupadoEtiqueta}
+                                  className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  Desativar
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => alternarAtivaEtiqueta(etiqueta, true)}
+                                  disabled={ocupadoEtiqueta}
+                                  className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  Reativar
+                                </button>
+                              )}
+                            </div>
                           </div>
                         )}
                       </li>
@@ -1425,14 +1493,6 @@ export default function GerenciarClientes({
                 {criandoEtiqueta ? (
                   <form onSubmit={criarEtiqueta} className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        type="text"
-                        value={novoEmojiEtiqueta}
-                        onChange={(e) => setNovoEmojiEtiqueta(e.target.value)}
-                        maxLength={4}
-                        aria-label="Emoji da etiqueta (opcional)"
-                        className="w-14 rounded-lg border border-border px-2 py-1.5 text-center text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-                      />
                       <input
                         type="text"
                         value={novoNomeEtiqueta}
@@ -1454,7 +1514,7 @@ export default function GerenciarClientes({
                         onClick={() => {
                           setCriandoEtiqueta(false);
                           setNovoNomeEtiqueta("");
-                          setNovoEmojiEtiqueta("");
+                          setNovaCorEtiqueta(COR_ETIQUETA_PADRAO);
                           setErroCriarEtiqueta("");
                         }}
                         className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
@@ -1462,6 +1522,11 @@ export default function GerenciarClientes({
                         Cancelar
                       </button>
                     </div>
+                    <PaletaCorEtiqueta
+                      valor={novaCorEtiqueta}
+                      onChange={setNovaCorEtiqueta}
+                      disabled={salvandoEtiqueta}
+                    />
                     {erroCriarEtiqueta && (
                       <p className="text-sm text-red-700">{erroCriarEtiqueta}</p>
                     )}

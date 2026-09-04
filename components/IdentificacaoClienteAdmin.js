@@ -27,7 +27,7 @@ import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 //   estabelecimentoId – particiona a busca e o upsert.
 //   onIdentificado    – recebe { id, nome, telefone, etiqueta }, pronto pra
 //                       virar clienteInicial do FormularioAgendamento.
-//                       `etiqueta` ({ nome, emoji } ou null) só acompanha pra
+//                       `etiqueta` ({ nome, cor } ou null) só acompanha pra
 //                       o /admin poder repetir o badge na linha "Agendando
 //                       para X" sem uma consulta nova — o wizard não usa o
 //                       campo pra nada além de exibir.
@@ -93,7 +93,7 @@ export default function IdentificacaoClienteAdmin({
         // etiqueta_id + o embed alimentam o badge do dropdown (ver JSX): a
         // dona reconhece a cliente certa pela etiqueta quando dois nomes
         // parecidos aparecem juntos na busca.
-        .select("id, nome, whatsapp, etiqueta_id, etiquetas_cliente(nome, emoji)")
+        .select("id, nome, whatsapp, etiqueta_id, etiquetas_cliente(nome, emoji, cor)")
         .eq("estabelecimento_id", estabelecimentoId)
         .ilike("nome", `%${termo}%`)
         .order("nome", { ascending: true })
@@ -320,7 +320,7 @@ export default function IdentificacaoClienteAdmin({
                                     ...c,
                                     etiqueta_id: nova?.id ?? null,
                                     etiquetas_cliente: nova
-                                      ? { nome: nova.nome, emoji: nova.emoji }
+                                      ? { nome: nova.nome, cor: nova.cor }
                                       : null,
                                   }
                                 : c
