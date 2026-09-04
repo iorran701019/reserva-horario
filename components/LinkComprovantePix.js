@@ -11,6 +11,13 @@ const VALIDADE_SEGUNDOS = 600;
 // Comprovante de Pix anexado pela cliente (ver BlocoConfirmacaoPix), exibido
 // no card da aba Pendentes do /admin.
 //
+// Verde de CONFIRMAÇÃO de propósito: este bloco só renderiza havendo
+// `caminho`, ou seja, arquivo de verdade no bucket. O outro caso — a cliente
+// marcar "Enviei o comprovante pelo WhatsApp" sem anexar nada — grava o mesmo
+// sinal_declarado_pago, mas fica NEUTRO no card do /admin, porque é a palavra
+// dela e não um comprovante conferido. Os dois são mutuamente exclusivos lá
+// (ver a cadeia de ternários do bloco de status de pagamento).
+//
 // O bucket comprovantes-pix é PRIVADO, então a coluna
 // agendamentos.comprovante_pix_url guarda o CAMINHO, não uma URL utilizável —
 // a signed url é gerada aqui, SOB DEMANDA (primeiro clique), e não na
@@ -56,9 +63,9 @@ export default function LinkComprovantePix({
   }
 
   return (
-    <div className="mt-3 rounded-lg bg-surface px-3 py-2">
+    <div className="mt-3 rounded-lg bg-green-50 px-3 py-2 ring-1 ring-green-200">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <p className="text-xs font-bold text-heading">Comprovante do Pix</p>
+        <p className="text-xs font-bold text-green-800">Comprovante do Pix</p>
         {enviadoEm && (
           <p className="text-xs text-body">
             enviado em {formatarEnviadoEm ? formatarEnviadoEm(enviadoEm) : enviadoEm}
@@ -71,7 +78,7 @@ export default function LinkComprovantePix({
           type="button"
           onClick={abrir}
           disabled={carregando}
-          className="mt-1.5 rounded-lg bg-card px-3 py-1.5 text-xs font-medium text-heading ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-1.5 rounded-lg bg-card px-3 py-1.5 text-xs font-medium text-green-800 ring-1 ring-green-200 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {carregando ? "Abrindo..." : "Ver comprovante"}
         </button>
