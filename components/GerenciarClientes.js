@@ -1352,69 +1352,79 @@ export default function GerenciarClientes({
                             </button>
                           </div>
                         ) : (
-                          <div className="flex flex-wrap items-center gap-2">
+                          /* Mobile: nome numa linha, controles na linha de
+                             baixo — em telas estreitas os 4 botões + o nome
+                             não cabem lado a lado e o wrap jogava um botão
+                             solto pra segunda linha. A partir de `sm` o
+                             `sm:contents` dissolve o agrupador e os botões
+                             voltam a ser filhos diretos do flex row, então o
+                             desktop fica idêntico ao que era. */
+                          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                             <span className="min-w-0 flex-1 truncate text-sm font-medium text-heading">
                               {etiqueta.emoji ? `${etiqueta.emoji} ` : ""}
                               {etiqueta.nome}
                             </span>
 
-                            {!etiqueta.ativa && (
-                              <span className="shrink-0 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-body ring-1 ring-border">
-                                desativada
-                              </span>
-                            )}
+                            <div className="flex items-center gap-2 sm:contents">
+                              {!etiqueta.ativa && (
+                                <span className="shrink-0 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-body ring-1 ring-border">
+                                  desativada
+                                </span>
+                              )}
 
-                            {/* Mover para cima/baixo: desabilitado nas pontas,
-                                mesmo comportamento do reordenar de categorias. */}
-                            <button
-                              type="button"
-                              onClick={() => moverEtiqueta(etiqueta, -1)}
-                              disabled={ocupadoEtiqueta || indice === 0}
-                              aria-label={`Mover ${etiqueta.nome} para cima`}
-                              className="shrink-0 rounded-lg p-1.5 text-body transition hover:bg-card disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              <ChevronUp className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => moverEtiqueta(etiqueta, 1)}
-                              disabled={
-                                ocupadoEtiqueta || indice === etiquetasOrdenadas.length - 1
-                              }
-                              aria-label={`Mover ${etiqueta.nome} para baixo`}
-                              className="shrink-0 rounded-lg p-1.5 text-body transition hover:bg-card disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              <ChevronDown className="h-4 w-4" />
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => abrirRenomearEtiqueta(etiqueta)}
-                              disabled={ocupadoEtiqueta}
-                              className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              Renomear
-                            </button>
-
-                            {etiqueta.ativa ? (
+                              {/* Mover para cima/baixo: desabilitado nas pontas,
+                                  mesmo comportamento do reordenar de categorias. */}
                               <button
                                 type="button"
-                                onClick={() => setEtiquetaParaDesativar(etiqueta)}
-                                disabled={ocupadoEtiqueta}
-                                className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                onClick={() => moverEtiqueta(etiqueta, -1)}
+                                disabled={ocupadoEtiqueta || indice === 0}
+                                aria-label={`Mover ${etiqueta.nome} para cima`}
+                                className="shrink-0 rounded-lg p-1.5 text-body transition hover:bg-card disabled:cursor-not-allowed disabled:opacity-40"
                               >
-                                Desativar
+                                <ChevronUp className="h-4 w-4" />
                               </button>
-                            ) : (
                               <button
                                 type="button"
-                                onClick={() => alternarAtivaEtiqueta(etiqueta, true)}
+                                onClick={() => moverEtiqueta(etiqueta, 1)}
+                                disabled={
+                                  ocupadoEtiqueta ||
+                                  indice === etiquetasOrdenadas.length - 1
+                                }
+                                aria-label={`Mover ${etiqueta.nome} para baixo`}
+                                className="shrink-0 rounded-lg p-1.5 text-body transition hover:bg-card disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                <ChevronDown className="h-4 w-4" />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => abrirRenomearEtiqueta(etiqueta)}
                                 disabled={ocupadoEtiqueta}
                                 className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
                               >
-                                Reativar
+                                Renomear
                               </button>
-                            )}
+
+                              {etiqueta.ativa ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setEtiquetaParaDesativar(etiqueta)}
+                                  disabled={ocupadoEtiqueta}
+                                  className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  Desativar
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => alternarAtivaEtiqueta(etiqueta, true)}
+                                  disabled={ocupadoEtiqueta}
+                                  className="shrink-0 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  Reativar
+                                </button>
+                              )}
+                            </div>
                           </div>
                         )}
                       </li>
