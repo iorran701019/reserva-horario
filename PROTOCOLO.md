@@ -104,4 +104,29 @@ Iorran só cola o bloco pronto — nunca marca `[x]` manualmente. Itens marcados
 - Reconectar apenas nas sessões em que for necessário teste ao vivo no navegador (Claude Code validando fluxo/staging por conta própria, como feito na Sessão 30).
 - Claude (chat) deve sinalizar quando uma demanda pedir esse tipo de validação, sugerindo reconectar antes do prompt pro Claude Code.
 
-*Última atualização: 27/08 (sessão paralela de protocolo).*
+## Regra: checagem de base antes de nova branch
+
+Antes de todo `git checkout -b`, rodar `git branch` (sem argumento) pra confirmar
+em qual branch você está. Só criar a nova branch se estiver em `main` limpa —
+se estiver em outra branch de trabalho, decidir explicitamente: mergear ela
+primeiro, ou nomear a nova como dependente da atual (ramificação consciente,
+não acidental).
+
+## Regra: branches concorrentes no mesmo arquivo/bloco
+
+Ao abrir uma demanda nova, checar se alguma branch ainda não mergeada em `main`
+toca o mesmo arquivo. Se tocar, preferir sequenciar (mergear a primeira até
+`main` + `staging` antes de começar a segunda) em vez de paralelizar — evita
+conflito de merge por divergência estrutural no mesmo bloco. Só paralelizar
+quando as branches tocam arquivos ou blocos claramente distintos.
+
+## Regra: comandos de merge/push rodados fora da visão do Claude Code
+
+Sempre que um merge, checkout ou push for rodado no terminal sem passar por um
+prompt do Claude Code (ex: comandos de fluxo Git que o Iorran roda direto após
+receber do chat), avisar explicitamente no próximo prompt pra ele — algo como
+"um merge de staging aconteceu entre sua última leitura e agora, rodado por mim
+via terminal, branch X em Y". Evita o agente interpretar estado de Git
+inesperado (MERGE_HEAD, conflitos) como anomalia ou ação própria não lembrada.
+
+*Última atualização: 04/09 (sessão paralela de protocolo).*
