@@ -82,3 +82,22 @@ Se o cliente tiver marca própria, ver `THEMING.md` — extrair paleta real, mon
 - [ ] Testar `/slug-aqui/admin` (login funciona, todas as abas carregam)
 - [ ] Confirmar que nenhum outro tenant mudou de comportamento (rodar smoke test rápido em
       `/teste` ou outro tenant de controle)
+
+
+## Etiquetas de cliente padrão
+
+Ao cadastrar um novo tenant (staging e produção), rodar o SQL abaixo trocando
+`<ID_DO_TENANT>` pelo `estabelecimento_id` real:
+
+​```sql
+-- STAGING ou PRODUÇÃO (trocar <ID_DO_TENANT> pelo id real do novo tenant)
+insert into etiquetas_cliente (estabelecimento_id, nome, emoji, ordem, ativa) values
+  (<ID_DO_TENANT>, 'Cliente Fixo', null, 1, true),
+  (<ID_DO_TENANT>, 'Cliente Nova', null, 2, true),
+  (<ID_DO_TENANT>, 'Cliente Ocasional', null, 3, true),
+  (<ID_DO_TENANT>, 'Lista de Espera', null, 4, true),
+  (<ID_DO_TENANT>, 'Lista de Bloqueio', null, 5, true);
+​```
+
+Confirmar com `select * from etiquetas_cliente where estabelecimento_id = <ID_DO_TENANT>;`
+antes de considerar o passo concluído.
