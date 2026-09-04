@@ -59,6 +59,7 @@ import {
   AlertCircle,
   Gift,
   ChevronRight,
+  ChevronDown,
   Check,
   MessageCircleOff,
   Clock,
@@ -485,6 +486,17 @@ export default function AdminPage() {
     () => new Set()
   );
 
+  // Ids dos pendentes com o accordion "Ver detalhes do agendamento" aberto.
+  // Progressive disclosure: o card mostra só o que decide confirmar ou não
+  // (quem, quando, o que, e o status do pagamento); o resto — respostas do
+  // serviço, profissional, outros confirmados da cliente, trocar profissional
+  // — vive aqui dentro, fechado por padrão. É o lugar onde entra qualquer
+  // informação operacional NOVA, pra o card não voltar a crescer.
+  // Set pelo mesmo motivo de pendentesComListaExpandida: um por card, só UI,
+  // e some no reload de propósito (fechado é o estado desejado ao voltar).
+  const [pendentesComDetalhesExpandidos, setPendentesComDetalhesExpandidos] =
+    useState(() => new Set());
+
   // Etiqueta (e id do cliente) por telefone, pros cards do inbox — os
   // agendamentos não guardam cliente_id, então a ligação vem por telefone
   // normalizado (ver buscarEtiquetasPorTelefones em lib/clientesAdmin.js).
@@ -527,6 +539,14 @@ export default function AdminPage() {
 
   const alternarListaConfirmados = (id) =>
     setPendentesComListaExpandida((atual) => {
+      const proximo = new Set(atual);
+      if (proximo.has(id)) proximo.delete(id);
+      else proximo.add(id);
+      return proximo;
+    });
+
+  const alternarDetalhesPendente = (id) =>
+    setPendentesComDetalhesExpandidos((atual) => {
       const proximo = new Set(atual);
       if (proximo.has(id)) proximo.delete(id);
       else proximo.add(id);
@@ -2411,6 +2431,37 @@ export default function AdminPage() {
                   String(item.telefone ?? "").replace(/\D/g, "")
                 );
 
+                const detalhesExpandidos =
+                  pendentesComDetalhesExpandidos.has(item.id);
+
+                // Profissional só é informação útil com 2+ ativos: com 0 ou 1 o
+                // salão é a própria dona e a linha vira ruído. Mesmo critério de
+                // rotuloAba/iconeAba (a aba vira "Horários"). null = contagem
+                // ainda carregando, mantém o padrão de mostrar. Extraído do JSX
+                // porque agora decide também se o accordion tem conteúdo.
+                const mostrarProfissional =
+                  Boolean(item.profissional_nome) &&
+                  !(qtdProfissionaisAtivos != null && qtdProfissionaisAtivos <= 1);
+
+                const respostasServico =
+                  respostasPorAgendamento.get(item.id) ?? [];
+
+                // Troca de profissional só com o toggle DESLIGADO (o dono
+                // encaixa); ligado, respeita a escolha do cliente. E só com 2+
+                // profissionais ativos — com 1 só não há pra quem trocar.
+                const podeTrocarProfissional =
+                  !escolhaProfissional && qtdProfissionaisAtivos > 1;
+
+                // O toggle "Ver detalhes" não renderiza se não houver nada
+                // atrás dele — card sem respostas, sem outros confirmados, com
+                // 1 profissional só. Qualquer bloco NOVO que passe a morar no
+                // accordion precisa entrar nesta conta também.
+                const temDetalhes =
+                  respostasServico.length > 0 ||
+                  outrosAgendamentos.length > 0 ||
+                  mostrarProfissional ||
+                  podeTrocarProfissional;
+
                 return (
                 <li
                   key={item.id}
@@ -2429,6 +2480,9 @@ export default function AdminPage() {
                       : ""
                   }`}
                 >
+                  {/* Cabeçalho: quem é a cliente e como falar com ela. Em
+                      grupo, nome/telefone/contato vivem na bandeja (uma vez
+                      só, ver abaixo) — repeti-los por card seria eco puro. */}
                   <div className="flex items-start justify-between gap-3">
                     {!emGrupo && (
                       <div className="min-w-0">
@@ -2436,20 +2490,56 @@ export default function AdminPage() {
                           {item.nome_cliente}
                         </p>
                         <p className="mt-0.5 text-sm text-body">{item.telefone}</p>
+                        {/* Contato livre (sem mensagem pré-preenchida), mesmo
+                            padrão dos cards de pendência administrativa acima
+                            (TIPOS_PENDENCIA) — diferente do "Entrar em contato"
+                            do Histórico, que reaproveita msg_reativacao (texto
+                            pensado pra cliente SEM agendamento ativo, não se
+                            aplica aqui).
+                            Subiu do rodapé pra cá de propósito: é um atalho de
+                            comunicação preso ao telefone logo acima, não uma
+                            decisão sobre o agendamento — o rodapé fica só com
+                            Confirmar/Cancelar. Pílula pequena pra não competir
+                            com eles. Sem telefone (não deveria ocorrer no
+                            inbox, que já filtra por item.telefone, mas fica
+                            defensivo) fica desabilitada com tooltip. */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            window.open(
+                              linkWhatsAppSemMensagem(item.telefone),
+                              "_blank",
+                              "noopener,noreferrer"
+                            )
+                          }
+                          disabled={!item.telefone}
+                          title={!item.telefone ? "Telefone não cadastrado" : undefined}
+                          className="mt-1.5 inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 ring-1 ring-green-200 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-green-50"
+                        >
+                          <IconeWhatsApp className="h-3.5 w-3.5" />
+                          Entrar em contato
+                        </button>
                       </div>
                     )}
 
-                    {/* ml-auto segura os badges na direita também quando o
-                        bloco de nome/telefone acima não renderiza (em grupo):
-                        sem ele, justify-between com um filho só jogaria os
-                        badges pra esquerda. */}
-                    <div className="ml-auto flex shrink-0 flex-col items-end gap-1">
-                      {/* Etiqueta: mesma regra de eco do nome/telefone acima —
-                          em grupo ela já aparece uma vez na bandeja, então
-                          repetir por card seria ruído. `entradaEtiqueta` é
-                          undefined quando nenhum cliente casa com o telefone
-                          (ver buscarEtiquetasPorTelefones): aí não há linha
-                          pra gravar, e o seletor não renderiza nada. */}
+                    {/* Tags do topo direito, em LINHA (não mais empilhadas em
+                        coluna): compactas e lado a lado, quebrando só quando
+                        não couberem. O badge de status cru saiu daqui —
+                        "Pendente" era redundante (o card já está na aba
+                        Pendentes) e "Aguardando sinal" virou o bloco de
+                        pagamento mais abaixo, onde a dona vai procurar por ele.
+                        ml-auto segura as tags na direita também quando o bloco
+                        de nome/telefone acima não renderiza (em grupo): sem
+                        ele, justify-between com um filho só jogaria as tags
+                        pra esquerda. */}
+                    <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                      {/* Etiqueta (ex.: "Cliente Fixo"): mesma regra de eco do
+                          nome/telefone acima — em grupo ela já aparece uma vez
+                          na bandeja, então repetir por card seria ruído.
+                          `entradaEtiqueta` é undefined quando nenhum cliente
+                          casa com o telefone (ver buscarEtiquetasPorTelefones):
+                          aí não há linha pra gravar, e o seletor não renderiza
+                          nada. */}
                       {!emGrupo && entradaEtiqueta && (
                         <SeletorEtiquetaRapido
                           estabelecimentoId={estabelecimento.id}
@@ -2469,13 +2559,6 @@ export default function AdminPage() {
                           onFechar={fecharPopoverEtiqueta}
                         />
                       )}
-                      <span
-                        className={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${classesStatus(
-                          item.status
-                        )}`}
-                      >
-                        {rotuloStatus(item.status)}
-                      </span>
                       {mostrarBadgeExpira && (
                         <span
                           className={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${
@@ -2490,177 +2573,251 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  {/* Dados do agendamento pendente: é o que a dona precisa ler
-                      primeiro pra decidir confirmar ou não, então ganha caixa
-                      âmbar mais saturada que o fundo do card (amber-50/60) e
-                      um ring fino. O bloco "Agendamentos confirmados" abaixo é
-                      o oposto — cinza claro, informação auxiliar. */}
-                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg bg-amber-100/70 px-3 py-2 text-sm text-body ring-1 ring-amber-200">
-                    <span className="inline-flex min-w-0 items-center gap-1.5">
-                      <span className="text-body">Data</span>
-                      <span className="font-semibold text-heading">
+                  {/* Corpo central: o que a dona precisa ler primeiro pra
+                      decidir confirmar ou não. Data e horário levam o maior
+                      peso tipográfico do card (é o que se lê num relance); o
+                      serviço vem junto, em corpo menor — ao lado quando cabe,
+                      embaixo no mobile (basis-full). Sem os rótulos
+                      "Data"/"Horário"/"Serviço": dd/mm e hh:mm se identificam
+                      sozinhos, e o rótulo só somava ruído. Profissional desceu
+                      pro accordion. Caixa âmbar mais saturada que o fundo do
+                      card (amber-50/60), com ring fino. */}
+                  <div className="mt-3 rounded-lg bg-amber-100/70 px-3 py-2 ring-1 ring-amber-200">
+                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                      <span className="text-lg font-bold leading-tight tracking-tight text-heading">
                         {formatarData(item.data)}
                       </span>
-                    </span>
-                    <span className="inline-flex min-w-0 items-center gap-1.5">
-                      <span className="text-body">Horário</span>
-                      <span className="font-semibold text-heading">
+                      <span className="text-lg font-bold leading-tight tracking-tight text-heading">
                         {formatarHorario(item.horario)}
                       </span>
-                    </span>
-                    {/* Serviço pode ter nome longo: no mobile ocupa a linha
-                        inteira (basis-full), mas rótulo e valor ficam lado a
-                        lado como em Data/Horário — só quebram pra linha de
-                        baixo quando não couberem, sem gap vertical extra.
-                        min-w-0 + break-words deixam o nome quebrar dentro do
-                        card em vez de estourar a borda. */}
-                    <span className="flex min-w-0 basis-full flex-wrap items-center gap-x-1.5 gap-y-0 sm:basis-auto">
-                      <span className="text-body">Serviço</span>
-                      <span className="min-w-0 break-words font-semibold text-heading">
+                      {/* min-w-0 + break-words deixam nome de serviço longo
+                          quebrar dentro do card em vez de estourar a borda. */}
+                      <span className="min-w-0 basis-full break-words text-sm text-body sm:basis-auto">
                         {item.servicos?.nome ?? "—"}
                       </span>
-                    </span>
-                    {/* Com 0 ou 1 profissional ativo o salão é a própria dona:
-                        dizer "Profissional: Fulana" em todo card é ruído, já
-                        que não há outra opção possível. Mesmo critério de
-                        rotuloAba/iconeAba (a aba vira "Horários"). null =
-                        ainda carregando a contagem, mantém o comportamento
-                        padrão de mostrar. */}
-                    {item.profissional_nome &&
-                      !(qtdProfissionaisAtivos != null && qtdProfissionaisAtivos <= 1) && (
-                      <span className="inline-flex min-w-0 items-center gap-1.5">
-                        <span className="text-body">Profissional</span>
-                        <span className="min-w-0 break-words font-medium">
-                          {item.profissional_nome}
-                        </span>
-                      </span>
-                    )}
+                    </div>
                   </div>
 
-                  {/* Respostas do popup de perguntas do serviço (ver
-                      lib/agendamentoRespostas), quando houver. */}
-                  {(respostasPorAgendamento.get(item.id) ?? []).length > 0 && (
-                    <ul className="mt-2 space-y-0.5">
-                      {respostasPorAgendamento.get(item.id).map((texto, i) => (
-                        <li key={i} className="text-xs text-body">
-                          {texto}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                  {/* Status do pagamento do sinal: UM bloco só, nunca dois.
+                      Ordem de prioridade, do mais forte pro mais fraco:
 
-                  {/* Comprovante do Pix anexado pela cliente na tela de
-                      confirmação de sinal (ver BlocoConfirmacaoPix). Bucket
-                      privado: o que está na coluna é o CAMINHO, e a signed
-                      url só é gerada quando a dona clica. Some sozinho quando
-                      não há comprovante — a maioria dos pendentes. */}
-                  <LinkComprovantePix
-                    caminho={item.comprovante_pix_url}
-                    enviadoEm={item.comprovante_pix_enviado_em}
-                    formatarEnviadoEm={formatarEnviadoEm}
-                  />
+                      1. Comprovante ANEXADO (arquivo real no bucket privado —
+                         ver BlocoConfirmacaoPix / LinkComprovantePix, que só
+                         renderiza havendo caminho e é o único caso que ganha
+                         verde de confirmação).
+                      2. Declarou o pagamento SEM anexar arquivo. Os dois
+                         gestos do BlocoConfirmacaoPix — marcar "Enviei o
+                         comprovante pelo WhatsApp" e subir o arquivo — gravam
+                         sinal_declarado_pago igual, então é a AUSÊNCIA do
+                         caminho que separa um do outro. Tom NEUTRO de
+                         propósito: é a palavra da cliente, não um comprovante
+                         conferido, e não deve ler como confirmação — por isso
+                         não é verde como o caso 1.
+                      3. Nada declarado e status aguardando_sinal: alerta
+                         âmbar. Este badge substitui o "Aguardando sinal" que
+                         antes ficava junto das tags do topo.
 
-                  {/* Declarou o pagamento SEM anexar arquivo. Os dois gestos do
-                      BlocoConfirmacaoPix — marcar "Enviei o comprovante pelo
-                      WhatsApp" e subir o arquivo — gravam sinal_declarado_pago
-                      igual, então é a AUSÊNCIA do caminho que separa um do
-                      outro. Mutuamente exclusiva com o bloco acima, que só
-                      renderiza HAVENDO caminho: nunca aparecem os dois.
-                      Tom neutro de propósito — é a palavra da cliente, não um
-                      comprovante conferido, e não deve ler como confirmação. */}
-                  {item.sinal_declarado_pago && !item.comprovante_pix_url && (
+                      A cadeia de ternários é o que garante o "um ou outro":
+                      antes, 1 e 2 já eram mutuamente exclusivos por acaso (um
+                      testa o caminho, o outro a ausência dele), mas o badge de
+                      status do topo aparecia POR CIMA dos dois. */}
+                  {item.comprovante_pix_url ? (
+                    <LinkComprovantePix
+                      caminho={item.comprovante_pix_url}
+                      enviadoEm={item.comprovante_pix_enviado_em}
+                      formatarEnviadoEm={formatarEnviadoEm}
+                    />
+                  ) : item.sinal_declarado_pago ? (
                     <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-body ring-1 ring-border">
                       <IconeWhatsApp className="h-3.5 w-3.5" />
                       Comprovante declarado pelo WhatsApp
                     </p>
-                  )}
+                  ) : item.status === "aguardando_sinal" ? (
+                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-200 px-2.5 py-1 text-xs font-semibold text-amber-900 ring-1 ring-amber-400">
+                      <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+                      Aguardando sinal
+                    </p>
+                  ) : null}
 
-                  {/* Relatório inline: outros agendamentos CONFIRMADOS do
-                      mesmo telefone, ainda no futuro. Só data+horário, sem
-                      abrir modal — some sozinho quando não há nenhum, pra não
-                      poluir o card na maioria dos casos. */}
-                  {outrosAgendamentos.length > 0 && (
-                    // Cinza claro (não mais âmbar): informação auxiliar, não
-                    // deve competir com a caixa âmbar dos dados do pendente
-                    // acima. Mais claro que o bg-stone-200 da bandeja de
-                    // agrupamento por cliente, pra continuar lendo como algo
-                    // DENTRO do card, e não como um segundo nível de bandeja.
-                    <div className="mt-3 rounded-lg bg-stone-100 px-3 py-2 text-xs text-body">
-                      {/* space-y maior que o padrão da lista: com o botão
-                          "Ver" em área de toque cheia, linhas coladas viram
-                          alvo ambíguo no dedo. */}
-                      <ul className="mt-2 space-y-2">
-                        {outrosAgendamentosVisiveis.map((outro) => (
-                          <li
-                            key={outro.id}
-                            className="flex flex-wrap items-center gap-x-3 gap-y-1"
-                          >
-                            {/* Atalho pro MESMO modal de detalhe que o Painel
-                                abre no clique do evento (ver
-                                onSelecionarConfirmado): leva pra aba Dia na
-                                data do outro agendamento e carrega o id em
-                                ?agendamento=, consumido pelo efeito que chama
-                                setIdSelecionado (ver acima). Vai pela URL, e
-                                não por setState direto, pra reusar o ?data=
-                                que o PainelCalendario já lê no mount. */}
+                  {/* Accordion de detalhes secundários (progressive
+                      disclosure). Tudo que é operacional — respostas do popup
+                      de perguntas do serviço, profissional, outros
+                      agendamentos confirmados da cliente, trocar profissional
+                      — vive aqui, FECHADO por padrão: nada disso decide
+                      confirmar ou cancelar, mas some se a dona precisar.
+                      Expande dentro do próprio card, sem modal.
+
+                      É também o destino padrão de qualquer informação NOVA que
+                      queira entrar no card: o topo (quem / quando / o quê /
+                      sinal) é fechado de propósito, senão o card volta a
+                      crescer. Ao adicionar um bloco aqui, inclua-o em
+                      `temDetalhes` acima — senão o toggle some justo quando
+                      ele for o único conteúdo. */}
+                  {temDetalhes && (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => alternarDetalhesPendente(item.id)}
+                        aria-expanded={detalhesExpandidos}
+                        aria-controls={`detalhes-pendente-${item.id}`}
+                        className="inline-flex items-center gap-1 rounded-lg py-1 text-xs font-medium text-body transition hover:text-heading"
+                      >
+                        <ChevronDown
+                          className={`h-3.5 w-3.5 transition-transform ${
+                            detalhesExpandidos ? "rotate-180" : ""
+                          }`}
+                          aria-hidden="true"
+                        />
+                        {detalhesExpandidos
+                          ? "Ocultar detalhes do agendamento"
+                          : "Ver detalhes do agendamento"}
+                      </button>
+
+                      {detalhesExpandidos && (
+                        <div
+                          id={`detalhes-pendente-${item.id}`}
+                          className="mt-2 space-y-3 border-t border-amber-200 pt-3"
+                        >
+                          {/* Com 0 ou 1 profissional ativo o salão é a própria
+                              dona: dizer "Profissional: Fulana" seria ruído, já
+                              que não há outra opção possível (ver
+                              mostrarProfissional). */}
+                          {mostrarProfissional && (
+                            <p className="flex flex-wrap items-center gap-x-1.5 text-sm text-body">
+                              <span>Profissional</span>
+                              <span className="min-w-0 break-words font-medium text-heading">
+                                {item.profissional_nome}
+                              </span>
+                            </p>
+                          )}
+
+                          {/* Respostas do popup de perguntas do serviço (ver
+                              lib/agendamentoRespostas), quando houver — ex.:
+                              formato de unha. */}
+                          {respostasServico.length > 0 && (
+                            <ul className="space-y-0.5">
+                              {respostasServico.map((texto, i) => (
+                                <li key={i} className="text-xs text-body">
+                                  {texto}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+
+                          {/* Relatório inline: outros agendamentos CONFIRMADOS
+                              do mesmo telefone, ainda no futuro. Só
+                              data+horário, sem abrir modal. */}
+                          {outrosAgendamentos.length > 0 && (
+                            // Cinza claro (não âmbar): informação auxiliar, não
+                            // deve competir com a caixa âmbar dos dados do
+                            // pendente acima. Mais claro que o bg-stone-200 da
+                            // bandeja de agrupamento por cliente, pra continuar
+                            // lendo como algo DENTRO do card, e não como um
+                            // segundo nível de bandeja.
+                            <div className="rounded-lg bg-stone-100 px-3 py-2 text-xs text-body">
+                              <p className="font-medium text-heading">
+                                Agendamentos confirmados
+                              </p>
+                              {/* space-y maior que o padrão da lista: com o
+                                  botão "Agendado" em área de toque cheia,
+                                  linhas coladas viram alvo ambíguo no dedo. */}
+                              <ul className="mt-2 space-y-2">
+                                {outrosAgendamentosVisiveis.map((outro) => (
+                                  <li
+                                    key={outro.id}
+                                    className="flex flex-wrap items-center gap-x-3 gap-y-1"
+                                  >
+                                    {/* Atalho pro MESMO modal de detalhe que o
+                                        Painel abre no clique do evento (ver
+                                        onSelecionarConfirmado): leva pra aba
+                                        Dia na data do outro agendamento e
+                                        carrega o id em ?agendamento=, consumido
+                                        pelo efeito que chama setIdSelecionado
+                                        (ver acima). Vai pela URL, e não por
+                                        setState direto, pra reusar o ?data= que
+                                        o PainelCalendario já lê no mount. */}
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        router.push(
+                                          `${pathname}?aba=painel&data=${outro.data}&agendamento=${outro.id}`,
+                                          { scroll: false }
+                                        )
+                                      }
+                                      className="inline-flex min-h-11 min-w-16 items-center justify-center rounded-full bg-green-50 px-3.5 py-1.5 text-xs font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
+                                    >
+                                      Agendado
+                                    </button>
+                                    <span>
+                                      {formatarData(outro.data)} às{" "}
+                                      {formatarHorario(outro.horario)}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                              {/* Toggle da truncagem interna (2 visíveis por
+                                  padrão). Mesmo formato de badge dos "Agendado"
+                                  da lista acima (pílula, área de toque de
+                                  44px), mas em cinza em vez do verde: só
+                                  mostra/esconde linhas que já estão aqui, não
+                                  navega pra lugar nenhum. */}
+                              {confirmadosOcultos > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => alternarListaConfirmados(item.id)}
+                                  aria-expanded={listaConfirmadosExpandida}
+                                  className="mt-1 inline-flex min-h-11 min-w-16 items-center justify-center rounded-full bg-stone-200 px-3.5 py-1.5 text-xs text-stone-700 ring-1 ring-stone-300 transition hover:bg-stone-300"
+                                >
+                                  {listaConfirmadosExpandida
+                                    ? "Mostrar menos"
+                                    : `+${confirmadosOcultos} ${
+                                        confirmadosOcultos === 1 ? "outro" : "outros"
+                                      }`}
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Troca de profissional: ação secundária, e por isso
+                              aqui e não no rodapé — o rodapé é só
+                              Confirmar/Cancelar. Handler intacto; a regra de
+                              exibição virou podeTrocarProfissional acima. */}
+                          {podeTrocarProfissional && (
                             <button
                               type="button"
-                              onClick={() =>
-                                router.push(
-                                  `${pathname}?aba=painel&data=${outro.data}&agendamento=${outro.id}`,
-                                  { scroll: false }
-                                )
-                              }
-                              className="inline-flex min-h-11 min-w-16 items-center justify-center rounded-full bg-green-50 px-3.5 py-1.5 text-xs font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
+                              onClick={() => setAgendamentoParaTrocar(item)}
+                              className="inline-flex items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
                             >
-                              Agendado
+                              Trocar profissional
                             </button>
-                            <span>
-                              {formatarData(outro.data)} às{" "}
-                              {formatarHorario(outro.horario)}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                      {/* Toggle da truncagem. Mesmo formato de badge dos "Ver"
-                          da lista acima (pílula, área de toque de 44px), mas
-                          em cinza em vez do azul: só mostra/esconde linhas que
-                          já estão aqui, não navega pra lugar nenhum — o azul
-                          fica reservado pra ação que troca de tela. */}
-                      {confirmadosOcultos > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => alternarListaConfirmados(item.id)}
-                          aria-expanded={listaConfirmadosExpandida}
-                          className="mt-1 inline-flex min-h-11 min-w-16 items-center justify-center rounded-full bg-stone-200 px-3.5 py-1.5 text-xs text-stone-700 ring-1 ring-stone-300 transition hover:bg-stone-300"
-                        >
-                          {listaConfirmadosExpandida
-                            ? "Mostrar menos"
-                            : `+${confirmadosOcultos} ${
-                                confirmadosOcultos === 1 ? "outro" : "outros"
-                              }`}
-                        </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
 
+                  {/* Rodapé: SÓ as duas decisões sobre o agendamento —
+                      Confirmar (verde, primária) e Cancelar (outline vermelho,
+                      secundária). "Entrar em contato" subiu pro cabeçalho e
+                      "Trocar profissional" desceu pro accordion, pra este bloco
+                      não misturar decisão com navegação.
+
+                      Cada um é um botão dividido em duas zonas: a maior
+                      (texto+ícone) mantém o comportamento de sempre (update +
+                      WhatsApp); a menor (só ícones, ~64px pra área de toque no
+                      mobile) abre um popup de confirmação e, se aceito, faz o
+                      mesmo update mas pula o redirecionamento pro WhatsApp.
+                      Mesma cor de fundo dos dois lados — só uma borda fina
+                      (mesma cor do ring já usado no botão) separa as zonas, sem
+                      criar elemento/cor novos. */}
+                  {/* As QUATRO zonas passam por comGateDeEtiqueta: fossem só as
+                      duas maiores, o atalho "sem notificar" seria um desvio
+                      silencioso do aviso de etiqueta. O gate não muda o que
+                      cada zona faz — só decide se roda agora ou depois do
+                      modal. Consequência aceita: nas zonas pequenas, seguir
+                      pelo aviso abre em seguida o popup de "sem notificar" que
+                      já existia, dois modais em sequência. */}
                   <div className="mt-4 flex flex-col gap-2">
-                    {/* Botão dividido em duas zonas: a maior (texto+ícone)
-                        mantém o comportamento de sempre (update + WhatsApp);
-                        a menor (só ícones, ~64px pra área de toque no mobile)
-                        abre um popup de confirmação e, se aceito, faz o mesmo
-                        update mas pula o redirecionamento pro WhatsApp. Mesma
-                        cor de fundo dos dois lados — só uma borda fina (mesma
-                        cor do ring já usado no botão) separa as zonas, sem
-                        criar elemento/cor novos. */}
-                    {/* As QUATRO zonas passam por comGateDeEtiqueta: fossem
-                        só as duas maiores, o atalho "sem notificar" seria um
-                        desvio silencioso do aviso de etiqueta. O gate não
-                        muda o que cada zona faz — só decide se roda agora ou
-                        depois do modal. Consequência aceita: nas zonas
-                        pequenas, seguir pelo aviso abre em seguida o popup de
-                        "sem notificar" que já existia, dois modais em
-                        sequência. */}
                     <div className="flex items-stretch overflow-hidden rounded-lg bg-green-50 ring-1 ring-green-100">
                       <button
                         type="button"
@@ -2732,45 +2889,6 @@ export default function AdminPage() {
                         <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
                       </button>
                     </div>
-
-                    {/* Contato livre (sem mensagem pré-preenchida), mesmo
-                        padrão dos cards de pendência administrativa acima
-                        (TIPOS_PENDENCIA) — diferente do "Entrar em contato"
-                        do Histórico, que reaproveita msg_reativacao (texto
-                        pensado pra cliente SEM agendamento ativo, não se
-                        aplica aqui). Sem telefone (não deveria ocorrer no
-                        inbox, que já filtra por item.telefone, mas fica
-                        defensivo) o botão fica desabilitado com tooltip. */}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        window.open(
-                          linkWhatsAppSemMensagem(item.telefone),
-                          "_blank",
-                          "noopener,noreferrer"
-                        )
-                      }
-                      disabled={!item.telefone}
-                      title={!item.telefone ? "Telefone não cadastrado" : undefined}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 ring-1 ring-blue-100 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-blue-50"
-                    >
-                      <IconeWhatsApp />
-                      Entrar em contato
-                    </button>
-
-                    {/* Troca de profissional só com o toggle DESLIGADO (o dono
-                        encaixa); ligado, respeita a escolha do cliente. E só
-                        com 2+ profissionais ativos — com 1 só não há pra quem
-                        trocar. */}
-                    {!escolhaProfissional && qtdProfissionaisAtivos > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => setAgendamentoParaTrocar(item)}
-                        className="inline-flex items-center justify-center rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
-                      >
-                        Trocar profissional
-                      </button>
-                    )}
                   </div>
                 </li>
                 );
@@ -2826,6 +2944,36 @@ export default function AdminPage() {
                       <span className="ml-auto shrink-0 text-xs text-body">
                         {grupo.itens.length} pendentes
                       </span>
+                      {/* "Entrar em contato" do grupo: mesma regra de eco do
+                          nome/telefone/etiqueta acima. Os cards de dentro não
+                          renderizam o cabeçalho (ver `emGrupo`), então a pílula
+                          deles nem existe — sem esta aqui, cliente com 2+
+                          pendentes ficaria SEM atalho de contato.
+
+                          A quebra de linha é do WRAPPER (basis-full), não da
+                          pílula: a contagem acima usa ml-auto e empurraria a
+                          pílula pra fora da linha, mas basis-full aplicado no
+                          próprio botão o esticava pra largura inteira da
+                          bandeja. Wrapper ocupa a linha, botão ocupa só o
+                          conteúdo — mesma largura do modo solo. */}
+                      <div className="basis-full">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            window.open(
+                              linkWhatsAppSemMensagem(grupo.telefone),
+                              "_blank",
+                              "noopener,noreferrer"
+                            )
+                          }
+                          disabled={!grupo.telefone}
+                          title={!grupo.telefone ? "Telefone não cadastrado" : undefined}
+                          className="mt-1 inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 ring-1 ring-green-200 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-green-50"
+                        >
+                          <IconeWhatsApp className="h-3.5 w-3.5" />
+                          Entrar em contato
+                        </button>
+                      </div>
                     </div>
                     <ul className="space-y-3 p-3">{cards}</ul>
                   </li>
