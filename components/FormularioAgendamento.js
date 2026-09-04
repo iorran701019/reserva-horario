@@ -5,6 +5,7 @@ import { Check, MessageCircleOff } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import {
   buscarRestricoesAtivas,
+  buscarMesesJanela,
   calcularPrimeiroMesComVaga,
   calcularVagasDoMes,
   calcularVagasPorHorario,
@@ -26,7 +27,8 @@ import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendament
 import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
 import { useVoltarFisico } from "@/lib/voltarFisico";
 import {
-  dentroDaJanelaAgendamento,
+  dataAgendavelComMes,
+  mesesJanelaIndisponiveis,
   diaLiberadoPorEtiqueta,
 } from "@/lib/janelaAgendamento";
 import { linkWhatsApp, MENSAGEM_CONFIRMACAO } from "@/lib/whatsapp";
@@ -123,6 +125,10 @@ const DIAS_SEMANA_CURTO = ["D", "S", "T", "Q", "Q", "S", "S"];
 // módulo em vez de `new Set()` no parâmetro, que criaria um objeto novo a
 // cada render.
 const NENHUM_DIA_SEM_VAGA = new Set();
+
+// Mesmo motivo dos defaults acima, agora pra prop `mesesJanela` de
+// CalendarioDias (Map "AAAA-M" -> status mensal da agenda).
+const NENHUM_MES_CONFIGURADO = new Map();
 
 // Mesmo motivo do default acima, agora pra prop `restricoes` de CalendarioDias
 // (ver restrições de agenda por etiqueta em lib/janelaAgendamento.js): array
@@ -273,8 +279,9 @@ function perguntaDeveAparecer(pergunta, respostas) {
 // mão. Um dia nasce DESABILITADO (cinza, não clicável) quando é passado (< min),
 // quando o seu dia da semana não está em `diasSemanaAtivos` — o conjunto de
 // dias em que há profissional elegível trabalhando (calculado por quem chama)
-// — ou quando está além de estabelecimentos.janela_agendamento_fim (ver
-// dentroDaJanelaAgendamento em lib/janelaAgendamento.js, a MESMA checagem
+// — ou quando o mês/data não é agendável (status mensal da agenda, ou
+// estabelecimentos.janela_agendamento_fim nos meses sem status — ver
+// dataAgendavelComMes em lib/janelaAgendamento.js, a MESMA checagem
 // usada em lib/disponibilidade.js pro fluxo público e o /admin nunca divergirem).
 //
 // Props:
@@ -294,7 +301,12 @@ function perguntaDeveAparecer(pergunta, respostas) {
 //   onSelecionar     – recebe o "YYYY-MM-DD" do dia clicado (só dias válidos).
 //   onPrev/onNext    – navegação de mês. podeVoltar trava o passado.
 //   estabelecimento  – salão atual, lido só por janela_agendamento_fim (ver
-//                   dentroDaJanelaAgendamento acima).
+//                   dataAgendavelComMes acima).
+//   mesesJanela      – Map "AAAA-M" -> status mensal da agenda
+//                   (janela_agendamento_meses, ver buscarMesesJanela em
+//                   lib/disponibilidade.js). Um mês com registro decide
+//                   sozinho se é agendável; os meses SEM registro seguem na
+//                   data única de estabelecimento.janela_agendamento_fim.
 //   restricoes       – restrições de agenda por etiqueta ATIVAS do salão (ver
 //                   buscarRestricoesAtivas em lib/disponibilidade.js). Um dia
 //                   coberto por uma restrição que NÃO libera esta cliente fica
@@ -335,6 +347,7 @@ export function CalendarioDias({
   onNext,
   podeVoltar,
   estabelecimento,
+  mesesJanela = NENHUM_MES_CONFIGURADO,
   restricoes = NENHUMA_RESTRICAO,
   etiquetaClienteId = null,
   vencimentoManutencao,
@@ -420,7 +433,12 @@ export function CalendarioDias({
           const iso = formatarISO(date);
           const passado = iso < min;
           const fechado = !diasSemanaAtivos.has(date.getDay());
-          const foraDaJanela = !dentroDaJanelaAgendamento(iso, estabelecimento);
+          const foraDaJanela = !dataAgendavelComMes(
+            iso,
+            estabelecimento,
+            mesesJanela,
+            etiquetaClienteId
+          );
           // Segunda checagem de dia, independente da janela: o dia só é
           // selecionável se passar nas DUAS (ver diaLiberadoPorEtiqueta em
           // lib/janelaAgendamento.js — a MESMA regra que lib/disponibilidade.js
@@ -958,6 +976,14 @@ export default function FormularioAgendamento({
   // uma lista velha aqui nunca abre um horário que o cálculo fecharia.
   const [restricoesAgenda, setRestricoesAgenda] = useState(NENHUMA_RESTRICAO);
 
+  // Status mensal da agenda (janela_agendamento_meses). Mesmo papel e mesmo
+  // ciclo de vida de restricoesAgenda acima: o calendário precisa do mapa
+  // ANTES de qualquer clique, e o submit reaplica a regra. Mapa vazio = nenhum
+  // mês configurado = nenhum dia agendável (fail-closed, ver mesAgendavel);
+  // mapa marcado como falha de leitura = fail-open. A distinção vem pronta de
+  // buscarMesesJanela e só precisa CHEGAR até aqui inteira.
+  const [mesesJanela, setMesesJanela] = useState(NENHUM_MES_CONFIGURADO);
+
   // Etiqueta da cliente que está agendando. No público vem de
   // clienteInicial.etiqueta_id, propagado pelas RPCs de identificação/cadastro
   // (SÓ o id trafega: nenhuma tela pública mostra nome/emoji de etiqueta). No
@@ -971,6 +997,19 @@ export default function FormularioAgendamento({
     let ativo = true;
     buscarRestricoesAtivas(estabelecimento.id).then((lista) => {
       if (ativo) setRestricoesAgenda(lista.length > 0 ? lista : NENHUMA_RESTRICAO);
+    });
+    buscarMesesJanela(estabelecimento.id).then((mapa) => {
+      // A troca por NENHUM_MES_CONFIGURADO existe só pra manter a identidade
+      // da prop estável entre renders quando não há nada configurado. Um mapa
+      // vazio MARCADO como falha de leitura não pode passar por ela: a marca
+      // vive no objeto e sumiria na troca, virando "salão sem configuração" —
+      // exatamente o fail-closed que a marca serve pra evitar.
+      if (!ativo) return;
+      setMesesJanela(
+        mapa.size > 0 || mesesJanelaIndisponiveis(mapa)
+          ? mapa
+          : NENHUM_MES_CONFIGURADO
+      );
     });
     return () => {
       ativo = false;
@@ -2747,12 +2786,16 @@ export default function FormularioAgendamento({
     }
 
     // ADMIN (modoLivre, único caminho que chega aqui — `status` truthy):
-    // fora da janela de agendamento (estabelecimento.janela_agendamento_fim,
-    // ver dentroDaJanelaAgendamento) o calendário só sinaliza visualmente
+    // fora da janela de agendamento (status mensal da agenda, ou
+    // estabelecimento.janela_agendamento_fim nos meses sem status — ver
+    // dataAgendavelComMes) o calendário só sinaliza visualmente
     // (borda tracejada, ver `liberado` acima) — aqui vira decisão consciente
     // antes do insert. ignorarJanela=true só quando confirmarForaDaJanela
     // reinvoca depois do "Confirmar mesmo assim?" (ver popup no JSX).
-    if (!ignorarJanela && !dentroDaJanelaAgendamento(form.data, estabelecimento)) {
+    if (
+      !ignorarJanela &&
+      !dataAgendavelComMes(form.data, estabelecimento, mesesJanela, etiquetaClienteId)
+    ) {
       setNotificarForaDaJanela(notificar);
       setMostrarPopupForaDaJanela(true);
       return;
@@ -3247,6 +3290,7 @@ export default function FormularioAgendamento({
                   onNext={proximoMes}
                   podeVoltar={podeVoltarMes}
                   estabelecimento={estabelecimento}
+                  mesesJanela={mesesJanela}
                   restricoes={restricoesAgenda}
                   etiquetaClienteId={etiquetaClienteId}
                   vencimentoManutencao={vencimentoManutencao}

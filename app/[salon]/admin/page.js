@@ -26,16 +26,18 @@ import {
 import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
 import { useNavegacaoTrimestre } from "@/lib/useNavegacaoTrimestre";
 import {
-  buscarRestricoesAtivas,
+  buscarMesesJanela,
   calcularVagasPorHorario,
   profissionaisLivresNoHorario,
 } from "@/lib/disponibilidade";
 import {
-  dentroDaJanelaAgendamento,
+  dataAgendavelComMes,
+  mesesJanelaIndisponiveis,
+  mesesDoAlcance,
+  statusDoMes,
   diasRestantesJanela,
-  restricaoAbertaParaTodos,
-  restricoesVigentesOuFuturas,
 } from "@/lib/janelaAgendamento";
+import { rotuloMesLongo } from "@/lib/mes";
 import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
 import { verificarFidelidadeClientes, buscarProgressoFidelidade } from "@/lib/fidelidade";
 import LinkComprovantePix from "@/components/LinkComprovantePix";
@@ -69,10 +71,7 @@ import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
 import GerenciarProfissionais from "./GerenciarProfissionais";
 import GerenciarClientes from "@/components/GerenciarClientes";
-import SeletorEtiquetaRapido, {
-  rotuloEtiqueta,
-} from "@/components/SeletorEtiquetaRapido";
-import { buscarTodasEtiquetas } from "@/lib/clientesAdmin";
+import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 import {
   buscarEtiquetasPorTelefones,
   contarAgendamentosConfirmados,
@@ -443,6 +442,13 @@ export default function AdminPage() {
   // via localStorage (chave por estabelecimento + data), sem coluna nova.
   const [popupJanelaAberto, setPopupJanelaAberto] = useState(false);
 
+  // Popup diário de VIRADA DE MÊS: o mês corrente não tem registro em
+  // janela_agendamento_meses, ou seja, a agenda de hoje está fechada e a dona
+  // provavelmente não percebeu (ver o useEffect que o abre). Mesmo visual e
+  // mesmo disparo "uma vez por dia via localStorage" do popup acima — o que
+  // muda é só a condição.
+  const [popupViradaMesAberto, setPopupViradaMesAberto] = useState(false);
+
   // true logo após clicar no banner "Agenda aberta até": sinaliza pro
   // ConfiguracoesSalao (montado a seguir, quando viewPai vira "regras") abrir
   // o bloco "Janela de agendamento" já expandido e rolar até ele. Consumida
@@ -579,7 +585,7 @@ export default function AdminPage() {
 
   // Agendamento fora da janela de agendamento (estabelecimento.
   // janela_agendamento_fim) que handleConfirmar interceptou antes do UPDATE
-  // — ver dentroDaJanelaAgendamento. { agendamento, notificar } enquanto o
+  // — ver dataAgendavelComMes. { agendamento, notificar } enquanto o
   // popup "Confirmar mesmo assim?" está aberto; null = fechado. `notificar`
   // preserva a escolha original (zona grande ou zona pequena "sem notificar")
   // pra aplicar depois que a dona decidir no popup.
@@ -678,46 +684,74 @@ export default function AdminPage() {
   // agendamento (próximo cadastro recomeça do zero) e ao sair da aba.
   const [clienteParaAgendar, setClienteParaAgendar] = useState(null);
 
-  // Restrições de agenda por etiqueta ATIVAS do salão (tabela
-  // `restricoes_agenda`), só pro banner do Painel abaixo do "Agenda aberta
-  // até". Carregadas uma vez ao resolver o estabelecimento e PATCHADAS por
-  // ConfiguracoesSalao (ver onRestricoesAtualizadas) — sem esse patch o banner
-  // ficaria com a lista do mount até um reload, exatamente o problema que
-  // onJanelaAgendamentoFimAtualizada resolve pra janela.
-  const [restricoesAgenda, setRestricoesAgenda] = useState([]);
+  // Status mensal da agenda (tabela `janela_agendamento_meses`): alimenta o
+  // card de meses do Painel E as duas checagens de dia desta tela
+  // (handleConfirmar e a lista "Fora da janela"). Carregado ao resolver o
+  // estabelecimento e PATCHADO por ConfiguracoesSalao (ver onMesesJanelaAtualizados), senão o
+  // card ficaria com o mapa do mount até um reload.
+  const [mesesJanela, setMesesJanela] = useState(new Map());
+
+  // Map vazio é ambíguo: pode ser "ainda não carregou" ou "carregou e o salão
+  // não configurou nenhum mês". O popup de virada de mês precisa distinguir
+  // os dois (senão dispararia no primeiro render de TODA visita, antes de a
+  // consulta voltar), então guardamos DE QUAL estabelecimento é o mapa em
+  // mãos. Um id (e não um boolean) porque assim trocar de salão invalida a
+  // resposta sozinho, sem um setState de reset síncrono no corpo do efeito.
+  const [mesesJanelaCarregadoDe, setMesesJanelaCarregadoDe] = useState(null);
 
   useEffect(() => {
     if (!estabelecimento?.id) return;
     let ativo = true;
-    buscarRestricoesAtivas(estabelecimento.id).then((lista) => {
-      if (ativo) setRestricoesAgenda(lista);
+    buscarMesesJanela(estabelecimento.id).then((mapa) => {
+      if (!ativo) return;
+      setMesesJanela(mapa);
+      setMesesJanelaCarregadoDe(estabelecimento.id);
     });
     return () => {
       ativo = false;
     };
   }, [estabelecimento?.id]);
 
-  // Etiquetas do salão indexadas por id, só pra resolver o NOME que o banner
-  // de restrição exibe. buscarTodasEtiquetas (e não buscarEtiquetasAtivas)
-  // porque uma restrição pode apontar pra uma etiqueta já desativada — o
-  // período continua valendo, e o banner precisa dizer qual é.
-  const [etiquetasPorId, setEtiquetasPorId] = useState(new Map());
+  // Fileira de meses do card do Painel: os N meses a partir do corrente
+  // (estabelecimentos.meses_alcance_edicao_agenda, com o mesmo default —
+  // MESMO alcance da grade de configuração, ver mesesDoAlcance). `status`
+  // null = mês sem registro em janela_agendamento_meses, o que AGORA quer
+  // dizer fechado (fail-closed, ver mesAgendavel) — a pílula usa a cor de
+  // fechado, não uma cor neutra.
+  //
+  // Calculado no corpo do componente a partir de `new Date()`, a cada render:
+  // a fileira é sempre relativa a HOJE (mês corrente + os N-1 seguintes) e
+  // gira sozinha na virada do mês, sem lista de meses em state nem cron.
+  // Leitura de janela_agendamento_meses falhou? O card não pode afirmar nada
+  // sobre os meses — nem "aberto" nem "fechado" (ver
+  // marcarMesesJanelaIndisponiveis). Sem isso, uma queda de rede pintaria a
+  // fileira inteira de roxo e diria pra dona que a agenda está fechada.
+  const mesesJanelaComFalha = mesesJanelaIndisponiveis(mesesJanela);
 
-  useEffect(() => {
-    if (!estabelecimento?.id) return;
-    let ativo = true;
-    buscarTodasEtiquetas(estabelecimento.id).then((lista) => {
-      if (ativo) setEtiquetasPorId(new Map(lista.map((e) => [e.id, e])));
-    });
-    return () => {
-      ativo = false;
-    };
-  }, [estabelecimento?.id]);
+  const mesesDoCard = mesesDoAlcance(
+    estabelecimento?.meses_alcance_edicao_agenda
+  ).map(({ ano, mes }) => ({
+    ano,
+    mes,
+    chave: `${ano}-${mes}`,
+    status: statusDoMes(ano, mes, mesesJanela),
+  }));
 
-  // Restrições que o banner mostra: as ativas que cobrem hoje ou ainda vão
-  // começar (ver restricoesVigentesOuFuturas). Períodos já vencidos somem
-  // sozinhos, sem a dona precisar apagá-los.
-  const restricoesEmDestaque = restricoesVigentesOuFuturas(restricoesAgenda);
+  // Meses marcados 'aberto' ALÉM dos exibidos na fileira — viram o "+N meses
+  // abertos" no fim do card, pra a dona saber que configurou mais do que cabe
+  // no alcance atual sem precisar abrir Regras.
+  // Ordinal (ano*12+mes) do último mês da fileira — comparação de mês simples
+  // e sem string, pra contar só o que vem DEPOIS dele (meses já passados,
+  // mesmo marcados 'aberto', não interessam).
+  const ultimoOrdinalDoCard = mesesDoCard.length
+    ? mesesDoCard[mesesDoCard.length - 1].ano * 12 +
+      mesesDoCard[mesesDoCard.length - 1].mes
+    : 0;
+  const abertosAlemDoCard = Array.from(mesesJanela.values()).filter(
+    (linha) =>
+      linha.status === "aberto" &&
+      Number(linha.ano) * 12 + Number(linha.mes) > ultimoOrdinalDoCard
+  ).length;
 
   // Cliente do atalho "Novo agendamento" (aba Histórico) que TEM pendente,
   // segurando o modal de aviso antes de abrir o wizard — mesmo papel que
@@ -826,13 +860,14 @@ export default function AdminPage() {
     }
   }
 
-  // Botão A: gatekeeper. Fora da janela de agendamento (estabelecimento.
-  // janela_agendamento_fim, ver dentroDaJanelaAgendamento), abre o popup
+  // Botão A: gatekeeper. Fora da janela de agendamento (status mensal da
+  // agenda, ou estabelecimento.janela_agendamento_fim nos meses sem status —
+  // ver dataAgendavelComMes), abre o popup
   // "Confirmar mesmo assim?" (ver confirmacaoForaDaJanela) e adia a gravação
   // até a dona decidir — nunca confirma fora da janela sem essa checagem
   // consciente. Dentro da janela, delega direto pra executarConfirmacao.
   async function handleConfirmar(agendamento, notificar = true) {
-    if (!dentroDaJanelaAgendamento(agendamento.data, estabelecimento)) {
+    if (!dataAgendavelComMes(agendamento.data, estabelecimento, mesesJanela)) {
       setConfirmacaoForaDaJanela({ agendamento, notificar });
       return;
     }
@@ -1314,6 +1349,39 @@ export default function AdminPage() {
     setPopupJanelaAberto(true);
   }, [estabelecimento]);
 
+  // Popup diário de virada de mês: o MÊS DE HOJE não tem registro em
+  // janela_agendamento_meses. Com a regra fail-closed (ver mesAgendavel em
+  // lib/janelaAgendamento.js) isso significa que ninguém consegue agendar
+  // para este mês — é o aviso que evita a agenda amanhecer fechada sem
+  // ninguém notar, na virada.
+  //
+  // Mesmo par (condição + "já mostrei hoje" no localStorage) do popup acima,
+  // com chave própria pra os dois não se calarem um ao outro. Espera o mapa
+  // DESTE salão ter chegado: com o Map ainda vazio por não ter carregado, a
+  // condição seria verdadeira em toda visita.
+  useEffect(() => {
+    if (!estabelecimento?.id || mesesJanelaCarregadoDe !== estabelecimento.id) {
+      return;
+    }
+    // Leitura falhou: o mês corrente não tem status POR NÃO TERMOS LIDO nada,
+    // e o agendamento segue liberado (fail-open em mesAgendavel). Avisar "este
+    // mês está fechado" aqui seria alarme falso.
+    if (mesesJanelaIndisponiveis(mesesJanela)) return;
+
+    const agora = new Date();
+    if (
+      statusDoMes(agora.getFullYear(), agora.getMonth() + 1, mesesJanela) != null
+    ) {
+      return;
+    }
+
+    const chave = `virada_mes_popup_mostrado_${estabelecimento.id}_${hojeISOLocal()}`;
+    if (window.localStorage.getItem(chave)) return;
+
+    window.localStorage.setItem(chave, "1");
+    setPopupViradaMesAberto(true);
+  }, [estabelecimento?.id, mesesJanela, mesesJanelaCarregadoDe]);
+
   // Zera a confirmação da anotação ao abrir/fechar/trocar o modal de detalhe
   // (o textarea já recolhe sozinho por `idEditandoObservacao` estar atrelado ao
   // id) — a mensagem "Anotação salva." não vaza entre agendamentos.
@@ -1711,7 +1779,7 @@ export default function AdminPage() {
   // pra status pendente/aguardando_sinal (ver lib/particao.js), e
   // `foraDaJanela` filtra exatamente esses mesmos dois status. Ou seja, todo
   // telefone que a aba exibe está aqui dentro — sem reimplementar as regras
-  // finas (fimDoAtendimento, dentroDaJanelaAgendamento), que continuam num
+  // finas (fimDoAtendimento, dataAgendavelComMes), que continuam num
   // lugar só. Sobra alguma entrada no Map que nenhum card lê: inofensivo, o
   // render busca por telefone e ignora o resto.
   //
@@ -1930,8 +1998,9 @@ export default function AdminPage() {
 
   // Seção "Fora da janela de agendamento" (aba Pendentes): DERIVADA, mesmo
   // padrão de `inbox`/`historico` — nenhum status novo, nenhuma query extra.
-  // data além de estabelecimentos.janela_agendamento_fim (ver
-  // dentroDaJanelaAgendamento), só pendente/aguardando_sinal — confirmado
+  // data não agendável (status mensal da agenda, ou
+  // estabelecimentos.janela_agendamento_fim nos meses sem status — ver
+  // dataAgendavelComMes), só pendente/aguardando_sinal — confirmado
   // fora da janela já passou pelo popup "Confirmar mesmo assim?" (ver
   // handleConfirmar/confirmacaoForaDaJanela) e continua normalmente no
   // Painel, sem aviso; não faz sentido pedir ação de novo aqui. Mesmos guards
@@ -1944,7 +2013,7 @@ export default function AdminPage() {
         item.finalizado &&
         item.telefone &&
         (item.status === "pendente" || item.status === "aguardando_sinal") &&
-        !dentroDaJanelaAgendamento(item.data, estabelecimento)
+        !dataAgendavelComMes(item.data, estabelecimento, mesesJanela)
     )
     .sort((a, b) => {
       const chaveA = `${a.data ?? ""} ${a.horario ?? ""}`;
@@ -2112,54 +2181,106 @@ export default function AdminPage() {
             ConfiguracoesSalao). Visual de botão de verdade (sombra, anel
             grosso, fonte maior/negrito) — precisa ser óbvio que é clicável,
             não só um detalhe no canto. Verde/confortável (>=30 dias) vs
-            vermelho (<30, já existia). Sem
-            estabelecimento.janela_agendamento_fim (salão não configurou
-            ainda), não aparece nada. */}
-        {viewPai === "painel" && estabelecimento.janela_agendamento_fim && (
-          <button
-            type="button"
-            onClick={() => {
-              setViewPai("regras");
-              setFocarJanelaAgendamento(true);
-              setDrawerAberto(false);
-            }}
-            className={`mb-4 flex w-full items-center justify-between gap-3 rounded-2xl px-5 py-4 text-left shadow-md ring-2 transition hover:shadow-lg ${
-              diasRestantesJanela(estabelecimento.janela_agendamento_fim) < 30
-                ? "bg-red-50 text-red-700 ring-red-300 hover:bg-red-100"
-                : "bg-green-50 text-green-700 ring-green-300 hover:bg-green-100"
-            }`}
-          >
-            <span className="min-w-0 text-base font-bold leading-snug sm:text-lg">
-              Agenda aberta até{" "}
-              {formatarDataComAno(estabelecimento.janela_agendamento_fim)}
-              {/* Segunda linha: restrições por etiqueta vigentes ou a começar
-                  (ver restricoesVigentesOuFuturas). Fonte normal/menor pra
-                  ficar claro que é um detalhe DA janela, não um segundo botão.
-                  O clique é o do banner inteiro — leva ao mesmo bloco "Janela
-                  de agendamento", onde as restrições agora moram. */}
-              {restricoesEmDestaque.map((restricao) => (
-                <span
-                  key={restricao.id}
-                  className="mt-1 block text-sm font-medium leading-snug opacity-90"
-                >
-                  {restricao.nome || "Período restrito"}
-                  {restricaoAbertaParaTodos(restricao)
-                    ? ` aberto pra todos desde ${formatarDataComAno(
-                        restricao.abre_para_todos_em
-                      )}`
-                    : ` restrito a ${
-                        etiquetasPorId.get(restricao.etiqueta_liberada_id)
-                          ? rotuloEtiqueta(
-                              etiquetasPorId.get(restricao.etiqueta_liberada_id)
-                            )
-                          : "uma etiqueta"
-                      }`}
+            vermelho (<30, já existia). Aparece SEMPRE no Painel, mesmo com
+            o salão sem nenhum mês configurado: é justamente esse o caso em
+            que a agenda está toda fechada (fail-closed) e a dona mais precisa
+            ver o caminho pra abrir. */}
+        {viewPai === "painel" && (
+            <button
+              type="button"
+              onClick={() => {
+                setViewPai("regras");
+                setFocarJanelaAgendamento(true);
+                setDrawerAberto(false);
+              }}
+              className="mb-4 flex w-full items-center justify-between gap-3 rounded-2xl bg-card px-5 py-4 text-left shadow-md ring-2 ring-border transition hover:shadow-lg"
+            >
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-heading">
+                  Agenda por mês
                 </span>
-              ))}
-            </span>
-            <ChevronRight aria-hidden="true" className="h-6 w-6 shrink-0" />
-          </button>
-        )}
+
+                {/* Grade de meses: uma pílula por mês do alcance
+                    (meses_alcance_edicao_agenda, a MESMA fonte da grade de
+                    ConfiguracoesSalao — as duas telas não podem divergir).
+                    Verde=aberto, amarelo=restrito, cinza=fechado — e "sem
+                    registro" cai no cinza de fechado junto, porque é
+                    exatamente o que ele é agora. O cinza é o MESMO da
+                    ausência/bloqueio do calendário (CORES_EVENTO.ausencia em
+                    PainelCalendario.js: #e5e7eb / #6b7280 / #374151), pra
+                    "indisponível" ter uma cor só no projeto inteiro. Borda
+                    TRACEJADA em todas, mesma convenção já usada no calendário
+                    do /admin pro que é "estado de regra", nunca a paleta cheia
+                    de status de agendamento. grid-cols-4 fixo: os 4 meses do
+                    alcance padrão cabem numa linha só, 6 = 2 linhas, 12 = 3,
+                    sem nenhum número de linhas no CSS — só o wrap natural da
+                    grade. */}
+                <span className="mt-2 block">
+                  <span className="grid grid-cols-4 gap-1.5">
+                    {mesesDoCard.map((m) => (
+                      <span
+                        key={m.chave}
+                        className={`block rounded-lg border border-dashed px-1.5 py-1 text-center text-xs font-semibold capitalize ${
+                          mesesJanelaComFalha
+                            ? "border-border bg-surface text-muted"
+                            : m.status === "aberto"
+                              ? "border-green-400 bg-green-50 text-green-700"
+                              : m.status === "restrito"
+                                ? "border-yellow-400 bg-yellow-50 text-yellow-700"
+                                : "border-gray-500 bg-gray-200 text-gray-700"
+                        }`}
+                      >
+                        {rotuloMesLongo(m.ano, m.mes)}
+
+                        {/* Status por extenso embaixo do nome: a cor sozinha
+                            não diz qual é qual (e não serve pra quem não
+                            distingue verde/amarelo). Na falha de leitura não
+                            afirma status nenhum — "—", com o porquê no aviso
+                            abaixo do card. */}
+                        <span className="block text-[10px] font-medium normal-case opacity-80">
+                          {mesesJanelaComFalha
+                            ? "—"
+                            : m.status === "aberto"
+                              ? "Aberto"
+                              : m.status === "restrito"
+                                ? "Restrito"
+                                : "Fechado"}
+                        </span>
+                      </span>
+                    ))}
+                  </span>
+
+                  {abertosAlemDoCard > 0 && (
+                    <span className="mt-1.5 block text-xs font-medium text-muted">
+                      +{abertosAlemDoCard}{" "}
+                      {abertosAlemDoCard === 1
+                        ? "mês aberto"
+                        : "meses abertos"}
+                    </span>
+                  )}
+                </span>
+
+                {/* Falha de leitura: as pílulas acima ficam neutras e o card
+                    diz por quê, em vez de mentir um status. */}
+                {mesesJanelaComFalha && (
+                  <span className="mt-2 block text-xs font-medium text-body">
+                    Não foi possível carregar o status dos meses. Os
+                    agendamentos seguem abertos até a próxima leitura.
+                  </span>
+                )}
+
+                {/* Sem linha da data antiga (janela_agendamento_fim) nem lista
+                    de restrições por etiqueta aqui: as pílulas de mês já
+                    dizem o status, e o amarelo já diz "restrito" — texto
+                    embaixo do card só repetia. Quem quer o detalhe clica no
+                    card e cai em "Janela de agendamento". */}
+              </span>
+              <ChevronRight
+                aria-hidden="true"
+                className="h-6 w-6 shrink-0 text-body"
+              />
+            </button>
+          )}
 
         {/* Título da seção ativa (a barra de abas virou drawer). O ícone espelha
             o da aba correspondente no drawer. */}
@@ -2787,7 +2908,7 @@ export default function AdminPage() {
                         {/* Confirmar, dividido no mesmo padrão do inbox
                             normal (ver acima): a zona maior chama
                             handleConfirmar direto (que já checa
-                            dentroDaJanelaAgendamento e abre o popup
+                            dataAgendavelComMes e abre o popup
                             "Confirmar mesmo assim?" quando necessário — faz
                             sentido aqui já que este card É o caso fora da
                             janela); a menor abre o popup "Confirmar sem
@@ -3441,10 +3562,10 @@ export default function AdminPage() {
             onMensagemAtualizada={(coluna, valor) =>
               setEstabelecimento((atual) => (atual ? { ...atual, [coluna]: valor } : atual))
             }
-            // Mesmo motivo dos dois patches acima, agora pras restrições de
-            // agenda por etiqueta: o banner do Painel (acima) lê
-            // `restricoesAgenda` deste state, buscado uma vez ao montar.
-            onRestricoesAtualizadas={setRestricoesAgenda}
+            // Mesmo motivo dos patches acima, para o status mensal da agenda: sem
+            // ele o card de meses do Painel ficaria com o mapa do mount até
+            // um reload.
+            onMesesJanelaAtualizados={setMesesJanela}
             focarBlocoJanela={focarJanelaAgendamento}
             onFocarBlocoJanelaConsumido={() => setFocarJanelaAgendamento(false)}
             onCadastrarProfissional={irParaCadastroProfissional}
@@ -4023,7 +4144,7 @@ export default function AdminPage() {
 
       {/* Popup "fora da janela": intercepta handleConfirmar quando o
           agendamento cai além de estabelecimentos.janela_agendamento_fim
-          (ver dentroDaJanelaAgendamento) — mesmo padrão visual do modal de
+          (ver dataAgendavelComMes) — mesmo padrão visual do modal de
           confirmação acima. Cancelar só fecha o popup, sem gravar nada;
           Confirmar chama executarConfirmacao com o `notificar` original. */}
       {confirmacaoForaDaJanela && (
@@ -4148,7 +4269,7 @@ export default function AdminPage() {
           só data/horário, mantendo cliente/serviço/profissional. Reaproveita
           CalendarioDias (exportado de FormularioAgendamento.js) pro
           calendário — a janela de agendamento já bloqueia dias fora dela
-          automaticamente, via dentroDaJanelaAgendamento dentro do próprio
+          automaticamente, via dataAgendavelComMes dentro do próprio
           CalendarioDias. A grade de horários é uma réplica inline da mesma
           grade do wizard (sem extrair componente ainda, só esse um uso).
           Mesmo modal serve as duas zonas do botão dividido (ver
@@ -4343,6 +4464,63 @@ export default function AdminPage() {
               <button
                 type="button"
                 onClick={() => setPopupJanelaAberto(false)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup diário de virada de mês (ver o useEffect que abre
+          popupViradaMesAberto) — o mês corrente não tem status, logo está
+          fechado. Mesmo componente visual do popup acima; o botão faz a MESMA
+          navegação do banner "Agenda por mês": vai pra Regras de negócio com
+          o bloco "Janela de agendamento" já aberto e rolado até ele. */}
+      {popupViradaMesAberto && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-popup-virada-mes"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setPopupViradaMesAberto(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-popup-virada-mes"
+              className="text-lg font-semibold text-heading"
+            >
+              Este mês ainda está fechado
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              O mês atual não tem status na agenda, então{" "}
+              <span className="font-medium text-heading">
+                ninguém consegue agendar
+              </span>{" "}
+              nele. Abra o mês em Regras de negócio pra voltar a receber
+              agendamentos.
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={() => {
+                  setPopupViradaMesAberto(false);
+                  setViewPai("regras");
+                  setFocarJanelaAgendamento(true);
+                  setDrawerAberto(false);
+                }}
+                className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+              >
+                Abrir agenda por mês
+              </button>
+              <button
+                type="button"
+                onClick={() => setPopupViradaMesAberto(false)}
                 className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Fechar

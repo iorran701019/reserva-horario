@@ -9,6 +9,15 @@ import { MENSAGENS_WHATSAPP_CONFIG, substituirVariaveis } from "@/lib/whatsapp";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import { buscarEtiquetasAtivas } from "@/lib/clientesAdmin";
 import { rotuloEtiqueta } from "@/components/SeletorEtiquetaRapido";
+import { buscarMesesJanela } from "@/lib/disponibilidade";
+import {
+  mesesDoAlcance,
+  registroMesJanela,
+  chaveMesJanela,
+  mesesJanelaIndisponiveis,
+  MESES_ALCANCE_PADRAO,
+} from "@/lib/janelaAgendamento";
+import { rotuloMesCurto } from "@/lib/mes";
 
 // Configurações do salão (tabela `estabelecimentos`) editáveis pelo dono direto
 // no admin:
@@ -78,6 +87,11 @@ export default function ConfiguracoesSalao({
   // a lista ATIVA sempre que ela muda, pro banner do Painel não ficar preso na
   // lista carregada no mount do /admin. Opcional (no-op por padrão).
   onRestricoesAtualizadas = () => {},
+  // Mesmo padrão dos dois acima, para o status mensal da agenda (tabela
+  // `janela_agendamento_meses`): chamado com o Map "AAAA-M" -> linha sempre
+  // que ele muda, pro card do Painel não ficar preso no mapa do mount.
+  // Opcional (no-op por padrão).
+  onMesesJanelaAtualizados = () => {},
   // Mesmo padrão acima, para as mensagens de WhatsApp editáveis (ver
   // salvarMensagem abaixo): chamado com (coluna, valor) por coluna gravada
   // com sucesso, pra AdminPage patchar sua própria cópia de `estabelecimento`
@@ -152,6 +166,58 @@ export default function ConfiguracoesSalao({
   // quando na verdade a regra continua valendo no banco.
   const [etiquetasSelect, setEtiquetasSelect] = useState([]);
   const [criandoRestricao, setCriandoRestricao] = useState(false);
+
+  // Status mensal da agenda (tabela `janela_agendamento_meses`): por mês,
+  // 'aberto' | 'fechado' | 'restrito' (+ etiqueta_liberada_id quando
+  // restrito). É o que SUBSTITUI a data única acima nos meses configurados —
+  // a data só continua valendo nos meses SEM registro (ver
+  // dataAgendavelComMes em lib/janelaAgendamento.js). Por isso o campo de
+  // data continua aqui: ele é a regra de tudo que ainda não foi configurado
+  // mês a mês.
+  //
+  // Map "AAAA-M" -> linha (mesmo formato de buscarMesesJanela, pra não haver
+  // duas representações do mesmo dado entre a config e o cálculo).
+  const [mesesJanela, setMesesJanela] = useState(new Map());
+  const [erroMeses, setErroMeses] = useState("");
+  // A ÚLTIMA leitura de janela_agendamento_meses falhou (ver
+  // marcarMesesJanelaIndisponiveis). Flag própria em vez de olhar a marca no
+  // `mesesJanela` acima porque numa falha o mapa em tela NÃO é substituído —
+  // seria trocar o que a dona está vendo por uma grade toda "sem registro",
+  // que é justamente a mentira que a marca existe pra evitar.
+  const [mesesIndisponiveis, setMesesIndisponiveis] = useState(false);
+  // Status por MÊS ("AAAA-M" -> "salvando"|"salvo"), mesmo padrão por-linha de
+  // statusRestricao: vários meses na tela, cada um com o seu feedback.
+  const [statusMes, setStatusMes] = useState({});
+
+  // Meses em que a dona escolheu "Restrito a etiqueta" mas AINDA não escolheu
+  // a etiqueta ("AAAA-M" -> true). 'restrito' sem etiqueta é um estado
+  // inválido — nenhum cliente passaria e nada na tela explicaria por quê —,
+  // então o autosave fica represado aqui até o segundo <select> ter valor: a
+  // grade mostra "restrito" (o que a dona pediu), com a mensagem inline e o
+  // foco no seletor de etiqueta, mas o banco só é tocado quando os DOIS
+  // campos existem, numa gravação só. Sair de 'restrito' sem ter escolhido
+  // etiqueta é livre (só a permanência em 'restrito' vazio é inválida).
+  const [restritoPendente, setRestritoPendente] = useState({});
+
+  // Meses cujo <select> de etiqueta está mostrando a opção VAZIA por escolha
+  // da dona, mesmo com uma etiqueta ainda salva no banco ("AAAA-M" -> true).
+  // Sem isto o <select> saltava de volta pro valor antigo no mesmo instante
+  // (o value vem do registro, que a limpeza represada não altera), como se o
+  // clique dela não tivesse acontecido — a mensagem de bloqueio aparecia
+  // falando de um campo que parecia preenchido. A volta pro valor salvo é
+  // adiada até ela sair do campo (blur) ou mexer no status do mês.
+  const [etiquetaMesVazia, setEtiquetaMesVazia] = useState({});
+  // "AAAA-M" -> <select> de etiqueta, pra dar foco nele quando a gravação é
+  // represada acima. Map de refs pelo mesmo motivo do statusMes: são N linhas
+  // na tela, uma ref só não endereça a linha certa.
+  const etiquetaMesRefs = useRef(new Map());
+
+  // Quantos meses a grade abaixo (e o card do Painel) mostram a partir do mês
+  // corrente — estabelecimentos.meses_alcance_edicao_agenda. undefined =
+  // carregando; null/vazio no banco cai em MESES_ALCANCE_PADRAO.
+  const [mesesAlcance, setMesesAlcance] = useState(undefined);
+  const [erroMesesAlcance, setErroMesesAlcance] = useState("");
+  const [statusMesesAlcance, setStatusMesesAlcance] = useState("");
 
   // Texto das regras do agendamento, mostrado num popup pra cliente, no
   // fluxo público, na etapa final de confirmação — sempre, com ou sem sinal
@@ -328,7 +394,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -419,6 +485,13 @@ export default function ConfiguracoesSalao({
 
       setErroJanela("");
       setJanelaAgendamentoFim(data?.janela_agendamento_fim ?? "");
+
+      setErroMesesAlcance("");
+      setMesesAlcance(
+        Number(data?.meses_alcance_edicao_agenda) > 0
+          ? Number(data.meses_alcance_edicao_agenda)
+          : MESES_ALCANCE_PADRAO
+      );
 
       setErroAntecedenciaMinima("");
       setAntecedenciaMinimaHoras(
@@ -517,6 +590,7 @@ export default function ConfiguracoesSalao({
   // recarregarRestricoes, que também é reusada depois de cada criar/excluir).
   useEffect(() => {
     recarregarRestricoes();
+    recarregarMesesJanela();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estabelecimento.id]);
 
@@ -1131,6 +1205,207 @@ export default function ConfiguracoesSalao({
     onJanelaAgendamentoFimAtualizada(novaData);
   }
 
+  // --- Status mensal da agenda (tabela `janela_agendamento_meses`) ----------
+
+  // Recarrega o mapa do banco e avisa o pai (ver onMesesJanelaAtualizados) —
+  // mesmo par de responsabilidades de recarregarRestricoes abaixo. Reusa
+  // buscarMesesJanela pra config e cálculo lerem exatamente as mesmas colunas.
+  async function recarregarMesesJanela() {
+    const mapa = await buscarMesesJanela(estabelecimento.id);
+
+    // Leitura falhou: a grade não pode exibir todo mês como "Fechado (sem
+    // registro)", que é o que um mapa vazio significa aqui — seria afirmar que
+    // a dona não configurou nada. Mostra o erro e mantém o que já estava na
+    // tela. O mapa MARCADO ainda é repassado ao pai, que precisa dele pro card
+    // do Painel e pras checagens de dia caírem em fail-open.
+    if (mesesJanelaIndisponiveis(mapa)) {
+      setMesesIndisponiveis(true);
+      setErroMeses(
+        "Não foi possível carregar o status dos meses. Recarregue a página antes de alterar algo."
+      );
+      onMesesJanelaAtualizados(mapa);
+      return;
+    }
+
+    setMesesIndisponiveis(false);
+    setErroMeses("");
+    setMesesJanela(mapa);
+    onMesesJanelaAtualizados(mapa);
+  }
+
+  // Grava o status de UM mês. Sem botão "Salvar": cada mudança salva na hora,
+  // com .select() + checagem de linha afetada, mesmo padrão de aplicarJanela.
+  //
+  // Não usa upsert de propósito: sem garantia de UNIQUE
+  // (estabelecimento_id, ano, mes) no banco, um upsert por colunas de
+  // conflito falharia silenciosamente ou duplicaria. Existindo linha, faz
+  // UPDATE por id; não existindo, INSERT.
+  //
+  // `patch` é o conjunto de colunas a gravar — os dois campos editáveis
+  // (status e etiqueta_liberada_id) passam pela MESMA função, pra checagem de
+  // linha afetada e feedback não serem escritos duas vezes.
+  async function salvarMes(ano, mes, patch) {
+    const chave = chaveMesJanela(ano, mes);
+
+    // Com a última leitura falhada não dá pra saber se a linha do mês existe, e
+    // o ramo INSERT abaixo criaria uma DUPLICATA (não há UNIQUE
+    // (estabelecimento_id, ano, mes) no banco — é por isso que esta função não
+    // usa upsert). Barra a gravação em vez de arriscar.
+    if (mesesIndisponiveis) {
+      setErroMeses(
+        "Status dos meses não carregou. Recarregue a página antes de alterar algo."
+      );
+      return;
+    }
+
+    const existente = registroMesJanela(ano, mes, mesesJanela);
+
+    setErroMeses("");
+    setStatusMes((atual) => ({ ...atual, [chave]: "salvando" }));
+
+    const { data: linhas, error } = existente
+      ? await supabase
+          .from("janela_agendamento_meses")
+          .update(patch)
+          .eq("id", existente.id)
+          .select("id, ano, mes, status, etiqueta_liberada_id, abre_para_todos_em")
+      : await supabase
+          .from("janela_agendamento_meses")
+          .insert({
+            estabelecimento_id: estabelecimento.id,
+            ano,
+            mes,
+            status: "aberto",
+            etiqueta_liberada_id: null,
+            abre_para_todos_em: null,
+            ...patch,
+          })
+          .select("id, ano, mes, status, etiqueta_liberada_id, abre_para_todos_em");
+
+    if (error || !linhas?.length) {
+      setStatusMes((atual) => ({ ...atual, [chave]: "" }));
+      setErroMeses(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
+      return;
+    }
+
+    // Patch local do Map (novo objeto, senão o React não re-renderiza) + aviso
+    // ao pai, pro card do Painel refletir na hora.
+    setMesesJanela((atual) => {
+      const proximo = new Map(atual);
+      proximo.set(chave, linhas[0]);
+      onMesesJanelaAtualizados(proximo);
+      return proximo;
+    });
+    setStatusMes((atual) => ({ ...atual, [chave]: "salvo" }));
+  }
+
+  // Troca de status pelo seletor de 3 estados. Sair de 'restrito' limpa a
+  // etiqueta E a data de abertura geral na MESMA gravação — deixar um
+  // etiqueta_liberada_id/abre_para_todos_em pendurado num mês
+  // 'aberto'/'fechado' seria um valor que nada lê e que voltaria sozinho se a
+  // dona escolhesse 'restrito' de novo.
+  async function aplicarStatusMes(ano, mes, novoStatus) {
+    const chave = chaveMesJanela(ano, mes);
+
+    // 'restrito' sem etiqueta não vai pro banco (ver restritoPendente): marca
+    // o mês como pendente, revela o seletor de etiqueta e põe o foco nele. O
+    // setTimeout(0) é pro <select> já estar montado quando o focus roda —
+    // mesmo padrão do scroll do banner da janela, mais acima.
+    if (novoStatus === "restrito") {
+      const etiqueta =
+        registroMesJanela(ano, mes, mesesJanela)?.etiqueta_liberada_id ?? null;
+      if (!etiqueta) {
+        setRestritoPendente((atual) => ({ ...atual, [chave]: true }));
+        setTimeout(() => etiquetaMesRefs.current.get(chave)?.focus(), 0);
+        return;
+      }
+    }
+
+    limparRestritoPendente(chave);
+    limparEtiquetaMesVazia(chave);
+    await salvarMes(ano, mes, {
+      status: novoStatus,
+      ...(novoStatus === "restrito"
+        ? {}
+        : { etiqueta_liberada_id: null, abre_para_todos_em: null }),
+    });
+  }
+
+  function limparRestritoPendente(chave) {
+    setRestritoPendente((atual) => {
+      if (!atual[chave]) return atual;
+      const proximo = { ...atual };
+      delete proximo[chave];
+      return proximo;
+    });
+  }
+
+  // Devolve o <select> de etiqueta ao valor salvo no banco (ver
+  // etiquetaMesVazia). Chamada no blur do campo e em qualquer mexida no
+  // status do mês.
+  function limparEtiquetaMesVazia(chave) {
+    setEtiquetaMesVazia((atual) => {
+      if (!atual[chave]) return atual;
+      const proximo = { ...atual };
+      delete proximo[chave];
+      return proximo;
+    });
+  }
+
+  // Escolha (ou limpeza) da etiqueta liberada de um mês. Sem etiqueta o mês
+  // não pode FICAR restrito: limpar o <select> num mês restrito represa a
+  // gravação igual ao caminho de aplicarStatusMes, em vez de gravar null e
+  // deixar o mês num estado que ninguém consegue agendar e nada explica.
+  async function aplicarEtiquetaMes(ano, mes, valor) {
+    const chave = chaveMesJanela(ano, mes);
+    const etiquetaId = valor || null;
+    const pendente = Boolean(restritoPendente[chave]);
+
+    if (!etiquetaId) {
+      setRestritoPendente((atual) => ({ ...atual, [chave]: true }));
+      // A tela passa a mostrar o vazio que ela escolheu, e não o valor do
+      // banco (que continua lá, intocado, até uma etiqueta válida entrar).
+      setEtiquetaMesVazia((atual) => ({ ...atual, [chave]: true }));
+      return;
+    }
+
+    limparRestritoPendente(chave);
+    limparEtiquetaMesVazia(chave);
+    // Pendente = o status ainda não foi gravado: os dois campos vão juntos.
+    await salvarMes(
+      ano,
+      mes,
+      pendente
+        ? { status: "restrito", etiqueta_liberada_id: etiquetaId }
+        : { etiqueta_liberada_id: etiquetaId }
+    );
+  }
+
+  // Grava meses_alcance_edicao_agenda (quantos meses a grade e o card do
+  // Painel mostram). Mesmo padrão update + .select() + linha afetada.
+  async function salvarMesesAlcance(valor) {
+    const numero = Number(valor);
+    if (!(numero > 0)) return;
+
+    setErroMesesAlcance("");
+    setStatusMesesAlcance("salvando");
+
+    const { data: linhas, error } = await supabase
+      .from("estabelecimentos")
+      .update({ meses_alcance_edicao_agenda: numero })
+      .eq("id", estabelecimento.id)
+      .select("id");
+
+    if (error || !linhas?.length) {
+      setStatusMesesAlcance("");
+      setErroMesesAlcance(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
+      return;
+    }
+
+    setMesesAlcance(numero);
+    setStatusMesesAlcance("salvo");
+  }
+
   // --- Restrições de agenda por etiqueta (tabela `restricoes_agenda`) -------
 
   // Recarrega a lista do banco E o <select> de etiquetas, mantendo os dois
@@ -1481,9 +1756,239 @@ export default function ConfiguracoesSalao({
 
         {blocoAberto === "janela" && (
           <div className="border-t border-border p-4 space-y-4">
-            <p className="text-xs text-muted">
-              Nenhum cliente consegue agendar (nem você, pelo /admin) além
-              desta data. Escolha um atalho ou uma data manual.
+            {/* Grade de meses (janela_agendamento_meses): a regra NOVA, e por
+                isso vem primeiro. Um mês configurado decide sozinho se abre —
+                a data única abaixo só vale nos meses que continuam sem status
+                (ver dataAgendavelComMes em lib/janelaAgendamento.js). Cada
+                mudança salva na hora, sem botão Salvar. */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <span className="block text-sm font-medium text-body">
+                    Status de cada mês
+                  </span>
+                  <p className="text-xs text-muted">
+                    Mês sem status fica FECHADO — só quem você marcar aqui
+                    recebe agendamento.
+                  </p>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="meses-alcance-edicao"
+                    className="mb-1 block text-xs text-muted"
+                  >
+                    Meses editáveis
+                  </label>
+                  <select
+                    id="meses-alcance-edicao"
+                    value={mesesAlcance ?? ""}
+                    onChange={(e) => salvarMesesAlcance(e.target.value)}
+                    disabled={mesesAlcance === undefined}
+                    className="rounded-lg border border-border px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <option value="3">3 meses</option>
+                    <option value="6">6 meses</option>
+                    <option value="12">12 meses</option>
+                  </select>
+                </div>
+              </div>
+
+              {statusMesesAlcance === "salvando" && (
+                <p className="text-xs text-muted">Salvando…</p>
+              )}
+              {erroMesesAlcance && (
+                <p className="text-xs text-red-600">{erroMesesAlcance}</p>
+              )}
+
+              <div className="space-y-2">
+                {/* mesesDoAlcance é chamada AQUI, no render, a partir de
+                    `new Date()` — a fileira é sempre "mês corrente + os N-1
+                    seguintes" e gira sozinha na virada do mês. Nada de lista
+                    de meses guardada em state (que exigiria um cron pra
+                    girar). */}
+                {mesesDoAlcance(mesesAlcance).map(({ ano, mes }) => {
+                  const chave = chaveMesJanela(ano, mes);
+                  const registro = registroMesJanela(ano, mes, mesesJanela);
+                  // Mês represado (restrito escolhido, etiqueta ainda não)
+                  // aparece como restrito NA TELA mesmo sem estar no banco —
+                  // é o que a dona acabou de pedir, e é o que faz o seletor
+                  // de etiqueta aparecer pra ela terminar a escolha.
+                  const pendente = Boolean(restritoPendente[chave]);
+                  const statusAtual = pendente
+                    ? "restrito"
+                    : (registro?.status ?? "");
+
+                  // MESMAS cores das pílulas do card do Painel (ver page.js):
+                  // verde=aberto, amarelo=restrito, cinza=fechado. Mês sem
+                  // registro usa o estilo de FECHADO, porque é o que ele é
+                  // agora (fail-closed em mesAgendavel) — não existe mais um
+                  // estado neutro "usa a data única".
+                  const estiloMes =
+                    statusAtual === "aberto"
+                      ? "bg-green-50 ring-1 ring-green-200"
+                      : statusAtual === "restrito"
+                        ? "bg-yellow-50 ring-1 ring-yellow-200"
+                        : "bg-gray-200 ring-1 ring-gray-300";
+
+                  return (
+                    <div
+                      key={chave}
+                      className={`flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 ${estiloMes}`}
+                    >
+                      <span className="w-20 shrink-0 text-sm font-medium capitalize text-heading">
+                        {rotuloMesCurto(ano, mes)}
+                      </span>
+
+                      <select
+                        aria-label={`Status de ${rotuloMesCurto(ano, mes)}`}
+                        value={statusAtual}
+                        onChange={(e) =>
+                          aplicarStatusMes(ano, mes, e.target.value)
+                        }
+                        className="rounded-lg border border-border bg-card px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                      >
+                        {/* "" só existe enquanto o mês não tem registro, e
+                            não é salvável (voltar pra "sem registro" seria
+                            apagar a linha, fora do escopo desta fatia). Sem
+                            registro o mês JÁ está fechado — o rótulo diz isso
+                            em vez de fingir um estado neutro. */}
+                        <option value="" disabled>
+                          Fechado (sem registro)
+                        </option>
+                        <option value="aberto">Aberto</option>
+                        <option value="fechado">Fechado</option>
+                        <option value="restrito">Restrito a etiqueta</option>
+                      </select>
+
+                      {/* Seletor de etiqueta: MESMO <select> alimentado por
+                          etiquetasSelect que as restrições usam logo abaixo
+                          (ativas + as já escolhidas, mesmo desativadas), pra
+                          uma etiqueta desligada não sumir da tela e a regra
+                          parecer vazia. */}
+                      {statusAtual === "restrito" && (
+                        <>
+                          <select
+                            ref={(el) => {
+                              if (el) etiquetaMesRefs.current.set(chave, el);
+                              else etiquetaMesRefs.current.delete(chave);
+                            }}
+                            aria-label={`Etiqueta liberada em ${rotuloMesCurto(ano, mes)}`}
+                            value={
+                              etiquetaMesVazia[chave]
+                                ? ""
+                                : (registro?.etiqueta_liberada_id ?? "")
+                            }
+                            // O id da etiqueta é uuid (texto): grava a string
+                            // CRUA, nunca Number()/parseInt. Era esse o bug de
+                            // "a etiqueta não salva" — Number(uuid) é NaN, o
+                            // JSON do PostgREST manda NaN como null e a coluna
+                            // era gravada NULA, com a tela dizendo "Salvo ✓"
+                            // (a linha era mesmo afetada). Mesmo padrão do
+                            // <select> das restrições, logo abaixo.
+                            onChange={(e) =>
+                              aplicarEtiquetaMes(ano, mes, e.target.value)
+                            }
+                            // Saiu do campo sem escolher etiqueta: o vazio
+                            // deixa de ser mostrado e o valor salvo volta. O
+                            // mês SEGUE represado (a mensagem continua) —
+                            // isto é só o campo parando de mentir sobre o que
+                            // está no banco.
+                            onBlur={() => limparEtiquetaMesVazia(chave)}
+                            className={`rounded-lg border bg-card px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 ${
+                              pendente ? "border-red-400" : "border-border"
+                            }`}
+                          >
+                            <option value="">Selecione a etiqueta</option>
+                            {etiquetasSelect.map((etiqueta) => (
+                              <option key={etiqueta.id} value={etiqueta.id}>
+                                {rotuloEtiqueta(etiqueta)}
+                              </option>
+                            ))}
+                          </select>
+
+                          {/* Abertura geral do mês restrito: chegada esta
+                              data, o mês passa a valer como 'aberto' pra
+                              qualquer pessoa, sem a dona precisar voltar aqui
+                              (ver mesLibera em lib/janelaAgendamento.js, que
+                              reusa a MESMA checagem das restrições por
+                              etiqueta). Opcional — vazio grava null e o mês
+                              segue restrito por tempo indeterminado. */}
+                          <label className="flex items-center gap-1 text-xs text-muted">
+                            Abre pra todos em (opcional)
+                            <input
+                              type="date"
+                              aria-label={`Abre pra todos em ${rotuloMesCurto(ano, mes)}`}
+                              value={registro?.abre_para_todos_em ?? ""}
+                              onChange={(e) =>
+                                salvarMes(ano, mes, {
+                                  abre_para_todos_em: e.target.value || null,
+                                })
+                              }
+                              className="rounded-lg border border-border bg-card px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                            />
+                          </label>
+
+                          {/* Só com data preenchida: grava null pelo MESMO
+                              salvarMes (update + .select() + checagem de
+                              linha afetada), então o campo e o card do Painel
+                              refletem na hora, sem reload. O input date
+                              nativo tem um "x" próprio em alguns navegadores,
+                              mas não em todos — e no celular, em nenhum. */}
+                          {registro?.abre_para_todos_em && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                salvarMes(ano, mes, {
+                                  abre_para_todos_em: null,
+                                })
+                              }
+                              className="rounded-lg px-2 py-1 text-xs font-medium text-body underline transition hover:text-heading"
+                            >
+                              Limpar
+                            </button>
+                          )}
+
+                          {/* Autosave represado: a dona precisa saber que o
+                              "restrito" que ela vê ainda NÃO está valendo. */}
+                          {pendente && (
+                            <p className="w-full text-xs font-medium text-red-600">
+                              Selecione uma etiqueta antes de continuar — o mês
+                              só fica restrito depois disso.
+                            </p>
+                          )}
+                        </>
+                      )}
+
+                      {statusMes[chave] === "salvando" && (
+                        <span className="text-xs text-muted">Salvando…</span>
+                      )}
+                      {statusMes[chave] === "salvo" && (
+                        <span className="text-xs font-medium text-green-600">
+                          Salvo ✓
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {erroMeses && <p className="text-xs text-red-600">{erroMeses}</p>}
+            </div>
+
+            {/* OCULTO (`false &&`, não removido) desde que a grade de meses
+                acima passou a ser a única regra: a coluna
+                estabelecimentos.janela_agendamento_fim continua existindo,
+                gravável e com a lógica intacta — nenhuma decisão de
+                agendamento a lê (ver o cabeçalho de
+                lib/janelaAgendamento.js), então o campo só confundia a dona
+                com uma segunda data que não manda em nada. Fica aqui inteiro
+                pra voltar trocando o `false` por `true`. */}
+            {false && (
+              <>
+            <p className="border-t border-border pt-4 text-xs text-muted">
+              Campo mantido para referência — não influencia mais o
+              agendamento público. Quem decide é o status de cada mês, acima.
             </p>
 
             <div className="flex flex-wrap gap-2">
@@ -1527,6 +2032,8 @@ export default function ConfiguracoesSalao({
               <p className="text-xs font-medium text-green-600">Salvo ✓</p>
             )}
             {erroJanela && <p className="text-xs text-red-600">{erroJanela}</p>}
+              </>
+            )}
 
             {/* Sub-bloco: antecedência mínima do CLIENTE (não afeta o
                 calendário da janela acima, que é o limite máximo) + corte do
@@ -1598,12 +2105,15 @@ export default function ConfiguracoesSalao({
               )}
             </div>
 
-            {/* Sub-bloco: restrições de agenda por etiqueta. Não é um acordeão
-                próprio de propósito — `blocoAberto` guarda UM bloco só, então
-                uma chave nova aqui fecharia "Janela de agendamento" ao ser
-                aberta. É a segunda regra de "que dias existem" (a primeira é a
-                janela acima), por isso mora junto. Cada campo grava sozinho
-                (autosave), com status/erro próprios. */}
+            {/* Sub-bloco: restrições de agenda por etiqueta (tabela
+                `restricoes_agenda`). OCULTO (`false &&`, não removido) desde
+                o status mensal da agenda: "restrito a etiqueta" agora é um
+                dos três status de cada mês, na grade acima, e manter as duas
+                UIs lado a lado deixava a dona configurar a mesma coisa em
+                dois lugares com regras diferentes. A TABELA e toda a lógica
+                que a lê continuam intactas — só a renderização saiu. Volta
+                trocando o `false` por `true`. */}
+            {false && (
             <div className="border-t border-border pt-4">
               <span className="mb-1 block text-sm font-medium text-body">
                 Restrições por etiqueta
@@ -1794,6 +2304,7 @@ export default function ConfiguracoesSalao({
                 <p className="mt-2 text-xs text-red-600">{erroRestricoes}</p>
               )}
             </div>
+            )}
           </div>
         )}
       </div>
