@@ -56,6 +56,12 @@
 + - [x] Sistema de etiquetas de cliente: CRUD, seletor rápido, badges em Pendentes/wizard admin/ficha de cliente (Sessão 40)
 + - [x] Gate obrigatório de etiqueta ao Confirmar/Cancelar em Pendentes (etiqueta ausente + "Cliente Nova" recorrente), cobrindo as 8 zonas de Pendentes (Sessão 40)
 + - [x] Regra de restrição de agenda por etiqueta ("Agenda de Dezembro"), incluindo propagação de etiqueta_id no fluxo público de identificação (Sessão 40)
++ - [x] Etiqueta "Cliente Fixo" pré-selecionada automaticamente ao marcar mês como "restrito a etiqueta" na Janela de agendamento, e destacada em negrito no topo do select (sessão 42)
++ - [x] Fix de mobile na lista de Etiquetas (aba Clientes): linha quebra em nome+badge / barra de ações, sem estourar em telas estreitas (sessão 42)
++ - [x] Campo de emoji livre nas etiquetas de cliente substituído por paleta fixa de 8 cores (mesmo princípio do Google Calendar), preservando o sistema de cores já reservado pro status de agendamento (sessão 42)
++ - [x] Botão "Renomear" renomeado para "Editar" no CRUD de etiquetas, refletindo que agora também edita cor (sessão 42)
++ - [x] Checklist de novo tenant (`NOVO_TENANT_CHECKLIST.md`) ganhou passo de seed das 5 etiquetas padrão (sessão 42)
++ - [x] `PROTOCOLO.md` ganhou 3 regras novas de fluxo Git para o período pós-`staging` (checagem de base antes de nova branch, branches concorrentes no mesmo arquivo, aviso de comandos rodados fora de prompt do Claude Code) (sessão 42)
 
 ## Em aberto
 - [ ] UX da configuração de pergunta condicional (mãe/filha) em `GerenciarServicos.js` — funcional, mas complexa pra configurar; considerar assistente passo-a-passo ou fluxo guiado no futuro.
@@ -72,6 +78,8 @@
 - PENDENTE, alta prioridade (achado 03/09): pergunta condicional (filha) é salva com pergunta_pai_id e opcao_gatilho_id NULL mesmo com checkbox "depende de outra" marcado e os dois selects preenchidos na tela — reproduzido em produção (tenant Júnior, serviços 148 e 150), em aba anônima (não é cache), com produção já rodando o fix bb37040 (não é deploy desatualizado). Investigação de código não encontrou caminho no state/payload capaz de gerar esse NULL com o checkbox marcado — contradição ainda não resolvida entre o código revisado e o comportamento real. Hipótese em aberto: dado do Network pode ter sido lido da Response em vez do Request Payload (precisa reconfirmar), ou corrida de timing entre o clique na opção-gatilho e o clique em salvar. Handoff detalhado com histórico completo da investigação e próximos passos: reserva-horario_Handoff_Bug_Pergunta_Condicional_Nao_Salva.md.
 - [ ] Bloqueio temporário de novembro (Laysla): bloquear mês inteiro com liberação automática numa data (Sessão 40)
 - [ ] Slots de dezembro da Flávia — 3 abordagens mapeadas (Sessão 38); **substituída pela regra de restrição por etiqueta, item resolvido acima**
++ - [ ] Campo `emoji` em `etiquetas_cliente` ficou sem consumidor no state propagado do admin após a troca por cor — candidata a limpeza futura, sem risco (sessão 42)
++ - [ ] Default de "Cliente Fixo" em mês restrito não filtra por `ativa` em `etiquetasSelect` — caso de borda raro (etiqueta desativada ainda presa a uma restrição), deixado como está por decisão consciente (sessão 42)
 
 ## Segurança — auditoria RLS/Storage (retomar semana que vem)
 - [ ] Upload de comprovante Pix quebrado em staging: bucket `comprovantes-pix` aceita INSERT anônimo, mas falta policy de UPDATE que o `upsert:true` do app exige — hoje toda cliente que anexa arquivo real provavelmente cai silenciosamente no caminho do checkbox.
