@@ -1858,7 +1858,7 @@ export default function AdminPage() {
       const proximo = new Map(atual);
       proximo.set(chave, {
         ...anterior,
-        etiqueta: nova ? { nome: nova.nome, emoji: nova.emoji } : null,
+        etiqueta: nova ? { nome: nova.nome, cor: nova.cor } : null,
       });
       return proximo;
     });

@@ -5,36 +5,103 @@ import { supabase } from "@/lib/supabaseClient";
 import { buscarEtiquetasAtivas } from "@/lib/clientesAdmin";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 
-// Classe única do badge de etiqueta — mesma anatomia dos outros badges do
-// /admin (ver classesStatus/HISTORICO_BADGE): `rounded-full px-2.5 py-0.5
-// text-xs font-medium ring-1` + uma família de cor. Violeta porque nenhum
-// outro selo do painel usa essa família: âmbar é "pendente", verde é
-// "confirmado/agendado", vermelho é "cancelado", cinza é histórico — a
-// etiqueta não pode ser confundida com nenhum deles.
-const CLASSE_BADGE =
-  "rounded-full bg-violet-50 px-2.5 py-0.5 text-xs font-medium text-violet-700 ring-1 ring-violet-100";
+// Paleta das etiquetas. A dona escolhe UMA destas ao criar/renomear a
+// etiqueta (ver o seletor de swatches em GerenciarClientes.js) e o valor vai
+// pra coluna `etiquetas_cliente.cor` como esta chave — nunca como classe
+// Tailwind, que é detalhe de apresentação e mudaria o banco junto com o CSS.
+//
+// As classes são ESTÁTICAS de propósito: o Tailwind faz purge por varredura
+// de texto, então `bg-${cor}-50` interpolado não sobreviveria ao build.
+//
+// A anatomia do badge é a mesma dos outros selos do /admin (ver
+// classesStatus/HISTORICO_BADGE): `rounded-full px-2.5 py-0.5 text-xs
+// font-medium ring-1` + uma família de cor. Nenhuma das 8 famílias aqui é
+// usada por outro selo do painel — âmbar é "pendente", verde é
+// "confirmado/agendado", vermelho é "cancelado", cinza é histórico — pra que
+// uma etiqueta nunca possa ser confundida com um status.
+export const CORES_ETIQUETA = {
+  violeta: {
+    rotulo: "Violeta",
+    badge: "bg-violet-50 text-violet-700 ring-violet-100",
+    swatch: "bg-violet-500",
+  },
+  azul: {
+    rotulo: "Azul",
+    badge: "bg-blue-50 text-blue-700 ring-blue-100",
+    swatch: "bg-blue-500",
+  },
+  rosa: {
+    rotulo: "Rosa",
+    badge: "bg-rose-50 text-rose-700 ring-rose-100",
+    swatch: "bg-rose-500",
+  },
+  esmeralda: {
+    rotulo: "Esmeralda",
+    badge: "bg-emerald-50 text-emerald-700 ring-emerald-100",
+    swatch: "bg-emerald-500",
+  },
+  indigo: {
+    rotulo: "Índigo",
+    badge: "bg-indigo-50 text-indigo-700 ring-indigo-100",
+    swatch: "bg-indigo-500",
+  },
+  ciano: {
+    rotulo: "Ciano",
+    badge: "bg-cyan-50 text-cyan-700 ring-cyan-100",
+    swatch: "bg-cyan-500",
+  },
+  fucsia: {
+    rotulo: "Fúcsia",
+    badge: "bg-fuchsia-50 text-fuchsia-700 ring-fuchsia-100",
+    swatch: "bg-fuchsia-500",
+  },
+  teal: {
+    rotulo: "Teal",
+    badge: "bg-teal-50 text-teal-700 ring-teal-100",
+    swatch: "bg-teal-500",
+  },
+};
+
+// Violeta é o padrão: era a cor fixa de TODOS os badges antes desta troca,
+// então etiquetas antigas (cor null no banco) continuam exatamente com a
+// aparência que já tinham.
+export const COR_ETIQUETA_PADRAO = "violeta";
+
+const CLASSE_BADGE_BASE = "rounded-full px-2.5 py-0.5 text-xs font-medium ring-1";
+
+// Cor desconhecida (valor legado, ou lixo digitado direto no banco) cai no
+// padrão em vez de gerar um badge sem classe de cor nenhuma.
+export function corEtiqueta(cor) {
+  return CORES_ETIQUETA[cor] ?? CORES_ETIQUETA[COR_ETIQUETA_PADRAO];
+}
+
+export function classesBadgeEtiqueta(cor) {
+  return `${CLASSE_BADGE_BASE} ${corEtiqueta(cor).badge}`;
+}
 
 // Chip do cliente ainda sem etiqueta. Âmbar (a mesma família do "pendente")
 // porque é justamente um convite a agir, não um estado neutro.
 const CLASSE_CHIP_VAZIO =
   "rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-amber-200";
 
-// Texto do badge: emoji é opcional na tabela, então o espaço só entra quando
-// há emoji (senão o badge nasce com um espaço solto antes do nome).
+// Texto do badge: só o nome. A identificação visual que antes vinha do emoji
+// agora vem da COR do badge (ver CORES_ETIQUETA), então nada é prefixado.
 // Exportado porque outros pontos do /admin precisam do MESMO rótulo fora de um
 // badge — ver o banner de restrição de agenda em app/[salon]/admin/page.js e o
 // CRUD de restrições em ConfiguracoesSalao.js. Continua sendo informação
 // EXCLUSIVA do /admin: nada no fluxo público chama isto.
 export function rotuloEtiqueta(etiqueta) {
   if (!etiqueta) return "";
-  return etiqueta.emoji ? `${etiqueta.emoji} ${etiqueta.nome}` : etiqueta.nome;
+  return etiqueta.nome;
 }
 
 // Badge somente-leitura, sem popover. Exportado à parte porque nem todo ponto
 // de exibição tem um cliente gravável por trás (ver `clienteId` abaixo).
 export function BadgeEtiqueta({ etiqueta }) {
   if (!etiqueta) return null;
-  return <span className={CLASSE_BADGE}>{rotuloEtiqueta(etiqueta)}</span>;
+  return (
+    <span className={classesBadgeEtiqueta(etiqueta.cor)}>{rotuloEtiqueta(etiqueta)}</span>
+  );
 }
 
 // Popover pequeno pra ver/trocar a etiqueta de UM cliente, reaproveitado em
@@ -42,8 +109,8 @@ export function BadgeEtiqueta({ etiqueta }) {
 // bandeja do grupo, dropdown da busca por nome, linha "Agendando para X",
 // card e ficha da aba Clientes). Grava direto em `clientes.etiqueta_id`.
 //
-// O gatilho é o próprio badge: com etiqueta mostra o selo violeta, sem
-// etiqueta mostra o chip âmbar "Sem etiqueta". Clicar abre a lista das
+// O gatilho é o próprio badge: com etiqueta mostra o selo na COR da etiqueta,
+// sem etiqueta mostra o chip âmbar "Sem etiqueta". Clicar abre a lista das
 // etiquetas ATIVAS do salão (carregada só na primeira abertura, pra que N
 // badges numa tela não virem N queries no load).
 //
@@ -62,8 +129,8 @@ export function BadgeEtiqueta({ etiqueta }) {
 //                        leitura — mostra o badge se houver etiqueta, e nada
 //                        se não houver. Nunca oferece um chip que não teria
 //                        onde gravar.
-//   etiqueta           – { nome, emoji } atual, ou null.
-//   onEtiquetaAlterada – recebe a etiqueta nova ({ id, nome, emoji }) ou null
+//   etiqueta           – { nome, cor } atual, ou null.
+//   onEtiquetaAlterada – recebe a etiqueta nova ({ id, nome, cor }) ou null
 //                        (ao remover), DEPOIS do update ter confirmado linha.
 //                        Quem monta patcha o próprio state com isso — este
 //                        componente não guarda cópia do valor exibido.
@@ -243,7 +310,9 @@ export default function SeletorEtiquetaRapido({
         aria-haspopup="menu"
         aria-expanded={aberto}
         title={etiqueta ? `Etiqueta: ${rotuloEtiqueta(etiqueta)}` : "Definir etiqueta"}
-        className={`${etiqueta ? CLASSE_BADGE : CLASSE_CHIP_VAZIO} shrink-0 transition hover:brightness-95`}
+        className={`${
+          etiqueta ? classesBadgeEtiqueta(etiqueta.cor) : CLASSE_CHIP_VAZIO
+        } shrink-0 transition hover:brightness-95`}
       >
         {etiqueta ? rotuloEtiqueta(etiqueta) : "Sem etiqueta"}
       </button>
@@ -285,6 +354,13 @@ export default function SeletorEtiquetaRapido({
                     atual ? "bg-surface font-medium text-heading" : "text-body"
                   }`}
                 >
+                  {/* Sem o emoji, a única pista visual da etiqueta é a cor —
+                      então a opção do popover precisa mostrá-la, senão a
+                      lista vira oito nomes idênticos em preto. */}
+                  <span
+                    aria-hidden="true"
+                    className={`h-2.5 w-2.5 shrink-0 rounded-full ${corEtiqueta(item.cor).swatch}`}
+                  />
                   <span className="min-w-0 truncate">{rotuloEtiqueta(item)}</span>
                   {atual && <span className="ml-auto shrink-0 text-xs text-body">atual</span>}
                 </button>

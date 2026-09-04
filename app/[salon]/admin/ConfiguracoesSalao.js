@@ -1491,7 +1491,7 @@ export default function ConfiguracoesSalao({
 
     const { data: desativadas } = await supabase
       .from("etiquetas_cliente")
-      .select("id, nome, emoji, ordem")
+      .select("id, nome, emoji, cor, ordem")
       .in("id", idsFaltando);
 
     setEtiquetasSelect([...ativas, ...(desativadas ?? [])]);
