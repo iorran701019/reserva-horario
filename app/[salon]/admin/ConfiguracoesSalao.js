@@ -58,6 +58,27 @@ function dataMaisDias(dias) {
   return `${ano}-${mes}-${dia}`;
 }
 
+// Nome da etiqueta usada como padrao quando a dona poe um mes em "restrito"
+// sem ter escolhido etiqueta (ver aplicarStatusMes). Constante em vez de
+// literal solto porque o mesmo nome tambem decide qual <option> vai pro topo
+// da lista, em negrito.
+const ETIQUETA_CLIENTE_FIXO = "cliente fixo";
+
+// A etiqueta "Cliente Fixo" dentro da lista do <select>, ou null se ela nao
+// estiver la (nao existe no salao, foi desativada, ou a carga assincrona de
+// etiquetasSelect ainda nao terminou). Compara por nome com trim +
+// case-insensitive: o nome e digitado pela dona no CRUD de etiquetas, entao
+// "Cliente fixo " e " CLIENTE FIXO" sao a mesma etiqueta.
+function encontrarEtiquetaClienteFixo(etiquetasSelect) {
+  return (
+    (etiquetasSelect ?? []).find(
+      (etiqueta) =>
+        String(etiqueta?.nome ?? "").trim().toLowerCase() ===
+        ETIQUETA_CLIENTE_FIXO
+    ) ?? null
+  );
+}
+
 // Atalhos de dias pro campo de janela de agendamento (ver bloco "Janela de
 // agendamento"): cada um calcula hoje + N e preenche o campo.
 const ATALHOS_JANELA_DIAS = [45, 60, 90];
@@ -1315,6 +1336,23 @@ export default function ConfiguracoesSalao({
       const etiqueta =
         registroMesJanela(ano, mes, mesesJanela)?.etiqueta_liberada_id ?? null;
       if (!etiqueta) {
+        // Caso de longe mais comum: restringir o mês a "Cliente Fixo". Existindo
+        // essa etiqueta, os dois campos vão juntos numa gravação só e o mês
+        // nem chega a ficar represado — a dona troca o status e acabou. Se ela
+        // quiser outra etiqueta, o <select> continua lá pra trocar depois.
+        const etiquetaFixo = encontrarEtiquetaClienteFixo(etiquetasSelect);
+        if (etiquetaFixo) {
+          limparRestritoPendente(chave);
+          limparEtiquetaMesVazia(chave);
+          await salvarMes(ano, mes, {
+            status: "restrito",
+            etiqueta_liberada_id: etiquetaFixo.id,
+          });
+          return;
+        }
+
+        // Sem "Cliente Fixo" na lista (não existe, foi desativada, ou a carga
+        // ainda está em voo): segue o represamento de sempre.
         setRestritoPendente((atual) => ({ ...atual, [chave]: true }));
         setTimeout(() => etiquetaMesRefs.current.get(chave)?.focus(), 0);
         return;
@@ -1687,6 +1725,20 @@ export default function ConfiguracoesSalao({
   const mostrarToggleEscolha =
     qtdProfissionaisAtivos != null && qtdProfissionaisAtivos >= 2;
 
+  // Ordem de EXIBIÇÃO das <option> do seletor de etiqueta do mês restrito:
+  // "Cliente Fixo" primeiro (é o padrão que aplicarStatusMes grava sozinho, e
+  // de longe o mais escolhido), o resto na ordem que já vinha. NÃO reordena
+  // `etiquetasSelect`: aquele state é a lista do banco (ativas por `ordem` +
+  // as desativadas ainda em uso) e as restrições logo abaixo continuam
+  // renderizando a partir dele, sem mudança nenhuma.
+  const etiquetaClienteFixo = encontrarEtiquetaClienteFixo(etiquetasSelect);
+  const etiquetasMesRestrito = etiquetaClienteFixo
+    ? [
+        etiquetaClienteFixo,
+        ...etiquetasSelect.filter((e) => e.id !== etiquetaClienteFixo.id),
+      ]
+    : etiquetasSelect;
+
   return (
     <>
     {mostrarToggleEscolha && (
@@ -1910,8 +1962,16 @@ export default function ConfiguracoesSalao({
                             }`}
                           >
                             <option value="">Selecione a etiqueta</option>
-                            {etiquetasSelect.map((etiqueta) => (
-                              <option key={etiqueta.id} value={etiqueta.id}>
+                            {etiquetasMesRestrito.map((etiqueta) => (
+                              <option
+                                key={etiqueta.id}
+                                value={etiqueta.id}
+                                style={
+                                  etiqueta.id === etiquetaClienteFixo?.id
+                                    ? { fontWeight: "bold" }
+                                    : undefined
+                                }
+                              >
                                 {rotuloEtiqueta(etiqueta)}
                               </option>
                             ))}
