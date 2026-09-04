@@ -978,6 +978,31 @@ function DetalheCliente({
   );
 }
 
+// Filtro por situação de agenda da lista de Clientes (client-side, sobre o
+// Set `telefonesAgendados` que já alimenta a tag de cada card). "todos" não
+// filtra. Não há regra nova aqui: quem decide o que é "Agendado" continua
+// sendo ehAgendamentoConfirmadoFuturo (lib/particao), via
+// buscarConfirmadosPorTelefones — o filtro só consulta o mesmo Set que a
+// tag, pra que chip e badge nunca discordem.
+const FILTROS_STATUS_CLIENTE = [
+  { id: "todos", rotulo: "Todos" },
+  { id: "agendado", rotulo: "Agendado" },
+  { id: "sem_agenda", rotulo: "Sem agenda" },
+];
+
+// Valor do <select> de etiqueta que significa "não filtrar". String porque o
+// value de um <option> sempre é string — os demais valores são o
+// `etiqueta_id` convertido, e a comparação no filtro confronta string com
+// string dos dois lados, sem depender do tipo que o banco devolve.
+const ETIQUETA_TODAS = "todas";
+
+// Valor do mesmo <select> que recorta quem NÃO tem etiqueta nenhuma
+// (etiqueta_id null). Não é um id de etiqueta: é o complemento da taxonomia
+// inteira, e por isso precisa de um sentinela próprio — "nenhuma" nunca
+// colide com um id, que é numérico. Mesmo par que o SeletorEtiquetaRapido já
+// mostra no card ("Sem etiqueta" quando não há), agora do lado do filtro.
+const ETIQUETA_NENHUMA = "nenhuma";
+
 export default function GerenciarClientes({
   estabelecimento,
   onAgendarPara,
@@ -988,6 +1013,14 @@ export default function GerenciarClientes({
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
   const [busca, setBusca] = useState("");
+
+  // Os dois recortes da faixa de filtros (ver FILTROS_STATUS_CLIENTE e
+  // ETIQUETA_TODAS acima). Combinam em AND entre si e com a busca por nome;
+  // nenhum dos dois dispara ida ao banco — a lista inteira já está em
+  // memória, e o insumo do status também (telefonesAgendados).
+  const [filtroStatus, setFiltroStatus] = useState("todos");
+  const [filtroEtiqueta, setFiltroEtiqueta] = useState(ETIQUETA_TODAS);
+
   const [selecionado, setSelecionado] = useState(null);
 
   // Insumo da tag "Agendado"/"Sem agenda": telefones (dígitos) com algum
@@ -1286,11 +1319,54 @@ export default function GerenciarClientes({
     [etiquetas]
   );
 
+  // Nome + situação de agenda + etiqueta, os três combinados em AND numa
+  // passada só. Tudo client-side sobre a lista já carregada.
   const clientesFiltrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
-    if (!termo) return clientes;
-    return clientes.filter((c) => c.nome?.toLowerCase().includes(termo));
-  }, [clientes, busca]);
+
+    return clientes.filter((c) => {
+      if (termo && !c.nome?.toLowerCase().includes(termo)) return false;
+
+      if (filtroStatus !== "todos") {
+        // Mesma chave do badge do card: dígitos do whatsapp contra o Set de
+        // buscarConfirmadosPorTelefones. Enquanto essa busca não volta o Set
+        // está vazio e todo mundo conta como "sem agenda" — exatamente o que
+        // a tag mostra nesse mesmo instante, então filtro e badge nunca
+        // aparecem em desacordo na tela.
+        const agendado = telefonesAgendados.has(
+          String(c.whatsapp ?? "").replace(/\D/g, "")
+        );
+        if (filtroStatus === "agendado" ? !agendado : agendado) return false;
+      }
+
+      // "Sem etiqueta" é o complemento da taxonomia, não um id: testa a
+      // AUSÊNCIA (null do banco, ou undefined se a coluna não vier no
+      // select) em vez de comparar com alguma etiqueta.
+      if (filtroEtiqueta === ETIQUETA_NENHUMA) {
+        if (c.etiqueta_id != null) return false;
+      } else if (
+        // Comparação pelo id cru: uma etiqueta DESATIVADA continua marcando
+        // quem já foi marcado (soft delete, ver alternarAtivaEtiqueta), e
+        // filtrar por ela precisa funcionar. Cliente sem etiqueta tem
+        // etiqueta_id null, que nunca casa com um id escolhido.
+        filtroEtiqueta !== ETIQUETA_TODAS &&
+        String(c.etiqueta_id) !== filtroEtiqueta
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [clientes, busca, filtroStatus, filtroEtiqueta, telefonesAgendados]);
+
+  // Há algum recorte ativo? Decide só o TEXTO da lista vazia: sem filtro, o
+  // salão não tem cliente nenhum cadastrado; com filtro, tem clientes mas
+  // nenhum casa com o que está selecionado — e a dona precisa saber a
+  // diferença pra não achar que perdeu a base.
+  const algumFiltroAtivo =
+    busca.trim() !== "" ||
+    filtroStatus !== "todos" ||
+    filtroEtiqueta !== ETIQUETA_TODAS;
 
   if (carregando) {
     return (
@@ -1558,11 +1634,68 @@ export default function GerenciarClientes({
           placeholder="Buscar por nome..."
           className="w-full rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
         />
+
+        {/* Faixa de filtros, sob a busca e DENTRO do mesmo bloco: os três
+            recortes (nome, situação, etiqueta) combinam em AND, então ficam
+            juntos em vez de espalhados pela tela.
+
+            Situação como chips (mesmo padrão do filtro de Observações da
+            ficha, mais acima neste arquivo): três opções fixas e curtas,
+            cabem numa linha. Etiqueta como <select> (mesmo padrão do filtro
+            de categoria da aba Histórico, em app/[salon]/admin/page.js):
+            quantas etiquetas existem é a dona quem decide, e uma fila de
+            chips estouraria a largura no celular. */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {FILTROS_STATUS_CLIENTE.map((opcao) => (
+            <button
+              key={opcao.id}
+              type="button"
+              aria-pressed={filtroStatus === opcao.id}
+              onClick={() => setFiltroStatus(opcao.id)}
+              className={`rounded-full px-3 py-1 text-xs font-medium ring-1 transition ${
+                filtroStatus === opcao.id
+                  ? "bg-primary text-white ring-primary"
+                  : "bg-card text-body ring-border hover:bg-surface"
+              }`}
+            >
+              {opcao.rotulo}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-3">
+          <label htmlFor="filtro-etiqueta-cliente" className="sr-only">
+            Filtrar por etiqueta
+          </label>
+          <select
+            id="filtro-etiqueta-cliente"
+            value={filtroEtiqueta}
+            onChange={(e) => setFiltroEtiqueta(e.target.value)}
+            className="w-full rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading shadow-sm ring-1 ring-border transition focus:outline-none focus:ring-2 focus:ring-border"
+          >
+            <option value={ETIQUETA_TODAS}>Todas as etiquetas</option>
+            {/* Logo abaixo de "Todas" e ANTES das etiquetas reais: é um
+                recorte sobre a lista inteira, da mesma natureza do de cima,
+                e não mais um item da taxonomia. */}
+            <option value={ETIQUETA_NENHUMA}>Sem etiqueta</option>
+            {/* Desativadas entram como opção DE PROPÓSITO: elas continuam
+                marcando quem já foi marcado (ver o modal de desativar), e sem
+                isso esses clientes ficariam inalcançáveis pelo filtro. O
+                sufixo avisa que a etiqueta não aceita mais marcações novas. */}
+            {etiquetasOrdenadas.map((etiqueta) => (
+              <option key={etiqueta.id} value={String(etiqueta.id)}>
+                {etiqueta.ativa ? etiqueta.nome : `${etiqueta.nome} (desativada)`}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {clientesFiltrados.length === 0 ? (
         <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
-          Nenhum cliente encontrado.
+          {algumFiltroAtivo
+            ? "Nenhum cliente encontrado com esse filtro."
+            : "Nenhum cliente encontrado."}
         </p>
       ) : (
         <ul className="space-y-3">
