@@ -22,25 +22,27 @@ import { useVoltarFisico } from "@/lib/voltarFisico";
 // digitada na etapa 1 (mesma convenção usada pelo FormularioAgendamento, que
 // não normaliza).
 //
-// O comportamento depois da busca depende de `cadastroCompleto`
+// O "Não" da etapa "confirmar" é igual nos dois ramos e NÃO depende de
+// `cadastroCompleto`: volta pra etapa "telefone" com o campo em branco,
+// pedindo um WhatsApp novo (ver handleConfirmarNao). O número pesquisado é
+// de outra pessoa — seguir com ele pro cadastro fazia o submit seguinte
+// gravar por cima da linha dela.
+//
+// O resto do comportamento depois da busca depende de `cadastroCompleto`
 // (estabelecimento.cadastro_completo), por tenant. Em AMBOS os ramos,
 // encontrar um cliente sempre passa pela etapa "confirmar" ("é você?") — a
-// diferença fica em "Sim"/"Não" e em quem nunca encontra:
+// diferença fica no "Sim" e em quem nunca encontra:
 //
 // - true (ex.: Flávia): "Sim" só libera direto pro agendamento se o bloco de
 //   endereço (CEP/número/bairro/cidade) já estiver completo; senão abre
-//   CadastroCliente pra completar (pré-preenchido com o que já existe).
-//   "Não" abre CadastroCliente em BRANCO (não herda nome/endereço da linha
-//   encontrada), mas guarda o id dela só pra excluir da checagem de
-//   conflito de WhatsApp — o registro em si só é sobrescrito de fato
-//   quando o CadastroCliente for confirmado (upsert por whatsapp, ver
-//   CadastroCliente.js). Não encontrar também abre CadastroCliente em
-//   branco, sem id nenhum (INSERT puro no submit).
+//   CadastroCliente pra completar (pré-preenchido com o que já existe, e com
+//   o id da linha pra excluí-la da checagem de conflito de WhatsApp). Não
+//   encontrar abre CadastroCliente em branco, sem id nenhum (INSERT puro no
+//   submit).
 // - false (ex.: Laysla): "Sim" libera direto pro agendamento sempre (nunca
-//   checa endereço). "Não" (ou não encontrar) mostra um cadastro mínimo
-//   (nome + confirmar WhatsApp) — nunca pede endereço. Esse caminho já só
-//   grava em `clientes` no submit (handleSubmitSimples), sem escrita
-//   antecipada.
+//   checa endereço). Não encontrar mostra um cadastro mínimo (nome +
+//   confirmar WhatsApp) — nunca pede endereço. Esse caminho já só grava em
+//   `clientes` no submit (handleSubmitSimples), sem escrita antecipada.
 //
 // IMPORTANTE: esta tela (a busca por telefone e a confirmação "é você?")
 // NUNCA grava nada em `clientes` — só lê. A única gravação do fluxo
@@ -113,6 +115,13 @@ export default function IdentificacaoCliente({
   const [origemSubEtapa, setOrigemSubEtapa] = useState(
     () => lerFatia(slug, "identificacao")?.origemSubEtapa ?? "telefone"
   );
+  // Chegou na etapa "telefone" pelo "Não é meu número" (e não pela entrada
+  // normal do fluxo): mostra uma linha explicando que o campo está em branco
+  // de propósito, pra não parecer que o app perdeu o que ela digitou. Some
+  // no primeiro avanço de etapa seguinte. Fica FORA da fatia persistida: é
+  // dica de transição, não estado do fluxo — um reload sem ela só perde a
+  // frase, e a fatia restaurada já traz o campo vazio de qualquer jeito.
+  const [veioDeNaoEMeuNumero, setVeioDeNaoEMeuNumero] = useState(false);
   const [buscando, setBuscando] = useState(false);
   const [erro, setErro] = useState("");
   // Erro de FORMATO (validarWhatsapp), em tempo real (onBlur), da etapa
@@ -193,6 +202,13 @@ export default function IdentificacaoCliente({
 
     const encontrado = data && data.length > 0 ? data[0] : null;
 
+    // Daqui pra baixo todo caminho troca de etapa, então é o ponto único
+    // onde a dica do "Não é meu número" deixa de valer (ver
+    // veioDeNaoEMeuNumero). Acima dela ficam só as saídas que mantêm a
+    // cliente na etapa "telefone" — número inválido, RPC indisponível —, em
+    // que a frase deve continuar visível.
+    setVeioDeNaoEMeuNumero(false);
+
     // Encontrado: SEMPRE passa por "confirmar" (é você?), nos dois ramos —
     // quem decide o que "Sim"/"Não" fazem é handleConfirmarSim/Nao.
     if (encontrado) {
@@ -251,25 +267,35 @@ export default function IdentificacaoCliente({
     });
   }
 
-  // "Não é meu número"/"Não sou eu": ramo false vai direto pro cadastro
-  // simples (nome + confirmar WhatsApp), sem voltar a pedir o telefone. Ramo
-  // true abre completarEndereco em branco (ver `clienteNovo` no render de
-  // CadastroCliente, abaixo, que decide não herdar nome/endereço). Nenhuma
-  // escrita acontece aqui: a linha só é sobrescrita de fato quando o
-  // CadastroCliente for confirmado (upsert por whatsapp). clienteEncontrado
-  // é PRESERVADO intacto (nome incluso) — precisamos dele pra reconstruir a
-  // tela "confirmar" caso o voltar físico volte pra cá (ver origemSubEtapa).
+  // "Não é meu número"/"Não sou eu": nos DOIS ramos volta pra etapa
+  // "telefone" com o campo em branco, pedindo um WhatsApp novo — não avança
+  // mais pro cadastro (simples ou completo) carregando o número pesquisado.
+  // O número digitado pertence a OUTRA pessoa: seguir com ele levava o
+  // cadastro seguinte a gravar por cima da linha dela (cadastro simples pelo
+  // p_cliente_id de handleSubmitSimples; completarEndereco pelo upsert por
+  // whatsapp de CadastroCliente), trocando o nome de quem já estava
+  // cadastrada nesse telefone. Nenhuma escrita acontece aqui — só limpamos o
+  // que a tentativa anterior deixou pra trás, incluindo clienteEncontrado
+  // (que antes era preservado só pra reconstruir esta tela no voltar físico
+  // das sub-etapas; nenhuma delas é alcançável por aqui agora).
   function handleConfirmarNao() {
-    if (!cadastroCompleto) {
-      setWhatsappSimples(telefone);
-      setOrigemSubEtapa("confirmar");
-      setEtapa("cadastroSimples");
-      return;
-    }
+    // Abandona "confirmar" por um clique em tela: consome a entrada de
+    // histórico empurrada por ela (ver lib/voltarFisico.js), senão fica
+    // órfã. Mesmo padrão de handleConfirmarSim. O setEtapa abaixo é
+    // deliberadamente explícito e não depende do popstate: a limpeza de
+    // clienteEncontrado nesta mesma função já derruba a condição de render
+    // de "confirmar", e ficar nela sem cliente mostraria um card vazio.
+    voltarFisicoConfirmar();
 
-    setClienteNovo(true);
-    setOrigemSubEtapa("confirmar");
-    setEtapa("completarEndereco");
+    setClienteEncontrado(null);
+    setClienteNovo(false);
+    setTelefone("");
+    setWhatsappSimples("");
+    setOrigemSubEtapa("telefone");
+    setErro("");
+    setErroFormatoTelefone("");
+    setVeioDeNaoEMeuNumero(true);
+    setEtapa("telefone");
   }
 
   // Voltar físico (ou o botão em tela equivalente, se algum dia existir) de
@@ -385,6 +411,13 @@ export default function IdentificacaoCliente({
     <div className="space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border">
       {etapa === "telefone" && (
         <form onSubmit={handleBuscar} className="space-y-4">
+          {/* Só para quem acabou de dizer "Não é meu número" — explica o
+              campo em branco. Na entrada normal do fluxo não aparece. */}
+          {veioDeNaoEMeuNumero && (
+            <p className="text-sm text-body">
+              Certo, digite o WhatsApp correto abaixo.
+            </p>
+          )}
           <div>
             <label
               htmlFor="whatsapp-identificacao"
@@ -554,19 +587,22 @@ export default function IdentificacaoCliente({
           slug={slug}
           estabelecimentoId={estabelecimentoId}
           clienteId={clienteEncontrado?.id ?? null}
-          // clienteNovo=true ("não encontrado" ou "não sou eu"): não herda
-          // nome/endereço de ninguém, mesmo com clienteEncontrado.id
-          // preenchido (só serve pra exclusão da checagem de conflito, ver
-          // CadastroCliente). clienteEncontrado nunca é mais mutado pra
-          // simular isso (ver handleConfirmarNao) — decide aqui, na hora de
-          // renderizar, sem perder o objeto original.
+          // clienteNovo=true só chega aqui por "telefone não encontrado"
+          // (ver handleBuscar): não herda nome/endereço de ninguém, e
+          // clienteEncontrado é null nesse caminho. clienteNovo=false é o
+          // "Sim, sou eu" com endereço incompleto, que herda tudo da linha
+          // encontrada e usa o id dela pra excluí-la da checagem de conflito
+          // (ver CadastroCliente).
           nomeInicial={clienteNovo ? undefined : clienteEncontrado?.nome}
-          // "Não sou eu" (clienteNovo=true vindo de "confirmar"): o número
-          // pesquisado pertence a outra pessoa, então o campo WhatsApp some
-          // e obriga redigitar — evita reenviar sem querer o número antigo.
-          // "Telefone não encontrado" (clienteNovo=true vindo de "telefone")
-          // continua preenchendo normal, é a primeira vez que esse número
-          // aparece.
+          // Hoje `telefone` sempre vale: nos dois caminhos acima ele é o
+          // número que a própria cliente acabou de digitar e que confere com
+          // a linha (ou com a ausência dela). O "Não é meu número", único
+          // caso em que o número era de outra pessoa e precisava ser
+          // apagado, não passa mais por aqui — volta pra etapa "telefone"
+          // (ver handleConfirmarNao). A condição fica só como rede pra uma
+          // fatia de sessão gravada pela versão anterior deste fluxo, que
+          // podia restaurar clienteNovo=true junto de origemSubEtapa
+          // "confirmar" direto nesta etapa.
           telefoneReferencia={
             clienteNovo && origemSubEtapa === "confirmar" ? "" : telefone
           }

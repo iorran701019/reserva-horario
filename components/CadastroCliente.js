@@ -16,20 +16,28 @@ import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendament
 // Completa o cadastro de endereço de um cliente já identificado (tenant com
 // `cadastro_completo = true`), exibido pelo IdentificacaoCliente quando o
 // bloco CEP/número/bairro/cidade está pendente — seja um cadastro novo
-// (nunca gravado ainda), um "não sou eu" sobre um número de outra pessoa, ou
-// um cliente antigo com endereço incompleto.
+// (nunca gravado ainda) ou um cliente antigo com endereço incompleto.
 //
 // NENHUMA linha é gravada em `clientes` antes deste formulário ser
 // confirmado — o IdentificacaoCliente só lê. No submit, faz UPSERT por
 // (estabelecimento_id, whatsapp): existindo já uma linha pra esse telefone
-// (a própria cliente voltando, ou "não sou eu" sobre o número de outra
-// pessoa), sobrescreve TODOS os campos do cadastro (inclusive zerando
-// endereço/contato_emergencia quando o bloco correspondente não está sendo
-// coletado agora — exigirEndereco true zera contato_emergencia, false zera o
-// bloco de endereço — pra não deixar resíduo do dono anterior do número).
-// Não existindo, insere. `clienteId` (id da linha encontrada antes, se
-// houver) só serve aqui pra excluir essa linha da checagem de conflito de
-// WhatsApp abaixo — não é mais usado como alvo do UPDATE.
+// (a própria cliente voltando), sobrescreve TODOS os campos do cadastro
+// (inclusive zerando endereço/contato_emergencia quando o bloco
+// correspondente não está sendo coletado agora — exigirEndereco true zera
+// contato_emergencia, false zera o bloco de endereço — pra não deixar
+// resíduo de um estado anterior). Não existindo, insere. `clienteId` (id da
+// linha encontrada antes, se houver) só serve aqui pra excluir essa linha da
+// checagem de conflito de WhatsApp abaixo — não é mais usado como alvo do
+// UPDATE.
+//
+// O "não sou eu" sobre o número de OUTRA pessoa não chega mais até aqui pelo
+// fluxo normal: o IdentificacaoCliente volta a pedir um WhatsApp novo em vez
+// de abrir este formulário com o número pesquisado (ver handleConfirmarNao
+// lá). Era o caso em que o upsert acima sobrescrevia o cadastro de quem já
+// estava naquele telefone. Chegando aqui um número que pertence a outra
+// linha (a cliente digitando à mão o número de outra pessoa), quem barra é a
+// checagem de conflito do submit — o upsert continua sendo uma sobrescrita
+// silenciosa se passar por ela.
 //
 // O WhatsApp já foi coletado na etapa anterior e vem em `telefoneReferencia`
 // só como valor INICIAL do campo — ele agora é editável aqui (a cliente pode
