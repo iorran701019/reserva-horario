@@ -6,6 +6,7 @@ import { linkWhatsApp, MENSAGEM_SOLICITACAO_ENVIADA } from "@/lib/whatsapp";
 import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
 import { formatarData } from "@/components/FormularioAgendamento";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
+import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento";
 
 // Tela de protocolo ("Solicitação enviada!") do fluxo público. Era inline em
 // app/[salon]/page.js e só existia LOGO APÓS o submit; agora é componente
@@ -31,7 +32,9 @@ import IconeWhatsApp from "@/components/IconeWhatsApp";
 //                      monta reabre o wizard, ver agendamentoEmEdicao em
 //                      FormularioAgendamento).
 //   onCancelado       – opcional; havendo, mostra "Cancelar agendamento" e é
-//                      chamado depois do cancelamento dar certo.
+//                      chamado depois do cancelamento dar certo. O clique
+//                      passa antes pela confirmação (ver
+//                      ModalConfirmarCancelamento).
 export default function TelaSolicitacaoEnviada({
   estabelecimento,
   agendamentoId = null,
@@ -46,6 +49,7 @@ export default function TelaSolicitacaoEnviada({
 }) {
   const [cancelando, setCancelando] = useState(false);
   const [erro, setErro] = useState("");
+  const [confirmandoCancelamento, setConfirmandoCancelamento] = useState(false);
 
   // Foca o título ao montar — leitores de tela anunciam o status.
   const tituloRef = useRef(null);
@@ -75,6 +79,7 @@ export default function TelaSolicitacaoEnviada({
       return;
     }
 
+    setConfirmandoCancelamento(false);
     onCancelado();
   }
 
@@ -221,7 +226,10 @@ export default function TelaSolicitacaoEnviada({
       {podeAgir && onCancelado && (
         <button
           type="button"
-          onClick={handleCancelar}
+          onClick={() => {
+            setErro("");
+            setConfirmandoCancelamento(true);
+          }}
           disabled={cancelando}
           className="mt-3 w-full rounded-lg bg-card px-4 py-2.5 font-medium text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
@@ -229,11 +237,24 @@ export default function TelaSolicitacaoEnviada({
         </button>
       )}
 
-      {erro && (
+      {/* Com a confirmação aberta o erro é mostrado lá dentro; aqui fora só
+          sobra o de uma tentativa já encerrada. */}
+      {erro && !confirmandoCancelamento && (
         <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
           {erro}
         </p>
       )}
+
+      <ModalConfirmarCancelamento
+        aberto={confirmandoCancelamento}
+        cancelando={cancelando}
+        erro={erro}
+        onConfirmar={handleCancelar}
+        onFechar={() => {
+          setConfirmandoCancelamento(false);
+          setErro("");
+        }}
+      />
     </div>
   );
 }

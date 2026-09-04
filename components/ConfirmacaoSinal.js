@@ -3,6 +3,7 @@
 import { useState } from "react";
 import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
+import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento";
 import { formatarData } from "@/components/FormularioAgendamento";
 
 // Tela de confirmação de pagamento do sinal. O bloco âmbar em si (valor,
@@ -61,6 +62,9 @@ export default function ConfirmacaoSinal({
   const [sinalDeclarado, setSinalDeclarado] = useState(false);
   const [cancelando, setCancelando] = useState(false);
   const [erro, setErro] = useState("");
+  // O clique em "Cancelar agendamento" abre a confirmação (ver
+  // ModalConfirmarCancelamento); quem chama o helper é o botão de dentro dela.
+  const [confirmandoCancelamento, setConfirmandoCancelamento] = useState(false);
 
   const podeCancelar = Boolean(onCancelado && agendamento);
 
@@ -83,6 +87,7 @@ export default function ConfirmacaoSinal({
       return;
     }
 
+    setConfirmandoCancelamento(false);
     onCancelado();
   }
 
@@ -126,7 +131,10 @@ export default function ConfirmacaoSinal({
       {podeCancelar && (
         <button
           type="button"
-          onClick={handleCancelar}
+          onClick={() => {
+            setErro("");
+            setConfirmandoCancelamento(true);
+          }}
           disabled={cancelando}
           className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
@@ -134,11 +142,24 @@ export default function ConfirmacaoSinal({
         </button>
       )}
 
-      {erro && (
+      {/* Enquanto a confirmação está aberta o erro aparece DENTRO dela — aqui
+          fora só sobra o que ficou de uma tentativa já encerrada. */}
+      {erro && !confirmandoCancelamento && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
           {erro}
         </p>
       )}
+
+      <ModalConfirmarCancelamento
+        aberto={confirmandoCancelamento}
+        cancelando={cancelando}
+        erro={erro}
+        onConfirmar={handleCancelar}
+        onFechar={() => {
+          setConfirmandoCancelamento(false);
+          setErro("");
+        }}
+      />
     </div>
   );
 }

@@ -25,6 +25,7 @@ import {
 } from "@/lib/manutencaoSugerida";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
+import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento";
 import { useVoltarFisico } from "@/lib/voltarFisico";
 import {
   dataAgendavelComMes,
@@ -914,6 +915,9 @@ export default function FormularioAgendamento({
   // oferecer cancelar algo que já avançou.
   const [statusPixReserva, setStatusPixReserva] = useState(null);
   const [cancelandoReserva, setCancelandoReserva] = useState(false);
+  // "Cancelar agendamento" do bloco do sinal abre a confirmação antes de
+  // chamar o helper (ver ModalConfirmarCancelamento).
+  const [confirmandoCancelamento, setConfirmandoCancelamento] = useState(false);
 
   // Reserva gravada ao ENTRAR na etapa "dados" (só fluxo público, ver
   // selecionarHorario) — id da linha em `agendamentos` e a "chave" da seleção
@@ -2387,6 +2391,8 @@ export default function FormularioAgendamento({
       return;
     }
 
+    setConfirmandoCancelamento(false);
+
     // Zerar `horarioSelecionado` JUNTO de `reservaId` não é zelo: a fatia de
     // sessão é regravada pelo efeito de persistência logo depois destes
     // setState, e um rascunho com horário mas SEM reservaId faz a restauração
@@ -3643,12 +3649,26 @@ export default function FormularioAgendamento({
                     </button>
                     <button
                       type="button"
-                      onClick={cancelarReservaAguardandoSinal}
+                      onClick={() => {
+                        setErro("");
+                        setConfirmandoCancelamento(true);
+                      }}
                       disabled={cancelandoReserva}
                       className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {cancelandoReserva ? "Cancelando..." : "Cancelar agendamento"}
                     </button>
+
+                    <ModalConfirmarCancelamento
+                      aberto={confirmandoCancelamento}
+                      cancelando={cancelandoReserva}
+                      erro={erro}
+                      onConfirmar={cancelarReservaAguardandoSinal}
+                      onFechar={() => {
+                        setConfirmandoCancelamento(false);
+                        setErro("");
+                      }}
+                    />
                   </div>
                 )}
               </>

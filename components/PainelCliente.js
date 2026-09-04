@@ -15,6 +15,7 @@ import { formatarData } from "@/components/FormularioAgendamento";
 import AtualizarDadosCliente from "@/components/AtualizarDadosCliente";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import ConfirmacaoSinal from "@/components/ConfirmacaoSinal";
+import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento";
 import { useVoltarFisico } from "@/lib/voltarFisico";
 
 // Selo de status dos agendamentos ATIVOS. Mesma paleta já usada no projeto
@@ -88,6 +89,12 @@ export default function PainelCliente({
   // `if (error) return` — em silêncio: a cliente clicava, nada acontecia, e
   // ela ficava sem saber se tinha cancelado ou não.
   const [erroCancelamento, setErroCancelamento] = useState("");
+
+  // Item "armado" pra cancelar: o clique em "Cancelar" só abre a confirmação
+  // (ver ModalConfirmarCancelamento) — quem chama o helper é o botão de
+  // dentro dela. null = modal fechado, mesmo padrão de
+  // `agendamentoParaCancelar` no /admin.
+  const [agendamentoParaCancelar, setAgendamentoParaCancelar] = useState(null);
 
   // Sugestão de manutenção em destaque no topo do painel (null = nenhuma ou
   // ainda carregando — sem diferença visual entre os dois, o card só aparece
@@ -307,6 +314,7 @@ export default function PainelCliente({
       return;
     }
 
+    setAgendamentoParaCancelar(null);
     setAgendamentos((anterior) => anterior.filter((a) => a.id !== item.id));
   }
 
@@ -429,7 +437,10 @@ export default function PainelCliente({
                 {item.podeCancelar ? (
                   <button
                     type="button"
-                    onClick={() => handleCancelar(item)}
+                    onClick={() => {
+                      setErroCancelamento("");
+                      setAgendamentoParaCancelar(item);
+                    }}
                     disabled={cancelandoId === item.id}
                     className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
@@ -465,11 +476,25 @@ export default function PainelCliente({
         </ul>
       )}
 
-      {erroCancelamento && (
+      {/* Erro fora do modal: só sobra quando a confirmação já foi fechada
+          (ela mesma mostra o erro enquanto está aberta, pra cliente poder
+          tentar de novo sem perder o contexto). */}
+      {erroCancelamento && !agendamentoParaCancelar && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
           {erroCancelamento}
         </p>
       )}
+
+      <ModalConfirmarCancelamento
+        aberto={Boolean(agendamentoParaCancelar)}
+        cancelando={cancelandoId === agendamentoParaCancelar?.id}
+        erro={erroCancelamento}
+        onConfirmar={() => handleCancelar(agendamentoParaCancelar)}
+        onFechar={() => {
+          setAgendamentoParaCancelar(null);
+          setErroCancelamento("");
+        }}
+      />
 
       {historico !== null && historico.length > 0 && (
         <div>
