@@ -62,6 +62,10 @@
 + - [x] Botão "Renomear" renomeado para "Editar" no CRUD de etiquetas, refletindo que agora também edita cor (sessão 42)
 + - [x] Checklist de novo tenant (`NOVO_TENANT_CHECKLIST.md`) ganhou passo de seed das 5 etiquetas padrão (sessão 42)
 + - [x] `PROTOCOLO.md` ganhou 3 regras novas de fluxo Git para o período pós-`staging` (checagem de base antes de nova branch, branches concorrentes no mesmo arquivo, aviso de comandos rodados fora de prompt do Claude Code) (sessão 42)
++ [x] CRÍTICO: fluxo "Não é meu número" em /agendar não sobrescreve mais cadastro de outra cliente — handleConfirmarNao limpa estado e volta pra identificação pedindo WhatsApp novo, testado nos dois ramos cadastroCompleto (sessão 43).
++ [x] Nomes completos dos meses (Setembro, Outubro...) na Janela de agendamento, antes abreviados (set, out) — rotuloMesLongo substitui rotuloMesCurto, helper antigo removido (sessão 43).
++ [x] Popup de confirmação antes de cancelar agendamento em /agendar, nos 4 pontos onde a cliente cancela (Painel, tela de sinal/Pix, tela de protocolo, wizard) — novo ModalConfirmarCancelamento.js (sessão 43).
+
 
 ## Em aberto
 - [ ] UX da configuração de pergunta condicional (mãe/filha) em `GerenciarServicos.js` — funcional, mas complexa pra configurar; considerar assistente passo-a-passo ou fluxo guiado no futuro.
@@ -80,6 +84,9 @@
 - [ ] Slots de dezembro da Flávia — 3 abordagens mapeadas (Sessão 38); **substituída pela regra de restrição por etiqueta, item resolvido acima**
 + - [ ] Campo `emoji` em `etiquetas_cliente` ficou sem consumidor no state propagado do admin após a troca por cor — candidata a limpeza futura, sem risco (sessão 42)
 + - [ ] Default de "Cliente Fixo" em mês restrito não filtra por `ativa` em `etiquetasSelect` — caso de borda raro (etiqueta desativada ainda presa a uma restrição), deixado como está por decisão consciente (sessão 42)
++ [ ] Resumo (data/horário/cliente/serviço) na tela "dados" do wizard de agendamento pelo /admin, antes de confirmar e enviar WhatsApp — próxima demanda da sessão 43, não iniciada.
++ [ ] Dois filtros na aba Clientes do /admin: por status "Agendado"/"Sem agenda" e por etiqueta do cliente — próxima demanda da sessão 43, não iniciada.
++ [ ] Aviso de Pix no cancelamento (valor não volta automaticamente) — escopo ampliado na sessão 43: cobrir tanto /agendar quanto /admin (incluindo cancelamento de confirmados), frente própria futura.
 
 ## Segurança — auditoria RLS/Storage (retomar semana que vem)
 - [ ] Upload de comprovante Pix quebrado em staging: bucket `comprovantes-pix` aceita INSERT anônimo, mas falta policy de UPDATE que o `upsert:true` do app exige — hoje toda cliente que anexa arquivo real provavelmente cai silenciosamente no caminho do checkbox.
