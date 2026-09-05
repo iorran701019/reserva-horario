@@ -2634,7 +2634,7 @@ export default function ConfiguracoesSalao({
                   <option value="desligado">Desligado</option>
                   <option value="novos">Obrigatório para clientes novos</option>
                   <option value="exceto_manutencao">
-                    Todos, exceto manutenção
+                    Exceto manutenção
                   </option>
                   <option value="todos">Obrigatório para todos</option>
                 </select>
