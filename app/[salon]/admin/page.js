@@ -63,6 +63,7 @@ import {
   Check,
   MessageCircleOff,
   Clock,
+  Info,
 } from "lucide-react";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
@@ -2616,6 +2617,20 @@ export default function AdminPage() {
                       3. Nada declarado e status aguardando_sinal: alerta
                          âmbar. Este badge substitui o "Aguardando sinal" que
                          antes ficava junto das tags do topo.
+                      4. Nada de Pix E status "pendente": este agendamento
+                         NUNCA exigiu sinal. Quem carimba isso é o INSERT do
+                         fluxo público (ver FormularioAgendamento,
+                         `status: precisaSinal ? "aguardando_sinal" :
+                         "pendente"`): o status na origem é o único dado do
+                         card que separa "não precisou pagar" de "precisou e
+                         não pagou" — sinal_declarado_pago é false nos dois.
+                         Cinza neutro, mais fraco que todos os anteriores: é
+                         ausência de cobrança, não pendência; não deve
+                         competir com o âmbar do caso 3. Existe pra que o
+                         espaço do Pix nunca fique VAZIO e sem explicação —
+                         antes este caso caía no `null` e a dona não tinha
+                         como saber se não havia sinal ou se o card só não
+                         estava mostrando.
 
                       A cadeia de ternários é o que garante o "um ou outro":
                       antes, 1 e 2 já eram mutuamente exclusivos por acaso (um
@@ -2636,6 +2651,13 @@ export default function AdminPage() {
                     <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-200 px-2.5 py-1 text-xs font-semibold text-amber-900 ring-1 ring-amber-400">
                       <Clock className="h-3.5 w-3.5" aria-hidden="true" />
                       Aguardando sinal
+                    </p>
+                  ) : item.status === "pendente" &&
+                    !item.sinal_declarado_pago &&
+                    !item.comprovante_pix_url ? (
+                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 ring-1 ring-gray-300">
+                      <Info className="h-3.5 w-3.5" aria-hidden="true" />
+                      Nenhum sinal de Pix foi cobrado
                     </p>
                   ) : null}
 
