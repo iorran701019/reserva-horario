@@ -893,15 +893,25 @@ export default function FormularioAgendamento({
   // separado.
   const modoLivre = Boolean(status);
 
-  // Sinal de reserva: regra do salão decide se é exigido (todos, só novos
-  // clientes, ou nunca). O cliente declara (não comprovante) que já pagou via
-  // Pix antes de liberar o botão de confirmar. SÓ no público — o admin
-  // (status truthy) já sabe se cobrou o cliente por fora e nunca deve ver
-  // essa etapa, independente de sinal_regra (ver IdentificacaoClienteAdmin,
-  // que resolve o cliente ANTES do wizard no /admin).
+  // Sinal de reserva: regra do salão decide se é exigido (todos, todos exceto
+  // manutenção, só novos clientes, ou nunca). O cliente declara (não
+  // comprovante) que já pagou via Pix antes de liberar o botão de confirmar.
+  // SÓ no público — o admin (status truthy) já sabe se cobrou o cliente por
+  // fora e nunca deve ver essa etapa, independente de sinal_regra (ver
+  // IdentificacaoClienteAdmin, que resolve o cliente ANTES do wizard no
+  // /admin).
+  //
+  // 'exceto_manutencao' é 'todos' menos os serviços com eh_manutencao=true —
+  // mesma checagem que o ramo 'novos' já fazia. NÃO cobre a manutenção
+  // "feita em outro salão": aquele fluxo troca a seleção pelo serviço de
+  // servico_manutencao_externa_id, que é um serviço comum
+  // (eh_manutencao=false) e por isso continua exigindo sinal, de propósito
+  // (ver confirmarManutencaoOutroSalao).
   const precisaSinal =
     !status &&
     (estabelecimento.sinal_regra === "todos" ||
+      (estabelecimento.sinal_regra === "exceto_manutencao" &&
+        !servicoSelecionado?.eh_manutencao) ||
       (estabelecimento.sinal_regra === "novos" &&
         clienteEhNovo &&
         !servicoSelecionado?.eh_manutencao));
