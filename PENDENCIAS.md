@@ -69,7 +69,12 @@
 - Filtros de status (Agendado/Sem agenda) e etiqueta (incluindo "Sem etiqueta") na aba Clientes do admin (Sessão 44).
 + - [x] Card de agendamento pendente no /admin refatorado: hierarquia visual limpa com progressive disclosure — pílula "Entrar em contato" (WhatsApp) abaixo do telefone, tag "Pendente" removida (redundante na aba), data/horário em destaque, bloco de pagamento com 3 estados mutuamente exclusivos (comprovante anexado=verde, declarado sem arquivo=neutro, aguardando sinal=âmbar), detalhes secundários (formato de unha, histórico de confirmados) ocultos em accordion "Ver detalhes do agendamento", rodapé reduzido a Confirmar/Cancelar mantendo as ações "sem notificar" e "trocar profissional" dentro do accordion. Modo agrupado (2+ pendentes do mesmo cliente) ganhou a mesma pílula de contato na bandeja, sem duplicar por card (sessão 45).
 + - [x] Badge do comprovante Pix (LinkComprovantePix.js) recolorido de verde e documentado com comentário explicando a decisão: verde só quando existe arquivo real anexado no bucket; declaração "enviei pelo WhatsApp" sem arquivo continua neutra, por ser a palavra da cliente e não um comprovante conferido (sessão 45).
-
++ - Regra de sinal "Exceto manutenção" implementada e em produção (commit 6920705).
++ - Aviso "Nenhum sinal de Pix foi cobrado" no card de Pendentes (commit e4940a9),
++   oculto quando sinal_regra = 'desligado' (commit fe7c925).
++ - sinal_regra adicionado a lib/perfil.js (resolve só esse campo da pendência de
++   sincronização abaixo — o resto continua em aberto).
+- [ ] Implementar alerta de agendamentos próximos / prazo mínimo entre agendamentos
 
 ## Em aberto
 - [ ] UX da configuração de pergunta condicional (mãe/filha) em `GerenciarServicos.js` — funcional, mas complexa pra configurar; considerar assistente passo-a-passo ou fluxo guiado no futuro.
@@ -98,8 +103,20 @@
 - Dívida técnica de tipos em `ConfiguracoesSalao.js` e `ModalVincularCliente.js`.
 - Aviso de Pix no cancelamento (`/agendar` + `/admin`, incluindo agendamentos já confirmados) — nova pauta de produto, registrada na Sessão 43.
 
+ ## Backlog
++ - Callback de patch para sinal_regra em ConfiguracoesSalao.js → AdminPage, evitando
++   staleness do aviso de Pendentes até reload da página.
++ - Confirmar no código real como clienteEhNovo é calculado em precisaSinal (ramo 'novos')
++   — discutido em profundidade na Sessão 46, não investigado ainda.
+
 ## Segurança — auditoria RLS/Storage (retomar semana que vem)
 - [ ] Upload de comprovante Pix quebrado em staging: bucket `comprovantes-pix` aceita INSERT anônimo, mas falta policy de UPDATE que o `upsert:true` do app exige — hoje toda cliente que anexa arquivo real provavelmente cai silenciosamente no caminho do checkbox.
 - [ ] DELETE via sessão autenticada do admin não funciona em `agendamentos`/Storage — sem policy de DELETE, o PostgREST retorna 204 "de sucesso" mesmo apagando 0 linhas; só `service_role` conseguiu apagar de fato.
 - [ ] Confirmar se reservas em `aguardando_sinal` (cliente abandona antes de declarar/anexar o Pix) têm alguma expiração automática, ou se ficam presas indefinidamente ocupando o slot — checar se o job `expirar_reservas_pendentes` cobre esse status ou só `pendente`.
 - [ ] `BlocoConfirmacaoPix` não recebe `jaPendente` do wizard — editar um agendamento já `pendente` (não mais `aguardando_sinal`) reabre o bloco cru e permite reescrever `pendente_desde`, reiniciando a janela do protocolo (48h) sem necessidade.
+
++ ## Incidente registrado (Sessão 47)
++ Duas branches de feature foram deletadas sem nunca terem recebido commit — toda a
++ implementação existia só como diff não commitado em cima de staging. Recuperado sem
++ perda, mas o hábito mudou: sempre rodar `git log --oneline` antes de deletar uma
++ branch de feature, não confiar só no resultado textual do merge.
