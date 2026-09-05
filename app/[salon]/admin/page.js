@@ -39,6 +39,7 @@ import {
 } from "@/lib/janelaAgendamento";
 import { rotuloMesLongo } from "@/lib/mes";
 import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
+import { buscarConflitoPrazoMinimo } from "@/lib/agendamentosCliente";
 import { verificarFidelidadeClientes, buscarProgressoFidelidade } from "@/lib/fidelidade";
 import LinkComprovantePix from "@/components/LinkComprovantePix";
 import {
@@ -68,6 +69,7 @@ import {
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
 import ModalClientePendente from "@/components/ModalClientePendente";
+import ModalPrazoMinimo from "@/components/ModalPrazoMinimo";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
@@ -612,6 +614,23 @@ export default function AdminPage() {
   // pra aplicar depois que a dona decidir no popup.
   const [confirmacaoForaDaJanela, setConfirmacaoForaDaJanela] = useState(null);
 
+  // Conflito de prazo mínimo entre agendamentos do MESMO cliente que
+  // handleConfirmar interceptou antes do UPDATE (ver
+  // buscarConflitoPrazoMinimo em lib/agendamentosCliente.js). Mesmo popup do
+  // fluxo de criação (ModalPrazoMinimo, compartilhado com
+  // FormularioAgendamento) — aqui o "novo" agendamento não é um insert, é o
+  // pendente que a dona está confirmando.
+  //
+  // { agendamento, notificar, conflito, prazoIgnorados } enquanto aberto;
+  // null = fechado. `notificar` preserva a escolha da zona do botão dividido,
+  // e `prazoIgnorados` é a lista ACUMULADA de vizinhos já decididos nesta
+  // tentativa — mesmo padrão de FormularioAgendamento, pro popup reabrir um
+  // conflito de cada vez quando o cliente tem mais de um dentro da janela.
+  const [conflitoPrazoConfirmacao, setConflitoPrazoConfirmacao] = useState(null);
+  const [processandoPrazoConfirmacao, setProcessandoPrazoConfirmacao] = useState(false);
+  // Trava síncrona do duplo toque: setState não vale antes do primeiro await.
+  const processandoPrazoConfirmacaoRef = useRef(false);
+
   // Agendamento confirmado selecionado no Painel (controla o modal de detalhe/
   // ações). Guardamos o id; os dados vivos saem de `agendamentos` no render,
   // pra refletir na hora o patch do lembrete. null = modal fechado.
@@ -881,18 +900,141 @@ export default function AdminPage() {
     }
   }
 
-  // Botão A: gatekeeper. Fora da janela de agendamento (status mensal da
-  // agenda, ou estabelecimento.janela_agendamento_fim nos meses sem status —
-  // ver dataAgendavelComMes), abre o popup
-  // "Confirmar mesmo assim?" (ver confirmacaoForaDaJanela) e adia a gravação
-  // até a dona decidir — nunca confirma fora da janela sem essa checagem
-  // consciente. Dentro da janela, delega direto pra executarConfirmacao.
-  async function handleConfirmar(agendamento, notificar = true) {
-    if (!dataAgendavelComMes(agendamento.data, estabelecimento, mesesJanela)) {
+  // Botão A: gatekeeper. São DOIS gates em sequência, ambos adiando a
+  // gravação até a dona decidir no popup correspondente; só depois de passar
+  // pelos dois é que executarConfirmacao grava.
+  //
+  // 1) Fora da janela de agendamento (status mensal da agenda, ou
+  //    estabelecimento.janela_agendamento_fim nos meses sem status — ver
+  //    dataAgendavelComMes): abre "Confirmar mesmo assim?" (ver
+  //    confirmacaoForaDaJanela). `ignorarJanela` é como esse popup volta pra
+  //    cá depois do sim, em vez de pular direto pro UPDATE: assim o gate de
+  //    prazo abaixo continua rodando pra ele.
+  // 2) Prazo mínimo entre agendamentos do mesmo cliente
+  //    (estabelecimento.prazo_minimo_entre_agendamentos_dias): este caminho
+  //    não passa por FormularioAgendamento nem por finalizarAgendamento, que
+  //    é onde o gate mora na criação — sem esta checagem, confirmar um
+  //    pendente era a única porta que escapava da regra.
+  //
+  // O PRÓPRIO agendamento entra em idsIgnorados: ele já está no banco (é uma
+  // linha 'pendente', status que buscarConflitoPrazoMinimo considera) e sem
+  // isso apareceria como conflito de si mesmo, a zero dias de distância.
+  async function handleConfirmar(
+    agendamento,
+    notificar = true,
+    { ignorarJanela = false, prazoIgnorados = [] } = {}
+  ) {
+    if (
+      !ignorarJanela &&
+      !dataAgendavelComMes(agendamento.data, estabelecimento, mesesJanela)
+    ) {
       setConfirmacaoForaDaJanela({ agendamento, notificar });
       return;
     }
+
+    const conflito = await buscarConflitoPrazoMinimo(
+      estabelecimento.id,
+      agendamento.telefone,
+      agendamento.data,
+      estabelecimento.prazo_minimo_entre_agendamentos_dias,
+      [agendamento.id, ...prazoIgnorados]
+    );
+
+    if (conflito) {
+      setConflitoPrazoConfirmacao({
+        agendamento,
+        notificar,
+        conflito,
+        prazoIgnorados,
+      });
+      return;
+    }
+
     await executarConfirmacao(agendamento, notificar);
+  }
+
+  // --- Decisões do ModalPrazoMinimo (confirmação de pendente) --------------
+  //
+  // Retoma a confirmação que o popup interrompeu, voltando por handleConfirmar
+  // (e não direto por executarConfirmacao) pra que o gate rode de novo atrás
+  // do PRÓXIMO vizinho — um popup de cada vez, até não sobrar nenhum. Termina
+  // sempre: cada rodada acrescenta um id a `prazoIgnorados` e o conjunto de
+  // candidatos só encolhe. `ignorarJanela` volta ligado porque, se o gate de
+  // janela existia, a dona já respondeu a ele antes de chegar aqui.
+  async function retomarAposPrazoConfirmacao(contexto, prazoIgnorados) {
+    setConflitoPrazoConfirmacao(null);
+    setProcessandoPrazoConfirmacao(false);
+    processandoPrazoConfirmacaoRef.current = false;
+
+    await handleConfirmar(contexto.agendamento, contexto.notificar, {
+      ignorarJanela: true,
+      prazoIgnorados,
+    });
+  }
+
+  // Ignorados da PRÓXIMA rodada: os já tratados mais o que acabou de ser
+  // decidido — cancelado ou mantido, os dois saem de cena do mesmo jeito.
+  function proximosIgnoradosConfirmacao(contexto) {
+    return [...(contexto.prazoIgnorados ?? []), contexto.conflito.id];
+  }
+
+  // "Cancelar <data antiga> e confirmar <data nova>": cancela o agendamento
+  // vizinho ANTES de confirmar o pendente. Mesmo UPDATE cru de handleCancelar,
+  // com .select("id") pra distinguir "não gravou" de "gravou zero linhas por
+  // RLS" — e só segue se REALMENTE cancelou, porque seguir depois de uma
+  // falha deixaria os dois de pé, exatamente o desfecho que esta ação promete
+  // evitar. Não notifica no WhatsApp: quem cancela aqui é a dona resolvendo a
+  // agenda dentro de um popup, não o botão de cancelamento com sua mensagem.
+  async function confirmarTrocaPrazoConfirmacao() {
+    const contexto = conflitoPrazoConfirmacao;
+    if (!contexto || processandoPrazoConfirmacaoRef.current) return;
+
+    processandoPrazoConfirmacaoRef.current = true;
+    setProcessandoPrazoConfirmacao(true);
+
+    const { data, error } = await supabase
+      .from("agendamentos")
+      .update({ status: "cancelado" })
+      .eq("id", contexto.conflito.id)
+      .select("id");
+
+    if (error || !data?.length) {
+      processandoPrazoConfirmacaoRef.current = false;
+      setProcessandoPrazoConfirmacao(false);
+      setConflitoPrazoConfirmacao(null);
+      setErro(
+        `Não foi possível cancelar o agendamento anterior: ${
+          error?.message ??
+          "nenhuma linha foi alterada no banco. Recarregue a página e tente de novo."
+        }`
+      );
+      return;
+    }
+
+    setErro("");
+    atualizarStatusLocal(contexto.conflito.id, "cancelado");
+
+    await retomarAposPrazoConfirmacao(contexto, proximosIgnoradosConfirmacao(contexto));
+  }
+
+  // "Manter dois agendamentos próximos": confirma o pendente SEM cancelar o
+  // vizinho. Entra na mesma fila de ignorados do cancelamento — manter ESTE
+  // vizinho não é uma resposta sobre a regra inteira, então um segundo
+  // conflito ainda reabre o popup.
+  async function manterOsDoisPrazoConfirmacao() {
+    const contexto = conflitoPrazoConfirmacao;
+    if (!contexto || processandoPrazoConfirmacaoRef.current) return;
+
+    processandoPrazoConfirmacaoRef.current = true;
+    await retomarAposPrazoConfirmacao(contexto, proximosIgnoradosConfirmacao(contexto));
+  }
+
+  // "Cancelar este e manter <data antiga>": desiste da confirmação e é também
+  // o que o clique no fundo faz. Única saída que não grava nada — o pendente
+  // continua pendente na aba, exatamente como estava.
+  function fecharConflitoPrazoConfirmacao() {
+    if (processandoPrazoConfirmacaoRef.current) return;
+    setConflitoPrazoConfirmacao(null);
   }
 
   // Grava o status 'confirmado' no banco e, se der certo, abre o WhatsApp com
@@ -3756,6 +3898,17 @@ export default function AdminPage() {
             onMensagemAtualizada={(coluna, valor) =>
               setEstabelecimento((atual) => (atual ? { ...atual, [coluna]: valor } : atual))
             }
+            // Mesmo patch dos anteriores, para o prazo mínimo entre
+            // agendamentos: o wizard da aba Agendar recebe `estabelecimento`
+            // como prop e lê prazo_minimo_entre_agendamentos_dias dele no gate
+            // de finalizarAgendamento (ver components/FormularioAgendamento.js).
+            // Sem isto, configurar o prazo aqui e ir direto agendar usaria o
+            // valor do mount (normalmente null) e o aviso nunca apareceria.
+            onPrazoMinimoAtualizado={(dias) =>
+              setEstabelecimento((atual) =>
+                atual ? { ...atual, prazo_minimo_entre_agendamentos_dias: dias } : atual
+              )
+            }
             // Mesmo motivo dos patches acima, para o status mensal da agenda: sem
             // ele o card de meses do Painel ficaria com o mapa do mount até
             // um reload.
@@ -4340,7 +4493,9 @@ export default function AdminPage() {
           agendamento cai além de estabelecimentos.janela_agendamento_fim
           (ver dataAgendavelComMes) — mesmo padrão visual do modal de
           confirmação acima. Cancelar só fecha o popup, sem gravar nada;
-          Confirmar chama executarConfirmacao com o `notificar` original. */}
+          Confirmar reentra em handleConfirmar com o `notificar`
+          original e `ignorarJanela`, pra cair no gate de prazo mínimo logo em
+          seguida. */}
       {confirmacaoForaDaJanela && (
         <div
           role="dialog"
@@ -4370,7 +4525,10 @@ export default function AdminPage() {
                 onClick={() => {
                   const { agendamento, notificar } = confirmacaoForaDaJanela;
                   setConfirmacaoForaDaJanela(null);
-                  executarConfirmacao(agendamento, notificar);
+                  // Volta por handleConfirmar com a janela já respondida, em
+                  // vez de gravar direto: o gate de prazo mínimo vem depois
+                  // deste e precisa rodar também pra quem passou por aqui.
+                  handleConfirmar(agendamento, notificar, { ignorarJanela: true });
                 }}
                 className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-green-700"
               >
@@ -4387,6 +4545,39 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* Prazo mínimo entre agendamentos do mesmo cliente, no gate de
+          handleConfirmar. MESMO componente do fluxo de criação (público e aba
+          Agendar) — ver ModalPrazoMinimo: as datas vão formatadas porque ele
+          não importa nada daqui. A "data nova" aqui é a do próprio pendente
+          que está sendo confirmado. */}
+      <ModalPrazoMinimo
+        conflito={
+          conflitoPrazoConfirmacao
+            ? {
+                dataFormatada: formatarData(conflitoPrazoConfirmacao.conflito.data),
+                horario: String(
+                  conflitoPrazoConfirmacao.conflito.horario ?? ""
+                ).slice(0, 5),
+                servicoNome: conflitoPrazoConfirmacao.conflito.servicos?.nome ?? null,
+              }
+            : null
+        }
+        dataNova={
+          conflitoPrazoConfirmacao
+            ? formatarData(conflitoPrazoConfirmacao.agendamento.data)
+            : ""
+        }
+        horarioNovo={String(
+          conflitoPrazoConfirmacao?.agendamento?.horario ?? ""
+        ).slice(0, 5)}
+        prazoDias={Number(estabelecimento.prazo_minimo_entre_agendamentos_dias)}
+        processando={processandoPrazoConfirmacao}
+        onTrocar={confirmarTrocaPrazoConfirmacao}
+        onDesistir={fecharConflitoPrazoConfirmacao}
+        onManterOsDois={manterOsDoisPrazoConfirmacao}
+        onCancelar={fecharConflitoPrazoConfirmacao}
+      />
 
       {/* Modal de troca de profissional. Lista só quem atende o serviço E está
           LIVRE no horário (lib/disponibilidade). Clicar num profissional grava

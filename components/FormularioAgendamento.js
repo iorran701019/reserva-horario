@@ -19,13 +19,18 @@ import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 import { formatarPreco } from "@/lib/preco";
 import { formatarData, montarResumoAgendamento } from "@/lib/data";
+import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import {
   calcularPrecoManutencao,
   buscarVencimentoManutencao,
 } from "@/lib/manutencaoSugerida";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
-import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
+import {
+  cancelarAgendamentoCliente,
+  buscarConflitoPrazoMinimo,
+} from "@/lib/agendamentosCliente";
 import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento";
+import ModalPrazoMinimo from "@/components/ModalPrazoMinimo";
 import { useVoltarFisico } from "@/lib/voltarFisico";
 import {
   dataAgendavelComMes,
@@ -988,6 +993,31 @@ export default function FormularioAgendamento({
   // regras (ver finalizarAgendamento).
   const [mostrarPopupRestricao, setMostrarPopupRestricao] = useState(false);
   const [notificarRestricao, setNotificarRestricao] = useState(true);
+
+  // Prazo mínimo entre agendamentos do MESMO cliente
+  // (estabelecimento.prazo_minimo_entre_agendamentos_dias, ver
+  // buscarConflitoPrazoMinimo em lib/agendamentosCliente.js). Diferente dos
+  // dois popups acima, este vale nos DOIS fluxos — e por isso guarda o
+  // contexto inteiro da tentativa interrompida, que é diferente em cada um:
+  //   { conflito, slot, notificar, ignorarJanela, ignorarRestricao }
+  // No público quem interrompe é selecionarHorario (nada gravado ainda), e o
+  // que precisa ser retomado é o `slot` clicado. No /admin quem interrompe é
+  // finalizarAgendamento, e o que precisa ser retomado são as flags que ele
+  // já tinha resolvido — sem preservá-las, confirmar aqui reabriria o popup
+  // de janela/restrição que a dona acabou de responder (mesmo cuidado que
+  // confirmarRestricao já toma com ignorarJanela).
+  // null = nenhum popup.
+  const [conflitoPrazo, setConflitoPrazo] = useState(null);
+  // Só pro visual: deixa os botões do modal em "Processando…"/disabled
+  // enquanto o cancelamento do agendamento antigo está em voo.
+  const [processandoPrazo, setProcessandoPrazo] = useState(false);
+  // A trava DE VERDADE contra o duplo toque. Precisa ser ref, não state:
+  // `processandoPrazo` só muda no próximo render, então dois toques rápidos
+  // entrariam os dois com o valor antigo capturado no closure e disparariam
+  // dois cancelamentos e dois inserts. O ref é lido e escrito de forma
+  // síncrona, antes do primeiro await — o `disabled` do botão sozinho não
+  // basta porque depende do render ter acontecido.
+  const processandoPrazoRef = useRef(false);
 
   // Restrições de agenda por etiqueta ATIVAS do salão (tabela
   // restricoes_agenda). Alimentam o calendário — que precisa delas ANTES de
@@ -2456,7 +2486,13 @@ export default function FormularioAgendamento({
   // diferente, cancela a anterior antes de criar a nova — nunca duas linhas
   // ativas da mesma tentativa. finalizarAgendamento, no submit final, só faz
   // UPDATE nesta linha (nunca INSERT).
-  async function selecionarHorario(slot) {
+  // `prazoIgnorados` chega preenchido quando o próprio ModalPrazoMinimo
+  // reinvoca esta função depois da cliente decidir (ver confirmarTrocaPrazo/
+  // manterOsDoisPrazo): são os conflitos JÁ tratados nesta tentativa, que o
+  // gate de prazo mínimo não deve mais apontar — sem isso o popup reabriria
+  // em loop pro mesmo agendamento. O gate em si continua rodando, pra achar
+  // um eventual SEGUNDO vizinho ainda ativo (ver retomarAposPrazo).
+  async function selecionarHorario(slot, { prazoIgnorados = [] } = {}) {
     setAvisoHorarioIndisponivel(false);
 
     if (status) {
@@ -2498,6 +2534,37 @@ export default function FormularioAgendamento({
       setErro("Esse horário não respeita mais a antecedência mínima do salão. Escolha outro.");
       setHorarioSelecionado("");
       return;
+    }
+
+    // Prazo mínimo entre agendamentos do mesmo cliente: aviso consciente,
+    // não bloqueio (o cliente pode "Manter dois agendamentos próximos" e
+    // seguir com os dois de pé). Fica DEPOIS da
+    // antecedência e ANTES do cancela-e-recria logo abaixo de propósito — é o
+    // último ponto do fluxo público em que ainda não escrevemos nada, então
+    // abortar aqui deixa a reserva anterior (se houver) intacta, exatamente
+    // como o abort de antecedência acima.
+    //
+    // A reserva desta mesma sessão (reservaId) e o agendamento em edição saem
+    // da conta: são a PRÓPRIA tentativa em curso, e sem ignorá-las a cliente
+    // que volta e troca de horário conflitaria com ela mesma.
+    {
+      const conflito = await buscarConflitoPrazoMinimo(
+        estabelecimento.id,
+        form.telefone,
+        form.data,
+        estabelecimento.prazo_minimo_entre_agendamentos_dias,
+        [reservaId, agendamentoEmEdicao?.id, ...prazoIgnorados]
+      );
+
+      if (conflito) {
+        setCriandoReserva(false);
+        setHorarioSelecionado("");
+        // `prazoIgnorados` viaja junto no contexto: a próxima rodada precisa
+        // continuar ignorando os que já foram tratados, senão o popup volta
+        // pro primeiro conflito e o fluxo nunca termina.
+        setConflitoPrazo({ conflito, slot, prazoIgnorados });
+        return;
+      }
     }
 
     // Havia uma reserva de uma tentativa anterior (outro serviço/data/horário
@@ -2741,6 +2808,144 @@ export default function FormularioAgendamento({
     });
   }
 
+  // --- Decisões do ModalPrazoMinimo ----------------------------------------
+  //
+  // Retoma a tentativa que o popup de prazo mínimo interrompeu. O contexto
+  // guardado em `conflitoPrazo` diz por qual caminho voltar: com `slot` veio
+  // do público (selecionarHorario, nada gravado ainda); sem ele veio do
+  // /admin (finalizarAgendamento), e aí as flags dos gates anteriores voltam
+  // junto.
+  //
+  // `prazoIgnorados` é a lista ACUMULADA de conflitos já resolvidos nesta
+  // tentativa — e substitui o antigo `ignorarPrazo:true`, que desligava o
+  // gate inteiro. A diferença importa quando a cliente tem DOIS agendamentos
+  // dentro da janela: desligando o gate, o segundo nunca era visto e ficava
+  // de pé em silêncio; ignorando só os já tratados, o gate roda de novo, acha
+  // o próximo e reabre o popup pra ele. Um de cada vez, até não sobrar
+  // nenhum. Termina sempre: cada rodada acrescenta um id à lista e o conjunto
+  // de candidatos de buscarConflitoPrazoMinimo só encolhe.
+  //
+  // Diferente, portanto, de confirmarForaDaJanela/confirmarRestricao, cujas
+  // regras são sobre O DIA (uma resposta resolve de vez) — esta é sobre
+  // CADA agendamento vizinho.
+  async function retomarAposPrazo(contexto, prazoIgnorados) {
+    setConflitoPrazo(null);
+    setProcessandoPrazo(false);
+    processandoPrazoRef.current = false;
+
+    if (contexto.slot != null) {
+      await selecionarHorario(contexto.slot, { prazoIgnorados });
+      return;
+    }
+
+    await finalizarAgendamento(contexto.notificar, {
+      ignorarJanela: contexto.ignorarJanela,
+      ignorarRestricao: contexto.ignorarRestricao,
+      prazoIgnorados,
+    });
+  }
+
+  // Lista de ignorados da PRÓXIMA rodada: os que já foram tratados nesta
+  // tentativa mais o conflito que acabou de ser decidido (cancelado ou
+  // mantido — os dois saem de cena do mesmo jeito, o gate não deve reabrir
+  // pra eles).
+  function proximosIgnorados(contexto) {
+    return [...(contexto.prazoIgnorados ?? []), contexto.conflito.id];
+  }
+
+  // "Cancelar <data antiga> e confirmar <data nova>": cancela o agendamento
+  // conflitante ANTES de seguir. Só retoma se o cancelamento REALMENTE
+  // gravou — seguir depois de uma falha deixaria os dois de pé, que é
+  // justamente o desfecho que esta ação promete evitar.
+  //
+  // Os dois fluxos cancelam de formas diferentes de propósito: no público é
+  // a cliente desistindo do próprio horário, então usa
+  // cancelarAgendamentoCliente (grava cancelado_por_cliente e avisa a dona no
+  // WhatsApp, mas só se o antigo já estava confirmado — ver lá); no /admin é
+  // a dona mexendo na própria agenda, mesmo UPDATE cru de handleCancelar em
+  // app/[salon]/admin/page.js, com .select("id") pra distinguir "não gravou"
+  // de "gravou zero linhas por RLS".
+  async function confirmarTrocaPrazo() {
+    const contexto = conflitoPrazo;
+    if (!contexto || processandoPrazoRef.current) return;
+
+    // Trava síncrona ANTES de qualquer await (ver processandoPrazoRef).
+    processandoPrazoRef.current = true;
+    setProcessandoPrazo(true);
+    setErro("");
+
+    if (status) {
+      const { data: canceladas, error } = await supabase
+        .from("agendamentos")
+        .update({ status: "cancelado" })
+        .eq("id", contexto.conflito.id)
+        .select("id");
+
+      if (error || !canceladas || canceladas.length === 0) {
+        processandoPrazoRef.current = false;
+        setProcessandoPrazo(false);
+        setConflitoPrazo(null);
+        setErro(
+          `Não foi possível cancelar o agendamento anterior: ${mensagemFalhaSalvar(error)}`
+        );
+        return;
+      }
+    } else {
+      const { ok, erro: erroCancelamento } = await cancelarAgendamentoCliente({
+        agendamentoId: contexto.conflito.id,
+        estabelecimento,
+        nomeCliente: form.nome,
+        dataFormatada: formatarData(contexto.conflito.data),
+        horario: contexto.conflito.horario,
+      });
+
+      if (!ok) {
+        processandoPrazoRef.current = false;
+        setProcessandoPrazo(false);
+        setConflitoPrazo(null);
+        setErro(erroCancelamento);
+        return;
+      }
+    }
+
+    await retomarAposPrazo(contexto, proximosIgnorados(contexto));
+  }
+
+  // "Manter dois agendamentos próximos": segue com o novo agendamento SEM
+  // cancelar o antigo — o equivalente ao "Agendar mesmo assim" do
+  // ModalClientePendente e ao "Confirmar mesmo assim" dos popups de
+  // janela/restrição. Nenhuma escrita acontece aqui: quem grava é o caminho
+  // retomado (insert no público, insert no /admin).
+  //
+  // Entra na MESMA fila de proximosIgnorados do cancelamento: manter este
+  // vizinho é uma decisão tomada sobre ELE, não sobre a regra inteira. Se
+  // houver um segundo agendamento dentro da janela, o popup reabre pra ele —
+  // a cliente pode querer manter um e cancelar o outro.
+  //
+  // Mesma trava síncrona do confirmarTrocaPrazo: aqui o duplo toque não
+  // cancelaria nada, mas ainda entraria duas vezes no caminho que insere.
+  async function manterOsDoisPrazo() {
+    const contexto = conflitoPrazo;
+    if (!contexto || processandoPrazoRef.current) return;
+
+    processandoPrazoRef.current = true;
+    await retomarAposPrazo(contexto, proximosIgnorados(contexto));
+  }
+
+  // "Cancelar este e manter <data antiga>": desiste do agendamento novo, e é
+  // também o que o clique no fundo do modal faz. Única saída do popup que não
+  // grava nada — as outras duas seguem em frente, com ou sem cancelar o
+  // antigo antes.
+  //
+  // Nada foi gravado até este ponto nos dois fluxos, então fechar basta: no
+  // público a cliente volta pra grade com o horário já solto (o abort de
+  // selecionarHorario limpou horarioSelecionado), e no /admin a dona
+  // continua na etapa "dados" com tudo preenchido, livre pra trocar a data.
+  function fecharConflitoPrazo() {
+    if (processandoPrazoRef.current) return;
+    setConflitoPrazo(null);
+  }
+
   // Submit final ("Confirmar agendamento").
   //
   // /admin (status truthy): comportamento de sempre — faz o INSERT aqui, na
@@ -2754,7 +2959,7 @@ export default function FormularioAgendamento({
   // registro existe do jeito certo desde que a etapa foi alcançada.
   async function finalizarAgendamento(
     notificar = true,
-    { ignorarJanela = false, ignorarRestricao = false } = {}
+    { ignorarJanela = false, ignorarRestricao = false, prazoIgnorados = [] } = {}
   ) {
     if (!status) {
       setEnviando(true);
@@ -2837,6 +3042,38 @@ export default function FormularioAgendamento({
       setNotificarRestricao(notificar);
       setMostrarPopupRestricao(true);
       return;
+    }
+
+    // MESMO padrão para o prazo mínimo entre agendamentos do cliente — com a
+    // diferença de que esta regra também roda no público, lá no clique do
+    // horário (ver selecionarHorario), porque lá o insert acontece antes de
+    // chegar aqui. Aqui é o gate do /admin, que insere só neste ponto.
+    //
+    // Guarda `notificar` e as flags já resolvidas dos dois gates acima: sem
+    // elas, confirmar no modal reabriria o popup de janela/restrição que a
+    // dona acabou de responder. Diferente daquelas duas, o prazo mínimo NÃO
+    // vira um "ignorar" de uma vez: cada vizinho decidido entra em
+    // `prazoIgnorados` e o gate roda de novo atrás do próximo (ver
+    // retomarAposPrazo).
+    {
+      const conflito = await buscarConflitoPrazoMinimo(
+        estabelecimento.id,
+        form.telefone,
+        form.data,
+        estabelecimento.prazo_minimo_entre_agendamentos_dias,
+        [reservaId, agendamentoEmEdicao?.id, ...prazoIgnorados]
+      );
+
+      if (conflito) {
+        setConflitoPrazo({
+          conflito,
+          notificar,
+          ignorarJanela: true,
+          ignorarRestricao: true,
+          prazoIgnorados,
+        });
+        return;
+      }
     }
 
     setEnviando(true);
@@ -4149,6 +4386,31 @@ export default function FormularioAgendamento({
           </div>
         </div>
       )}
+
+      {/* Prazo mínimo entre agendamentos do mesmo cliente — ÚNICO popup deste
+          arquivo que aparece nos dois fluxos: no público disparado por
+          selecionarHorario (antes de qualquer escrita), no /admin pelo gate de
+          finalizarAgendamento. As datas vão formatadas porque o modal não
+          importa nada daqui (ver ModalPrazoMinimo). */}
+      <ModalPrazoMinimo
+        conflito={
+          conflitoPrazo
+            ? {
+                dataFormatada: formatarData(conflitoPrazo.conflito.data),
+                horario: String(conflitoPrazo.conflito.horario ?? "").slice(0, 5),
+                servicoNome: conflitoPrazo.conflito.servicos?.nome ?? null,
+              }
+            : null
+        }
+        dataNova={form.data ? formatarData(form.data) : ""}
+        horarioNovo={String(conflitoPrazo?.slot ?? horarioSelecionado ?? "").slice(0, 5)}
+        prazoDias={Number(estabelecimento.prazo_minimo_entre_agendamentos_dias)}
+        processando={processandoPrazo}
+        onTrocar={confirmarTrocaPrazo}
+        onDesistir={fecharConflitoPrazo}
+        onManterOsDois={manterOsDoisPrazo}
+        onCancelar={fecharConflitoPrazo}
+      />
     </>
   );
 }

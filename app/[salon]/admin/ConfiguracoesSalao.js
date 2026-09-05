@@ -118,6 +118,14 @@ export default function ConfiguracoesSalao({
   // com sucesso, pra AdminPage patchar sua própria cópia de `estabelecimento`
   // sem refetch. Opcional (no-op por padrão).
   onMensagemAtualizada = () => {},
+  // Mesmo padrão acima, para o prazo mínimo entre agendamentos do mesmo
+  // cliente (ver salvarPrazoMinimo abaixo): chamado com o novo valor em dias
+  // (null = regra desligada) pra AdminPage patchar sua própria cópia de
+  // `estabelecimento`. Sem isto, o gate de prazo mínimo do wizard da aba
+  // Agendar (ver finalizarAgendamento em components/FormularioAgendamento.js)
+  // continuaria lendo o valor do mount — configurar o prazo e ir direto
+  // agendar não dispararia o aviso até um reload. Opcional (no-op por padrão).
+  onPrazoMinimoAtualizado = () => {},
   // true quando a navegação veio do banner "Agenda aberta até" (ver page.js) —
   // abre o bloco "Janela de agendamento" (accordion) já expandido e rola até
   // ele. Consumido uma vez (ver useEffect abaixo) via
@@ -331,6 +339,15 @@ export default function ConfiguracoesSalao({
   const [erroCancelamentoPrazo, setErroCancelamentoPrazo] = useState("");
   const [statusCancelamentoPrazo, setStatusCancelamentoPrazo] = useState("");
 
+  // Dias mínimos entre dois agendamentos do MESMO cliente. Não bloqueia nada:
+  // alimenta o aviso de "agendamentos próximos" que aparece antes de gravar,
+  // nos dois fluxos (ver buscarConflitoPrazoMinimo em
+  // lib/agendamentosCliente.js e ModalPrazoMinimo). String pro input; vazio
+  // grava null (regra desligada); undefined = ainda carregando.
+  const [prazoMinimoDias, setPrazoMinimoDias] = useState(undefined);
+  const [erroPrazoMinimo, setErroPrazoMinimo] = useState("");
+  const [statusPrazoMinimo, setStatusPrazoMinimo] = useState("");
+
   // Link de compartilhamento do Google Maps, usado pelo card "Ver
   // localização" na tela de confirmação do agendamento (ver
   // app/[salon]/page.js). Vazio grava null (card não aparece pro cliente).
@@ -415,7 +432,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, reserva_provisoria_expira_horas, cancelamento_prazo_horas, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, reserva_provisoria_expira_horas, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -475,6 +492,13 @@ export default function ConfiguracoesSalao({
         data?.cancelamento_prazo_horas == null
           ? ""
           : String(data.cancelamento_prazo_horas)
+      );
+
+      setErroPrazoMinimo("");
+      setPrazoMinimoDias(
+        data?.prazo_minimo_entre_agendamentos_dias == null
+          ? ""
+          : String(data.prazo_minimo_entre_agendamentos_dias)
       );
 
       setErroLinkLocalizacao("");
@@ -663,6 +687,12 @@ export default function ConfiguracoesSalao({
     const t = setTimeout(() => setStatusCancelamentoPrazo(""), 2500);
     return () => clearTimeout(t);
   }, [statusCancelamentoPrazo]);
+
+  useEffect(() => {
+    if (statusPrazoMinimo !== "salvo") return;
+    const t = setTimeout(() => setStatusPrazoMinimo(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusPrazoMinimo]);
 
   useEffect(() => {
     if (statusLinkLocalizacao !== "salvo") return;
@@ -906,6 +936,46 @@ export default function ConfiguracoesSalao({
 
     setCancelamentoPrazoHoras(String(horas));
     setStatusCancelamentoPrazo("salvo");
+  }
+
+  // Grava o prazo mínimo entre agendamentos do mesmo cliente, em dias (ver
+  // buscarConflitoPrazoMinimo em lib/agendamentosCliente.js). Mesmo molde de
+  // salvarAntecedenciaMinima: campo VAZIO é um valor legítimo e grava null
+  // (regra desligada, nenhum aviso aparece) — diferente de
+  // salvarCancelamentoPrazo, onde vazio é erro. Só recusa o que não dá pra
+  // interpretar: texto solto ou número negativo, que revertem pro último
+  // valor válido sem gravar. 0 também grava null: "0 dias de prazo" é a
+  // mesma coisa que não ter prazo, e deixar o zero no banco faria a regra
+  // parecer ligada na volta.
+  async function salvarPrazoMinimo() {
+    const bruto = String(prazoMinimoDias ?? "").trim();
+    const dias = bruto === "" ? null : parseInt(bruto, 10);
+
+    if (dias !== null && (!Number.isInteger(dias) || dias < 0)) {
+      setErroPrazoMinimo("Informe um número de dias maior ou igual a 0, ou deixe vazio.");
+      return;
+    }
+
+    const valor = dias === null || dias === 0 ? null : dias;
+
+    setStatusPrazoMinimo("salvando");
+    setErroPrazoMinimo("");
+
+    const { data: linhas, error } = await supabase
+      .from("estabelecimentos")
+      .update({ prazo_minimo_entre_agendamentos_dias: valor })
+      .eq("id", estabelecimento.id)
+      .select("id");
+
+    if (error || !linhas?.length) {
+      setStatusPrazoMinimo("");
+      setErroPrazoMinimo(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
+      return;
+    }
+
+    setPrazoMinimoDias(valor === null ? "" : String(valor));
+    setStatusPrazoMinimo("salvo");
+    onPrazoMinimoAtualizado(valor);
   }
 
   // Vazio grava null (nenhum card "Ver localização" aparece pro cliente).
@@ -1709,6 +1779,7 @@ export default function ConfiguracoesSalao({
   const carregandoManutencaoExterna = servicoManutencaoExternaId === undefined;
   const carregandoReservaExpira = reservaExpiraHoras === undefined;
   const carregandoCancelamentoPrazo = cancelamentoPrazoHoras === undefined;
+  const carregandoPrazoMinimo = prazoMinimoDias === undefined;
   const carregandoLinkLocalizacao = linkLocalizacao === undefined;
   const carregandoFidelidade = fidelidadeAtiva === undefined;
   const carregandoFoto = fotoPerfilUrl === undefined;
@@ -2465,6 +2536,45 @@ export default function ConfiguracoesSalao({
               )}
               {erroReservaExpira && (
                 <p className="mt-2 text-xs text-red-600">{erroReservaExpira}</p>
+              )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="prazo-minimo-dias"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Prazo mínimo entre agendamentos (dias)
+              </label>
+              <input
+                id="prazo-minimo-dias"
+                type="number"
+                min="0"
+                step="1"
+                inputMode="numeric"
+                value={prazoMinimoDias ?? ""}
+                onChange={(e) => setPrazoMinimoDias(e.target.value)}
+                onBlur={salvarPrazoMinimo}
+                disabled={carregandoPrazoMinimo}
+                placeholder="Sem prazo"
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <p className="mt-1 text-xs text-muted">
+                Quantos dias devem separar dois agendamentos do mesmo cliente.
+                Marcando um horário perto demais de outro que ele já tem, um
+                aviso aparece antes de gravar — no site e aqui no admin — com
+                a opção de trocar de data, desistir ou manter os dois. Não
+                bloqueia nada. Vazio (ou 0) desliga o aviso.
+              </p>
+
+              {statusPrazoMinimo === "salvando" && (
+                <p className="mt-2 text-xs text-muted">Salvando…</p>
+              )}
+              {statusPrazoMinimo === "salvo" && !erroPrazoMinimo && (
+                <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+              )}
+              {erroPrazoMinimo && (
+                <p className="mt-2 text-xs text-red-600">{erroPrazoMinimo}</p>
               )}
             </div>
           </div>
