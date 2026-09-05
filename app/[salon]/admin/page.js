@@ -2632,6 +2632,25 @@ export default function AdminPage() {
                          como saber se não havia sinal ou se o card só não
                          estava mostrando.
 
+                         Único ramo que olha a configuração ATUAL do salão
+                         (estabelecimento.sinal_regra): com o sinal desligado
+                         não existe cobrança nenhuma pra explicar, e o aviso
+                         viraria ruído em todo card pendente. Os 3 ramos
+                         acima seguem cegos à config de propósito — eles
+                         relatam o que aconteceu na época DAQUELE agendamento
+                         (a cliente anexou / declarou / ficou devendo), e isso
+                         não deixa de ser verdade porque a dona mudou a regra
+                         depois.
+
+                         O valor vem do `estabelecimento` resolvido no mount
+                         (ver o efeito de buscarPerfil/buscarEstabelecimento
+                         acima), e ConfiguracoesSalao grava sinal_regra na
+                         própria cópia sem avisar este componente. Desligar o
+                         sinal em Regras e voltar pra cá sem recarregar deixa
+                         o aviso no ar até o próximo reload — aceito de
+                         propósito, pra não abrir mais um callback de patch
+                         por um badge informativo.
+
                       A cadeia de ternários é o que garante o "um ou outro":
                       antes, 1 e 2 já eram mutuamente exclusivos por acaso (um
                       testa o caminho, o outro a ausência dele), mas o badge de
@@ -2654,7 +2673,8 @@ export default function AdminPage() {
                     </p>
                   ) : item.status === "pendente" &&
                     !item.sinal_declarado_pago &&
-                    !item.comprovante_pix_url ? (
+                    !item.comprovante_pix_url &&
+                    estabelecimento?.sinal_regra !== "desligado" ? (
                     <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 ring-1 ring-gray-300">
                       <Info className="h-3.5 w-3.5" aria-hidden="true" />
                       Nenhum sinal de Pix foi cobrado
