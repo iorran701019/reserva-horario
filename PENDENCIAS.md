@@ -75,6 +75,7 @@
 + - sinal_regra adicionado a lib/perfil.js (resolve só esse campo da pendência de
 +   sincronização abaixo — o resto continua em aberto).
 - [ ] Implementar alerta de agendamentos próximos / prazo mínimo entre agendamentos
++ - [x] Botão do modal de prazo mínimo (`ModalPrazoMinimo.js`) segue a cor de tema de cada salão em vez de âmbar fixo (Sessão 48).
 
 ## Em aberto
 - [ ] UX da configuração de pergunta condicional (mãe/filha) em `GerenciarServicos.js` — funcional, mas complexa pra configurar; considerar assistente passo-a-passo ou fluxo guiado no futuro.
