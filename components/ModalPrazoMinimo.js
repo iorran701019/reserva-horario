@@ -88,7 +88,7 @@ export default function ModalPrazoMinimo({
             type="button"
             onClick={onTrocar}
             disabled={processando}
-            className="w-full rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {processando
               ? "Processando…"
