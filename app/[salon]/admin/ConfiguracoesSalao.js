@@ -161,6 +161,19 @@ export default function ConfiguracoesSalao({
   const [erroSinal, setErroSinal] = useState("");
   const [statusSinal, setStatusSinal] = useState("");
 
+  // Credencial da AbacatePay do salão (só existe quando a forma de cobrança
+  // é 'abacatepay'). Mesmo padrão do Google Calendar: a api_key NUNCA volta
+  // pro browser — app/api/abacatepay/credenciais/route.js só responde um
+  // booleano de "conectado", e é o service role de lá que fala com a tabela.
+  // undefined = ainda carregando (evita piscar "desconectado" antes da
+  // resposta chegar).
+  const [abacatepayConectado, setAbacatepayConectado] = useState(undefined);
+  // A chave digitada vive aqui só até o POST responder — depois disso o
+  // campo é limpo, pra chave não ficar parada na memória da tela.
+  const [abacatepayApiKey, setAbacatepayApiKey] = useState("");
+  const [salvandoAbacatepay, setSalvandoAbacatepay] = useState(false);
+  const [erroAbacatepay, setErroAbacatepay] = useState("");
+
   // Data final da janela de agendamento (estabelecimentos.janela_agendamento_fim,
   // "YYYY-MM-DD") — além dela, nenhum dia pode ser agendado, público ou
   // /admin (ver lib/janelaAgendamento.js -> dentroDaJanelaAgendamento, a
@@ -624,6 +637,40 @@ export default function ConfiguracoesSalao({
     };
   }, [estabelecimento.id]);
 
+  // Só o booleano de "conectado" da credencial da AbacatePay — a rota não
+  // devolve a api_key (ver app/api/abacatepay/credenciais/route.js). Roda na
+  // montagem porque o bloco do sinal pode já vir aberto; erro aqui não trava
+  // a tela, só deixa o campo em "desconectado" com a mensagem embaixo.
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregarAbacatepay() {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const resposta = await fetch(
+          `/api/abacatepay/credenciais?estabelecimentoId=${estabelecimento.id}`,
+          { headers: { Authorization: `Bearer ${data?.session?.access_token ?? ""}` } }
+        );
+
+        if (!resposta.ok) throw new Error("Falha ao consultar.");
+
+        const corpo = await resposta.json();
+        if (!ativo) return;
+        setErroAbacatepay("");
+        setAbacatepayConectado(Boolean(corpo?.conectado));
+      } catch {
+        if (!ativo) return;
+        setAbacatepayConectado(false);
+        setErroAbacatepay("Não foi possível verificar a conta AbacatePay.");
+      }
+    }
+
+    carregarAbacatepay();
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento.id]);
+
   // Limpa o parâmetro `google_calendar_sincronizados` (lido acima, no
   // initializer de sucessoGoogleCalendar) da URL, pra não reexibir a
   // mensagem de sucesso num refresh da página.
@@ -801,6 +848,68 @@ export default function ConfiguracoesSalao({
     const novo = e.target.value;
     setMetodoCobrancaPix(novo);
     salvarSinal({ metodoCobrancaPix: novo });
+  }
+
+  // As 3 rotas de credencial da AbacatePay exigem Authorization: Bearer
+  // <token> (ver lib/apiAuth.js -> autorizarAdminEstabelecimento), mesma
+  // exigência das rotas do Google Calendar.
+  async function cabecalhoAutorizacaoAbacatepay() {
+    const { data } = await supabase.auth.getSession();
+    return { Authorization: `Bearer ${data?.session?.access_token ?? ""}` };
+  }
+
+  // Grava a api_key colada pelo dono. Em caso de sucesso o input é limpo:
+  // o state não guarda a chave depois do envio, e a tela volta a saber
+  // apenas o booleano de "conectado" — igual ao que a rota responde.
+  async function conectarAbacatepay() {
+    const apiKey = abacatepayApiKey.trim();
+    if (!apiKey) {
+      setErroAbacatepay("Cole a api_key da AbacatePay.");
+      return;
+    }
+
+    setSalvandoAbacatepay(true);
+    setErroAbacatepay("");
+
+    try {
+      const resposta = await fetch("/api/abacatepay/credenciais", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await cabecalhoAutorizacaoAbacatepay()),
+        },
+        body: JSON.stringify({ estabelecimentoId: estabelecimento.id, apiKey }),
+      });
+
+      if (!resposta.ok) throw new Error("Falha ao conectar.");
+
+      setAbacatepayApiKey("");
+      setAbacatepayConectado(true);
+    } catch {
+      setErroAbacatepay("Não foi possível conectar a conta AbacatePay. Tente de novo.");
+    } finally {
+      setSalvandoAbacatepay(false);
+    }
+  }
+
+  async function desconectarAbacatepay() {
+    setSalvandoAbacatepay(true);
+    setErroAbacatepay("");
+
+    try {
+      const resposta = await fetch(
+        `/api/abacatepay/credenciais?estabelecimentoId=${estabelecimento.id}`,
+        { method: "DELETE", headers: await cabecalhoAutorizacaoAbacatepay() }
+      );
+
+      if (!resposta.ok) throw new Error("Falha ao desconectar.");
+
+      setAbacatepayConectado(false);
+    } catch {
+      setErroAbacatepay("Não foi possível desconectar a conta AbacatePay. Tente de novo.");
+    } finally {
+      setSalvandoAbacatepay(false);
+    }
   }
 
   // Vazio grava null (nenhum popup aparece no fluxo público).
@@ -1799,7 +1908,11 @@ export default function ConfiguracoesSalao({
   const carregandoGoogleCalendar = googleCalendarAtivo === undefined;
   const carregandoJanela = janelaAgendamentoFim === undefined;
   const carregandoAntecedenciaMinima = antecedenciaMinimaHoras === undefined;
+  const carregandoAbacatepay = abacatepayConectado === undefined;
   const sinalDesligado = sinalRegra === "desligado";
+  // A credencial da AbacatePay só faz sentido com o sinal ligado E cobrado
+  // pela API — no modo manual não existe nada pra autenticar.
+  const mostrarAbacatepay = !sinalDesligado && metodoCobrancaPix === "abacatepay";
   // Com 1 só profissional ativo (ou enquanto a contagem ainda carrega), o
   // toggle some — não há outro profissional pro cliente escolher de qualquer
   // forma. Se o salão já tinha o valor "true" salvo de quando tinha 2+
@@ -2783,6 +2896,64 @@ export default function ConfiguracoesSalao({
                   <option value="abacatepay">Automático via AbacatePay</option>
                 </select>
               </div>
+
+              {mostrarAbacatepay && (
+                <div className="rounded-lg border border-border p-3">
+                  <p className="mb-1 block text-sm font-medium text-body">
+                    Conta AbacatePay
+                  </p>
+
+                  {carregandoAbacatepay ? (
+                    <p className="text-xs text-muted">Verificando…</p>
+                  ) : abacatepayConectado ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm text-heading">
+                        Conta AbacatePay conectada
+                      </span>
+                      <button
+                        type="button"
+                        onClick={desconectarAbacatepay}
+                        disabled={salvandoAbacatepay}
+                        className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-body transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {salvandoAbacatepay ? "Desconectando…" : "Desconectar"}
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="mb-2 text-xs text-muted">
+                        Cole a api_key da sua conta AbacatePay pra gerar os
+                        QR Codes do sinal automaticamente. Ela fica guardada no
+                        servidor e não volta a aparecer aqui.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <input
+                          id="abacatepay-api-key"
+                          type="password"
+                          value={abacatepayApiKey}
+                          onChange={(e) => setAbacatepayApiKey(e.target.value)}
+                          disabled={salvandoAbacatepay}
+                          autoComplete="off"
+                          placeholder="api_key da AbacatePay"
+                          className="min-w-0 flex-1 rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                        />
+                        <button
+                          type="button"
+                          onClick={conectarAbacatepay}
+                          disabled={salvandoAbacatepay}
+                          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {salvandoAbacatepay ? "Conectando…" : "Conectar"}
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {erroAbacatepay && (
+                    <p className="mt-2 text-xs text-red-600">{erroAbacatepay}</p>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label
