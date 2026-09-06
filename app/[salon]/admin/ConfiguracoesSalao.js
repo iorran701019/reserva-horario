@@ -154,6 +154,10 @@ export default function ConfiguracoesSalao({
   const [sinalRegra, setSinalRegra] = useState(undefined);
   const [sinalValor, setSinalValor] = useState("");
   const [sinalChavePix, setSinalChavePix] = useState("");
+  // Como o sinal é cobrado: 'manual' (cliente manda comprovante) ou
+  // 'abacatepay' (QR Code gerado pela API). Só a escolha por enquanto — nada
+  // do lado da AbacatePay está implementado ainda.
+  const [metodoCobrancaPix, setMetodoCobrancaPix] = useState("manual");
   const [erroSinal, setErroSinal] = useState("");
   const [statusSinal, setStatusSinal] = useState("");
 
@@ -432,7 +436,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, reserva_provisoria_expira_horas, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, reserva_provisoria_expira_horas, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -463,6 +467,7 @@ export default function ConfiguracoesSalao({
       setSinalRegra(data?.sinal_regra ?? "desligado");
       setSinalValor(centavosParaReais(data?.sinal_valor_centavos));
       setSinalChavePix(data?.sinal_chave_pix ?? "");
+      setMetodoCobrancaPix(data?.metodo_cobranca_pix ?? "manual");
 
       setErroRegrasAgendamento("");
       setAvisoRegrasAgendamento(data?.aviso_regras_agendamento ?? "");
@@ -754,13 +759,14 @@ export default function ConfiguracoesSalao({
     setStatus("salvo");
   }
 
-  // Grava os 3 campos do sinal juntos (mesma linha). `patch` sobrepõe o state
+  // Grava os 4 campos do sinal juntos (mesma linha). `patch` sobrepõe o state
   // atual pra casos em que o campo que disparou o save ainda não commitou no
   // state (ex.: o próprio onChange da regra).
   async function salvarSinal(patch = {}) {
     const regra = patch.sinalRegra ?? sinalRegra;
     const valor = patch.sinalValor ?? sinalValor;
     const chavePix = patch.sinalChavePix ?? sinalChavePix;
+    const metodo = patch.metodoCobrancaPix ?? metodoCobrancaPix;
 
     setStatusSinal("salvando");
     setErroSinal("");
@@ -771,6 +777,7 @@ export default function ConfiguracoesSalao({
         sinal_regra: regra,
         sinal_valor_centavos: reaisParaCentavos(valor),
         sinal_chave_pix: chavePix || null,
+        metodo_cobranca_pix: metodo,
       })
       .eq("id", estabelecimento.id)
       .select("id");
@@ -788,6 +795,12 @@ export default function ConfiguracoesSalao({
     const nova = e.target.value;
     setSinalRegra(nova);
     salvarSinal({ sinalRegra: nova });
+  }
+
+  function handleMetodoCobrancaPixChange(e) {
+    const novo = e.target.value;
+    setMetodoCobrancaPix(novo);
+    salvarSinal({ metodoCobrancaPix: novo });
   }
 
   // Vazio grava null (nenhum popup aparece no fluxo público).
@@ -2747,6 +2760,27 @@ export default function ConfiguracoesSalao({
                     Exceto manutenção
                   </option>
                   <option value="todos">Obrigatório para todos</option>
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="metodo-cobranca-pix"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Forma de cobrança
+                </label>
+                <select
+                  id="metodo-cobranca-pix"
+                  value={metodoCobrancaPix}
+                  onChange={handleMetodoCobrancaPixChange}
+                  disabled={carregandoSinal || sinalDesligado}
+                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <option value="manual">
+                    Manual (cliente envia comprovante)
+                  </option>
+                  <option value="abacatepay">Automático via AbacatePay</option>
                 </select>
               </div>
 
