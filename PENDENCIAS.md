@@ -121,3 +121,22 @@
 + implementação existia só como diff não commitado em cima de staging. Recuperado sem
 + perda, mas o hábito mudou: sempre rodar `git log --oneline` antes de deletar uma
 + branch de feature, não confiar só no resultado textual do merge.
+
+## AbacatePay — cobrança automática de sinal via Pix (em andamento)
+
+**Concluído (Sessão 49):**
+- Coluna `estabelecimentos.metodo_cobranca_pix` ('manual'/'abacatepay', default 'manual') — staging e produção.
+- Campo "Forma de cobrança" no admin (bloco Sinal de reserva).
+- Tabela `abacatepay_credenciais` (sem policy de RLS, só service role) — staging e produção.
+- Rotas `app/api/abacatepay/credenciais/route.js` (GET/POST/DELETE), testadas ponta a ponta.
+- Tela de conectar/desconectar conta AbacatePay no admin, condicionada a metodo_cobranca_pix='abacatepay'.
+- `/agendar` ainda NÃO consome esse campo — fluxo manual continua ativo pra todo mundo até a próxima etapa.
+
+**Pendente (próxima sessão, em ordem):**
+1. Testar API da AbacatePay em sandbox antes de mexer em produção.
+2. Endpoint público de criação de cobrança Pix (chama AbacatePay no servidor com a api_key guardada).
+3. Componente de exibição do QR Code no /agendar, substituindo o fluxo manual quando metodo_cobranca_pix='abacatepay'.
+4. Webhook de confirmação de pagamento (com validação de origem) atualizando status do agendamento automaticamente.
+5. Ajustar card de Pendentes pra conviver com o novo status automático, mantendo fallback manual.
+
+**Decisão de negócio:** sem taxa de conveniência/markup — 100% do sinal fica com a dona. Sem split de pagamento necessário.
