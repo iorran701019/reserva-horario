@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { confirmarPagamentoPix } from "@/lib/abacatepay/confirmarPagamento";
 
@@ -7,50 +8,88 @@ import { confirmarPagamentoPix } from "@/lib/abacatepay/confirmarPagamento";
 // até reabrir a tela ou a reserva expirar — ou seja, pagava e perdia o
 // horário.
 //
-// Autenticação por QUERY PARAM, não pelo header `x-webhook-secret` usado em
-// app/api/notificacoes e app/api/google-calendar/sync: quem dita o formato
-// aqui é a AbacatePay, que só sabe chamar a URL que a dona cadastrou no painel
-// dela. O segredo vive em ABACATEPAY_WEBHOOK_SECRET e faz parte da URL
-// cadastrada lá.
+// Autenticação por ASSINATURA HMAC nos headers `webhook-id`,
+// `webhook-timestamp` e `webhook-signature`, não pelo `x-webhook-secret` usado
+// em app/api/notificacoes e app/api/google-calendar/sync: quem dita o formato
+// aqui é a AbacatePay. O formato abaixo foi confirmado inspecionando uma
+// chamada real — a doc deles também descreve query param, que NÃO é o que
+// chega. O segredo vive em ABACATEPAY_WEBHOOK_SECRET.
 //
-// A rota é DELIBERADAMENTE tolerante: fora o segredo errado, tudo responde
-// 200. Gateway que recebe erro reentrega o mesmo evento em backoff, e nenhum
-// dos nossos modos de falha (evento que não interessa, cobrança que não bate
-// com agendamento nenhum, update que não pegou linha) melhora com reentrega —
-// só viraria ruído. O que precisa de olho humano vai pro console.error.
+// A rota é DELIBERADAMENTE tolerante: fora a assinatura inválida, tudo
+// responde 200. Gateway que recebe erro reentrega o mesmo evento em backoff, e
+// nenhum dos nossos modos de falha (evento que não interessa, cobrança que não
+// bate com agendamento nenhum, update que não pegou linha) melhora com
+// reentrega — só viraria ruído. O que precisa de olho humano vai pro
+// console.error.
 function supabaseServiceRole() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
+// A mensagem assinada é `id.timestamp.corpo` com o corpo em TEXTO BRUTO: um
+// JSON.parse seguido de re-serialização muda espaços e ordem de chaves e
+// quebra o HMAC, então o corpo só vira objeto depois da validação.
+function assinaturaConfere(cabecalhoAssinatura, mensagem) {
+  const esperada = Buffer.from(
+    createHmac("sha256", process.env.ABACATEPAY_WEBHOOK_SECRET ?? "")
+      .update(mensagem)
+      .digest("base64")
+  );
+
+  // O header pode trazer várias assinaturas separadas por espaço (rotação de
+  // segredo do lado deles); basta uma bater. O prefixo "v1," identifica a
+  // versão do esquema — as outras versões, se existirem, são ignoradas.
+  return cabecalhoAssinatura
+    .split(" ")
+    .filter((parte) => parte.startsWith("v1,"))
+    .some((parte) => {
+      const recebida = Buffer.from(parte.slice("v1,".length));
+      // timingSafeEqual lança se os buffers tiverem tamanhos diferentes — o
+      // tamanho não é segredo, então comparar antes é seguro e necessário.
+      return recebida.length === esperada.length && timingSafeEqual(recebida, esperada);
+    });
+}
+
 export async function POST(request) {
-  // TEMP: remover após diagnóstico
-  {
-    const urlDiagnostico = new URL(request.url);
-    console.log("[TEMP webhook abacatepay] headers", Object.fromEntries(request.headers.entries()));
-    console.log("[TEMP webhook abacatepay] query", Object.fromEntries(urlDiagnostico.searchParams.entries()));
-    console.log("[TEMP webhook abacatepay] corpo bruto", await request.clone().text().catch(() => "<falha ao ler corpo>"));
-  }
+  const webhookId = request.headers.get("webhook-id");
+  const webhookTimestamp = request.headers.get("webhook-timestamp");
+  const webhookSignature = request.headers.get("webhook-signature");
 
-  const { searchParams } = new URL(request.url);
-  const segredoRecebido = searchParams.get("webhookSecret");
-
-  if (!segredoRecebido || segredoRecebido !== process.env.ABACATEPAY_WEBHOOK_SECRET) {
+  if (!webhookId || !webhookTimestamp || !webhookSignature) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const corpo = await request.json().catch(() => null);
-  const evento = corpo?.event;
-  const dados = corpo?.data;
+  const corpoBruto = await request.text();
 
-  // A AbacatePay manda mais de um tipo de evento na mesma URL. Só o pagamento
-  // confirmado nos interessa; o resto é recebido e descartado.
-  if (evento !== "billing.paid" || dados?.status !== "PAID") {
+  if (!assinaturaConfere(webhookSignature, `${webhookId}.${webhookTimestamp}.${corpoBruto}`)) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  // Corpo com assinatura válida é JSON por construção; o catch existe só pra
+  // não transformar um payload torto num 500 que os faria reentregar em loop.
+  let corpo;
+  try {
+    corpo = JSON.parse(corpoBruto);
+  } catch (erro) {
+    console.error("Webhook da AbacatePay com corpo que não é JSON", webhookId, erro);
     return Response.json({ recebido: true });
   }
 
-  const cobrancaId = dados?.id;
+  const transparent = corpo?.data?.transparent;
+
+  // A AbacatePay manda mais de um tipo de evento na mesma URL. Só o pagamento
+  // confirmado nos interessa; o resto é recebido e descartado.
+  if (corpo?.type !== "transparent.completed" || transparent?.status !== "PAID") {
+    return Response.json({ recebido: true });
+  }
+
+  const cobrancaId = transparent?.id;
+
+  // Log enxuto pra auditoria: o suficiente pra cruzar um evento do painel deles
+  // com uma linha nossa, sem despejar os headers internos da infraestrutura.
+  console.log("Webhook da AbacatePay", webhookId, corpo?.type, cobrancaId);
+
   if (!cobrancaId) {
-    console.error("Webhook da AbacatePay com billing.paid sem id de cobrança", corpo);
+    console.error("Webhook da AbacatePay com transparent.completed sem id de cobrança", webhookId);
     return Response.json({ recebido: true });
   }
 
