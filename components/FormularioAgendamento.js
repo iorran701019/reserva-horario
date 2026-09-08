@@ -16,6 +16,7 @@ import { buscarTema } from "@/lib/temas";
 import PopupRegrasAgendamento from "@/components/PopupRegrasAgendamento";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
 import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
+import BlocoQrCodeAbacatePay from "@/components/BlocoQrCodeAbacatePay";
 import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 import { formatarPreco } from "@/lib/preco";
 import { formatarData, montarResumoAgendamento } from "@/lib/data";
@@ -3888,26 +3889,47 @@ export default function FormularioAgendamento({
                 que o comprovante é anexado, antes mesmo do submit. */}
             {precisaSinal && (
               <>
-                <BlocoConfirmacaoPix
-                  estabelecimento={estabelecimento}
-                  agendamentoId={reservaId}
-                  nomeCliente={form.nome}
-                  servicoNome={servicoSelecionado?.nome}
-                  data={form.data}
-                  horario={horarioSelecionado}
-                  nomeProfissionalContato={nomeProfissionalContato}
-                  sinalDeclarado={sinalDeclarado}
-                  onSinalDeclaradoChange={setSinalDeclarado}
-                  // O bloco leva a linha de "aguardando_sinal" pra "pendente"
-                  // sozinho, nos dois gestos que valem como "paguei e avisei"
-                  // (marcar a caixa, anexar o comprovante) — inclusive no do
-                  // comprovante, que não passa por `sinalDeclarado`. É por
-                  // aqui que o wizard fica sabendo, e é o que faz os dois
-                  // botões abaixo sumirem no mesmo instante.
-                  onStatusMudou={() =>
-                    setStatusPixReserva({ id: reservaId, aguardando: false })
-                  }
-                />
+                {/* Automático x manual. No Abacate a cliente não declara
+                    nada: quem muda o status é a rota de status, no servidor, e
+                    o wizard fica sabendo pelo mesmo onStatusMudou. Os dois
+                    blocos já renderizam a MESMA caixa cinza de resumo no topo
+                    deles, então isto aqui não duplica nada. */}
+                {estabelecimento?.metodo_cobranca_pix === "abacatepay" ? (
+                  <BlocoQrCodeAbacatePay
+                    estabelecimento={estabelecimento}
+                    agendamentoId={reservaId}
+                    nomeCliente={form.nome}
+                    servicoNome={servicoSelecionado?.nome}
+                    data={form.data}
+                    horario={horarioSelecionado}
+                    nomeProfissionalContato={nomeProfissionalContato}
+                    onStatusMudou={() =>
+                      setStatusPixReserva({ id: reservaId, aguardando: false })
+                    }
+                  />
+                ) : (
+                  <BlocoConfirmacaoPix
+                    estabelecimento={estabelecimento}
+                    agendamentoId={reservaId}
+                    nomeCliente={form.nome}
+                    servicoNome={servicoSelecionado?.nome}
+                    data={form.data}
+                    horario={horarioSelecionado}
+                    nomeProfissionalContato={nomeProfissionalContato}
+                    sinalDeclarado={sinalDeclarado}
+                    onSinalDeclaradoChange={setSinalDeclarado}
+                    // O bloco leva a linha de "aguardando_sinal" pra
+                    // "pendente" sozinho, nos dois gestos que valem como
+                    // "paguei e avisei" (marcar a caixa, anexar o
+                    // comprovante) — inclusive no do comprovante, que não
+                    // passa por `sinalDeclarado`. É por aqui que o wizard
+                    // fica sabendo, e é o que faz os dois botões abaixo
+                    // sumirem no mesmo instante.
+                    onStatusMudou={() =>
+                      setStatusPixReserva({ id: reservaId, aguardando: false })
+                    }
+                  />
+                )}
 
                 {/* Saídas da tela de Pix, enquanto a reserva ainda está em
                     "aguardando_sinal". Depois que ela avança, somem: a partir

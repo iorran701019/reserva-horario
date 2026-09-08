@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
+import BlocoQrCodeAbacatePay from "@/components/BlocoQrCodeAbacatePay";
 import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
 import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento";
 import { formatarData } from "@/components/FormularioAgendamento";
@@ -93,20 +94,40 @@ export default function ConfirmacaoSinal({
 
   return (
     <div className="space-y-4">
-      <BlocoConfirmacaoPix
-        estabelecimento={estabelecimento}
-        agendamentoId={agendamentoId}
-        nomeCliente={nomeCliente}
-        servicoNome={
-          agendamento ? (agendamento.servicos?.nome ?? "Serviço") : ""
-        }
-        data={agendamento?.data}
-        horario={agendamento?.horario}
-        nomeProfissionalContato={nomeProfissionalContato}
-        sinalDeclarado={sinalDeclarado}
-        onSinalDeclaradoChange={setSinalDeclarado}
-        onStatusMudou={() => onConfirmado?.()}
-      />
+      {/* Automático x manual: quem paga por QR Code do Abacate não declara
+          nada — a confirmação vem do polling da rota de status. Os dois blocos
+          já trazem a MESMA caixa cinza de resumo no topo, então nada aqui em
+          volta precisa duplicá-la. Fora isso o contrato é idêntico:
+          onStatusMudou dispara o mesmo onConfirmado nos dois caminhos. */}
+      {estabelecimento?.metodo_cobranca_pix === "abacatepay" ? (
+        <BlocoQrCodeAbacatePay
+          estabelecimento={estabelecimento}
+          agendamentoId={agendamentoId}
+          nomeCliente={nomeCliente}
+          servicoNome={
+            agendamento ? (agendamento.servicos?.nome ?? "Serviço") : ""
+          }
+          data={agendamento?.data}
+          horario={agendamento?.horario}
+          nomeProfissionalContato={nomeProfissionalContato}
+          onStatusMudou={() => onConfirmado?.()}
+        />
+      ) : (
+        <BlocoConfirmacaoPix
+          estabelecimento={estabelecimento}
+          agendamentoId={agendamentoId}
+          nomeCliente={nomeCliente}
+          servicoNome={
+            agendamento ? (agendamento.servicos?.nome ?? "Serviço") : ""
+          }
+          data={agendamento?.data}
+          horario={agendamento?.horario}
+          nomeProfissionalContato={nomeProfissionalContato}
+          sinalDeclarado={sinalDeclarado}
+          onSinalDeclaradoChange={setSinalDeclarado}
+          onStatusMudou={() => onConfirmado?.()}
+        />
+      )}
 
       {onEditar && (
         <button
