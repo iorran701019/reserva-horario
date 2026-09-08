@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { confirmarPagamentoPix } from "@/lib/abacatepay/confirmarPagamento";
 
 // Consulta o status de pagamento da cobrança Pix de um agendamento. Rota
 // PÚBLICA pelo mesmo motivo da gerar-cobranca: quem chama é a tela do QR Code
@@ -8,11 +9,12 @@ import { createClient } from "@supabase/supabase-js";
 // (tabela sem RLS, só service role) e NUNCA volta pro browser nem entra em
 // log — nem aqui, nem no console.error dos catches.
 //
-// É esta rota que faz o agendamento sair de "aguardando_sinal" e virar
-// "pendente" quando o Abacate confirma o pagamento — o equivalente automático
-// do gesto manual (marcar a caixa / anexar comprovante) do
-// BlocoConfirmacaoPix. O webhook do Abacate ainda não existe; enquanto isso, o
-// polling do BlocoQrCodeAbacatePay é o único caminho de confirmação.
+// Esta rota é UM dos dois caminhos que fazem o agendamento sair de
+// "aguardando_sinal" e virar "pendente" — o equivalente automático do gesto
+// manual (marcar a caixa / anexar comprovante) do BlocoConfirmacaoPix. O outro
+// é o webhook (app/api/abacatepay/webhook/route.js), que cobre a cliente que
+// fecha o navegador depois de pagar. O polling daqui continua existindo porque
+// é ele que faz a TELA avançar na hora, sem depender da entrega do webhook.
 function supabaseServiceRole() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
@@ -105,34 +107,12 @@ export async function GET(request) {
     return Response.json({ status: "aguardando_sinal" });
   }
 
-  // Mesmos campos que o gesto manual grava em marcarPendente
-  // (components/BlocoConfirmacaoPix.js) — pendente_desde inclusive, que é de
-  // onde sai a janela de protocolo de 24h. `abacatepay_pago_em` é o que faz o
-  // atalho de terminal lá em cima valer nas próximas chamadas.
-  //
-  // .select("id") + checagem de 0 linhas é o padrão do projeto: um update que
-  // não pega linha nenhuma volta com error null. Aqui, como na gerar-cobranca,
-  // isso NÃO derruba a resposta — o dinheiro já saiu da conta da cliente e ela
-  // precisa ver a tela avançar. A falha vai pro log pro salão resolver na mão.
-  const agora = new Date().toISOString();
-  const { data: linhas, error: erroUpdate } = await supabaseAdmin
-    .from("agendamentos")
-    .update({
-      status: "pendente",
-      sinal_declarado_pago: true,
-      pendente_desde: agora,
-      abacatepay_pago_em: agora,
-    })
-    .eq("id", agendamento.id)
-    .select("id");
-
-  if (erroUpdate || !linhas || linhas.length === 0) {
-    console.error(
-      "Pagamento Pix confirmado mas agendamento NÃO atualizado",
-      agendamentoId,
-      erroUpdate
-    );
-  }
+  // A gravação em si mora em lib/abacatepay/confirmarPagamento.js, porque o
+  // webhook (app/api/abacatepay/webhook/route.js) confirma o MESMO pagamento
+  // pelo mesmo conjunto de campos — os dois caminhos podem chegar juntos
+  // quando a cliente paga com a tela aberta, e a idempotência de lá é que
+  // impede o segundo de reescrever pendente_desde.
+  await confirmarPagamentoPix(agendamento.id, supabaseAdmin);
 
   return Response.json({ status: "pendente" });
 }
