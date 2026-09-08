@@ -155,8 +155,8 @@ export default function ConfiguracoesSalao({
   const [sinalValor, setSinalValor] = useState("");
   const [sinalChavePix, setSinalChavePix] = useState("");
   // Como o sinal é cobrado: 'manual' (cliente manda comprovante) ou
-  // 'abacatepay' (QR Code gerado pela API). Só a escolha por enquanto — nada
-  // do lado da AbacatePay está implementado ainda.
+  // 'abacatepay' (QR Code gerado pela API). No modo 'abacatepay' o campo de
+  // chave Pix some da tela: quem emite o QR Code é a conta deles.
   const [metodoCobrancaPix, setMetodoCobrancaPix] = useState("manual");
   const [erroSinal, setErroSinal] = useState("");
   const [statusSinal, setStatusSinal] = useState("");
@@ -168,6 +168,12 @@ export default function ConfiguracoesSalao({
   // undefined = ainda carregando (evita piscar "desconectado" antes da
   // resposta chegar).
   const [abacatepayConectado, setAbacatepayConectado] = useState(undefined);
+  // Segunda metade da conexão: o webhook de pagamento cadastrado na conta do
+  // salão. Separado de `abacatepayConectado` porque as duas etapas falham
+  // independentemente — chave salva + webhook pendente é um estado real, e é
+  // justamente o que a dona precisa enxergar pra não achar que a confirmação
+  // automática está funcionando quando não está.
+  const [abacatepayWebhookOk, setAbacatepayWebhookOk] = useState(false);
   // A chave digitada vive aqui só até o POST responder — depois disso o
   // campo é limpo, pra chave não ficar parada na memória da tela.
   const [abacatepayApiKey, setAbacatepayApiKey] = useState("");
@@ -637,8 +643,9 @@ export default function ConfiguracoesSalao({
     };
   }, [estabelecimento.id]);
 
-  // Só o booleano de "conectado" da credencial da AbacatePay — a rota não
-  // devolve a api_key (ver app/api/abacatepay/credenciais/route.js). Roda na
+  // Só os booleanos de "conectado" e "webhook cadastrado" da credencial da
+  // AbacatePay — a rota não devolve a api_key nem o webhook_secret (ver
+  // app/api/abacatepay/credenciais/route.js). Roda na
   // montagem porque o bloco do sinal pode já vir aberto; erro aqui não trava
   // a tela, só deixa o campo em "desconectado" com a mensagem embaixo.
   useEffect(() => {
@@ -658,9 +665,11 @@ export default function ConfiguracoesSalao({
         if (!ativo) return;
         setErroAbacatepay("");
         setAbacatepayConectado(Boolean(corpo?.conectado));
+        setAbacatepayWebhookOk(Boolean(corpo?.webhookOk));
       } catch {
         if (!ativo) return;
         setAbacatepayConectado(false);
+        setAbacatepayWebhookOk(false);
         setErroAbacatepay("Não foi possível verificar a conta AbacatePay.");
       }
     }
@@ -883,10 +892,46 @@ export default function ConfiguracoesSalao({
 
       if (!resposta.ok) throw new Error("Falha ao conectar.");
 
+      // A rota responde 200 mesmo quando só a primeira etapa deu certo: a
+      // chave está salva, o webhook não. `webhook: false` é o que leva o card
+      // pro estado intermediário em vez do verde.
+      const corpo = await resposta.json().catch(() => null);
+
       setAbacatepayApiKey("");
       setAbacatepayConectado(true);
+      setAbacatepayWebhookOk(Boolean(corpo?.webhook));
     } catch {
       setErroAbacatepay("Não foi possível conectar a conta AbacatePay. Tente de novo.");
+    } finally {
+      setSalvandoAbacatepay(false);
+    }
+  }
+
+  // Refaz só a etapa do webhook, pra conta que já tem a chave gravada. Não
+  // manda a api_key: ela não existe mais aqui no browser depois do connect, e
+  // é o service role da rota que a lê do banco (ver
+  // app/api/abacatepay/credenciais/webhook/route.js).
+  async function configurarWebhookAbacatepay() {
+    setSalvandoAbacatepay(true);
+    setErroAbacatepay("");
+
+    try {
+      const resposta = await fetch("/api/abacatepay/credenciais/webhook", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await cabecalhoAutorizacaoAbacatepay()),
+        },
+        body: JSON.stringify({ estabelecimentoId: estabelecimento.id }),
+      });
+
+      if (!resposta.ok) throw new Error("Falha ao configurar o webhook.");
+
+      setAbacatepayWebhookOk(true);
+    } catch {
+      setErroAbacatepay(
+        "Não foi possível configurar o webhook agora. Tente de novo em alguns minutos."
+      );
     } finally {
       setSalvandoAbacatepay(false);
     }
@@ -905,6 +950,7 @@ export default function ConfiguracoesSalao({
       if (!resposta.ok) throw new Error("Falha ao desconectar.");
 
       setAbacatepayConectado(false);
+      setAbacatepayWebhookOk(false);
     } catch {
       setErroAbacatepay("Não foi possível desconectar a conta AbacatePay. Tente de novo.");
     } finally {
@@ -2905,10 +2951,10 @@ export default function ConfiguracoesSalao({
 
                   {carregandoAbacatepay ? (
                     <p className="text-xs text-muted">Verificando…</p>
-                  ) : abacatepayConectado ? (
+                  ) : abacatepayConectado && abacatepayWebhookOk ? (
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-sm text-heading">
-                        Conta AbacatePay conectada
+                        Conta AbacatePay conectada ✓
                       </span>
                       <button
                         type="button"
@@ -2918,6 +2964,41 @@ export default function ConfiguracoesSalao({
                       >
                         {salvandoAbacatepay ? "Desconectando…" : "Desconectar"}
                       </button>
+                    </div>
+                  ) : abacatepayConectado ? (
+                    /* Chave salva, webhook não cadastrado. O QR Code já
+                       funciona neste estado — o que falta é a confirmação
+                       automática de quem paga e fecha o navegador —, então o
+                       aviso explica a consequência em vez de só dizer
+                       "incompleto". */
+                    <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
+                      <p className="text-sm font-medium text-amber-900">
+                        Chave conectada, mas falta configurar o aviso automático
+                      </p>
+                      <p className="mt-1 text-xs text-amber-800">
+                        O QR Code do sinal já vai aparecer pra sua cliente. Só que
+                        enquanto isso não for configurado, o pagamento de quem
+                        fechar a tela logo depois de pagar não chega sozinho aqui —
+                        você vai precisar conferir na mão.
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={configurarWebhookAbacatepay}
+                          disabled={salvandoAbacatepay}
+                          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {salvandoAbacatepay ? "Configurando…" : "Configurar agora"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={desconectarAbacatepay}
+                          disabled={salvandoAbacatepay}
+                          className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-body transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Desconectar
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <>
@@ -2977,24 +3058,31 @@ export default function ConfiguracoesSalao({
                 />
               </div>
 
-              <div>
-                <label
-                  htmlFor="sinal-chave-pix"
-                  className="mb-1 block text-sm font-medium text-body"
-                >
-                  Chave Pix
-                </label>
-                <input
-                  id="sinal-chave-pix"
-                  type="text"
-                  value={sinalChavePix}
-                  onChange={(e) => setSinalChavePix(e.target.value)}
-                  onBlur={() => salvarSinal()}
-                  disabled={carregandoSinal || sinalDesligado}
-                  placeholder="CPF, e-mail, telefone ou chave aleatória"
-                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </div>
+              {/* No modo AbacatePay a chave Pix do salão não tem função: quem
+                  emite o QR Code é a conta deles, não uma chave copiada pela
+                  cliente. Só a UI some — `sinal_chave_pix` continua gravada,
+                  então voltar pra cobrança manual traz o campo de volta
+                  preenchido. */}
+              {metodoCobrancaPix !== "abacatepay" && (
+                <div>
+                  <label
+                    htmlFor="sinal-chave-pix"
+                    className="mb-1 block text-sm font-medium text-body"
+                  >
+                    Chave Pix
+                  </label>
+                  <input
+                    id="sinal-chave-pix"
+                    type="text"
+                    value={sinalChavePix}
+                    onChange={(e) => setSinalChavePix(e.target.value)}
+                    onBlur={() => salvarSinal()}
+                    disabled={carregandoSinal || sinalDesligado}
+                    placeholder="CPF, e-mail, telefone ou chave aleatória"
+                    className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </div>
+              )}
             </div>
 
             {statusSinal === "salvando" && (
