@@ -23,6 +23,14 @@ function supabaseServiceRole() {
 }
 
 export async function POST(request) {
+  // TEMP: remover após diagnóstico
+  {
+    const urlDiagnostico = new URL(request.url);
+    console.log("[TEMP webhook abacatepay] headers", Object.fromEntries(request.headers.entries()));
+    console.log("[TEMP webhook abacatepay] query", Object.fromEntries(urlDiagnostico.searchParams.entries()));
+    console.log("[TEMP webhook abacatepay] corpo bruto", await request.clone().text().catch(() => "<falha ao ler corpo>"));
+  }
+
   const { searchParams } = new URL(request.url);
   const segredoRecebido = searchParams.get("webhookSecret");
 
