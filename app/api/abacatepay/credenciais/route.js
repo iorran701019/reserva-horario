@@ -99,12 +99,27 @@ export async function POST(request) {
 }
 
 // Diz se existe credencial gravada e se o webhook daquele salão foi
-// cadastrado. O select traz só `estabelecimento_id` e `webhook_id`, e a
-// resposta é dois booleanos: nem a api_key nem o webhook_secret saem daqui,
-// então nem um bug de log nem a aba de rede do browser conseguem vazar
-// qualquer um dos dois. `webhook_id` sozinho não é segredo — é o identificador
-// que aparece no painel deles —, mas mesmo ele não é ecoado, só convertido em
-// booleano.
+// cadastrado. O select traz `estabelecimento_id`, `webhook_id` e
+// `webhook_secret`, e a resposta continua sendo dois booleanos: nem a api_key
+// nem o webhook_secret saem daqui, então nem um bug de log nem a aba de rede
+// do browser conseguem vazar qualquer um dos dois. `webhook_id` sozinho não é
+// segredo — é o identificador que aparece no painel deles —, mas mesmo ele não
+// é ecoado, só convertido em booleano.
+//
+// `webhookOk` exige os DOIS campos, não só o `webhook_id`. Quem valida a
+// entrega é a assinatura HMAC, e ela é calculada com o `webhook_secret` (ver
+// app/api/abacatepay/webhook/route.js): sem secret, TODO evento é rejeitado
+// com 401 e o pagamento de quem fecha a tela nunca é confirmado sozinho.
+// Medindo só o `webhook_id`, esse salão aparecia com o verde de
+// "Conta AbacatePay conectada ✓" na tela de Configurações — o pior falso
+// positivo possível aqui, porque é justamente o estado em que a dona precisa
+// conferir pagamento na mão e não fica sabendo.
+//
+// Os dois campos são gravados no mesmo update desde
+// lib/abacatepay/configurarWebhook.js, então a divergência só existe em linha
+// LEGADA: salão conectado antes do webhook_secret por tenant, quando a
+// assinatura ainda era validada contra uma env global. Esses salões precisam
+// reconectar a conta — e a partir daqui a tela finalmente diz isso.
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const estabelecimentoId = Number(searchParams.get("estabelecimentoId"));
@@ -123,7 +138,7 @@ export async function GET(request) {
   try {
     const { data, error } = await supabaseAdmin
       .from("abacatepay_credenciais")
-      .select("estabelecimento_id, webhook_id")
+      .select("estabelecimento_id, webhook_id, webhook_secret")
       .eq("estabelecimento_id", estabelecimentoId)
       .maybeSingle();
 
@@ -131,7 +146,7 @@ export async function GET(request) {
 
     return Response.json({
       conectado: Boolean(data),
-      webhookOk: Boolean(data?.webhook_id),
+      webhookOk: Boolean(data?.webhook_id && data?.webhook_secret),
     });
   } catch (erro) {
     console.error("Falha ao consultar credencial da AbacatePay", estabelecimentoId, erro);

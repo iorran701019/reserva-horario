@@ -1009,7 +1009,56 @@ export default function FormularioAgendamento({
   // a guarda de abacatepay_pago_em na própria rota de gerar-cobranca.
   const sinalJaPago =
     reservaId != null && reservaPago?.id === reservaId && Boolean(reservaPago.pagoEm);
-  const mostrarBlocoSinal = precisaSinal && !sinalJaPago;
+
+  const [avisoRegrasConfirmado, setAvisoRegrasConfirmado] = useState(false);
+  const [mostrarPopupAvisoRegras, setMostrarPopupAvisoRegras] = useState(false);
+  // `mostrarPopupAvisoRegras` continua sendo SÓ do caminho do submit — o
+  // pré-gate do Pix automático abre o mesmo popup por derivação
+  // (avisoRegrasPreGate, abaixo), sem state e sem efeito. Além de evitar um
+  // setState dentro de efeito, é isso que distingue as duas origens na hora de
+  // confirmar: popup aberto por este flag veio de um envio interrompido e
+  // precisa retomá-lo; o outro não tem envio nenhum pra retomar (ver
+  // confirmarAvisoRegras).
+
+  // Aviso de regras ainda por confirmar, no fluxo em que ele NÃO tem outro
+  // momento pra aparecer. No Pix automático a cliente nunca aperta "Confirmar
+  // agendamento" (ver esconderSubmit logo abaixo): quem encerra o fluxo é o
+  // polling, chamando aoStatusSinalMudar direto — então o gate que morava em
+  // handleSubmit simplesmente nunca rodava, e o salão que escreveu regras
+  // (política de cancelamento, tolerância de atraso) achava que tinha avisado
+  // sem ter avisado.
+  //
+  // A checagem passa a acontecer na ENTRADA da etapa, antes do QR Code, e não
+  // depois do pagamento: aviso mostrado depois do dinheiro pago é pior que
+  // aviso nenhum — a cliente já não tem como recuar.
+  //
+  // Restrito ao método automático de propósito. No manual o botão de submit
+  // existe e o popup continua saindo exatamente onde sempre saiu, na
+  // confirmação final (ver handleSubmit) — mover os dois mudaria um fluxo que
+  // não está quebrado.
+  const avisoRegrasPendente =
+    !status &&
+    precisaSinal &&
+    // Reserva que chega paga (remarcação, "Editar" pelo protocolo) não monta
+    // bloco de Pix nenhum, então não há o que pré-gatear — e sem isto o gate
+    // esconderia o submit de uma tela que não tem outra saída, prendendo a
+    // cliente. Nesse caso o popup volta a sair no submit, como no manual.
+    !sinalJaPago &&
+    metodoSinal === "abacatepay" &&
+    Boolean(estabelecimento.aviso_regras_agendamento) &&
+    !avisoRegrasConfirmado;
+
+  // Enquanto pendente E já na etapa dos dados, o popup fica de pé por
+  // derivação — quem o fecha é a própria confirmação, que vira
+  // `avisoRegrasConfirmado` e derruba `avisoRegrasPendente` junto. Por sessão
+  // do wizard, igual ao caminho do submit: voltar pra "data" e escolher outro
+  // horário não repete o aviso pra mesma cliente.
+  const avisoRegrasPreGate = avisoRegrasPendente && etapa === "dados";
+
+  // Segurar o bloco também segura a COBRANÇA: o BlocoQrCodeAbacatePay gera o
+  // Pix na montagem, então montá-lo antes da confirmação criaria uma cobrança
+  // para quem ainda pode desistir ao ler as regras.
+  const mostrarBlocoSinal = precisaSinal && !sinalJaPago && !avisoRegrasPendente;
 
   // Some com o "Confirmar agendamento" na tela do QR Code do Abacate. Neste
   // fluxo NÃO existe gesto de confirmação da cliente: quem declara o pagamento
@@ -1031,15 +1080,18 @@ export default function FormularioAgendamento({
   // síncrono e casa exatamente com o que está renderizado ao lado, enquanto
   // aquele é null até a consulta de status responder — o botão piscaria em
   // tela nessa fresta.
-  const esconderSubmit = !status && mostrarBlocoSinal && metodoSinal === "abacatepay";
+  // `avisoRegrasPendente` entra junto pra fechar a fresta entre a etapa abrir
+  // e a cliente confirmar as regras: nela o bloco do Pix ainda não montou, e
+  // sem isto o botão apareceria atrás do popup (que é translúcido) — visível,
+  // sugerindo uma saída que não existe neste fluxo.
+  const esconderSubmit =
+    !status && (mostrarBlocoSinal || avisoRegrasPendente) && metodoSinal === "abacatepay";
 
   // Regras do agendamento (estabelecimento.aviso_regras_agendamento,
   // configurado no admin): popup bloqueante no fluxo público, mostrado uma
   // vez por sessão de agendamento na etapa final de confirmação, sempre —
   // com ou sem sinal a pagar (ver handleSubmit/confirmarAvisoRegras e
   // PopupRegrasAgendamento no JSX abaixo).
-  const [avisoRegrasConfirmado, setAvisoRegrasConfirmado] = useState(false);
-  const [mostrarPopupAvisoRegras, setMostrarPopupAvisoRegras] = useState(false);
 
   // Botão dividido "Confirmar agendamento" — só existe no /admin (`status`
   // truthy, ver JSX). Zona pequena pula o WhatsApp de confirmação (mesmo
@@ -2947,6 +2999,13 @@ export default function FormularioAgendamento({
   // cliente fica na etapa "dados" com o motivo em tela — o bloco do Pix já
   // parou de perguntar, e os botões de escape somem junto (statusPixReserva
   // com aguardando:false), porque não há mais o que cancelar.
+  //
+  // O QR Code em si some pelo mesmo aviso, dentro do bloco (ver
+  // `encerradoParaId` em BlocoQrCodeAbacatePay): ele troca o código copiável
+  // por uma caixa vermelha de "não pague este Pix". O `setErro` daqui não é
+  // duplicata disso — a caixa de lá diz o que NÃO fazer, esta linha diz o que
+  // fazer em seguida (escolher outro horário), e ela é o que sobra se o bloco
+  // não estiver montado.
   function aoStatusSinalMudar(statusRecebido) {
     setStatusPixReserva({ id: reservaId, aguardando: false });
 
@@ -3002,8 +3061,20 @@ export default function FormularioAgendamento({
   }
 
   async function confirmarAvisoRegras() {
+    // Lido ANTES de limpar: é o flag do render atual que diz de onde o popup
+    // veio. True = envio interrompido pelo handleSubmit, que precisa ser
+    // retomado. False = pré-gate do Pix automático (avisoRegrasPreGate), onde
+    // não havia envio nenhum — confirmar só libera o bloco do QR Code na etapa
+    // "dados". Chamar finalizarAgendamento nesse caso mandaria a cliente pra
+    // tela de protocolo com a linha ainda em "aguardando_sinal", que é
+    // exatamente o pulo do Pix que esconderSubmit existe pra impedir.
+    const veioDoSubmit = mostrarPopupAvisoRegras;
+
     setAvisoRegrasConfirmado(true);
     setMostrarPopupAvisoRegras(false);
+
+    if (!veioDoSubmit) return;
+
     await finalizarAgendamento(true);
   }
 
@@ -4506,9 +4577,13 @@ export default function FormularioAgendamento({
         </div>
       )}
 
-      {/* Regras do agendamento (ver handleSubmit/confirmarAvisoRegras acima):
-          bloqueia o envio final do agendamento até a cliente confirmar. */}
-      {mostrarPopupAvisoRegras && (
+      {/* Regras do agendamento (ver handleSubmit/confirmarAvisoRegras acima).
+          Duas origens, mesmo popup: no fluxo comum bloqueia o envio final até
+          a cliente confirmar; no Pix automático bloqueia a ENTRADA do bloco do
+          QR Code, porque lá não existe envio a bloquear (ver
+          avisoRegrasPendente). Quem separa os dois é o próprio
+          `mostrarPopupAvisoRegras`, que só o caminho do submit liga. */}
+      {(mostrarPopupAvisoRegras || avisoRegrasPreGate) && (
         <PopupRegrasAgendamento
           texto={estabelecimento.aviso_regras_agendamento}
           onConfirmar={confirmarAvisoRegras}

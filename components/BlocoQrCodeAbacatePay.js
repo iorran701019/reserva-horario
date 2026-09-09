@@ -90,6 +90,21 @@ export default function BlocoQrCodeAbacatePay({
   const [confirmadoParaId, setConfirmadoParaId] = useState(null);
   const pagamentoConfirmado =
     agendamentoId != null && confirmadoParaId === agendamentoId;
+  // Simétrico do confirmadoParaId, pro OUTRO desfecho que encerra a espera: a
+  // reserva saiu de "aguardando_sinal" sem ter sido paga (o salão cancelou, o
+  // pg_cron expirou a reserva provisória). Sem ele o polling parava de
+  // perguntar mas o QR Code CONTINUAVA em tela, com o botão de copiar código
+  // funcionando — e a cliente podia pagar um Pix de uma reserva que não existe
+  // mais. Esse pagamento não bate com agendamento nenhum nem no webhook (ver
+  // o ramo de "cobrança sem agendamento correspondente" lá), então vira
+  // dinheiro pra alguém devolver na mão: é falha de pagamento, não de visual.
+  //
+  // Guarda o ID pelo mesmo motivo do confirmadoParaId — `agendamentoId` troca
+  // sem o componente desmontar, e o encerramento da reserva anterior não vale
+  // pra próxima.
+  const [encerradoParaId, setEncerradoParaId] = useState(null);
+  const reservaEncerrada =
+    agendamentoId != null && encerradoParaId === agendamentoId;
   // Trava o polling depois que ele já avisou o pai: sem isso, um
   // onStatusMudou que não desmonte o componente na hora (troca de tela
   // assíncrona) dispararia de novo no tick seguinte.
@@ -129,6 +144,7 @@ export default function BlocoQrCodeAbacatePay({
       if (json?.pago) {
         confirmadoRef.current = true;
         if (ehPagamentoConfirmado(json.status)) setConfirmadoParaId(agendamentoId);
+        else setEncerradoParaId(agendamentoId);
         onStatusMudouRef.current?.(json.status);
         return;
       }
@@ -179,6 +195,7 @@ export default function BlocoQrCodeAbacatePay({
         if (json?.status && json.status !== "aguardando_sinal") {
           confirmadoRef.current = true;
           if (ehPagamentoConfirmado(json.status)) setConfirmadoParaId(agendamentoId);
+          else setEncerradoParaId(agendamentoId);
           onStatusMudouRef.current?.(json.status);
         }
       } catch {
@@ -239,6 +256,37 @@ export default function BlocoQrCodeAbacatePay({
           <p className="text-sm text-green-900">
             Recebemos o sinal e sua reserva está garantida. Não é preciso pagar
             de novo.
+          </p>
+        </div>
+      </>
+    );
+  }
+
+  // Reserva encerrada sem pagamento (cancelada pelo salão, ou expirada pelo
+  // pg_cron). Espelho exato do ramo acima: mesma caixa cinza de resumo, mesma
+  // troca do bloco inteiro — o QR Code e o botão "Copiar código" SAEM DE CENA,
+  // que é o ponto. Enquanto continuavam em tela, o Pix seguia pagável e o
+  // dinheiro entrava sem reserva do outro lado.
+  //
+  // Vermelho e não âmbar pelo motivo inverso do verde: a caixa âmbar significa
+  // "falta fazer algo" e aqui não há mais nada a fazer NESTA reserva — o
+  // caminho é escolher outro horário, e quem oferece isso é o pai (ver
+  // aoStatusSinalMudar em FormularioAgendamento). O texto diz explicitamente
+  // pra não pagar, porque a cliente pode ter o QR Code aberto no app do banco
+  // noutra janela, fora do alcance desta tela.
+  if (reservaEncerrada) {
+    return (
+      <>
+        {caixaResumo}
+
+        <div className="space-y-1 rounded-xl bg-red-50 p-4 ring-1 ring-red-200">
+          <p className="text-base font-medium text-red-800">
+            Reserva cancelada ou expirada
+          </p>
+          <p className="text-sm text-red-900">
+            Esta reserva não está mais aguardando o sinal, então NÃO faça o
+            pagamento deste Pix — ele não vale mais. Se você já pagou, fale com
+            {` ${nomeProfissionalContato}`} pelo botão verde.
           </p>
         </div>
       </>
