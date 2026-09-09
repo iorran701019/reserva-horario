@@ -24,11 +24,13 @@ import { createClient } from "@supabase/supabase-js";
 //                            em app/[salon]/page.js); reiniciá-la a cada
 //                            remarcação daria à cliente uma janela nova de
 //                            graça toda vez que ela trocasse de horário.
-//   abacatepay_*           – copiadas em bloco. Além de `abacatepay_pago_em`
-//                            (que é o que impede a cobrança nova, ver a
-//                            guarda em gerar-cobranca), as três da cobrança
-//                            mantêm o rastro do Pix que foi efetivamente pago
-//                            preso ao agendamento que ele pagou.
+//   abacatepay_*           – copiadas, MENOS `abacatepay_cobranca_id`. É
+//                            `abacatepay_pago_em` que impede a cobrança nova
+//                            (ver a guarda em gerar-cobranca), e o br_code
+//                            mantém o rastro do Pix pago preso ao agendamento.
+//                            O id da cobrança fica de fora porque a coluna é
+//                            UNIQUE no banco: copiá-lo colidia com a linha
+//                            antiga e o insert morria com 23505.
 //
 // Rota PÚBLICA, service role, pelo mesmo motivo da gerar-cobranca: quem chama
 // é o /agendar, ainda sem sessão. O escopo é o que a torna segura, e aqui ele
@@ -63,7 +65,7 @@ export async function POST(request) {
   const { data: atual, error: erroAtual } = await supabaseAdmin
     .from("agendamentos")
     .select(
-      "id, estabelecimento_id, nome_cliente, telefone, status, pendente_desde, abacatepay_pago_em, abacatepay_cobranca_id, abacatepay_expira_em, abacatepay_br_code, abacatepay_br_code_base64"
+      "id, estabelecimento_id, nome_cliente, telefone, status, pendente_desde, abacatepay_pago_em, abacatepay_expira_em, abacatepay_br_code, abacatepay_br_code_base64"
     )
     .eq("id", agendamentoId)
     .maybeSingle();
@@ -139,7 +141,10 @@ export async function POST(request) {
       pendente_desde: atual.pendente_desde ?? atual.abacatepay_pago_em,
       sinal_declarado_pago: true,
       finalizado: true,
-      abacatepay_cobranca_id: atual.abacatepay_cobranca_id,
+      // `abacatepay_cobranca_id` NÃO é copiado: a coluna tem UNIQUE
+      // (abacatepay_cobranca_id_unico) no banco, então duplicá-lo na linha
+      // nova derrubava o insert inteiro com 23505. O id fica só na linha
+      // antiga cancelada, como histórico de qual cobrança pagou o sinal.
       abacatepay_expira_em: atual.abacatepay_expira_em,
       abacatepay_br_code: atual.abacatepay_br_code,
       abacatepay_br_code_base64: atual.abacatepay_br_code_base64,
