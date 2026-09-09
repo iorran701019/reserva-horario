@@ -2735,6 +2735,45 @@ export default function FormularioAgendamento({
     return true;
   }
 
+  // Desfecho do sinal AUTOMÁTICO, avisado pelo BlocoQrCodeAbacatePay quando o
+  // polling vê a linha sair de "aguardando_sinal". Recebe o status cru do
+  // banco (ver a prop onStatusMudou lá).
+  //
+  // Pago: não há NADA a gravar — quem carimbou status/pendente_desde foi o
+  // servidor (confirmarPagamentoPix, chamado pela rota de status ou pelo
+  // webhook). Por isso NÃO passa por finalizarAgendamento: aquele caminho é o
+  // do submit da cliente, com o popup de regras antes e o update de sinal
+  // dentro, e reaproveitá-lo aqui reabriria popup já respondido e repetiria
+  // efeito que não é deste fluxo. Sobram as duas coisas que a tela ainda deve:
+  // apagar a sessão salva e avançar pro protocolo, exatamente como o ramo
+  // público de finalizarAgendamento faz.
+  //
+  // Não pago (o salão cancelou, o pg_cron expirou a reserva): NÃO avança. A
+  // cliente fica na etapa "dados" com o motivo em tela — o bloco do Pix já
+  // parou de perguntar, e os botões de escape somem junto (statusPixReserva
+  // com aguardando:false), porque não há mais o que cancelar.
+  function aoStatusSinalMudar(statusRecebido) {
+    setStatusPixReserva({ id: reservaId, aguardando: false });
+
+    if (statusRecebido !== "pendente" && statusRecebido !== "confirmado") {
+      setErro(
+        "Esta reserva não está mais aguardando o sinal — ela foi cancelada ou o prazo do Pix expirou. Escolha um horário de novo para continuar."
+      );
+      return;
+    }
+
+    setErro("");
+    limparFatia(estabelecimento.slug, "agendamento");
+
+    onSucesso?.({
+      form,
+      servico: servicoSelecionado,
+      horario: horarioSelecionado,
+      profissional: escolherProfissional ? profissionalSelecionado : null,
+      agendamentoId: reservaId,
+    });
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setErro("");
@@ -3903,9 +3942,7 @@ export default function FormularioAgendamento({
                     data={form.data}
                     horario={horarioSelecionado}
                     nomeProfissionalContato={nomeProfissionalContato}
-                    onStatusMudou={() =>
-                      setStatusPixReserva({ id: reservaId, aguardando: false })
-                    }
+                    onStatusMudou={aoStatusSinalMudar}
                   />
                 ) : (
                   <BlocoConfirmacaoPix
