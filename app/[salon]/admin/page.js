@@ -18,6 +18,7 @@ import {
   MENSAGEM_FORA_DA_JANELA,
   MENSAGEM_ALTERACAO_DATA,
 } from "@/lib/whatsapp";
+import { WHATSAPP_SUPORTE_ACOLHE, MENSAGEM_SUPORTE_ACOLHE } from "@/lib/acolhe";
 import {
   classificarAgendamento,
   fimDoAtendimento,
@@ -71,6 +72,7 @@ import {
 } from "lucide-react";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
+import IconeAcolhe from "@/components/IconeAcolhe";
 import ModalClientePendente from "@/components/ModalClientePendente";
 import ModalPrazoMinimo from "@/components/ModalPrazoMinimo";
 import Hero from "@/components/Hero";
@@ -4064,6 +4066,40 @@ export default function AdminPage() {
               </Link>
             </div>
           )}
+
+          {/* Suporte da ACOLHE (o produto), não do salão: quem clica é a
+              dona falando com quem mantém o sistema. Por isso o número vem de
+              lib/acolhe.js, fixo, e NÃO de estabelecimento.whatsapp (que é o
+              número dela mesma) nem das msg_* configuráveis por tenant.
+              Posição: depois de "Painel global" quando ele existe, depois das
+              notificações quando não — sem índice nem condicional, é só a
+              ordem do JSX; os dois blocos acima podem não renderizar
+              (papelUsuario !== "global"; AtivarNotificacoes devolve null em
+              navegador sem Push API) e este simplesmente sobe. Estilo do
+              padrão dominante do drawer (py-3/font-semibold/gap-3), não o
+              do "Painel global" logo acima, que é a exceção. O ícone foge do
+              h-5 dos vizinhos de propósito (ver abaixo).
+              Link externo no molde já usado no resto do projeto: <a> com
+              target="_blank" + rel="noopener noreferrer". */}
+          <div className="border-t border-border p-2">
+            <a
+              href={linkWhatsApp(WHATSAPP_SUPORTE_ACOLHE, MENSAGEM_SUPORTE_ACOLHE)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold text-body transition hover:bg-surface hover:text-heading"
+            >
+              {/* w-auto, não w-16: o viewBox da marca é ~1.56:1, travar as
+                  duas dimensões esmagaria o desenho. Só a altura é fixada.
+                  h-16 (contra o h-5 dos ícones lucide vizinhos) é escolha
+                  deliberada de tratar a marca como assinatura, não como mais
+                  um ícone de menu: é o único item do drawer que exibe uma
+                  MARCA, e nesse tamanho o lettering "acolhe" dentro dela fica
+                  legível. Custo assumido: esta linha fica bem mais alta que as
+                  outras (ver medição no comentário do bloco acima). */}
+              <IconeAcolhe className="h-16 w-auto shrink-0" />
+              Suporte
+            </a>
+          </div>
 
           {/* "Sair" mora no drawer (saiu do header). */}
           <div className="border-t border-border p-2">

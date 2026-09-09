@@ -143,7 +143,7 @@ export default function AtivarNotificacoes({ estabelecimento }) {
           ? "Notificações ativadas ✓"
           : carregando
           ? "Ativando…"
-          : "Ativar notificações neste dispositivo"}
+          : "Ativar notificações"}
       </button>
       {mensagem && <p className="px-3 pb-2 text-xs text-body">{mensagem}</p>}
     </div>
