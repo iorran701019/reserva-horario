@@ -997,6 +997,29 @@ export default function FormularioAgendamento({
     reservaId != null && reservaPago?.id === reservaId && Boolean(reservaPago.pagoEm);
   const mostrarBlocoSinal = precisaSinal && !sinalJaPago;
 
+  // Some com o "Confirmar agendamento" na tela do QR Code do Abacate. Neste
+  // fluxo NÃO existe gesto de confirmação da cliente: quem declara o pagamento
+  // é o Abacate, e quem avança a tela é aoStatusSinalMudar, avisado pelo
+  // polling do BlocoQrCodeAbacatePay. O botão, que nunca soube que este fluxo
+  // existe, não era só ruído visual — clicado, ele levava ao ramo `else` de
+  // finalizarAgendamento (`sinalDeclarado` é sempre false aqui, o bloco do QR
+  // Code não recebe onSinalDeclaradoChange) e mandava a cliente pra tela de
+  // protocolo com a linha ainda em "aguardando_sinal": pulava o Pix.
+  //
+  // As três condições são o corte mais estreito que resolve isso. `!status`
+  // preserva o botão dividido do /admin; `mostrarBlocoSinal` garante que só
+  // some quando há QR Code em tela de fato — no sinal já pago (remarcação,
+  // "Editar" pelo protocolo) o bloco não aparece e o submit volta a ser a
+  // única saída; o método automático preserva o fluxo manual, onde o botão é
+  // obrigatório (é ele que chama onSucesso depois da cliente marcar a caixa).
+  //
+  // Gateado por `mostrarBlocoSinal` e não por `aguardandoSinal`: este é
+  // síncrono e casa exatamente com o que está renderizado ao lado, enquanto
+  // aquele é null até a consulta de status responder — o botão piscaria em
+  // tela nessa fresta.
+  const esconderSubmit =
+    !status && mostrarBlocoSinal && estabelecimento?.metodo_cobranca_pix === "abacatepay";
+
   // Regras do agendamento (estabelecimento.aviso_regras_agendamento,
   // configurado no admin): popup bloqueante no fluxo público, mostrado uma
   // vez por sessão de agendamento na etapa final de confirmação, sempre —
@@ -4218,7 +4241,7 @@ export default function FormularioAgendamento({
                   <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div>
-            ) : (
+            ) : esconderSubmit ? null : (
               <button
                 type="submit"
                 disabled={enviando}
