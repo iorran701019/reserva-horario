@@ -938,6 +938,19 @@ export default function FormularioAgendamento({
   // à prova de falha de propósito: melhor não oferecer cancelar do que
   // oferecer cancelar algo que já avançou.
   const [statusPixReserva, setStatusPixReserva] = useState(null);
+  // Sinal já pago da reserva atual: `{ id, pagoEm }`, onde `pagoEm` é o
+  // `abacatepay_pago_em` da linha (null = não pago). É o que decide, em
+  // selecionarHorario, se trocar de horário pode seguir pelo cancela-e-recria
+  // de sempre ou se precisa passar pela rota de remarcação, que carrega o
+  // pagamento pra linha nova (ver app/api/agendamentos/remarcar/route.js).
+  //
+  // Guarda o ID JUNTO pelo mesmo motivo do statusPixReserva acima — `reservaId`
+  // troca sem o componente desmontar — e com a mesma leitura de três estados:
+  // id que não bate (ou null) significa "ainda não sei", NÃO "não pago". A
+  // diferença importa: aqui um "não sei" tratado como "não pago" reintroduziria
+  // exatamente o bug da cobrança duplicada, então quem lê resolve a dúvida
+  // antes de decidir, em vez de assumir.
+  const [reservaPago, setReservaPago] = useState(null);
   const [cancelandoReserva, setCancelandoReserva] = useState(false);
   // "Cancelar agendamento" do bloco do sinal abre a confirmação antes de
   // chamar o helper (ver ModalConfirmarCancelamento).
@@ -963,6 +976,26 @@ export default function FormularioAgendamento({
     reservaId != null &&
     statusPixReserva?.id === reservaId &&
     statusPixReserva.aguardando;
+
+  // Reserva que chega à etapa "dados" com o sinal JÁ pago — remarcação (a
+  // rota copia `abacatepay_pago_em` pra linha nova) ou o "Editar" a partir do
+  // protocolo de uma reserva paga. É o que tira o bloco de pagamento da tela:
+  // sem isto, `precisaSinal` sozinho mostrava QR Code (e gerava cobrança) por
+  // cima de um sinal que já tinha sido pago.
+  //
+  // Olha o carimbo do pagamento, e NÃO `aguardandoSinal`, que responde outra
+  // pergunta ("ainda falta pagar?") e vira false também no instante em que a
+  // cliente declara o pagamento aqui mesmo — gateado nele, o bloco manual
+  // sumiria da tela no gesto de marcar a caixa, levando junto o link do
+  // comprovante. `abacatepay_pago_em` não muda por nada que aconteça nesta
+  // tela, e é null em todo salão de cobrança manual.
+  //
+  // "Ainda não sei" (id que não bate) conta como não pago: o bloco fica em
+  // tela, como sempre ficou, e quem impede a cobrança duplicada nessa fresta é
+  // a guarda de abacatepay_pago_em na própria rota de gerar-cobranca.
+  const sinalJaPago =
+    reservaId != null && reservaPago?.id === reservaId && Boolean(reservaPago.pagoEm);
+  const mostrarBlocoSinal = precisaSinal && !sinalJaPago;
 
   // Regras do agendamento (estabelecimento.aviso_regras_agendamento,
   // configurado no admin): popup bloqueante no fluxo público, mostrado uma
@@ -1883,6 +1916,7 @@ export default function FormularioAgendamento({
       // já não serve pra nada aqui), e o aviso acima é só informativo.
       setReservaId(null);
       setReservaChave(null);
+      setReservaPago(null);
     }
     pendenteRestaurarRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1943,7 +1977,7 @@ export default function FormularioAgendamento({
     let ignorar = false;
     supabase
       .from("agendamentos")
-      .select("status")
+      .select("status, abacatepay_pago_em")
       .eq("id", reservaId)
       .single()
       .then(({ data, error }) => {
@@ -1952,6 +1986,10 @@ export default function FormularioAgendamento({
           id: reservaId,
           aguardando: data.status === "aguardando_sinal",
         });
+        // Mesma consulta, uma coluna a mais: é aqui que o modo edição e a
+        // restauração de sessão descobrem que a reserva já tem sinal pago,
+        // antes de a cliente tocar em qualquer horário.
+        setReservaPago({ id: reservaId, pagoEm: data.abacatepay_pago_em ?? null });
       });
 
     return () => {
@@ -2451,6 +2489,7 @@ export default function FormularioAgendamento({
     setReservaId(null);
     setReservaChave(null);
     setStatusPixReserva(null);
+    setReservaPago(null);
     setHorarioSelecionado("");
     limparFatia(estabelecimento.slug, "agendamento");
 
@@ -2568,6 +2607,120 @@ export default function FormularioAgendamento({
       }
     }
 
+    // Sinal JÁ pago na reserva atual: o cancela-e-recria logo abaixo não serve
+    // aqui. Ele criaria uma linha nova sem nenhuma memória do pagamento, e o
+    // bloco do QR Code cobraria o sinal outra vez — era exatamente esse o bug
+    // da cobrança duplicada ao remarcar. Este caso vai por uma rota
+    // server-side, que faz o MESMO cancelar-depois-inserir com service role e
+    // leva o pagamento (e o `pendente_desde` original) pra linha nova.
+    //
+    // A dúvida é RESOLVIDA antes de decidir, nunca assumida: `reservaPago` só
+    // vale pra reserva cujo id ele carrega, e no caminho em que ele ainda não
+    // respondeu (a cliente tocou num horário antes de o efeito de resolução
+    // terminar) a leitura acontece aqui, uma vez. No caminho comum — reserva
+    // criada nesta mesma sessão — o valor já está anotado e nada é consultado.
+    let sinalPagoEm = reservaPago?.id === reservaId ? reservaPago.pagoEm : undefined;
+    if (reservaId != null && sinalPagoEm === undefined) {
+      const { data: linhaAtual } = await supabase
+        .from("agendamentos")
+        .select("abacatepay_pago_em")
+        .eq("id", reservaId)
+        .maybeSingle();
+      sinalPagoEm = linhaAtual?.abacatepay_pago_em ?? null;
+      setReservaPago({ id: reservaId, pagoEm: sinalPagoEm });
+    }
+
+    if (reservaId != null && sinalPagoEm) {
+      // Mesma escolha de profissional do caminho de sempre, só que resolvida
+      // ANTES da chamada — quem cancela a reserva antiga agora é a rota, e
+      // depois dela não haveria mais onde encaixar esta etapa. `vagas` já
+      // exclui a própria reserva da cliente (ver excluirAgendamentoId), então
+      // o mapa lido aqui é o mesmo que o caminho comum lê depois do
+      // cancelamento.
+      let profissionalRemarcado = chaveAtual.profissionalId;
+      if (!escolherProfissional) {
+        const livres = vagas[slot] ?? [];
+        if (livres.length === 0) {
+          setCriandoReserva(false);
+          setErro("Esse horário acabou de ser reservado. Escolha outro.");
+          setHorarioSelecionado("");
+          // reservaId/reservaChave ficam como estão: nada foi cancelado ainda,
+          // a reserva paga continua de pé exatamente como estava.
+          return;
+        }
+        profissionalRemarcado = await escolherMenosOcupado(estabelecimento.id, form.data, livres);
+      }
+
+      let respostaOk = false;
+      let json = null;
+      try {
+        const resposta = await fetch("/api/agendamentos/remarcar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agendamentoId: reservaId,
+            data: form.data,
+            horario: slot,
+            servicoId: servicoSelecionado.id,
+            duracaoMin: duracaoEfetivaServico(),
+            profissionalId: profissionalRemarcado,
+          }),
+        });
+        respostaOk = resposta.ok;
+        json = await resposta.json().catch(() => null);
+      } catch {
+        // Rede caiu antes da resposta. Cai no tratamento abaixo — do lado de
+        // cá não dá pra saber se a troca chegou a acontecer, e é por isso que
+        // a mensagem manda tocar no horário de novo em vez de afirmar que
+        // nada mudou: uma segunda tentativa reencontra o estado real.
+      }
+
+      if (!respostaOk || !json?.id) {
+        setCriandoReserva(false);
+        setHorarioSelecionado("");
+
+        if (json?.codigo === "horario_ocupado") {
+          setErro("Esse horário acabou de ser reservado. Escolha outro.");
+          try {
+            const mapa = await calcularVagasPorHorario({
+              estabelecimentoId: estabelecimento.id,
+              servicoId: servicoSelecionado.id,
+              data: form.data,
+              duracaoMinOverride: duracaoEfetivaServico(),
+              etiquetaClienteId,
+            });
+            setVagas(mapa);
+          } catch {
+            setVagas({});
+          }
+          return;
+        }
+
+        // reservaId/reservaChave preservados pelo mesmo motivo do caminho
+        // comum: a rota desfaz o cancelamento quando o insert falha, então a
+        // reserva paga continua de pé e o estado local precisa continuar
+        // apontando pra ela.
+        setErro(
+          json?.erro ??
+            "Não foi possível trocar o horário da sua reserva agora. Toque no horário de novo em instantes."
+        );
+        return;
+      }
+
+      await salvarRespostasPerguntas(json.id);
+
+      setReservaId(json.id);
+      setReservaChave(chaveAtual);
+      setReservaPago({ id: json.id, pagoEm: json.abacatepayPagoEm ?? sinalPagoEm });
+      // A linha nova nasce em "pendente", com o sinal já pago junto: não há
+      // sinal a aguardar, e é isto que mantém o bloco do QR Code fora da tela
+      // (ver o gate de aguardandoSinal no JSX).
+      setStatusPixReserva({ id: json.id, aguardando: false });
+      setCriandoReserva(false);
+      setEtapa("dados");
+      return;
+    }
+
     // Havia uma reserva de uma tentativa anterior (outro serviço/data/horário
     // escolhido depois de um "Voltar"): cancela ANTES de criar a nova.
     //
@@ -2611,6 +2764,7 @@ export default function FormularioAgendamento({
         setHorarioSelecionado("");
         setReservaId(null);
         setReservaChave(null);
+        setReservaPago(null);
         return;
       }
       profissionalId = await escolherMenosOcupado(estabelecimento.id, form.data, livres);
@@ -2645,6 +2799,7 @@ export default function FormularioAgendamento({
       setCriandoReserva(false);
       setReservaId(null);
       setReservaChave(null);
+      setReservaPago(null);
 
       // 23P01 = violação da exclusion constraint agendamentos_sem_sobreposicao:
       // outra reserva sobrepõe esse intervalo — alguém ocupou primeiro.
@@ -2684,6 +2839,10 @@ export default function FormularioAgendamento({
     // Acabou de nascer com o status do payload acima — anotar aqui poupa a
     // consulta do efeito de statusPixReserva no caminho comum.
     setStatusPixReserva({ id: data.id, aguardando: precisaSinal });
+    // Linha recém-inserida: nunca tem sinal pago. Anotado pelo mesmo motivo
+    // da linha acima — sem isto, o próximo toque num horário gastaria uma
+    // consulta só pra redescobrir o que já sabemos aqui.
+    setReservaPago({ id: data.id, pagoEm: null });
     setCriandoReserva(false);
     setEtapa("dados");
   }
@@ -3800,11 +3959,19 @@ export default function FormularioAgendamento({
                 nenhuma referência à data/horário escolhidos, e o botão logo
                 abaixo já dispara a confirmação no WhatsApp da cliente.
 
-                Some quando há sinal: nesse caso o resumo do
-                BlocoConfirmacaoPix (logo abaixo, na mesma caixa cinza) é a
-                MESMA string, montada pela mesma função — as duas juntas eram
-                repetição literal. Sem sinal não existe bloco de Pix nenhum. */}
-            {clienteInicial && !precisaSinal && (
+                Some quando o bloco do sinal está em tela: nesse caso o resumo
+                dele (logo abaixo, na mesma caixa cinza) é a MESMA string,
+                montada pela mesma função — as duas juntas eram repetição
+                literal.
+
+                A condição segue `mostrarBlocoSinal`, e não `precisaSinal`,
+                pelo mesmo motivo do gate do bloco lá embaixo: desde que uma
+                reserva pode chegar a esta etapa JÁ paga (remarcação, "Editar"
+                a partir do protocolo), "o salão exige sinal" deixou de
+                significar "o bloco de Pix está em tela". Amarrado no
+                `precisaSinal`, o resumo sumiria junto com o bloco e a etapa
+                ficaria sem resumo nenhum. */}
+            {clienteInicial && !mostrarBlocoSinal && (
               <div className="flex flex-wrap items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm text-body">
                 <span className="font-medium text-heading">{resumoAgendamento}</span>
                 {/* Etiqueta: só no /admin (ver mostrarEtiquetaAdmin). No
@@ -3925,8 +4092,15 @@ export default function FormularioAgendamento({
                 mesmo componente que o ConfirmacaoSinal usa quando a cliente
                 volta depois pelo PainelCliente. `agendamentoId` é a reserva já
                 gravada ao entrar em "dados" (ver selecionarHorario) — é nela
-                que o comprovante é anexado, antes mesmo do submit. */}
-            {precisaSinal && (
+                que o comprovante é anexado, antes mesmo do submit.
+
+                Gateado por `mostrarBlocoSinal`, não só por `precisaSinal`:
+                `precisaSinal` é regra de CONFIGURAÇÃO do salão e não sabe nada
+                sobre esta linha em particular, então sozinho ele mostrava o
+                bloco de pagamento até por cima de uma reserva já paga (o
+                caminho da remarcação e o do "Editar" a partir do protocolo).
+                Ver `sinalJaPago`, que é quem olha a linha. */}
+            {mostrarBlocoSinal && (
               <>
                 {/* Automático x manual. No Abacate a cliente não declara
                     nada: quem muda o status é a rota de status, no servidor, e

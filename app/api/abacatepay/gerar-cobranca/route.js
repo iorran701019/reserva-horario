@@ -27,7 +27,7 @@ export async function POST(request) {
   const { data: agendamento, error: erroAgendamento } = await supabaseAdmin
     .from("agendamentos")
     .select(
-      "id, estabelecimento_id, abacatepay_cobranca_id, abacatepay_expira_em, abacatepay_br_code, abacatepay_br_code_base64, status"
+      "id, estabelecimento_id, abacatepay_cobranca_id, abacatepay_expira_em, abacatepay_br_code, abacatepay_br_code_base64, status, abacatepay_pago_em"
     )
     .eq("id", agendamentoId)
     .maybeSingle();
@@ -39,6 +39,25 @@ export async function POST(request) {
 
   if (!agendamento) {
     return new Response("Agendamento não encontrado.", { status: 404 });
+  }
+
+  // Sinal JÁ pago: não existe cobrança a gerar, e criar uma aqui seria cobrar
+  // duas vezes pela mesma reserva. Acontece em dois caminhos reais — a cliente
+  // reabre a tela de pagamento depois de já ter pago (reload, volta do app do
+  // banco), e a remarcação que carrega o sinal pago pra linha nova (ver
+  // app/api/agendamentos/remarcar/route.js, que copia `abacatepay_pago_em`).
+  //
+  // A guarda é `abacatepay_pago_em`, o MESMO campo que já serve de atalho de
+  // terminal na rota de status e de idempotência em confirmarPagamentoPix —
+  // não o `status`, que sai de "aguardando_sinal" também por caminhos que não
+  // são pagamento (o salão cancelou, o pg_cron expirou a reserva) e onde uma
+  // cobrança nova ainda faria sentido.
+  //
+  // Devolve o status CRU do banco junto, igual à rota de status: quem chama é
+  // o mesmo BlocoQrCodeAbacatePay, que já sabe distinguir pagamento
+  // confirmado dos outros desfechos (ver ehPagamentoConfirmado lá).
+  if (agendamento.abacatepay_pago_em) {
+    return Response.json({ pago: true, status: agendamento.status });
   }
 
   // `reserva_provisoria_expira_horas` é a MESMA janela que já governa o

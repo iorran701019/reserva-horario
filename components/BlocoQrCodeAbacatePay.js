@@ -120,6 +120,19 @@ export default function BlocoQrCodeAbacatePay({
       if (!resposta.ok) throw new Error("Falha ao gerar cobrança.");
 
       const json = await resposta.json();
+
+      // Linha já paga: a rota não cria cobrança nenhuma e responde só isso
+      // (ver a guarda de abacatepay_pago_em em gerar-cobranca). Desfecho
+      // IDÊNTICO ao de um tick do polling que vê a linha sair de
+      // "aguardando_sinal" — mesma trava, mesmo aviso ao pai, mesmo estado de
+      // sucesso em tela — só que sem esperar os 5s do primeiro tick.
+      if (json?.pago) {
+        confirmadoRef.current = true;
+        if (ehPagamentoConfirmado(json.status)) setConfirmadoParaId(agendamentoId);
+        onStatusMudouRef.current?.(json.status);
+        return;
+      }
+
       if (!json?.brCode) throw new Error("Cobrança sem código Pix.");
 
       setCobranca({ brCode: json.brCode, brCodeBase64: json.brCodeBase64 });
