@@ -72,7 +72,6 @@ export async function POST(request) {
   }
 
   const corpoBruto = await request.text();
-  console.log("DEBUG webhook corpoBruto", corpoBruto.slice(0, 1000));
 
   // Parse de corpo AINDA NÃO CONFIÁVEL — serve só pra achar de quem é o
   // evento. O catch existe pra não transformar um payload torto num 500 que os
@@ -86,7 +85,16 @@ export async function POST(request) {
   }
 
   const transparent = corpo?.data?.transparent;
-  console.log("DEBUG webhook corpo.event", JSON.stringify(corpo?.event), "status", JSON.stringify(transparent?.status));
+
+  // Log de toda entrega, ANTES do early return abaixo de propósito. Serve a
+  // dois propósitos: cruzar um evento do painel deles com uma linha nossa, e —
+  // o motivo de estar acima do filtro — deixar o valor cru de `type` e `status`
+  // visível mesmo quando o evento é descartado. Foi justamente a falta disso
+  // que transformou um nome de campo errado num early return silencioso e num
+  // ciclo inteiro de instrumentação temporária pra descobrir o óbvio.
+  //
+  // Continua enxuto: nada de headers internos da infraestrutura, nada do corpo.
+  console.log("Webhook recebido", webhookId, "type:", corpo?.type, "status:", transparent?.status, "cobranca:", transparent?.id);
 
   // A AbacatePay manda mais de um tipo de evento na mesma URL. Só o pagamento
   // confirmado nos interessa; o resto é recebido e descartado — comportamento
@@ -95,20 +103,22 @@ export async function POST(request) {
   // portanto não tem dono conhecido. É inofensivo: o corpo é jogado fora sem
   // tocar em nada.
   //
-  // O nome do evento vem em `event` na RAIZ do corpo, não em `type`. Confirmado
-  // com uma entrega real em Dev mode (08/09). Só a estrutura interna
-  // `data.transparent` já estava certa antes: a raiz continuava no formato
-  // antigo, então `corpo?.type` era sempre undefined e TODO evento caía neste
-  // early return — o webhook respondia 200 sem nunca confirmar pagamento.
-  if (corpo?.event !== "transparent.completed" || transparent?.status !== "PAID") {
+  // O nome do evento vem em `type` na RAIZ do corpo. PEGADINHA que já custou um
+  // ciclo inteiro de debug, então fica registrado: o dashboard da AbacatePay
+  // exibe esse mesmo evento sob um campo chamado `event`, mas isso é a
+  // representação NORMALIZADA que eles montam pra leitura humana — o payload
+  // que trafega de fato no fio usa `type`. Confirmado inspecionando o corpo
+  // bruto de uma entrega real em produção (09/09).
+  //
+  // Quem for conferir pelo painel e "corrigir" isso de volta pro campo do
+  // dashboard faz TODO evento cair neste early return: o webhook volta a
+  // responder 200 sem nunca confirmar pagamento nenhum, silenciosamente. Já
+  // aconteceu.
+  if (corpo?.type !== "transparent.completed" || transparent?.status !== "PAID") {
     return Response.json({ recebido: true });
   }
 
   const cobrancaId = transparent?.id;
-
-  // Log enxuto pra auditoria: o suficiente pra cruzar um evento do painel deles
-  // com uma linha nossa, sem despejar os headers internos da infraestrutura.
-  console.log("Webhook da AbacatePay", webhookId, corpo?.event, cobrancaId);
 
   if (!cobrancaId) {
     console.error("Webhook da AbacatePay com transparent.completed sem id de cobrança", webhookId);
