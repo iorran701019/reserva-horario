@@ -6,6 +6,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import { buscarPerfil } from "@/lib/perfil";
+import { sinalPixRebaixado } from "@/lib/sinalPix";
 import { buscarTema } from "@/lib/temas";
 import {
   linkWhatsApp,
@@ -62,6 +63,7 @@ import {
   ChevronRight,
   ChevronDown,
   Check,
+  AlertTriangle,
   CheckCircle2,
   MessageCircleOff,
   Clock,
@@ -400,6 +402,13 @@ export default function AdminPage() {
   // resolvendo; null = slug inexistente/inativo; objeto = encontrado. Particiona
   // o fetch de agendamentos e o insert da aba Agendar por estabelecimento_id.
   const [estabelecimento, setEstabelecimento] = useState(undefined);
+
+  // A configuração de sinal Pix do salão está rebaixada AGORA? (ver a cascata
+  // em lib/sinalPix.js). Único dado do bloco de Pix dos cards que fala da
+  // configuração ATUAL, e não do que aconteceu na época daquele agendamento —
+  // ver a explicação dos ramos 5 e 6 mais abaixo. Reavaliado a cada render, de
+  // graça: é função pura sobre o estabelecimento já resolvido.
+  const sinalPixRebaixadoAgora = sinalPixRebaixado(estabelecimento);
 
   // Autenticado, mas sem linha em perfis (conta órfã): não há salão a resolver.
   // Troca todo o conteúdo pela tela "Conta sem salão vinculado".
@@ -2779,7 +2788,25 @@ export default function AdminPage() {
                       4. Nada declarado e status aguardando_sinal: alerta
                          âmbar. Este badge substitui o "Aguardando sinal" que
                          antes ficava junto das tags do topo.
-                      5. Nada de Pix E status "pendente": este agendamento
+                      5. CONFIGURAÇÃO REBAIXADA (vermelho). A regra do salão
+                         pede sinal, mas não sobrou meio nenhum de cobrar —
+                         'abacatepay' sem credencial E sem chave Pix de
+                         reserva, ou 'manual' com a chave vazia (ver a cascata
+                         em lib/sinalPix.js). Vem ANTES do ramo 6 porque os
+                         dois descrevem o mesmo card — pendente, sem nada de
+                         Pix —, e a diferença é se a ausência de cobrança foi
+                         projetada ou é um defeito de configuração que a dona
+                         precisa ir arrumar. Vermelho é a única cor da cadeia
+                         que pede AÇÃO fora do card.
+
+                         Este é o caso involuntário. O deliberado
+                         (sinal_regra = 'desligado') não chega aqui: sai antes
+                         em calcularStatusSinalPix, com rebaixado = false, e cai
+                         no `null` do fim da cadeia — desligar o sinal de
+                         propósito nunca pinta nada de vermelho. É essa
+                         distinção que a cascata preserva sem coluna nova, por
+                         nunca gravar o rebaixamento.
+                      6. Nada de Pix E status "pendente": este agendamento
                          NUNCA exigiu sinal. Quem carimba isso é o INSERT do
                          fluxo público (ver FormularioAgendamento,
                          `status: precisaSinal ? "aguardando_sinal" :
@@ -2794,11 +2821,12 @@ export default function AdminPage() {
                          como saber se não havia sinal ou se o card só não
                          estava mostrando.
 
-                         Único ramo que olha a configuração ATUAL do salão
-                         (estabelecimento.sinal_regra): com o sinal desligado
-                         não existe cobrança nenhuma pra explicar, e o aviso
-                         viraria ruído em todo card pendente. Os 4 ramos
-                         acima seguem cegos à config de propósito — eles
+                         Junto com o ramo 5, o único que olha a configuração
+                         ATUAL do salão (estabelecimento.sinal_regra): com o
+                         sinal desligado não existe cobrança nenhuma pra
+                         explicar, e o aviso viraria ruído em todo card
+                         pendente. Os 4 primeiros ramos seguem cegos à config
+                         de propósito — eles
                          relatam o que aconteceu na época DAQUELE agendamento
                          (o gateway confirmou / a cliente anexou / declarou /
                          ficou devendo), e isso não deixa de ser verdade
@@ -2837,6 +2865,14 @@ export default function AdminPage() {
                     <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-200 px-2.5 py-1 text-xs font-semibold text-amber-900 ring-1 ring-amber-400">
                       <Clock className="h-3.5 w-3.5" aria-hidden="true" />
                       Aguardando sinal
+                    </p>
+                  ) : item.status === "pendente" &&
+                    !item.sinal_declarado_pago &&
+                    !item.comprovante_pix_url &&
+                    sinalPixRebaixadoAgora ? (
+                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-300">
+                      <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+                      Sinal não cobrado, configurar sinal Pix
                     </p>
                   ) : item.status === "pendente" &&
                     !item.sinal_declarado_pago &&

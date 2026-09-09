@@ -4,6 +4,7 @@ import { useState } from "react";
 import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 import BlocoQrCodeAbacatePay from "@/components/BlocoQrCodeAbacatePay";
 import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
+import { metodoEfetivoSinalPix } from "@/lib/sinalPix";
 import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento";
 import { formatarData } from "@/components/FormularioAgendamento";
 
@@ -98,8 +99,12 @@ export default function ConfirmacaoSinal({
           nada — a confirmação vem do polling da rota de status. Os dois blocos
           já trazem a MESMA caixa cinza de resumo no topo, então nada aqui em
           volta precisa duplicá-la. Fora isso o contrato é idêntico:
-          onStatusMudou dispara o mesmo onConfirmado nos dois caminhos. */}
-      {estabelecimento?.metodo_cobranca_pix === "abacatepay" ? (
+          onStatusMudou dispara o mesmo onConfirmado nos dois caminhos.
+          A escolha segue o método EFETIVO (lib/sinalPix.js), igual ao
+          FormularioAgendamento: salão que escolheu 'abacatepay' mas está
+          sem credencial cai no bloco manual, com a chave Pix, em vez de
+          exibir um QR Code que a rota de cobrança vai recusar. */}
+      {metodoEfetivoSinalPix(estabelecimento) === "abacatepay" ? (
         <BlocoQrCodeAbacatePay
           estabelecimento={estabelecimento}
           agendamentoId={agendamentoId}

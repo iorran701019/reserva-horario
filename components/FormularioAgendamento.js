@@ -19,6 +19,7 @@ import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 import BlocoQrCodeAbacatePay from "@/components/BlocoQrCodeAbacatePay";
 import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 import { formatarPreco } from "@/lib/preco";
+import { metodoEfetivoSinalPix } from "@/lib/sinalPix";
 import { formatarData, montarResumoAgendamento } from "@/lib/data";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import {
@@ -913,8 +914,21 @@ export default function FormularioAgendamento({
   // servico_manutencao_externa_id, que é um serviço comum
   // (eh_manutencao=false) e por isso continua exigindo sinal, de propósito
   // (ver confirmarManutencaoOutroSalao).
+  // Método EFETIVO de cobrança (lib/sinalPix.js), nunca o
+  // `metodo_cobranca_pix` cru: a configuração salva é a intenção da dona, este
+  // é o que o salão CONSEGUE cobrar agora. 'desligado' aqui significa que a
+  // regra pedia sinal mas não sobrou meio de cobrar (sem credencial e sem
+  // chave Pix) — ver a cascata lá.
+  const metodoSinal = metodoEfetivoSinalPix(estabelecimento);
+
   const precisaSinal =
     !status &&
+    // Primeiro degrau do gate, e o mais importante: sem meio de cobrar não se
+    // exige sinal. Sem isto, a cascata seria só cosmética — `precisaSinal`
+    // seguiria gravando a linha em "aguardando_sinal" (ver o insert abaixo)
+    // por uma cobrança que nenhuma tela consegue apresentar, prendendo a
+    // reserva até o pg_cron expirá-la.
+    metodoSinal !== "desligado" &&
     (estabelecimento.sinal_regra === "todos" ||
       (estabelecimento.sinal_regra === "exceto_manutencao" &&
         !servicoSelecionado?.eh_manutencao) ||
@@ -1017,8 +1031,7 @@ export default function FormularioAgendamento({
   // síncrono e casa exatamente com o que está renderizado ao lado, enquanto
   // aquele é null até a consulta de status responder — o botão piscaria em
   // tela nessa fresta.
-  const esconderSubmit =
-    !status && mostrarBlocoSinal && estabelecimento?.metodo_cobranca_pix === "abacatepay";
+  const esconderSubmit = !status && mostrarBlocoSinal && metodoSinal === "abacatepay";
 
   // Regras do agendamento (estabelecimento.aviso_regras_agendamento,
   // configurado no admin): popup bloqueante no fluxo público, mostrado uma
@@ -4130,7 +4143,7 @@ export default function FormularioAgendamento({
                     o wizard fica sabendo pelo mesmo onStatusMudou. Os dois
                     blocos já renderizam a MESMA caixa cinza de resumo no topo
                     deles, então isto aqui não duplica nada. */}
-                {estabelecimento?.metodo_cobranca_pix === "abacatepay" ? (
+                {metodoSinal === "abacatepay" ? (
                   <BlocoQrCodeAbacatePay
                     estabelecimento={estabelecimento}
                     agendamentoId={reservaId}

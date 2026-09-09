@@ -7,6 +7,7 @@ import CampoMensagemWhatsapp from "@/components/CampoMensagemWhatsapp";
 import ModalImportarGoogleCalendar from "@/components/ModalImportarGoogleCalendar";
 import { MENSAGENS_WHATSAPP_CONFIG, substituirVariaveis } from "@/lib/whatsapp";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
+import { calcularStatusSinalPix } from "@/lib/sinalPix";
 import { buscarEtiquetasAtivas } from "@/lib/clientesAdmin";
 import { rotuloEtiqueta } from "@/components/SeletorEtiquetaRapido";
 import { buscarMesesJanela } from "@/lib/disponibilidade";
@@ -1959,6 +1960,43 @@ export default function ConfiguracoesSalao({
   // A credencial da AbacatePay só faz sentido com o sinal ligado E cobrado
   // pela API — no modo manual não existe nada pra autenticar.
   const mostrarAbacatepay = !sinalDesligado && metodoCobrancaPix === "abacatepay";
+
+  // Status EFETIVO da cobrança (lib/sinalPix.js) calculado sobre o STATE local
+  // desta tela, não sobre a prop `estabelecimento`: aqui os quatro campos estão
+  // sendo editados ao vivo, e é justamente enquanto a dona mexe neles que o
+  // aviso precisa reagir — apagar a chave Pix pinta a seção de vermelho no
+  // mesmo instante, sem esperar reload.
+  const statusEfetivoSinal = calcularStatusSinalPix({
+    sinal_regra: sinalRegra,
+    metodo_cobranca_pix: metodoCobrancaPix,
+    sinal_chave_pix: sinalChavePix,
+    abacatepayConectado: abacatepayConectado,
+  });
+
+  // Só depois das DUAS cargas (a linha do salão e o booleano da credencial).
+  // Sem esta guarda, `abacatepayConectado` undefined no primeiro render leria
+  // como "desconectado" e piscaria vermelho em toda abertura da tela de um
+  // salão perfeitamente configurado.
+  //
+  // Falha na leitura da credencial cai aqui como rebaixado (o catch do efeito
+  // grava false), e isso é deliberado: a dona vê o vermelho junto da mensagem
+  // "Não foi possível verificar a conta AbacatePay" logo abaixo, que explica
+  // que o problema é de verificação. Conferir a configuração é a ação certa
+  // nos dois casos.
+  const sinalRebaixado =
+    !carregandoSinal && !carregandoAbacatepay && statusEfetivoSinal.rebaixado;
+
+  // A chave Pix é a REDE DE SEGURANÇA do salão de cobrança automática: é ela
+  // que segura o degrau manual quando a credencial some. Escondê-la no modo
+  // 'abacatepay' (comportamento anterior, incondicional) deixava a dona sem
+  // como completar esse degrau exatamente na hora em que ele importa. Agora
+  // some só quando a conta está mesmo conectada e o campo é de fato inútil.
+  //
+  // A comparação é com `false` explícito, e não `!abacatepayConectado`: com
+  // undefined (ainda carregando) o campo continua escondido, como antes, pra
+  // não aparecer e sumir a cada abertura da tela.
+  const mostrarChavePix =
+    metodoCobrancaPix !== "abacatepay" || abacatepayConectado === false;
   // Com 1 só profissional ativo (ou enquanto a contagem ainda carrega), o
   // toggle some — não há outro profissional pro cliente escolher de qualquer
   // forma. Se o salão já tinha o valor "true" salvo de quando tinha 2+
@@ -2877,15 +2915,33 @@ export default function ConfiguracoesSalao({
         )}
       </div>
 
-      {/* Bloco: Sinal de reserva */}
-      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+      {/* Bloco: Sinal de reserva
+
+          O anel vermelho é o sinal visual da CASCATA rebaixada (ver
+          lib/sinalPix.js): a regra do salão pede sinal e não sobrou meio de
+          cobrar. Pinta o bloco inteiro, e não só o campo que falta, porque o
+          bloco pode estar FECHADO — a dona precisa enxergar o problema da
+          lista de blocos, sem abrir um por um. O que falta exatamente fica no
+          aviso lá dentro. */}
+      <div
+        className={`rounded-2xl bg-card shadow-sm ring-1 ${
+          sinalRebaixado ? "ring-2 ring-red-400" : "ring-border"
+        }`}
+      >
         <button
           type="button"
           onClick={() => alternarBloco("sinal")}
           aria-expanded={blocoAberto === "sinal"}
           className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
         >
-          <span className="font-semibold text-heading">Sinal de reserva</span>
+          <span className="font-semibold text-heading">
+            Sinal de reserva
+            {sinalRebaixado && (
+              <span className="ml-2 align-middle text-xs font-semibold text-red-600">
+                Não está sendo cobrado
+              </span>
+            )}
+          </span>
           <span aria-hidden="true" className="shrink-0 text-xs text-body">
             {blocoAberto === "sinal" ? "▲" : "▼"}
           </span>
@@ -2897,6 +2953,22 @@ export default function ConfiguracoesSalao({
               Exige que o cliente declare o pagamento de um sinal via Pix
               antes de confirmar o agendamento.
             </p>
+
+            {/* Diz o que FALTA, não só que está errado. Os dois textos cobrem
+                os dois jeitos de chegar no fundo da cascata, e a chave Pix
+                aparece nos dois porque é ela que resolve os dois. */}
+            {sinalRebaixado && (
+              <div className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3">
+                <p className="text-sm font-medium text-red-800">
+                  O sinal não está sendo cobrado
+                </p>
+                <p className="mt-1 text-xs text-red-700">
+                  {metodoCobrancaPix === "abacatepay"
+                    ? "A conta AbacatePay não está conectada e não há chave Pix cadastrada, então suas clientes estão agendando sem pagar sinal. Conecte a conta abaixo ou preencha a chave Pix pra voltar a cobrar pelo modo manual."
+                    : "A chave Pix está vazia, então suas clientes estão agendando sem pagar sinal. Preencha a chave abaixo pra voltar a cobrar."}
+                </p>
+              </div>
+            )}
 
             <div className="mt-3 space-y-3">
               <div>
@@ -3058,12 +3130,18 @@ export default function ConfiguracoesSalao({
                 />
               </div>
 
-              {/* No modo AbacatePay a chave Pix do salão não tem função: quem
-                  emite o QR Code é a conta deles, não uma chave copiada pela
-                  cliente. Só a UI some — `sinal_chave_pix` continua gravada,
-                  então voltar pra cobrança manual traz o campo de volta
-                  preenchido. */}
-              {metodoCobrancaPix !== "abacatepay" && (
+              {/* Com a conta AbacatePay conectada a chave Pix do salão não tem
+                  função: quem emite o QR Code é a conta deles, não uma chave
+                  copiada pela cliente. Só a UI some — `sinal_chave_pix`
+                  continua gravada, então voltar pra cobrança manual traz o
+                  campo de volta preenchido.
+
+                  Mas SEM a credencial o campo reaparece mesmo no modo
+                  'abacatepay' (ver mostrarChavePix): aí ele é o degrau manual
+                  da cascata, a diferença entre cobrar de um jeito mais
+                  trabalhoso e não cobrar nada. Escondê-lo justamente nessa
+                  hora era o que trancava a dona fora da própria saída. */}
+              {mostrarChavePix && (
                 <div>
                   <label
                     htmlFor="sinal-chave-pix"
