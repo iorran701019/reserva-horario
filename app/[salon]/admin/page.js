@@ -62,6 +62,7 @@ import {
   ChevronRight,
   ChevronDown,
   Check,
+  CheckCircle2,
   MessageCircleOff,
   Clock,
   Info,
@@ -341,7 +342,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, expirado_automaticamente, sinal_declarado_pago, comprovante_pix_url, comprovante_pix_enviado_em, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, expirado_automaticamente, sinal_declarado_pago, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -2744,22 +2745,41 @@ export default function AdminPage() {
                   {/* Status do pagamento do sinal: UM bloco só, nunca dois.
                       Ordem de prioridade, do mais forte pro mais fraco:
 
-                      1. Comprovante ANEXADO (arquivo real no bucket privado —
+                      1. Pix CONFIRMADO PELO GATEWAY (AbacatePay). Quem carimba
+                         é lib/abacatepay/confirmarPagamento.js, único ponto de
+                         transição, alcançado tanto pelo polling da tela de QR
+                         Code quanto pelo webhook. É a confirmação mais forte que
+                         existe no card: não é a palavra da cliente nem um
+                         arquivo pra dona conferir, é o próprio gateway dizendo
+                         que o dinheiro entrou. Verde de confirmação.
+
+                         Precisa vir PRIMEIRO na cadeia porque confirmarPagamentoPix
+                         grava sinal_declarado_pago também — sem este ramo na
+                         frente, o pagamento validado cairia no caso 3 e leria
+                         como declaração manual, mais fraca do que é.
+
+                         Condição crua (só abacatepay_pago_em), sem olhar
+                         estabelecimento.metodo_cobranca_pix: como os ramos 2 a 4,
+                         ele relata o que aconteceu na época DAQUELE agendamento,
+                         e trocar o método de cobrança depois não desfaz um Pix
+                         que o gateway confirmou.
+                      2. Comprovante ANEXADO (arquivo real no bucket privado —
                          ver BlocoConfirmacaoPix / LinkComprovantePix, que só
-                         renderiza havendo caminho e é o único caso que ganha
-                         verde de confirmação).
-                      2. Declarou o pagamento SEM anexar arquivo. Os dois
+                         renderiza havendo caminho). Também ganha verde, mas é
+                         mais fraco que o caso 1: aqui alguém ainda precisa abrir
+                         e conferir o arquivo.
+                      3. Declarou o pagamento SEM anexar arquivo. Os dois
                          gestos do BlocoConfirmacaoPix — marcar "Enviei o
                          comprovante pelo WhatsApp" e subir o arquivo — gravam
                          sinal_declarado_pago igual, então é a AUSÊNCIA do
                          caminho que separa um do outro. Tom NEUTRO de
                          propósito: é a palavra da cliente, não um comprovante
                          conferido, e não deve ler como confirmação — por isso
-                         não é verde como o caso 1.
-                      3. Nada declarado e status aguardando_sinal: alerta
+                         não é verde como os casos 1 e 2.
+                      4. Nada declarado e status aguardando_sinal: alerta
                          âmbar. Este badge substitui o "Aguardando sinal" que
                          antes ficava junto das tags do topo.
-                      4. Nada de Pix E status "pendente": este agendamento
+                      5. Nada de Pix E status "pendente": este agendamento
                          NUNCA exigiu sinal. Quem carimba isso é o INSERT do
                          fluxo público (ver FormularioAgendamento,
                          `status: precisaSinal ? "aguardando_sinal" :
@@ -2768,7 +2788,7 @@ export default function AdminPage() {
                          não pagou" — sinal_declarado_pago é false nos dois.
                          Cinza neutro, mais fraco que todos os anteriores: é
                          ausência de cobrança, não pendência; não deve
-                         competir com o âmbar do caso 3. Existe pra que o
+                         competir com o âmbar do caso 4. Existe pra que o
                          espaço do Pix nunca fique VAZIO e sem explicação —
                          antes este caso caía no `null` e a dona não tinha
                          como saber se não havia sinal ou se o card só não
@@ -2777,12 +2797,12 @@ export default function AdminPage() {
                          Único ramo que olha a configuração ATUAL do salão
                          (estabelecimento.sinal_regra): com o sinal desligado
                          não existe cobrança nenhuma pra explicar, e o aviso
-                         viraria ruído em todo card pendente. Os 3 ramos
+                         viraria ruído em todo card pendente. Os 4 ramos
                          acima seguem cegos à config de propósito — eles
                          relatam o que aconteceu na época DAQUELE agendamento
-                         (a cliente anexou / declarou / ficou devendo), e isso
-                         não deixa de ser verdade porque a dona mudou a regra
-                         depois.
+                         (o gateway confirmou / a cliente anexou / declarou /
+                         ficou devendo), e isso não deixa de ser verdade
+                         porque a dona mudou a regra depois.
 
                          O valor vem do `estabelecimento` resolvido no mount
                          (ver o efeito de buscarPerfil/buscarEstabelecimento
@@ -2794,10 +2814,15 @@ export default function AdminPage() {
                          por um badge informativo.
 
                       A cadeia de ternários é o que garante o "um ou outro":
-                      antes, 1 e 2 já eram mutuamente exclusivos por acaso (um
+                      antes, 2 e 3 já eram mutuamente exclusivos por acaso (um
                       testa o caminho, o outro a ausência dele), mas o badge de
                       status do topo aparecia POR CIMA dos dois. */}
-                  {item.comprovante_pix_url ? (
+                  {item.abacatepay_pago_em ? (
+                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-700 ring-1 ring-green-200">
+                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      Pix confirmado pelo AbacatePay
+                    </p>
+                  ) : item.comprovante_pix_url ? (
                     <LinkComprovantePix
                       caminho={item.comprovante_pix_url}
                       enviadoEm={item.comprovante_pix_enviado_em}
