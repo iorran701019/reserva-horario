@@ -72,6 +72,7 @@ export async function POST(request) {
   }
 
   const corpoBruto = await request.text();
+  console.log("DEBUG webhook corpoBruto", corpoBruto.slice(0, 1000));
 
   // Parse de corpo AINDA NÃO CONFIÁVEL — serve só pra achar de quem é o
   // evento. O catch existe pra não transformar um payload torto num 500 que os
@@ -85,6 +86,7 @@ export async function POST(request) {
   }
 
   const transparent = corpo?.data?.transparent;
+  console.log("DEBUG webhook corpo.event", JSON.stringify(corpo?.event), "status", JSON.stringify(transparent?.status));
 
   // A AbacatePay manda mais de um tipo de evento na mesma URL. Só o pagamento
   // confirmado nos interessa; o resto é recebido e descartado — comportamento
