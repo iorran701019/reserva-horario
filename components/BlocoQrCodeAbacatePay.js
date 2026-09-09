@@ -21,6 +21,15 @@ function srcDoQrCode(brCodeBase64) {
     : `data:image/png;base64,${brCodeBase64}`;
 }
 
+// Status do banco que significam "o sinal foi pago" — os únicos que fazem
+// ESTA tela virar sucesso. Os outros desfechos que também tiram a linha de
+// "aguardando_sinal" (o salão cancelou, o pg_cron expirou a reserva) encerram
+// o polling do mesmo jeito, mas quem decide o que mostrar neles é o pai: aqui
+// não há como distinguir um do outro sem reler a linha, e essa leitura é dele.
+function ehPagamentoConfirmado(status) {
+  return status === "pendente" || status === "confirmado";
+}
+
 // Bloco do sinal quando o salão usa cobrança AUTOMÁTICA
 // (estabelecimentos.metodo_cobranca_pix === 'abacatepay'). Irmão do
 // BlocoConfirmacaoPix, não substituto: os dois vivem lado a lado, e quem
@@ -44,9 +53,16 @@ function srcDoQrCode(brCodeBase64) {
 //                     manual (montarResumoAgendamento, lib/data.js). `data` é
 //                     o ISO cru ("YYYY-MM-DD"), formatado lá dentro.
 //   nomeProfissionalContato – mesmo nome do botão fixo ContatoDono.
-//   onStatusMudou   – chamado (sem args) quando o polling vê a reserva sair de
-//                     "aguardando_sinal", pro pai trocar de tela (mesmo
-//                     contrato do bloco manual).
+//   onStatusMudou   – chamado quando o polling vê a reserva sair de
+//                     "aguardando_sinal", pro pai trocar de tela. Recebe o
+//                     status CRU do banco como argumento — diferente do bloco
+//                     manual, que chama sem args porque lá o único desfecho
+//                     possível é o que a própria cliente acabou de declarar.
+//                     Aqui o polling também vê os desfechos que NÃO são
+//                     pagamento (cancelado pelo salão, reserva expirada), e o
+//                     pai precisa saber qual foi pra não celebrar um
+//                     cancelamento. Pai que ignore o argumento continua
+//                     funcionando como antes.
 export default function BlocoQrCodeAbacatePay({
   estabelecimento,
   agendamentoId,
@@ -61,6 +77,19 @@ export default function BlocoQrCodeAbacatePay({
   const [carregando, setCarregando] = useState(true);
   const [erroCobranca, setErroCobranca] = useState("");
   const [codigoCopiado, setCodigoCopiado] = useState(false);
+  // Sucesso em tela SEM depender do pai: o contrato manda avisar via
+  // onStatusMudou, mas um pai que não trate o aviso deixaria a cliente olhando
+  // pro QR Code de um Pix que ela já pagou (foi exatamente o que aconteceu no
+  // wizard). Este estado é a rede de segurança dessa falha.
+  //
+  // Guarda o ID confirmado, não um booleano, pelo mesmo motivo do
+  // statusPixReserva do wizard: `agendamentoId` troca sem o componente
+  // desmontar (voltar e escolher outro horário cria outra linha), e o sucesso
+  // da anterior não vale pra próxima. Comparar com o id atual reseta sozinho,
+  // sem um setState de limpeza dentro de efeito.
+  const [confirmadoParaId, setConfirmadoParaId] = useState(null);
+  const pagamentoConfirmado =
+    agendamentoId != null && confirmadoParaId === agendamentoId;
   // Trava o polling depois que ele já avisou o pai: sem isso, um
   // onStatusMudou que não desmonte o componente na hora (troca de tela
   // assíncrona) dispararia de novo no tick seguinte.
@@ -136,7 +165,8 @@ export default function BlocoQrCodeAbacatePay({
         // que relê a linha; aqui só faz sentido parar de perguntar.
         if (json?.status && json.status !== "aguardando_sinal") {
           confirmadoRef.current = true;
-          onStatusMudouRef.current?.();
+          if (ehPagamentoConfirmado(json.status)) setConfirmadoParaId(agendamentoId);
+          onStatusMudouRef.current?.(json.status);
         }
       } catch {
         // Rede oscilando não é erro de tela: o próximo tick tenta de novo, e o
@@ -174,16 +204,40 @@ export default function BlocoQrCodeAbacatePay({
     }
   }
 
+  // Mesma caixa cinza nos dois desfechos desta tela (esperando e confirmado):
+  // o que a cliente confere não muda depois que ela paga.
+  const caixaResumo = resumo ? (
+    <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">{resumo}</p>
+  ) : null;
+
+  // Pagamento confirmado: o QR Code sai de cena na hora. Normalmente o pai já
+  // trocou de tela antes desta render acontecer — isto é o que a cliente vê se
+  // ele não trocar. Verde e não âmbar de propósito: a caixa âmbar significa
+  // "falta fazer algo", e aqui não falta mais nada.
+  if (pagamentoConfirmado) {
+    return (
+      <>
+        {caixaResumo}
+
+        <div className="space-y-1 rounded-xl bg-green-50 p-4 ring-1 ring-green-200">
+          <p className="text-base font-medium text-green-800">
+            Pagamento confirmado ✓
+          </p>
+          <p className="text-sm text-green-900">
+            Recebemos o sinal e sua reserva está garantida. Não é preciso pagar
+            de novo.
+          </p>
+        </div>
+      </>
+    );
+  }
+
   return (
     // Fragmento pelo mesmo motivo do bloco manual: o resumo é uma caixa cinza
     // IRMÃ da caixa âmbar, e quem separa as duas é o space-y do container do
     // pai.
     <>
-      {resumo && (
-        <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
-          {resumo}
-        </p>
-      )}
+      {caixaResumo}
 
       <div className="space-y-3 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
         <div>
