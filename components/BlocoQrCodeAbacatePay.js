@@ -365,7 +365,7 @@ export default function BlocoQrCodeAbacatePay({
             </div>
 
             <p className="text-sm text-amber-900">
-              {`Em caso de dúvidas, aperte o botão verde "Falar com ${nomeProfissionalContato}".`}
+              {`Em caso de dúvidas, aperte o botão verde do WhatsApp com o nome ${nomeProfissionalContato}.`}
             </p>
           </>
         )}

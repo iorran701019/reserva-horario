@@ -276,7 +276,7 @@ export default function BlocoConfirmacaoPix({
             {`Este agendamento exige um sinal de ${formatarPreco(estabelecimento.sinal_valor_centavos)} via Pix para confirmar a reserva.`}
           </p>
           <p className="mt-1 text-base font-medium text-amber-800">
-            {`Anexe o comprovante abaixo ou aperte o botão verde "Falar com ${nomeProfissionalContato}" e envie o comprovante do Pix.`}
+            {`Anexe o comprovante abaixo ou aperte o botão verde do WhatsApp com o nome ${nomeProfissionalContato} e envie o comprovante do Pix.`}
           </p>
           <p className="mt-1 text-base font-medium text-amber-800">
             O profissional irá confirmar seu agendamento.
