@@ -570,11 +570,13 @@ export default function AgendarPage() {
       {/* pt reduzido é o padrão pra TODOS os tenants agora — distância entre
           o fim do Hero e "Agende seu horário" enxuta por padrão, não só pra
           quem tem headerCompacto (esse flag continua valendo pros outros
-          ajustes de padding do Hero, que são independentes). pb-0: o
-          respiro do fim da página (conteúdo -> "Desenvolvido por Acolhe" ->
-          selos) mora todo no RodapePagina, dentro da área que ele observa
-          pra posicionar o ContatoDono — ver lá. */}
-      <div className="mx-auto w-full max-w-md px-4 pt-3.5 pb-0 sm:pt-6">
+          ajustes de padding do Hero, que são independentes). pb-10: somado
+          ao mt-10 do RodapePagina, dá ao último card os mesmos 80px até o
+          rodapé que a tela de resumo pós-envio já tem (py-10 + mt-10) — só
+          o mt-10 deixava o ContatoDono, parado 16px acima do rodapé,
+          invadindo ~20px do fundo do card. Padding aqui, não na caixa
+          abaixo: alturaCaixa mede a caixa pra dimensionar a foto. */}
+      <div className="mx-auto w-full max-w-md px-4 pt-3.5 pb-10 sm:pt-6">
         <header className="mb-6 text-center">
           <h1 className="text-2xl font-bold text-heading">Agende seu horário</h1>
           <p className="mt-1 text-sm text-body">
