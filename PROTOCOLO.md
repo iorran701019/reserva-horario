@@ -12,6 +12,7 @@ Documento vivo. Atualizar conforme o protocolo evoluir (não é regra fixa e imu
 4. Iorran testa localmente (e em staging, com push, se a mudança exigir).
 5. Merge imediato após validação — branch validada não fica esperando. Acúmulo de branches pendentes é anti-padrão.
 6. Iorran faz add/commit/push manualmente no VSCode. Claude sempre entrega o texto da mensagem de commit pronto.
+7. Só depois do merge da demanda atual (item 5) Claude parte pra próxima — mesmo que várias tenham sido citadas no início da sessão. Ver regra "uma demanda por vez" abaixo.
 
 **Antes de reescrever um arquivo grande:** olhar `git diff` ou trechos específicos primeiro, avaliar o impacto isolado, e alterar estritamente o necessário.
 
@@ -104,6 +105,8 @@ Iorran só cola o bloco pronto — nunca marca `[x]` manualmente. Itens marcados
 - Reconectar apenas nas sessões em que for necessário teste ao vivo no navegador (Claude Code validando fluxo/staging por conta própria, como feito na Sessão 30).
 - Claude (chat) deve sinalizar quando uma demanda pedir esse tipo de validação, sugerindo reconectar antes do prompt pro Claude Code.
 
+---
+
 ## Regra: checagem de base antes de nova branch
 
 Antes de todo `git checkout -b`, rodar `git branch` (sem argumento) pra confirmar
@@ -129,4 +132,22 @@ receber do chat), avisar explicitamente no próximo prompt pra ele — algo como
 via terminal, branch X em Y". Evita o agente interpretar estado de Git
 inesperado (MERGE_HEAD, conflitos) como anomalia ou ação própria não lembrada.
 
-*Última atualização: 04/09 (sessão paralela de protocolo).*
+## Regra: uma demanda por vez
+
+Mesmo quando Iorran lança várias demandas de uma vez no início da sessão, Claude
+não deve organizá-las e emendar a fila sozinho. O fluxo correto é: declarar uma
+demanda, completar o ciclo inteiro (branch → raio-x → diff → teste → merge), e só
+então perguntar explicitamente se segue pra próxima da lista ou se a sessão fecha
+ali. Isso existe porque triagem de várias demandas de uma vez já causou perda de
+pendência sem ficar claro pra Iorran — algo parecia resolvido "no papel" sem
+nunca ter virado branch de verdade. Vale mesmo que pareça repetitivo perguntar a
+cada fechamento.
+
+## Regra: teste rápido via celular
+
+O localhost (`npm run staging`) está salvo como ícone na tela do celular de
+Iorran — dá pra testar mudanças visuais direto ali, sem precisar de push pra
+staging. Vale como primeira opção de teste pra ajustes de UI antes de subir
+pra staging de verdade.
+
+*Última atualização: 10/09 (regra de "uma demanda por vez" + teste via celular).*
