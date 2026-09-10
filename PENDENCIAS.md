@@ -7,11 +7,16 @@
 - Fail-open silencioso em `lib/estabelecimento.js` (`abacatepay_conectado: true` em erro de leitura): roda no browser da cliente, então um `console.warn` ali não ajuda a dona a perceber. Se quiser alertar a dona de fato, o lugar certo é instrumentar a rota `/api/abacatepay/conectado`.
 - Rebaixamento silencioso da cascata de sinal Pix pra "desligado" (quando falta chave manual e credencial AbacatePay ao mesmo tempo): hoje o único aviso é o badge visual em Configurações e Pendentes — não há notificação ativa. Escolha de design consciente, mas vale reavaliar se algum tenant real cair nesse estado.
 
-### Marca Acolhe (logo, tagline, link de suporte)
-- Responsividade do menu-drawer do `/admin` em telas baixas/paisagem: com o ícone da logo em `h-16`, o rodapé do drawer passa a ocupar ~279px fixos — em paisagem no celular (~360px de altura) sobra só ~24px pro `<nav>` das 8 abas rolarem. Nada quebra, mas fica apertado. Sugestão registrada: `h-10 sm:h-16` (compacto só no breakpoint pequeno).
-- Confirmar visualmente o Ponto 2 da logo com tagline no `/agendar` (tela de protocolo pós-submit, `app/[salon]/page.js`) — verificado só por código e build; o Salão de Teste não tem nenhum mês aberto na agenda, então não foi possível fechar um agendamento de teste pra ver a tela ao vivo.
-- Fase futura, ainda não desenhada: logo do `/admin` (Hero, cabeçalho) virar link pro Instagram do Acolhe — item distinto do link de Suporte já entregue no menu-drawer.
-- Dois clientes de teste ficaram cadastrados no Salão de Teste (sandbox, sem dado real): `Teste Logo Rodape` (24) 98877-6655 e `Teste Anamnese Rodape` (24) 98877-6600 — remover quando quiser limpar.
+### Bug: navegação por voltar físico a partir do Pix (baixa prioridade)
+- **Modo edição, não investigado ao vivo ainda.** Cliente chega no Pix, usa "editar" (entra em modo edição), volta várias vezes com o botão físico do navegador até a etapa "1-serviços" e continua voltando. Esperado: `sairDaEdicao` deveria levar de volta ao protocolo/Pix. Observado: cai no Painel do cliente (se já cadastrado) ou na tela inicial pedindo WhatsApp (se cliente novo) — contraria o que o código deveria fazer. Não perde dado nem trava o fluxo (cliente só precisa recomeçar a edição), mas o destino errado é uma falha real, ainda sem diagnóstico.
+- **Fluxo de agendamento novo (sem edição), mecanismo já mapeado.** O primeiro toque em voltar a partir do Pix sempre leva à Identificação — isso é esperado, não é bug. Os toques seguintes ficam "mortos" (não mudam a tela) antes de sair do site: 2 toques mortos no caminho direto, 4 no caminho com F5 (o F5 piora, não corrige). Causa: entradas de histórico do wizard ("servico"/"dados") empilhadas a mais durante a restauração pós-F5, por um furo de um commit no gate de "servico" (`FormularioAgendamento.js:2508-2527`). Sem perda de dado. Consertar exige mexer no mesmo mecanismo delicado que sustenta toda a navegação por voltar físico — risco desproporcional ao incômodo.
+
+### Marca Acolhe — resíduos
+- `components/LogoAcolheRodape.js` é código morto: nenhum arquivo importa desde que o texto "Desenvolvido por Acolhe" substituiu a logo com tagline. Candidato a remoção numa limpeza futura, ou reaproveitamento se a logo voltar um dia.
+- A string de fallback `"a equipe"` (quando não há profissional ativo) está duplicada em três lugares: `app/[salon]/page.js`, `components/BlocoConfirmacaoPix.js` e `components/BlocoQrCodeAbacatePay.js`. Se o texto do fallback mudar, precisa mudar nos três.
+- Fase futura, ainda não desenhada: logo do `/admin` (Hero, cabeçalho) virar link pro Instagram do Acolhe.
+- Clientes de teste no Salão de Teste (sandbox, sem dado real): `Teste Logo Rodape` (24) 98877-6655 e `Teste Anamnese Rodape` (24) 98877-6600 — remover quando quiser limpar.
+- Config residual em staging (Salão de Teste, id 1): `sinal_valor_centavos` e `sinal_chave_pix` ainda preenchidos (1000 / `teste-historico@exemplo.com`), com `sinal_regra` já revertido para `desligado` — inofensivo (o sistema ignora os dois com a regra desligada), mas sujo. Reverter com `UPDATE estabelecimentos SET sinal_valor_centavos = NULL, sinal_chave_pix = NULL WHERE id = 1;`.
 
 ### Outros
 - UX da configuração de pergunta condicional (mãe/filha) em `GerenciarServicos.js` — funcional, mas complexa de configurar; considerar assistente passo-a-passo no futuro.
