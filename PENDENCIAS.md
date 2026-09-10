@@ -7,6 +7,12 @@
 - Fail-open silencioso em `lib/estabelecimento.js` (`abacatepay_conectado: true` em erro de leitura): roda no browser da cliente, então um `console.warn` ali não ajuda a dona a perceber. Se quiser alertar a dona de fato, o lugar certo é instrumentar a rota `/api/abacatepay/conectado`.
 - Rebaixamento silencioso da cascata de sinal Pix pra "desligado" (quando falta chave manual e credencial AbacatePay ao mesmo tempo): hoje o único aviso é o badge visual em Configurações e Pendentes — não há notificação ativa. Escolha de design consciente, mas vale reavaliar se algum tenant real cair nesse estado.
 
+### Marca Acolhe (logo, tagline, link de suporte)
+- Responsividade do menu-drawer do `/admin` em telas baixas/paisagem: com o ícone da logo em `h-16`, o rodapé do drawer passa a ocupar ~279px fixos — em paisagem no celular (~360px de altura) sobra só ~24px pro `<nav>` das 8 abas rolarem. Nada quebra, mas fica apertado. Sugestão registrada: `h-10 sm:h-16` (compacto só no breakpoint pequeno).
+- Confirmar visualmente o Ponto 2 da logo com tagline no `/agendar` (tela de protocolo pós-submit, `app/[salon]/page.js`) — verificado só por código e build; o Salão de Teste não tem nenhum mês aberto na agenda, então não foi possível fechar um agendamento de teste pra ver a tela ao vivo.
+- Fase futura, ainda não desenhada: logo do `/admin` (Hero, cabeçalho) virar link pro Instagram do Acolhe — item distinto do link de Suporte já entregue no menu-drawer.
+- Dois clientes de teste ficaram cadastrados no Salão de Teste (sandbox, sem dado real): `Teste Logo Rodape` (24) 98877-6655 e `Teste Anamnese Rodape` (24) 98877-6600 — remover quando quiser limpar.
+
 ### Outros
 - UX da configuração de pergunta condicional (mãe/filha) em `GerenciarServicos.js` — funcional, mas complexa de configurar; considerar assistente passo-a-passo no futuro.
 - Polish visual dos botões de upload de comprovante (unificar "Enviar print/foto" e "Enviar PDF" num botão principal + link secundário) — desenhado, prompt pronto, adiado até confirmar se a fricção se repete no uso real.
