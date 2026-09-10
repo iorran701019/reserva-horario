@@ -3844,6 +3844,20 @@ export default function FormularioAgendamento({
                 )}
               </div>
             )}
+
+            {/* Só no público: o /admin nunca passa onVoltarAntes. Fica no fim
+                da etapa (depois da escolha de profissional, quando houver) e
+                usa voltarFisicoServico, não onVoltarAntes direto — ver
+                lib/voltarFisico.js. */}
+            {!status && onVoltarAntes && (
+              <button
+                type="button"
+                onClick={voltarFisicoServico}
+                className="mt-6 w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Voltar
+              </button>
+            )}
           </div>
         )}
 
