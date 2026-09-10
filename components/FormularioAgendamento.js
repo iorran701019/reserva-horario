@@ -67,6 +67,9 @@ const TAMANHO_FOTO_CATEGORIA = 48;
 // sumir pra pagar o sinal via Pix e nunca voltar a esta tela. O submit final
 // do público só faz UPDATE (declarar sinal pago) ou nada. Ver reservaId/
 // reservaChave, mais abaixo, pro controle de quando reaproveitar/cancelar.
+// Sem sinal a cobrar (confirmaSemRevisao), o público nem chega à etapa
+// "dados": o insert do clique no horário já é a confirmação, e dali vai
+// direto pro protocolo (ver concluirFluxoPublico).
 
 const ESTADO_INICIAL = {
   nome: "",
@@ -992,6 +995,16 @@ export default function FormularioAgendamento({
       (estabelecimento.sinal_regra === "novos" &&
         clienteEhNovo &&
         !servicoSelecionado?.eh_manutencao));
+
+  // Público sem sinal a cobrar: a etapa "dados" não teria nada a fazer além
+  // de reler o resumo, então é pulada — o clique no horário grava a reserva
+  // em "pendente" e já leva ao protocolo (ver selecionarHorario). Lido de
+  // `precisaSinal`, NUNCA direto de `sinal_regra`: é ele que sabe da Lista de
+  // Bloqueio (cobra mesmo com a regra do salão desligada) e do método
+  // efetivo (regra ligada sem meio de cobrar = não cobra). O `!status` não é
+  // redundante: precisaSinal é false no /admin, que continua inserindo só no
+  // "Confirmar".
+  const confirmaSemRevisao = !status && !precisaSinal;
   const [sinalDeclarado, setSinalDeclarado] = useState(false);
 
   // Status Pix da reserva atual: `{ id, aguardando }`. É o que decide se os
@@ -1077,6 +1090,12 @@ export default function FormularioAgendamento({
   // precisa retomá-lo; o outro não tem envio nenhum pra retomar (ver
   // confirmarAvisoRegras).
 
+  // Terceira origem do mesmo popup: com confirmaSemRevisao não existe
+  // submit, então o aviso sai no clique do horário, ANTES do insert (ver
+  // selecionarHorario). Guarda o clique interrompido ({ slot, prazoIgnorados })
+  // pra confirmarAvisoRegras retomá-lo; null = o popup não veio daqui.
+  const [horarioAguardandoRegras, setHorarioAguardandoRegras] = useState(null);
+
   // Aviso de regras ainda por confirmar, no fluxo em que ele NÃO tem outro
   // momento pra aparecer. No Pix automático a cliente nunca aperta "Confirmar
   // agendamento" (ver esconderSubmit logo abaixo): quem encerra o fluxo é o
@@ -1146,9 +1165,11 @@ export default function FormularioAgendamento({
 
   // Regras do agendamento (estabelecimento.aviso_regras_agendamento,
   // configurado no admin): popup bloqueante no fluxo público, mostrado uma
-  // vez por sessão de agendamento na etapa final de confirmação, sempre —
-  // com ou sem sinal a pagar (ver handleSubmit/confirmarAvisoRegras e
-  // PopupRegrasAgendamento no JSX abaixo).
+  // vez por sessão de agendamento, sempre antes de a cliente se comprometer:
+  // no clique do horário quando não há sinal (confirmaSemRevisao, ver
+  // selecionarHorario), na entrada do QR Code no Pix automático
+  // (avisoRegrasPendente) e na confirmação final no Pix manual (ver
+  // handleSubmit/confirmarAvisoRegras e PopupRegrasAgendamento no JSX abaixo).
 
   // Botão dividido "Confirmar agendamento" — só existe no /admin (`status`
   // truthy, ver JSX). Zona pequena pula o WhatsApp de confirmação (mesmo
@@ -2423,11 +2444,13 @@ export default function FormularioAgendamento({
   // não registrado — quem está na tela precisa saber disso. Vai pelo `erro`
   // comum (renderizado nas etapas "data" e "dados"), que ninguém usa como
   // trava: handleSubmit limpa no começo e nada checa antes de avançar.
+  // Devolve a mesma mensagem (null = sem falha) pra quem sai do wizard antes
+  // de o `erro` chegar a aparecer — ver concluirFluxoPublico.
   async function salvarRespostasPerguntas(agendamentoId) {
     const linhas = linhasRespostasPerguntas(agendamentoId);
-    if (linhas.length === 0) return;
+    if (linhas.length === 0) return null;
     const { error } = await supabase.from("agendamento_respostas").insert(linhas);
-    if (!error) return;
+    if (!error) return null;
 
     console.error("Não foi possível salvar as respostas das perguntas:", error.message);
 
@@ -2445,11 +2468,11 @@ export default function FormularioAgendamento({
         ? `sua resposta em ${titulos[0]}`
         : `suas respostas em ${titulos.slice(0, -1).join(", ")} e ${titulos.at(-1)}`;
 
-    setErro(
-      status
-        ? `O agendamento foi criado, mas não foi possível salvar ${alvo}. Confirme o ajuste com a cliente antes do atendimento.`
-        : `Seu horário está reservado, mas não conseguimos registrar ${alvo}. Isso pode mudar o preço e a duração — a dona vai confirmar os detalhes com você.`
-    );
+    const mensagem = status
+      ? `O agendamento foi criado, mas não foi possível salvar ${alvo}. Confirme o ajuste com a cliente antes do atendimento.`
+      : `Seu horário está reservado, mas não conseguimos registrar ${alvo}. Isso pode mudar o preço e a duração — a dona vai confirmar os detalhes com você.`;
+    setErro(mensagem);
+    return mensagem;
   }
 
   // Fluxo "cliente escolhe": escolher o profissional conclui a etapa de serviço
@@ -2655,6 +2678,31 @@ export default function FormularioAgendamento({
     );
   }
 
+  // Saída de sucesso do público quando não há etapa "dados" a mostrar
+  // (confirmaSemRevisao): mesmo desfecho do ramo público de
+  // finalizarAgendamento — apaga o rascunho da sessão e entrega o resumo pro
+  // consumidor montar o protocolo. `horario` vem por parâmetro porque quem
+  // chama (selecionarHorario) acabou de setar horarioSelecionado e ainda
+  // está na closure do render anterior.
+  //
+  // `aviso` é a falha de salvarRespostasPerguntas. Ela também vai pro `erro`
+  // comum, só que ele só aparece dentro do wizard — e o wizard desmonta assim
+  // que onSucesso troca a tela. O alert bloqueia ANTES da troca, pra cliente
+  // não chegar ao protocolo sem saber que o ajuste escolhido pode não ter
+  // sido registrado. alert, e não toast: o projeto não tem sistema de toast,
+  // e um montado aqui morreria junto com o componente.
+  function concluirFluxoPublico({ agendamentoId, horario, aviso = null }) {
+    if (aviso) window.alert(aviso);
+    limparFatia(estabelecimento.slug, "agendamento");
+    onSucesso?.({
+      form,
+      servico: servicoSelecionado,
+      horario,
+      profissional: escolherProfissional ? profissionalSelecionado : null,
+      agendamentoId,
+    });
+  }
+
   // Clique num horário na etapa "data".
   //
   // /admin (status truthy): comportamento de sempre — só marca o horário e
@@ -2670,13 +2718,19 @@ export default function FormularioAgendamento({
   // diferente, cancela a anterior antes de criar a nova — nunca duas linhas
   // ativas da mesma tentativa. finalizarAgendamento, no submit final, só faz
   // UPDATE nesta linha (nunca INSERT).
+  // Sem sinal a cobrar (confirmaSemRevisao), "dados" nem abre: o popup de
+  // regras sai aqui, antes do insert, e o sucesso vai direto pro protocolo
+  // (ver concluirFluxoPublico).
   // `prazoIgnorados` chega preenchido quando o próprio ModalPrazoMinimo
   // reinvoca esta função depois da cliente decidir (ver confirmarTrocaPrazo/
   // manterOsDoisPrazo): são os conflitos JÁ tratados nesta tentativa, que o
   // gate de prazo mínimo não deve mais apontar — sem isso o popup reabriria
   // em loop pro mesmo agendamento. O gate em si continua rodando, pra achar
   // um eventual SEGUNDO vizinho ainda ativo (ver retomarAposPrazo).
-  async function selecionarHorario(slot, { prazoIgnorados = [] } = {}) {
+  async function selecionarHorario(
+    slot,
+    { prazoIgnorados = [], regrasConfirmadas = false } = {}
+  ) {
     setAvisoHorarioIndisponivel(false);
 
     if (status) {
@@ -2686,6 +2740,26 @@ export default function FormularioAgendamento({
     }
 
     if (criandoReserva) return;
+
+    // Sem sinal, este clique É a confirmação (ver confirmaSemRevisao) — então
+    // as regras do salão precisam ser lidas AQUI, antes de qualquer escrita,
+    // e não mais no submit da etapa "dados", que este caminho não mostra.
+    // Fica antes de tudo, inclusive da reserva reaproveitada logo abaixo (que
+    // no modo edição também vai direto pro protocolo): interromper depois do
+    // cancela-e-recria deixaria a reserva anterior já cancelada esperando uma
+    // resposta. `regrasConfirmadas` vem de confirmarAvisoRegras, que retoma
+    // ainda na closure em que avisoRegrasConfirmado era false. As retomadas
+    // do prazo mínimo (retomarAposPrazo) não precisam dele: rodam num render
+    // posterior, que já vê avisoRegrasConfirmado=true.
+    if (
+      confirmaSemRevisao &&
+      estabelecimento.aviso_regras_agendamento &&
+      !avisoRegrasConfirmado &&
+      !regrasConfirmadas
+    ) {
+      setHorarioAguardandoRegras({ slot, prazoIgnorados });
+      return;
+    }
 
     setHorarioSelecionado(slot);
     setErro("");
@@ -2698,7 +2772,14 @@ export default function FormularioAgendamento({
     };
 
     // Mesma seleção de uma reserva já gravada: reaproveita sem gravar de novo.
+    // Sem sinal (na prática, o modo edição tocando no horário que já era o
+    // dela), não há "dados" a revisar: a reserva já existe, então é o mesmo
+    // desfecho do insert lá embaixo.
     if (reservaId != null && mesmaChaveReserva(reservaChave, chaveAtual)) {
+      if (confirmaSemRevisao) {
+        concluirFluxoPublico({ agendamentoId: reservaId, horario: slot });
+        return;
+      }
       setEtapa("dados");
       return;
     }
@@ -2976,7 +3057,7 @@ export default function FormularioAgendamento({
       return;
     }
 
-    await salvarRespostasPerguntas(data.id);
+    const avisoRespostas = await salvarRespostasPerguntas(data.id);
 
     setReservaId(data.id);
     setReservaChave(chaveAtual);
@@ -2988,6 +3069,16 @@ export default function FormularioAgendamento({
     // consulta só pra redescobrir o que já sabemos aqui.
     setReservaPago({ id: data.id, pagoEm: null });
     setCriandoReserva(false);
+
+    // Sem sinal a cobrar: a linha já nasceu em "pendente" com pendente_desde,
+    // que é tudo que o "Confirmar agendamento" da etapa "dados" faria (o ramo
+    // público de finalizarAgendamento não grava nada nesse caso). Vai direto
+    // pro protocolo.
+    if (confirmaSemRevisao) {
+      concluirFluxoPublico({ agendamentoId: data.id, horario: slot, aviso: avisoRespostas });
+      return;
+    }
+
     setEtapa("dados");
   }
 
@@ -3101,13 +3192,16 @@ export default function FormularioAgendamento({
     }
 
     // Regras do agendamento (estabelecimento.aviso_regras_agendamento):
-    // popup bloqueante mostrado uma vez por sessão do wizard, na etapa final
-    // de confirmação — sempre, com ou sem sinal a pagar. Confirmado, quem
-    // libera o envio de fato é confirmarAvisoRegras, chamando
-    // finalizarAgendamento diretamente. SÓ no público — o admin (status
-    // truthy) escreveu essas regras pros PRÓPRIOS clientes lerem, não faz
-    // sentido bloqueá-lo com o próprio aviso (mesmo raciocínio de
-    // precisaSinal).
+    // popup bloqueante mostrado uma vez por sessão do wizard. Aqui é o ponto
+    // do Pix manual; sem sinal ele já saiu no clique do horário (ver
+    // selecionarHorario) e avisoRegrasConfirmado barra a repetição — este
+    // gate só volta a agir sem sinal no caminho raro que ainda para em
+    // "dados" (restauração de sessão com a reserva já gravada, ver o efeito 3
+    // de restauração). Confirmado, quem libera o envio de fato é
+    // confirmarAvisoRegras, chamando finalizarAgendamento diretamente. SÓ no
+    // público — o admin (status truthy) escreveu essas regras pros PRÓPRIOS
+    // clientes lerem, não faz sentido bloqueá-lo com o próprio aviso (mesmo
+    // raciocínio de precisaSinal).
     if (!status && estabelecimento.aviso_regras_agendamento && !avisoRegrasConfirmado) {
       setMostrarPopupAvisoRegras(true);
       return;
@@ -3117,17 +3211,35 @@ export default function FormularioAgendamento({
   }
 
   async function confirmarAvisoRegras() {
-    // Lido ANTES de limpar: é o flag do render atual que diz de onde o popup
-    // veio. True = envio interrompido pelo handleSubmit, que precisa ser
-    // retomado. False = pré-gate do Pix automático (avisoRegrasPreGate), onde
-    // não havia envio nenhum — confirmar só libera o bloco do QR Code na etapa
-    // "dados". Chamar finalizarAgendamento nesse caso mandaria a cliente pra
-    // tela de protocolo com a linha ainda em "aguardando_sinal", que é
-    // exatamente o pulo do Pix que esconderSubmit existe pra impedir.
+    // Lidos ANTES de limpar: são os flags do render atual que dizem de onde o
+    // popup veio.
+    // - horarioAguardandoRegras: clique no horário sem sinal
+    //   (confirmaSemRevisao), interrompido antes do insert — retoma
+    //   selecionarHorario com o mesmo slot. `regrasConfirmadas` é obrigatório:
+    //   esta closure ainda vê avisoRegrasConfirmado=false, e sem ele o gate
+    //   de lá reabriria o popup em loop.
+    // - mostrarPopupAvisoRegras: envio interrompido pelo handleSubmit, que
+    //   precisa ser retomado.
+    // - nenhum dos dois: pré-gate do Pix automático (avisoRegrasPreGate), onde
+    //   não havia envio nenhum — confirmar só libera o bloco do QR Code na
+    //   etapa "dados". Chamar finalizarAgendamento nesse caso mandaria a
+    //   cliente pra tela de protocolo com a linha ainda em
+    //   "aguardando_sinal", que é exatamente o pulo do Pix que esconderSubmit
+    //   existe pra impedir.
+    const horarioPendente = horarioAguardandoRegras;
     const veioDoSubmit = mostrarPopupAvisoRegras;
 
     setAvisoRegrasConfirmado(true);
     setMostrarPopupAvisoRegras(false);
+    setHorarioAguardandoRegras(null);
+
+    if (horarioPendente) {
+      await selecionarHorario(horarioPendente.slot, {
+        prazoIgnorados: horarioPendente.prazoIgnorados,
+        regrasConfirmadas: true,
+      });
+      return;
+    }
 
     if (!veioDoSubmit) return;
 
@@ -4727,12 +4839,13 @@ export default function FormularioAgendamento({
       )}
 
       {/* Regras do agendamento (ver handleSubmit/confirmarAvisoRegras acima).
-          Duas origens, mesmo popup: no fluxo comum bloqueia o envio final até
-          a cliente confirmar; no Pix automático bloqueia a ENTRADA do bloco do
-          QR Code, porque lá não existe envio a bloquear (ver
-          avisoRegrasPendente). Quem separa os dois é o próprio
-          `mostrarPopupAvisoRegras`, que só o caminho do submit liga. */}
-      {(mostrarPopupAvisoRegras || avisoRegrasPreGate) && (
+          Três origens, mesmo popup: sem sinal bloqueia o INSERT, no clique do
+          horário (horarioAguardandoRegras, ver selecionarHorario); no Pix
+          manual bloqueia o envio final até a cliente confirmar; no Pix
+          automático bloqueia a ENTRADA do bloco do QR Code, porque lá não
+          existe envio a bloquear (ver avisoRegrasPendente). Quem separa as
+          três é confirmarAvisoRegras, pelos flags de cada origem. */}
+      {(mostrarPopupAvisoRegras || avisoRegrasPreGate || horarioAguardandoRegras) && (
         <PopupRegrasAgendamento
           texto={estabelecimento.aviso_regras_agendamento}
           onConfirmar={confirmarAvisoRegras}

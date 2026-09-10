@@ -1,13 +1,13 @@
 "use client";
 
-// Popup bloqueante exibido no fluxo público do FormularioAgendamento, na
-// etapa final de confirmação do agendamento — sempre, com ou sem sinal a
+// Popup bloqueante exibido no fluxo público do FormularioAgendamento antes
+// de a cliente se comprometer com o agendamento — sempre, com ou sem sinal a
 // pagar — quando o salão tem um aviso configurado
 // (estabelecimento.aviso_regras_agendamento, ver ConfiguracoesSalao).
-// Componente só de apresentação: quem decide SE mostra é quem chama (ver
-// handleSubmit em FormularioAgendamento); aqui só desenha o texto e o botão
-// de confirmação. Mesmo padrão visual dos outros modais do wizard
-// (ModalConflitoWhatsapp etc).
+// Componente só de apresentação: quem decide SE e QUANDO mostra é quem chama
+// (ver selecionarHorario/handleSubmit em FormularioAgendamento); aqui só
+// desenha o texto e o botão de confirmação. Mesmo padrão visual dos outros
+// modais do wizard (ModalConflitoWhatsapp etc).
 //
 // Props:
 //   texto        – aviso_regras_agendamento do estabelecimento (texto
