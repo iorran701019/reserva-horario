@@ -10,7 +10,6 @@ import { buscarAgendamentosAtivos } from "@/lib/agendamentosCliente";
 import { classificarAgendamento } from "@/lib/particao";
 import Hero from "@/components/Hero";
 import RodapePagina from "@/components/RodapePagina";
-import LogoAcolheRodape from "@/components/LogoAcolheRodape";
 import IdentificacaoCliente from "@/components/IdentificacaoCliente";
 import FormularioAnamnese from "@/components/FormularioAnamnese";
 import PainelCliente from "@/components/PainelCliente";
@@ -557,7 +556,9 @@ export default function AgendarPage() {
             onCancelado={aposCancelamento}
           />
         </div>
-        <LogoAcolheRodape />
+        <p className="mt-10 text-center text-[10px] text-muted sm:text-xs">
+          Desenvolvido por Acolhe
+        </p>
         <RodapePagina estabelecimento={estabelecimento} nome={nomeContatoExibido} />
       </main>
     );
@@ -740,7 +741,9 @@ export default function AgendarPage() {
             />
           )}
         </div>
-        <LogoAcolheRodape />
+        <p className="mt-10 text-center text-[10px] text-muted sm:text-xs">
+          Desenvolvido por Acolhe
+        </p>
       </div>
       <RodapePagina estabelecimento={estabelecimento} nome={nomeContatoExibido} />
     </main>

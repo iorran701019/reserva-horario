@@ -72,7 +72,6 @@ import {
 } from "lucide-react";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
-import IconeAcolhe from "@/components/IconeAcolhe";
 import ModalClientePendente from "@/components/ModalClientePendente";
 import ModalPrazoMinimo from "@/components/ModalPrazoMinimo";
 import Hero from "@/components/Hero";
@@ -4077,8 +4076,7 @@ export default function AdminPage() {
               (papelUsuario !== "global"; AtivarNotificacoes devolve null em
               navegador sem Push API) e este simplesmente sobe. Estilo do
               padrão dominante do drawer (py-3/font-semibold/gap-3), não o
-              do "Painel global" logo acima, que é a exceção. O ícone foge do
-              h-5 dos vizinhos de propósito (ver abaixo).
+              do "Painel global" logo acima, que é a exceção.
               Link externo no molde já usado no resto do projeto: <a> com
               target="_blank" + rel="noopener noreferrer". */}
           <div className="border-t border-border p-2">
@@ -4088,15 +4086,7 @@ export default function AdminPage() {
               rel="noopener noreferrer"
               className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold text-body transition hover:bg-surface hover:text-heading"
             >
-              {/* w-auto, não w-16: o viewBox da marca é ~1.56:1, travar as
-                  duas dimensões esmagaria o desenho. Só a altura é fixada.
-                  h-16 (contra o h-5 dos ícones lucide vizinhos) é escolha
-                  deliberada de tratar a marca como assinatura, não como mais
-                  um ícone de menu: é o único item do drawer que exibe uma
-                  MARCA, e nesse tamanho o lettering "acolhe" dentro dela fica
-                  legível. Custo assumido: esta linha fica bem mais alta que as
-                  outras (ver medição no comentário do bloco acima). */}
-              <IconeAcolhe className="h-16 w-auto shrink-0" />
+              <IconeWhatsApp className="h-5 w-5 shrink-0" />
               Suporte
             </a>
           </div>
