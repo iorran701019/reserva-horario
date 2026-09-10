@@ -3947,7 +3947,17 @@ export default function AdminPage() {
             particionado pelo estabelecimento resolvido. "Excluir" é soft delete
             (ativo=false) pra preservar o histórico de agendamentos antigos. */}
         {!carregando && !erro && viewPai === "servicos" && (
-          <GerenciarServicos estabelecimento={estabelecimento} />
+          <GerenciarServicos
+            estabelecimento={estabelecimento}
+            // Mesmo patch dos callbacks de ConfiguracoesSalao, para os toggles
+            // globais de preço/duração ocultos: o wizard da aba Agendar recebe
+            // este MESMO `estabelecimento` e lê ocultar_preco_servicos/
+            // ocultar_duracao_servicos dele. Sem isto, ligar o toggle aqui e ir
+            // direto agendar mostraria o valor do mount até um reload.
+            onOcultacaoServicosAtualizada={(coluna, valor) =>
+              setEstabelecimento((atual) => (atual ? { ...atual, [coluna]: valor } : atual))
+            }
+          />
         )}
 
         {/* Profissionais: CRUD dos profissionais (tabela `profissionais`) +

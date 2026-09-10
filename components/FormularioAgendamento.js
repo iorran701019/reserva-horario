@@ -929,6 +929,14 @@ export default function FormularioAgendamento({
   // separado.
   const modoLivre = Boolean(status);
 
+  // Preço e duração escondidos de TODOS os serviços do salão — config global
+  // em `estabelecimentos`, no lugar das antigas flags por serviço
+  // (servicos.ocultar_preco/ocultar_duracao, que não são mais lidas). Valem
+  // também na aba Agendar do /admin, que usa este mesmo wizard — igual às
+  // flags antigas faziam.
+  const ocultarPreco = Boolean(estabelecimento.ocultar_preco_servicos);
+  const ocultarDuracao = Boolean(estabelecimento.ocultar_duracao_servicos);
+
   // Sinal de reserva: regra do salão decide se é exigido (todos, todos exceto
   // manutenção, só novos clientes, ou nunca). O cliente declara (não
   // comprovante) que já pagou via Pix antes de liberar o botão de confirmar.
@@ -1273,7 +1281,7 @@ export default function FormularioAgendamento({
         supabase
           .from("servicos")
           .select(
-            "id, nome, duracao_min, preco_centavos, categoria_id, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, eh_manutencao"
+            "id, nome, duracao_min, preco_centavos, categoria_id, alerta_mensagem, servico_origem_id, eh_manutencao"
           )
           .eq("estabelecimento_id", estabelecimento.id)
           .eq("ativo", true)
@@ -1489,7 +1497,7 @@ export default function FormularioAgendamento({
       >
         <span className="min-w-0">
           <span className="block font-medium">{servico.nome}</span>
-          {!servico.ocultar_duracao && (
+          {!ocultarDuracao && (
             <span
               className={[
                 "block text-sm",
@@ -1501,7 +1509,7 @@ export default function FormularioAgendamento({
           )}
         </span>
 
-        {servico.preco_centavos > 0 && !servico.ocultar_preco && (
+        {servico.preco_centavos > 0 && !ocultarPreco && (
           <span className="shrink-0 font-medium">
             {formatarPreco(servico.preco_centavos)}
           </span>
@@ -4406,8 +4414,14 @@ export default function FormularioAgendamento({
                 calcularPrecoManutencao). Só aparece pra manutenções — serviços
                 normais não têm precoManutencao setado. Quando valorCheio é
                 true, o destaque âmbar deixa claro que NÃO é o valor normal da
-                manutenção (evita parecer erro de cobrança). */}
-            {servicoSelecionado?.servico_origem_id != null && precoManutencao && (
+                manutenção (evita parecer erro de cobrança).
+                Com ocultarPreco o VALOR some, mas o aviso de valor cheio fica:
+                ele avisa que a cobrança será a do serviço completo sem revelar
+                número nenhum. Sem valor cheio, o bloco não teria mais nada a
+                mostrar e some inteiro. */}
+            {servicoSelecionado?.servico_origem_id != null &&
+              precoManutencao &&
+              (!ocultarPreco || precoManutencao.valorCheio) && (
               <div
                 className={
                   precoManutencao.valorCheio
@@ -4415,19 +4429,25 @@ export default function FormularioAgendamento({
                     : "rounded-lg bg-surface px-3 py-2"
                 }
               >
-                <p
-                  className={
-                    precoManutencao.valorCheio
-                      ? "text-sm font-medium text-amber-800"
-                      : "text-sm text-body"
-                  }
-                >
-                  {precoManutencao.valorCheio
-                    ? `Valor cheio do serviço: ${formatarPreco(precoManutencao.centavos)}`
-                    : `Valor da manutenção: ${formatarPreco(precoManutencao.centavos)}`}
-                </p>
+                {!ocultarPreco && (
+                  <p
+                    className={
+                      precoManutencao.valorCheio
+                        ? "text-sm font-medium text-amber-800"
+                        : "text-sm text-body"
+                    }
+                  >
+                    {precoManutencao.valorCheio
+                      ? `Valor cheio do serviço: ${formatarPreco(precoManutencao.centavos)}`
+                      : `Valor da manutenção: ${formatarPreco(precoManutencao.centavos)}`}
+                  </p>
+                )}
                 {precoManutencao.valorCheio && (
-                  <p className="mt-1 text-xs text-amber-800">
+                  <p
+                    className={
+                      ocultarPreco ? "text-xs text-amber-800" : "mt-1 text-xs text-amber-800"
+                    }
+                  >
                     Sua última manutenção já passou do prazo, por isso o valor
                     cobrado é o do serviço completo, não o de manutenção.
                   </p>
@@ -4438,9 +4458,9 @@ export default function FormularioAgendamento({
             {/* Valor final com os ajustes das respostas do popup de perguntas
                 (ver calcularAjustePerguntas) — só aparece havendo algum ajuste
                 != 0, com transparência sobre o que compõe o total. Respeita
-                ocultar_preco: o dono escondeu o preço deste serviço do
-                público, então o total também fica escondido. */}
-            {!servicoSelecionado?.ocultar_preco && itensAjustePerguntas.length > 0 && (
+                ocultarPreco: o salão escondeu o preço dos serviços, então o
+                total também fica escondido. */}
+            {!ocultarPreco && itensAjustePerguntas.length > 0 && (
               <div className="rounded-lg bg-surface px-3 py-2">
                 <p className="text-sm font-medium text-heading">
                   Valor total: {formatarPreco(precoBaseCentavos + ajusteCentavosPerguntas)}
@@ -4793,7 +4813,8 @@ export default function FormularioAgendamento({
                             ].join(" ")}
                           >
                             {opcao.label}
-                            {opcao.ajuste_preco_centavos !== 0 && (
+                            {/* O ajuste é preço também: some com ocultarPreco. */}
+                            {!ocultarPreco && opcao.ajuste_preco_centavos !== 0 && (
                               <span
                                 className={
                                   selecionada ? "ml-1 text-on-primary/80" : "ml-1 text-muted"

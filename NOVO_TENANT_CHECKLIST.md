@@ -41,8 +41,10 @@ espaçados"?
 
 ## 3. Serviços
 Cadastrar pela tela (aba Serviços) ou via INSERT em `servicos` — nome, duração, preço,
-categoria. Perguntar: algum serviço deve ter preço oculto (`ocultar_preco`), duração oculta
-(`ocultar_duracao`), ou um alerta pós-seleção (`alerta_mensagem`, ex.: regra de manutenção)?
+categoria. Perguntar: algum serviço deve ter um alerta pós-seleção (`alerta_mensagem`, ex.:
+regra de manutenção)? E o salão quer esconder preço e/ou duração de TODOS os serviços?
+(`estabelecimentos.ocultar_preco_servicos` / `ocultar_duracao_servicos` — config única do
+salão; as antigas `servicos.ocultar_preco`/`ocultar_duracao` não são mais lidas.)
 
 ## 4. Vincular serviços ao(s) profissional(is)
 ```sql

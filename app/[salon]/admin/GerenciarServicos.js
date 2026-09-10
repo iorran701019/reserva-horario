@@ -28,10 +28,33 @@ import { mensagemFalhaSalvar, mensagemFalhaDelete } from "@/lib/erroSalvar";
 //                    pela Janela C do form de profissional (os dois lados
 //                    refletem os mesmos vínculos). Gravado com "substitui tudo"
 //                    (apaga os vínculos do servico_id e reinsere os marcados).
+//
+// Preço/duração ocultos NÃO são mais por serviço: servicos.ocultar_preco/
+// ocultar_duracao deixaram de ser lidas e gravadas, substituídas pelos dois
+// toggles globais do topo da aba (estabelecimentos.ocultar_preco_servicos/
+// ocultar_duracao_servicos, ver TOGGLES_OCULTACAO).
 
 // Sentinel do grupo sintético "Sem categoria" no acordeão — nunca colide com
 // um id de categoria (numérico).
 const SEM_CATEGORIA = "sem-categoria";
+
+// Toggles globais de exibição dos serviços (colunas de `estabelecimentos`),
+// no topo da aba — ver alternarOcultacao. Valem no wizard de agendamento
+// inteiro, que é o MESMO componente no público e na aba Agendar do /admin.
+const TOGGLES_OCULTACAO = [
+  {
+    coluna: "ocultar_preco_servicos",
+    rotulo: "Ocultar preço dos serviços",
+    descricao:
+      "Esconde o valor de todos os serviços na tela de agendamento (a do cliente e a aba Agendar).",
+  },
+  {
+    coluna: "ocultar_duracao_servicos",
+    rotulo: "Ocultar duração dos serviços",
+    descricao:
+      "Esconde quanto tempo cada serviço dura na tela de agendamento (a do cliente e a aba Agendar).",
+  },
+];
 
 // Estado inicial do formulário. `preco` fica em REAIS (string do input); só é
 // convertido pra centavos na hora de gravar. `profissionais` é a lista de ids
@@ -44,8 +67,6 @@ const FORM_INICIAL = {
   duracao: "",
   profissionais: [],
   categoria_id: "",
-  ocultarPreco: false,
-  ocultarDuracao: false,
   adicionarAlerta: false,
   alertaMensagem: "",
   servico_origem_id: "",
@@ -178,7 +199,18 @@ function ListaProfissionais({ profissionais, carregando, erro, selecionados, onT
   );
 }
 
-export default function GerenciarServicos({ estabelecimento }) {
+// Props:
+//   estabelecimento – salão resolvido pelo /admin. Além de id/slug, é de onde
+//                   os toggles globais de preço/duração ocultos nascem (os
+//                   dois loaders de estabelecimento já trazem as colunas).
+//   onOcultacaoServicosAtualizada – chamado com (coluna, valor) depois que um
+//                   desses toggles grava, pro /admin patchar a própria cópia
+//                   de `estabelecimento` (é ela que o wizard da aba Agendar
+//                   lê). Opcional (no-op por padrão).
+export default function GerenciarServicos({
+  estabelecimento,
+  onOcultacaoServicosAtualizada = () => {},
+}) {
   const [servicos, setServicos] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -244,6 +276,46 @@ export default function GerenciarServicos({ estabelecimento }) {
   const [salvandoCategoria, setSalvandoCategoria] = useState(false);
   const [erroCriarCategoria, setErroCriarCategoria] = useState("");
 
+  // Toggles globais de preço/duração ocultos (ver TOGGLES_OCULTACAO). Nascem
+  // da prop, sem query própria: os dois loaders de estabelecimento já trazem
+  // as colunas, e o patch de onOcultacaoServicosAtualizada mantém a prop
+  // atualizada entre uma troca de aba e outra (esta aba remonta a cada visita).
+  const [ocultacao, setOcultacao] = useState(() => ({
+    ocultar_preco_servicos: Boolean(estabelecimento.ocultar_preco_servicos),
+    ocultar_duracao_servicos: Boolean(estabelecimento.ocultar_duracao_servicos),
+  }));
+  // Feedback de gravação: "" | "salvando" | "salvo".
+  const [statusOcultacao, setStatusOcultacao] = useState("");
+  const [erroOcultacao, setErroOcultacao] = useState("");
+
+  // Mesmo padrão do toggle escolha_profissional (ConfiguracoesSalao.alternar):
+  // grava no clique, reflete o novo valor na hora e, se o banco recusar
+  // (RLS ou zero linhas — por isso o .select("id")), reverte e mostra o erro.
+  // Só avisa o /admin DEPOIS de gravar: um valor que o banco recusou nunca
+  // chega ao wizard da aba Agendar.
+  async function alternarOcultacao(coluna) {
+    const novo = !ocultacao[coluna];
+    setOcultacao((atual) => ({ ...atual, [coluna]: novo }));
+    setStatusOcultacao("salvando");
+    setErroOcultacao("");
+
+    const { data: linhas, error } = await supabase
+      .from("estabelecimentos")
+      .update({ [coluna]: novo })
+      .eq("id", estabelecimento.id)
+      .select("id");
+
+    if (error || !linhas?.length) {
+      setOcultacao((atual) => ({ ...atual, [coluna]: !novo }));
+      setStatusOcultacao("");
+      setErroOcultacao(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
+      return;
+    }
+
+    setStatusOcultacao("salvo");
+    onOcultacaoServicosAtualizada(coluna, novo);
+  }
+
   // Renomear categoria: inline, na própria linha do cabeçalho do grupo.
   const [categoriaEditandoId, setCategoriaEditandoId] = useState(null);
   const [nomeEdicaoCategoria, setNomeEdicaoCategoria] = useState("");
@@ -304,7 +376,7 @@ export default function GerenciarServicos({ estabelecimento }) {
       const { data, error } = await supabase
         .from("servicos")
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias"
+          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias"
         )
         .eq("estabelecimento_id", estabelecimento.id)
         .order("categoria_id", { ascending: true, nullsFirst: true })
@@ -390,11 +462,6 @@ export default function GerenciarServicos({ estabelecimento }) {
   function handleChange(e) {
     const { name, value } = e.target;
     setForm((anterior) => ({ ...anterior, [name]: value }));
-  }
-
-  function handleCheckbox(e) {
-    const { name, checked } = e.target;
-    setForm((anterior) => ({ ...anterior, [name]: checked }));
   }
 
   // Desmarcar "Adicionar alerta" também limpa a mensagem digitada — ao salvar,
@@ -489,8 +556,6 @@ export default function GerenciarServicos({ estabelecimento }) {
       duracao: String(servico.duracao_min),
       profissionais: [],
       categoria_id: servico.categoria_id != null ? String(servico.categoria_id) : "",
-      ocultarPreco: Boolean(servico.ocultar_preco),
-      ocultarDuracao: Boolean(servico.ocultar_duracao),
       // A caixa nasce marcada se já houver mensagem salva.
       adicionarAlerta: Boolean(servico.alerta_mensagem),
       alertaMensagem: servico.alerta_mensagem ?? "",
@@ -619,8 +684,6 @@ export default function GerenciarServicos({ estabelecimento }) {
   // uma categoria que não existe mais (manutenção incluída, pelo mesmo
   // categoria_id herdado do serviço-base). Cada um só aparece se tiver
   // algum serviço.
-        ocultar_preco: form.ocultarPreco,
-        ocultar_duracao: form.ocultarDuracao,
         // Caixa desmarcada ou texto em branco -> null (nunca salva alerta
         // "vazio mas marcado").
         alerta_mensagem:
@@ -789,7 +852,7 @@ export default function GerenciarServicos({ estabelecimento }) {
           ordem: proximaOrdemNoGrupo(payload.categoria_id),
         })
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, ocultar_preco, ocultar_duracao, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias"
+          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias"
         )
         .single();
 
@@ -2385,6 +2448,58 @@ export default function GerenciarServicos({ estabelecimento }) {
               {erroCriarCategoria}
             </p>
           )}
+
+          {/* Preço/duração ocultos: config ÚNICA do salão (ver
+              alternarOcultacao), no lugar dos antigos checkboxes por serviço.
+              Logo abaixo de "Nova categoria"/"Novo serviço" porque diz como
+              TODOS os serviços desta aba aparecem no agendamento. Mesmo switch
+              do toggle de escolha de profissional em ConfiguracoesSalao. */}
+          <section className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+            <div className="space-y-4">
+              {TOGGLES_OCULTACAO.map(({ coluna, rotulo, descricao }) => (
+                <div key={coluna} className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <label
+                      htmlFor={`toggle-${coluna}`}
+                      className="block text-sm font-medium text-heading"
+                    >
+                      {rotulo}
+                    </label>
+                    <p className="mt-1 text-xs text-muted">{descricao}</p>
+                  </div>
+
+                  <button
+                    id={`toggle-${coluna}`}
+                    type="button"
+                    role="switch"
+                    aria-checked={ocultacao[coluna]}
+                    onClick={() => alternarOcultacao(coluna)}
+                    // Trava enquanto grava: um segundo toque no meio do
+                    // update poderia reverter pro valor errado no rollback.
+                    disabled={statusOcultacao === "salvando"}
+                    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                      ocultacao[coluna] ? "bg-primary" : "bg-border"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                        ocultacao[coluna] ? "translate-x-5" : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Feedback de gravação (mesmo padrão de ConfiguracoesSalao). */}
+            {statusOcultacao === "salvando" && (
+              <p className="mt-2 text-xs text-muted">Salvando…</p>
+            )}
+            {statusOcultacao === "salvo" && !erroOcultacao && (
+              <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+            )}
+            {erroOcultacao && <p className="mt-2 text-xs text-red-600">{erroOcultacao}</p>}
+          </section>
         </div>
       )}
 
@@ -2576,32 +2691,6 @@ export default function GerenciarServicos({ estabelecimento }) {
                 className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
               />
             </div>
-          </div>
-
-          {/* Ocultar preço/duração na exibição pública (ver renderBotaoServico
-              em FormularioAgendamento) — o serviço continua com os valores
-              reais no banco, só não aparece pro cliente. */}
-          <div className="flex flex-col gap-2 sm:flex-row sm:gap-6">
-            <label className="flex items-center gap-2 text-sm text-body">
-              <input
-                type="checkbox"
-                name="ocultarPreco"
-                checked={form.ocultarPreco}
-                onChange={handleCheckbox}
-                className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
-              />
-              Ocultar preço
-            </label>
-            <label className="flex items-center gap-2 text-sm text-body">
-              <input
-                type="checkbox"
-                name="ocultarDuracao"
-                checked={form.ocultarDuracao}
-                onChange={handleCheckbox}
-                className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
-              />
-              Ocultar duração
-            </label>
           </div>
 
           {/* Alerta exibido ao cliente ao escolher este serviço no /agendar
