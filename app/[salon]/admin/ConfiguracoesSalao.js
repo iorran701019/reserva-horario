@@ -27,6 +27,9 @@ import { rotuloMesLongo } from "@/lib/mes";
 //   fatia seguinte; AQUI é só persistir a preferência.
 //   sinal_regra/sinal_valor_centavos/sinal_chave_pix – regra do sinal de
 //   reserva exigido no FormularioAgendamento (ver precisaSinal lá).
+//   etiqueta_bloqueio_sinal_id – id da etiqueta "Lista de Bloqueio" quando a
+//   dona marca "Cobrar sinal de clientes na Lista de Bloqueio" (null =
+//   desmarcado); cobra sinal dessas clientes mesmo fora da sinal_regra.
 //
 // O objeto `estabelecimento` (prop) traz só { id, nome, whatsapp, slug, ... },
 // então o valor atual de cada campo é lido do banco ao montar. O update
@@ -65,17 +68,21 @@ function dataMaisDias(dias) {
 // da lista, em negrito.
 const ETIQUETA_CLIENTE_FIXO = "cliente fixo";
 
-// A etiqueta "Cliente Fixo" dentro da lista do <select>, ou null se ela nao
-// estiver la (nao existe no salao, foi desativada, ou a carga assincrona de
+// Nome da etiqueta cujo id a opcao "Cobrar sinal de clientes na Lista de
+// Bloqueio" grava em estabelecimentos.etiqueta_bloqueio_sinal_id (bloco "Sinal
+// de reserva"). Ja em minusculas, pronto pra encontrarEtiquetaPorNome.
+const ETIQUETA_LISTA_BLOQUEIO = "lista de bloqueio";
+
+// A etiqueta de nome `nome` dentro da lista, ou null se ela nao estiver la
+// (nao existe no salao, foi desativada, ou a carga assincrona de
 // etiquetasSelect ainda nao terminou). Compara por nome com trim +
 // case-insensitive: o nome e digitado pela dona no CRUD de etiquetas, entao
-// "Cliente fixo " e " CLIENTE FIXO" sao a mesma etiqueta.
-function encontrarEtiquetaClienteFixo(etiquetasSelect) {
+// "Cliente fixo " e " CLIENTE FIXO" sao a mesma etiqueta. `nome` ja vem em
+// minusculas (as constantes acima).
+function encontrarEtiquetaPorNome(etiquetas, nome) {
   return (
-    (etiquetasSelect ?? []).find(
-      (etiqueta) =>
-        String(etiqueta?.nome ?? "").trim().toLowerCase() ===
-        ETIQUETA_CLIENTE_FIXO
+    (etiquetas ?? []).find(
+      (etiqueta) => String(etiqueta?.nome ?? "").trim().toLowerCase() === nome
     ) ?? null
   );
 }
@@ -153,6 +160,10 @@ export default function ConfiguracoesSalao({
 
   // Regra do sinal: 'desligado' | 'novos' | 'todos'. undefined = carregando.
   const [sinalRegra, setSinalRegra] = useState(undefined);
+  // "Cobrar sinal de clientes na Lista de Bloqueio": boolean resolvido de
+  // etiqueta_bloqueio_sinal_id (não nulo = marcado). O id em si só é gravado
+  // pelo próprio checkbox (ver handleCobrarSinalListaBloqueioChange).
+  const [cobrarSinalListaBloqueio, setCobrarSinalListaBloqueio] = useState(false);
   const [sinalValor, setSinalValor] = useState("");
   const [sinalChavePix, setSinalChavePix] = useState("");
   // Como o sinal é cobrado: 'manual' (cliente manda comprovante) ou
@@ -456,7 +467,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, reserva_provisoria_expira_horas, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, reserva_provisoria_expira_horas, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -485,6 +496,7 @@ export default function ConfiguracoesSalao({
 
       setErroSinal("");
       setSinalRegra(data?.sinal_regra ?? "desligado");
+      setCobrarSinalListaBloqueio(data?.etiqueta_bloqueio_sinal_id != null);
       setSinalValor(centavosParaReais(data?.sinal_valor_centavos));
       setSinalChavePix(data?.sinal_chave_pix ?? "");
       setMetodoCobrancaPix(data?.metodo_cobranca_pix ?? "manual");
@@ -819,6 +831,13 @@ export default function ConfiguracoesSalao({
   // Grava os 4 campos do sinal juntos (mesma linha). `patch` sobrepõe o state
   // atual pra casos em que o campo que disparou o save ainda não commitou no
   // state (ex.: o próprio onChange da regra).
+  //
+  // `etiqueta_bloqueio_sinal_id` só entra no UPDATE quando o patch traz
+  // `etiquetaBloqueioSinalId` (só o checkbox da Lista de Bloqueio traz). Os
+  // outros campos salvam sem tocar nela: o state guarda só o boolean, e
+  // regravar o id a partir da busca por nome faria um onBlur disparado antes de
+  // `etiquetasSelect` carregar gravar null e desmarcar a opção sem ninguém ver.
+  // Devolve true se gravou.
   async function salvarSinal(patch = {}) {
     const regra = patch.sinalRegra ?? sinalRegra;
     const valor = patch.sinalValor ?? sinalValor;
@@ -835,6 +854,9 @@ export default function ConfiguracoesSalao({
         sinal_valor_centavos: reaisParaCentavos(valor),
         sinal_chave_pix: chavePix || null,
         metodo_cobranca_pix: metodo,
+        ...("etiquetaBloqueioSinalId" in patch && {
+          etiqueta_bloqueio_sinal_id: patch.etiquetaBloqueioSinalId,
+        }),
       })
       .eq("id", estabelecimento.id)
       .select("id");
@@ -842,16 +864,32 @@ export default function ConfiguracoesSalao({
     if (error || !linhas?.length) {
       setStatusSinal("");
       setErroSinal(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
-      return;
+      return false;
     }
 
     setStatusSinal("salvo");
+    return true;
   }
 
   function handleSinalRegraChange(e) {
     const nova = e.target.value;
     setSinalRegra(nova);
     salvarSinal({ sinalRegra: nova });
+  }
+
+  // Marcar grava o id da etiqueta "Lista de Bloqueio" do salão; desmarcar
+  // grava null. Falhou, volta o checkbox (mesmo padrão do toggle de
+  // escolha_profissional) — senão a tela mostraria uma regra que não vale.
+  async function handleCobrarSinalListaBloqueioChange(e) {
+    const marcado = e.target.checked;
+    // O checkbox fica desabilitado sem a etiqueta, mas marcar sem id gravaria
+    // null com a caixa marcada na tela.
+    if (marcado && !etiquetaListaBloqueio) return;
+    setCobrarSinalListaBloqueio(marcado);
+    const ok = await salvarSinal({
+      etiquetaBloqueioSinalId: marcado ? etiquetaListaBloqueio.id : null,
+    });
+    if (!ok) setCobrarSinalListaBloqueio(!marcado);
   }
 
   function handleMetodoCobrancaPixChange(e) {
@@ -1579,7 +1617,10 @@ export default function ConfiguracoesSalao({
         // essa etiqueta, os dois campos vão juntos numa gravação só e o mês
         // nem chega a ficar represado — a dona troca o status e acabou. Se ela
         // quiser outra etiqueta, o <select> continua lá pra trocar depois.
-        const etiquetaFixo = encontrarEtiquetaClienteFixo(etiquetasSelect);
+        const etiquetaFixo = encontrarEtiquetaPorNome(
+          etiquetasSelect,
+          ETIQUETA_CLIENTE_FIXO
+        );
         if (etiquetaFixo) {
           limparRestritoPendente(chave);
           limparEtiquetaMesVazia(chave);
@@ -1728,9 +1769,12 @@ export default function ConfiguracoesSalao({
       return;
     }
 
+    // `ativa` vem junto só pra etiquetaListaBloqueio conseguir pular estas
+    // (ver lá); as de buscarEtiquetasAtivas não trazem o campo e são todas
+    // ativas.
     const { data: desativadas } = await supabase
       .from("etiquetas_cliente")
-      .select("id, nome, emoji, cor, ordem")
+      .select("id, nome, emoji, cor, ordem, ativa")
       .in("id", idsFaltando);
 
     setEtiquetasSelect([...ativas, ...(desativadas ?? [])]);
@@ -1957,9 +2001,22 @@ export default function ConfiguracoesSalao({
   const carregandoAntecedenciaMinima = antecedenciaMinimaHoras === undefined;
   const carregandoAbacatepay = abacatepayConectado === undefined;
   const sinalDesligado = sinalRegra === "desligado";
-  // A credencial da AbacatePay só faz sentido com o sinal ligado E cobrado
+  // Nenhum sinal é cobrado de ninguém: regra desligada E a Lista de Bloqueio
+  // desmarcada. Com a Lista marcada, a regra desligada ainda cobra dessas
+  // clientes, então forma de cobrança, valor e chave Pix continuam editáveis.
+  const sinalSemCobranca = sinalDesligado && !cobrarSinalListaBloqueio;
+  // A credencial da AbacatePay só faz sentido com o sinal cobrado de alguém E
   // pela API — no modo manual não existe nada pra autenticar.
-  const mostrarAbacatepay = !sinalDesligado && metodoCobrancaPix === "abacatepay";
+  const mostrarAbacatepay = !sinalSemCobranca && metodoCobrancaPix === "abacatepay";
+
+  // Etiqueta "Lista de Bloqueio" do salão, só entre as ATIVAS: etiquetasSelect
+  // também traz desativadas que alguma restrição ainda usa (essas vêm com
+  // ativa=false), e uma Lista de Bloqueio desativada não deve ser oferecida.
+  // null = o salão não tem essa etiqueta → checkbox desabilitado.
+  const etiquetaListaBloqueio = encontrarEtiquetaPorNome(
+    etiquetasSelect.filter((e) => e.ativa !== false),
+    ETIQUETA_LISTA_BLOQUEIO
+  );
 
   // Status EFETIVO da cobrança (lib/sinalPix.js) calculado sobre o STATE local
   // desta tela, não sobre a prop `estabelecimento`: aqui os quatro campos estão
@@ -2012,7 +2069,10 @@ export default function ConfiguracoesSalao({
   // `etiquetasSelect`: aquele state é a lista do banco (ativas por `ordem` +
   // as desativadas ainda em uso) e as restrições logo abaixo continuam
   // renderizando a partir dele, sem mudança nenhuma.
-  const etiquetaClienteFixo = encontrarEtiquetaClienteFixo(etiquetasSelect);
+  const etiquetaClienteFixo = encontrarEtiquetaPorNome(
+    etiquetasSelect,
+    ETIQUETA_CLIENTE_FIXO
+  );
   const etiquetasMesRestrito = etiquetaClienteFixo
     ? [
         etiquetaClienteFixo,
@@ -2994,6 +3054,45 @@ export default function ConfiguracoesSalao({
                 </select>
               </div>
 
+              {/* Lista de Bloqueio: cobra sinal dessas clientes mesmo quando a
+                  regra acima não cobraria (desligado, manutenção, cliente
+                  antiga). Sem a etiqueta no salão não há o que gravar, então
+                  desabilita — mas só pra MARCAR: já marcado, desmarcar continua
+                  possível mesmo que a etiqueta tenha sumido depois. O texto
+                  abaixo repete o tooltip porque `title` não aparece no toque
+                  (celular). */}
+              <div>
+                <label
+                  title={
+                    etiquetaListaBloqueio
+                      ? undefined
+                      : 'Cadastre uma etiqueta chamada "Lista de Bloqueio" na aba Clientes para usar esta opção.'
+                  }
+                  className="flex items-start gap-2 text-sm text-body"
+                >
+                  <input
+                    type="checkbox"
+                    checked={cobrarSinalListaBloqueio}
+                    onChange={handleCobrarSinalListaBloqueioChange}
+                    disabled={
+                      carregandoSinal ||
+                      (!cobrarSinalListaBloqueio && !etiquetaListaBloqueio)
+                    }
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                  <span>
+                    Cobrar sinal de clientes na Lista de Bloqueio, mesmo fora
+                    da regra normal
+                  </span>
+                </label>
+                {!etiquetaListaBloqueio && (
+                  <p className="mt-1 pl-6 text-xs text-muted">
+                    Cadastre uma etiqueta chamada &quot;Lista de Bloqueio&quot;
+                    na aba Clientes para usar esta opção.
+                  </p>
+                )}
+              </div>
+
               <div>
                 <label
                   htmlFor="metodo-cobranca-pix"
@@ -3005,7 +3104,7 @@ export default function ConfiguracoesSalao({
                   id="metodo-cobranca-pix"
                   value={metodoCobrancaPix}
                   onChange={handleMetodoCobrancaPixChange}
-                  disabled={carregandoSinal || sinalDesligado}
+                  disabled={carregandoSinal || sinalSemCobranca}
                   className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <option value="manual">
@@ -3124,7 +3223,7 @@ export default function ConfiguracoesSalao({
                   value={sinalValor}
                   onChange={(e) => setSinalValor(e.target.value)}
                   onBlur={() => salvarSinal()}
-                  disabled={carregandoSinal || sinalDesligado}
+                  disabled={carregandoSinal || sinalSemCobranca}
                   placeholder="0,00"
                   className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
                 />
@@ -3155,7 +3254,7 @@ export default function ConfiguracoesSalao({
                     value={sinalChavePix}
                     onChange={(e) => setSinalChavePix(e.target.value)}
                     onBlur={() => salvarSinal()}
-                    disabled={carregandoSinal || sinalDesligado}
+                    disabled={carregandoSinal || sinalSemCobranca}
                     placeholder="CPF, e-mail, telefone ou chave aleatória"
                     className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
                   />

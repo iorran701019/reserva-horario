@@ -4,7 +4,7 @@ import { useState } from "react";
 import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 import BlocoQrCodeAbacatePay from "@/components/BlocoQrCodeAbacatePay";
 import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
-import { metodoEfetivoSinalPix } from "@/lib/sinalPix";
+import { metodoDisponivelSinalPix } from "@/lib/sinalPix";
 import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento";
 import { formatarData } from "@/components/FormularioAgendamento";
 
@@ -103,8 +103,13 @@ export default function ConfirmacaoSinal({
           A escolha segue o método EFETIVO (lib/sinalPix.js), igual ao
           FormularioAgendamento: salão que escolheu 'abacatepay' mas está
           sem credencial cai no bloco manual, com a chave Pix, em vez de
-          exibir um QR Code que a rota de cobrança vai recusar. */}
-      {metodoEfetivoSinalPix(estabelecimento) === "abacatepay" ? (
+          exibir um QR Code que a rota de cobrança vai recusar.
+          Método DISPONÍVEL, e não o efetivo: esta tela só existe pra uma
+          linha que já está em "aguardando_sinal", então a cobrança já foi
+          decidida — inclusive pela Lista de Bloqueio com a regra do salão
+          desligada, caso em que o efetivo diria 'desligado' e jogaria no
+          bloco manual um salão que tem QR Code. */}
+      {metodoDisponivelSinalPix(estabelecimento) === "abacatepay" ? (
         <BlocoQrCodeAbacatePay
           estabelecimento={estabelecimento}
           agendamentoId={agendamentoId}

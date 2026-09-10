@@ -19,7 +19,7 @@ import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 import BlocoQrCodeAbacatePay from "@/components/BlocoQrCodeAbacatePay";
 import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 import { formatarPreco } from "@/lib/preco";
-import { metodoEfetivoSinalPix } from "@/lib/sinalPix";
+import { metodoEfetivoSinalPix, metodoDisponivelSinalPix } from "@/lib/sinalPix";
 import { formatarData, montarResumoAgendamento } from "@/lib/data";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import {
@@ -945,7 +945,35 @@ export default function FormularioAgendamento({
   // é o que o salão CONSEGUE cobrar agora. 'desligado' aqui significa que a
   // regra pedia sinal mas não sobrou meio de cobrar (sem credencial e sem
   // chave Pix) — ver a cascata lá.
-  const metodoSinal = metodoEfetivoSinalPix(estabelecimento);
+  //
+  // Etiqueta da cliente que está agendando. No público vem de
+  // clienteInicial.etiqueta_id, propagado pelas RPCs de identificação/cadastro
+  // (SÓ o id trafega: nenhuma tela pública mostra nome/emoji de etiqueta). No
+  // /admin, IdentificacaoClienteAdmin já entrega o objeto `etiqueta` inteiro —
+  // os dois formatos são aceitos aqui pra este componente não depender de qual
+  // dos dois consumidores o montou. Declarada AQUI, antes de precisaSinal, que
+  // a lê (const em TDZ: mais abaixo daria ReferenceError no render).
+  const etiquetaClienteId =
+    clienteInicial?.etiqueta_id ?? clienteInicial?.etiqueta?.id ?? null;
+
+  // Cliente na Lista de Bloqueio com a opção "Cobrar sinal de clientes na
+  // Lista de Bloqueio" marcada no salão (etiqueta_bloqueio_sinal_id não nulo).
+  // Os dois `!= null` são obrigatórios: sem eles, cliente sem etiqueta num
+  // salão com a opção desmarcada seria null === null.
+  const clienteNaListaBloqueio =
+    etiquetaClienteId != null &&
+    estabelecimento.etiqueta_bloqueio_sinal_id != null &&
+    etiquetaClienteId === estabelecimento.etiqueta_bloqueio_sinal_id;
+
+  // Na Lista de Bloqueio o sinal é cobrado mesmo com sinal_regra = 'desligado',
+  // então o método vem de metodoDisponivelSinalPix, que ignora o corte da
+  // regra. Fora dela, nada muda. Com a regra ligada as duas funções devolvem
+  // o mesmo método, então só o caso "regra desligada" é que diverge. E se o
+  // salão não tem meio nenhum configurado, sai 'desligado' do mesmo jeito e a
+  // regra não força nada.
+  const metodoSinal = clienteNaListaBloqueio
+    ? metodoDisponivelSinalPix(estabelecimento)
+    : metodoEfetivoSinalPix(estabelecimento);
 
   const precisaSinal =
     !status &&
@@ -955,7 +983,10 @@ export default function FormularioAgendamento({
     // por uma cobrança que nenhuma tela consegue apresentar, prendendo a
     // reserva até o pg_cron expirá-la.
     metodoSinal !== "desligado" &&
-    (estabelecimento.sinal_regra === "todos" ||
+    // Lista de Bloqueio cobra sempre, inclusive manutenção: é a regra que
+    // existe justamente pra passar por cima das isenções da regra normal.
+    (clienteNaListaBloqueio ||
+      estabelecimento.sinal_regra === "todos" ||
       (estabelecimento.sinal_regra === "exceto_manutencao" &&
         !servicoSelecionado?.eh_manutencao) ||
       (estabelecimento.sinal_regra === "novos" &&
@@ -1183,15 +1214,6 @@ export default function FormularioAgendamento({
   // mapa marcado como falha de leitura = fail-open. A distinção vem pronta de
   // buscarMesesJanela e só precisa CHEGAR até aqui inteira.
   const [mesesJanela, setMesesJanela] = useState(NENHUM_MES_CONFIGURADO);
-
-  // Etiqueta da cliente que está agendando. No público vem de
-  // clienteInicial.etiqueta_id, propagado pelas RPCs de identificação/cadastro
-  // (SÓ o id trafega: nenhuma tela pública mostra nome/emoji de etiqueta). No
-  // /admin, IdentificacaoClienteAdmin já entrega o objeto `etiqueta` inteiro —
-  // os dois formatos são aceitos aqui pra este componente não depender de qual
-  // dos dois consumidores o montou.
-  const etiquetaClienteId =
-    clienteInicial?.etiqueta_id ?? clienteInicial?.etiqueta?.id ?? null;
 
   useEffect(() => {
     let ativo = true;
