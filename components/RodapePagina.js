@@ -15,6 +15,12 @@ const GAP_PX = 16;
 // altura do rodapé) — isso já cobre sozinho qualquer espaço extra abaixo do
 // rodapé (ex.: min-h-screen do <main>) e qualquer altura de rodapé por
 // tenant (Laysla tem selo mais longo), sem precisar medir isso à parte.
+//
+// O "Desenvolvido por Acolhe" mora DENTRO da div observada, acima dos selos:
+// assim o topo medido é o topo do texto, e o botão para 16px acima dele em
+// vez de cobri-lo. O respiro de cima é `mt-10` NA DIV (margem fica fora do
+// getBoundingClientRect; um padding-top entraria na conta e empurraria o
+// botão pra longe do texto). O respiro entre texto e selos é o pb do <p>.
 export default function RodapePagina({ estabelecimento, nome }) {
   const rodapeRef = useRef(null);
   const [pertoDoRodape, setPertoDoRodape] = useState(false);
@@ -66,7 +72,10 @@ export default function RodapePagina({ estabelecimento, nome }) {
         nome={nome}
         style={bottomExtra ? { bottom: `${bottomExtra}px` } : undefined}
       />
-      <div ref={rodapeRef}>
+      <div ref={rodapeRef} className="mt-10">
+        <p className="pb-10 text-center text-[10px] text-muted sm:pb-16 sm:text-xs">
+          Desenvolvido por Acolhe
+        </p>
         <RodapeSelos estabelecimento={estabelecimento} />
       </div>
     </>

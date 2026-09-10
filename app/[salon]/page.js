@@ -556,9 +556,6 @@ export default function AgendarPage() {
             onCancelado={aposCancelamento}
           />
         </div>
-        <p className="mt-10 text-center text-[10px] text-muted sm:text-xs">
-          Desenvolvido por Acolhe
-        </p>
         <RodapePagina estabelecimento={estabelecimento} nome={nomeContatoExibido} />
       </main>
     );
@@ -573,10 +570,11 @@ export default function AgendarPage() {
       {/* pt reduzido é o padrão pra TODOS os tenants agora — distância entre
           o fim do Hero e "Agende seu horário" enxuta por padrão, não só pra
           quem tem headerCompacto (esse flag continua valendo pros outros
-          ajustes de padding do Hero, que são independentes). pb segue igual
-          ao original, pra não mexer no respiro antes do ContatoDono no fim
-          da página. */}
-      <div className="mx-auto w-full max-w-md px-4 pt-3.5 pb-10 sm:pt-6 sm:pb-16">
+          ajustes de padding do Hero, que são independentes). pb-0: o
+          respiro do fim da página (conteúdo -> "Desenvolvido por Acolhe" ->
+          selos) mora todo no RodapePagina, dentro da área que ele observa
+          pra posicionar o ContatoDono — ver lá. */}
+      <div className="mx-auto w-full max-w-md px-4 pt-3.5 pb-0 sm:pt-6">
         <header className="mb-6 text-center">
           <h1 className="text-2xl font-bold text-heading">Agende seu horário</h1>
           <p className="mt-1 text-sm text-body">
@@ -741,9 +739,6 @@ export default function AgendarPage() {
             />
           )}
         </div>
-        <p className="mt-10 text-center text-[10px] text-muted sm:text-xs">
-          Desenvolvido por Acolhe
-        </p>
       </div>
       <RodapePagina estabelecimento={estabelecimento} nome={nomeContatoExibido} />
     </main>
