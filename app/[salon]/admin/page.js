@@ -140,6 +140,17 @@ function formatarHoraLocal(d) {
   return `${hora}:${min}`;
 }
 
+// Data "DD/MM/AAAA" em horário LOCAL a partir de um Date — par de
+// formatarHoraLocal acima, pra timestamptz (ex.: pendencias_admin.created_at).
+// Não dá pra usar formatarDataBR (lib/data) aqui: ela corta os 10 primeiros
+// caracteres da string, que num timestamptz são a data em UTC — um
+// cancelamento às 22h (GMT-3) sairia com o dia seguinte.
+function formatarDataComAnoLocal(d) {
+  const dia = String(d.getDate()).padStart(2, "0");
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dia}/${mes}/${d.getFullYear()}`;
+}
+
 // preco_centavos (ex.: 3500) -> "R$ 35,00". Mesma convenção do /agendar.
 function formatarPreco(centavos) {
   return (centavos / 100).toLocaleString("pt-BR", {
@@ -366,17 +377,19 @@ async function buscarAgendamentos(estabelecimentoId) {
 
 // Helper PURO (sem setState): lê as pendências administrativas em aberto
 // (pendencias_admin.resolvido = false) do estabelecimento, mais recentes
-// primeiro. `agendamentos(telefone)` é o join pelo agendamento_id vinculado
+// primeiro. `agendamentos(...)` é o join pelo agendamento_id vinculado
 // (ver sql/pendencias_admin.sql) — resolve o telefone pra ação "Enviar
 // mensagem" das pendências presas a um agendamento (cancelamento_cliente) sem
-// uma segunda query. `clientes(whatsapp)` é o mesmo, mas pelo cliente_id (ver
+// uma segunda query, e data/horário/serviço pro bloco de detalhe do card de
+// cancelamento. Tipos sem agendamento_id recebem `agendamentos: null` e
+// ignoram tudo isso. `clientes(whatsapp)` é o mesmo, mas pelo cliente_id (ver
 // sql/pendencias_admin_cliente.sql) — usado pelas que não têm agendamento
 // (fidelidade_disponivel).
 async function buscarPendenciasAdmin(estabelecimentoId) {
   const { data, error } = await supabase
     .from("pendencias_admin")
     .select(
-      "id, tipo, titulo, descricao, agendamento_id, cliente_id, created_at, agendamentos(telefone), clientes(whatsapp)"
+      "id, tipo, titulo, descricao, agendamento_id, cliente_id, created_at, agendamentos(telefone, data, horario, servico_livre, nome_cliente, servicos(nome)), clientes(whatsapp)"
     )
     .eq("estabelecimento_id", estabelecimentoId)
     .eq("resolvido", false)
@@ -2498,6 +2511,14 @@ export default function AdminPage() {
                   arquivar: handleArquivarPendencia,
                   marcarBrinde: handleMarcarBrindeConcedido,
                 });
+                // Cancelamento com o agendamento ainda no banco: troca a
+                // descrição crua do trigger (texto congelado, sem serviço) por
+                // um bloco montado do join. Sem agendamento (apagado → SET
+                // NULL) cai no caminho genérico, com a descrição do banco
+                // como único dado que sobrou.
+                const agendamentoCancelado =
+                  item.tipo === "cancelamento_cliente" ? item.agendamentos : null;
+                const canceladoEm = new Date(item.created_at);
                 return (
                   <li
                     key={`pendencia-${item.id}`}
@@ -2508,13 +2529,46 @@ export default function AdminPage() {
                         className={`h-5 w-5 shrink-0 ${config.corIcone}`}
                       />
                       <div className="min-w-0 flex-1">
+                        {/* Título do trigger é fixo ("Cancelado pelo
+                            cliente") e o nome só vivia na descrição, que saiu
+                            da tela — então o nome sobe pro título. Só na
+                            exibição: item.titulo no banco não muda. */}
                         <p className="truncate font-medium text-heading">
-                          {item.titulo}
+                          {agendamentoCancelado
+                            ? `${agendamentoCancelado.nome_cliente} cancelou o agendamento`
+                            : item.titulo}
                         </p>
-                        {item.descricao && (
-                          <p className="mt-0.5 text-sm text-body">
-                            {item.descricao}
-                          </p>
+                        {agendamentoCancelado ? (
+                          <>
+                            {/* Mesmo bloco de detalhe do card âmbar de
+                                pendente (data/horário em destaque, serviço
+                                embaixo), na família do vermelho do card. */}
+                            <div className="mt-2 rounded-lg bg-red-100/70 px-3 py-2 ring-1 ring-red-200">
+                              <div className="flex flex-wrap items-baseline gap-x-3">
+                                <span className="text-lg font-bold leading-tight tracking-tight text-heading">
+                                  {formatarData(agendamentoCancelado.data)}
+                                </span>
+                                <span className="text-lg font-bold leading-tight tracking-tight text-heading">
+                                  {formatarHorario(agendamentoCancelado.horario)}
+                                </span>
+                              </div>
+                              <p className="mt-0.5 min-w-0 break-words text-sm text-body">
+                                {agendamentoCancelado.servicos?.nome ??
+                                  agendamentoCancelado.servico_livre ??
+                                  "—"}
+                              </p>
+                            </div>
+                            <p className="mt-1.5 text-xs text-muted">
+                              Cancelado no dia {formatarDataComAnoLocal(canceladoEm)} às{" "}
+                              {formatarHoraLocal(canceladoEm)}
+                            </p>
+                          </>
+                        ) : (
+                          item.descricao && (
+                            <p className="mt-0.5 text-sm text-body">
+                              {item.descricao}
+                            </p>
+                          )
                         )}
                       </div>
                     </div>
