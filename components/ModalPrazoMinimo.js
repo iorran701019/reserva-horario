@@ -20,7 +20,9 @@
 // Não é um bloqueio: "Manter dois agendamentos próximos" segue o fluxo
 // normal e cria o novo com o antigo de pé, igual ao "Agendar mesmo assim" do
 // ModalClientePendente. Das três saídas, só "Cancelar este e manter <data
-// antiga>" não grava nada. O objetivo é evitar o agendamento próximo demais
+// antiga>" não mexe no agendamento antigo nem cria o novo (no público ela
+// ainda cancela a reserva provisória desta tentativa, se houver — ver
+// onDesistirPublico). O objetivo é evitar o agendamento próximo demais
 // feito sem perceber que já havia outro por perto.
 //
 // Props (as datas chegam JÁ FORMATADAS — este componente não importa nada de
@@ -33,6 +35,10 @@
 //   processando     – trava os botões enquanto a ação escolhida grava.
 //   onTrocar        – cancela o agendamento antigo e segue com o novo.
 //   onDesistir      – abandona o novo e mantém o antigo como está.
+//   onDesistirPublico – opcional; quando vem, substitui onDesistir no botão
+//                     "Cancelar este e manter". Só o fluxo público (fora do
+//                     modo edição) passa: além de abandonar o novo, sai do
+//                     wizard. Sem ele (/admin, edição), vale onDesistir.
 //   onManterOsDois  – cria o novo SEM cancelar o antigo: os dois ficam de pé.
 //   onCancelar      – fecha e deixa quem chamou onde estava (é também o que o
 //                     clique no fundo faz, como nos demais modais daqui).
@@ -44,6 +50,7 @@ export default function ModalPrazoMinimo({
   processando = false,
   onTrocar,
   onDesistir,
+  onDesistirPublico,
   onManterOsDois,
   onCancelar,
 }) {
@@ -96,7 +103,7 @@ export default function ModalPrazoMinimo({
           </button>
           <button
             type="button"
-            onClick={onDesistir}
+            onClick={onDesistirPublico ?? onDesistir}
             disabled={processando}
             className="w-full rounded-lg bg-card px-4 py-2.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
           >

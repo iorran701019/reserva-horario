@@ -82,6 +82,32 @@ const ETAPAS = [
   { id: "dados", rotulo: "Dados" },
 ];
 
+// Chaves que o wizard grava em history.state.voltarFisico (ver
+// useVoltarFisico) — as entradas que desistirDoNovoAgendamento consome.
+const CHAVES_HISTORICO_WIZARD = ETAPAS.map((e) => e.id);
+
+// Quanto desistirDoNovoAgendamento espera o popstate de cada history.back()
+// antes de desistir da cadeia e destravar o modal.
+const TIMEOUT_POPSTATE_MS = 3000;
+
+// Resolve no próximo popstate; rejeita se ele não chegar em `ms`. Registrar
+// ANTES de chamar history.back() — o evento é assíncrono, mas assim não há
+// janela pra perdê-lo.
+function aguardarPopstate(ms) {
+  return new Promise((resolve, reject) => {
+    function aoPopstate() {
+      clearTimeout(timer);
+      window.removeEventListener("popstate", aoPopstate);
+      resolve();
+    }
+    const timer = setTimeout(() => {
+      window.removeEventListener("popstate", aoPopstate);
+      reject(new Error("popstate não chegou"));
+    }, ms);
+    window.addEventListener("popstate", aoPopstate);
+  });
+}
+
 // Rótulos pt-BR dos `motivo` que calcularVagasPorHorario/filtrarPorAntecedenciaMinima
 // anotam no formato enriquecido (contexto='admin') — usado só pelo tooltip da
 // grade do modo livre (ver gradeAdmin/ROTULOS_MOTIVO_BLOQUEIO no JSX).
@@ -2416,9 +2442,17 @@ export default function FormularioAgendamento({
     rolarPara(dataRef);
   }
 
+  // True enquanto desistirDoNovoAgendamento consome as entradas de histórico
+  // do wizard em cadeia (ver lá). Cada history.back() dessa cadeia dispara um
+  // popstate que chega também ao listener da etapa "data" (voltarEtapa, via
+  // voltarFisicoData) — com a ref ligada ele não navega pra lugar nenhum,
+  // quem conduz a saída é o próprio handler.
+  const desistirEmAndamentoRef = useRef(false);
+
   // Volta para a etapa anterior preservando o que já foi escolhido —
   // não limpa serviço, data nem horário.
   function voltarEtapa() {
+    if (desistirEmAndamentoRef.current) return;
     const indice = ETAPAS.findIndex((e) => e.id === etapa);
     if (indice > 0) setEtapa(ETAPAS[indice - 1].id);
   }
@@ -3238,8 +3272,9 @@ export default function FormularioAgendamento({
     await retomarAposPrazo(contexto, proximosIgnorados(contexto));
   }
 
-  // "Cancelar este e manter <data antiga>": desiste do agendamento novo, e é
-  // também o que o clique no fundo do modal faz. Única saída do popup que não
+  // "Cancelar este e manter <data antiga>" no /admin e no modo edição (no
+  // público fora da edição vale desistirDoNovoAgendamento, abaixo): desiste
+  // do agendamento novo, e é também o que o clique no fundo do modal faz. Única saída do popup que não
   // grava nada — as outras duas seguem em frente, com ou sem cancelar o
   // antigo antes.
   //
@@ -3250,6 +3285,84 @@ export default function FormularioAgendamento({
   function fecharConflitoPrazo() {
     if (processandoPrazoRef.current) return;
     setConflitoPrazo(null);
+  }
+
+  // "Cancelar este e manter <data antiga>" no fluxo público (fora do modo
+  // edição): em vez de só fechar o modal e deixar a cliente na grade, aborta
+  // o agendamento novo e sai do wizard pro MESMO destino do voltar físico em
+  // "servico" (onVoltarAntes: Painel se há agendamentos ativos, senão
+  // Identificação). O /admin e o modo edição continuam em fecharConflitoPrazo.
+  //
+  // Sair chamando onVoltarAntes direto deixaria as entradas empurradas pelo
+  // wizard ("servico", "data" e eventuais sobras de reload/erro — o número
+  // varia com o caminho) órfãs no histórico real: a cliente apertaria o
+  // voltar físico várias vezes sem nada acontecer. history.go(-N) não serve:
+  // N não é conhecível pela History API, e passar do ponto tira a cliente do
+  // site. Então consome UMA entrada por vez, conferindo a chave a cada passo,
+  // e para na primeira que não é do wizard — nunca sai da página.
+  //
+  // Nenhum setEtapa na cadeia: a etapa fica em "data", então o único
+  // listener do wizard vivo é o de voltarFisicoData, que desistirEmAndamentoRef
+  // neutraliza (ver voltarEtapa).
+  async function desistirDoNovoAgendamento() {
+    const contexto = conflitoPrazo;
+    if (!contexto || processandoPrazoRef.current) return;
+
+    // Trava síncrona ANTES de qualquer await (ver processandoPrazoRef).
+    processandoPrazoRef.current = true;
+    setProcessandoPrazo(true);
+    desistirEmAndamentoRef.current = true;
+    setErro("");
+
+    // Devolve os controles à cliente sem sair do wizard — pra quando algo
+    // interrompe a saída no meio.
+    function abortarSaida(mensagem) {
+      desistirEmAndamentoRef.current = false;
+      processandoPrazoRef.current = false;
+      setProcessandoPrazo(false);
+      if (mensagem) {
+        setConflitoPrazo(null);
+        setErro(mensagem);
+      }
+    }
+
+    try {
+      while (CHAVES_HISTORICO_WIZARD.includes(window.history.state?.voltarFisico)) {
+        const chegou = aguardarPopstate(TIMEOUT_POPSTATE_MS);
+        window.history.back();
+        await chegou;
+      }
+    } catch {
+      // Timeout de segurança: o popstate esperado não veio. Destrava o modal
+      // em vez de deixá-lo em "Processando…" pra sempre.
+      abortarSaida(null);
+      return;
+    }
+
+    // Reserva provisória desta tentativa ainda de pé (só existe aqui quando a
+    // cliente veio de "Voltar e escolher outro horário", com a linha em
+    // "aguardando_sinal"): cancela antes de sair, senão ela sobra no banco.
+    // O helper é silencioso pra aguardando_sinal/pendente.
+    if (reservaId != null) {
+      const { ok, erro: erroCancelamento } = await cancelarAgendamentoCliente({
+        agendamentoId: reservaId,
+        estabelecimento,
+        nomeCliente: form.nome,
+        dataFormatada: reservaChave?.data ? formatarData(reservaChave.data) : "",
+        horario: reservaChave?.horario ?? "",
+      });
+      if (!ok) {
+        abortarSaida(erroCancelamento);
+        return;
+      }
+    }
+
+    // Sem isso, o próximo "Novo agendamento" restauraria serviço/data deste
+    // rascunho abandonado, e um reload no Painel reabriria o wizard.
+    limparFatia(estabelecimento.slug, "agendamento");
+
+    desistirEmAndamentoRef.current = false;
+    onVoltarAntes();
   }
 
   // Submit final ("Confirmar agendamento").
@@ -4766,6 +4879,11 @@ export default function FormularioAgendamento({
         processando={processandoPrazo}
         onTrocar={confirmarTrocaPrazo}
         onDesistir={fecharConflitoPrazo}
+        onDesistirPublico={
+          !status && onVoltarAntes && !agendamentoEmEdicao
+            ? desistirDoNovoAgendamento
+            : undefined
+        }
         onManterOsDois={manterOsDoisPrazo}
         onCancelar={fecharConflitoPrazo}
       />
