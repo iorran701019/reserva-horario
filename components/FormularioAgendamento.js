@@ -3362,7 +3362,7 @@ export default function FormularioAgendamento({
     if (status) {
       const { data: canceladas, error } = await supabase
         .from("agendamentos")
-        .update({ status: "cancelado" })
+        .update({ status: "cancelado", cancelado_pelo_salao: true })
         .eq("id", contexto.conflito.id)
         .select("id");
 

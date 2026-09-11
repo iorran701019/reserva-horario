@@ -1106,7 +1106,7 @@ export default function AdminPage() {
 
     const { data, error } = await supabase
       .from("agendamentos")
-      .update({ status: "cancelado" })
+      .update({ status: "cancelado", cancelado_pelo_salao: true })
       .eq("id", contexto.conflito.id)
       .select("id");
 
@@ -1209,7 +1209,7 @@ export default function AdminPage() {
   async function handleCancelar(agendamento, notificar = true) {
     const { data, error } = await supabase
       .from("agendamentos")
-      .update({ status: "cancelado" })
+      .update({ status: "cancelado", cancelado_pelo_salao: true })
       .eq("id", agendamento.id)
       .select("id");
 

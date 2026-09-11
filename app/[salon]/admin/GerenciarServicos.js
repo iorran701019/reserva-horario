@@ -73,6 +73,7 @@ const FORM_INICIAL = {
   prazoInicioDias: "",
   prazoFimDias: "",
   ehManutencao: false,
+  manutencaoExterna: false,
 };
 
 // Reais digitado (aceita "35", "35,50" ou "35.50") -> centavos inteiros.
@@ -376,7 +377,7 @@ export default function GerenciarServicos({
       const { data, error } = await supabase
         .from("servicos")
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias"
+          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias, manutencao_externa"
         )
         .eq("estabelecimento_id", estabelecimento.id)
         .order("categoria_id", { ascending: true, nullsFirst: true })
@@ -462,6 +463,11 @@ export default function GerenciarServicos({
   function handleChange(e) {
     const { name, value } = e.target;
     setForm((anterior) => ({ ...anterior, [name]: value }));
+  }
+
+  function handleToggleManutencaoExterna(e) {
+    const checked = e.target.checked;
+    setForm((anterior) => ({ ...anterior, manutencaoExterna: checked }));
   }
 
   // Desmarcar "Adicionar alerta" também limpa a mensagem digitada — ao salvar,
@@ -566,6 +572,7 @@ export default function GerenciarServicos({
       prazoFimDias:
         servico.prazo_fim_dias != null ? String(servico.prazo_fim_dias) : "",
       ehManutencao: Boolean(servico.eh_manutencao),
+      manutencaoExterna: Boolean(servico.manutencao_externa),
     });
     setErroForm("");
     setEditando(servico);
@@ -694,6 +701,7 @@ export default function GerenciarServicos({
         prazo_inicio_dias: prazoInicioDias,
         prazo_fim_dias: prazoFimDias,
         eh_manutencao: form.ehManutencao,
+        manutencao_externa: form.manutencaoExterna,
       },
     };
   }
@@ -852,7 +860,7 @@ export default function GerenciarServicos({
           ordem: proximaOrdemNoGrupo(payload.categoria_id),
         })
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias"
+          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias, manutencao_externa"
         )
         .single();
 
@@ -2718,6 +2726,19 @@ export default function GerenciarServicos({
               />
             )}
           </div>
+
+          {/* Serviço feito em outro salão (grava servicos.manutencao_externa).
+              Independente de "Este item é uma manutenção". */}
+          <label className="flex items-center gap-2 text-sm text-body">
+            <input
+              type="checkbox"
+              name="manutencaoExterna"
+              checked={form.manutencaoExterna}
+              onChange={handleToggleManutencaoExterna}
+              className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+            />
+            Manutenção vinda de outro salão
+          </label>
 
           {/* Profissionais que atendem este serviço (tabela servico_profissional).
               Enquanto os vínculos do serviço em edição carregam, mostra o estado

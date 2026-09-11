@@ -83,3 +83,12 @@
 ### Ocultar preço/duração globais (nova, Sessão 57)
 - Colunas antigas `servicos.ocultar_preco` e `servicos.ocultar_duracao` continuam no banco sem uso (a UI não lê nem grava mais nelas) — candidatas a remoção futura numa limpeza de schema.
 - Com preço oculto, o bloco "Sua última manutenção já passou do prazo…" continua aparecendo, só sem o valor numérico. Se preferir sumir com o bloco inteiro nesse caso, é um ajuste de uma linha.
+
+### Em aberto
+- [ ] Serviços — "Manutenção vinda de outro salão": revisar como esse checkbox se comporta.
+  Hoje é independente e pode ser marcado em quantos serviços a dona quiser, mas na prática
+  deveria ser único por estabelecimento (é uma categoria conceitual só, não vários serviços
+  externos). Também precisa ficar mutuamente exclusivo com "Este item é uma manutenção" —
+  regra de negócio: manutenção vinda de fora não tem prazo de manutenção próprio (não existe
+  "manutenção da manutenção externa"), então marcar um devia esconder/desmarcar o outro.
+  Vale desenhar a UI com calma antes de implementar (sessão XX).
