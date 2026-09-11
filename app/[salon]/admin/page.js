@@ -72,6 +72,7 @@ import {
   Info,
   ClipboardCheck,
   Pencil,
+  PieChart,
 } from "lucide-react";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
@@ -89,6 +90,7 @@ import {
   contarAgendamentosConfirmados,
 } from "@/lib/clientesAdmin";
 import ConfiguracoesSalao from "./ConfiguracoesSalao";
+import Relatorios from "./Relatorios";
 import FormularioAgendamento, { CalendarioDias } from "@/components/FormularioAgendamento";
 import IdentificacaoClienteAdmin from "@/components/IdentificacaoClienteAdmin";
 import AtivarNotificacoes from "@/components/AtivarNotificacoes";
@@ -334,6 +336,7 @@ const ABAS_PAI = [
   { id: "servicos", rotulo: "Serviços", Icone: Scissors },
   { id: "profissionais", rotulo: "Profissionais", Icone: Users },
   { id: "clientes", rotulo: "Clientes", Icone: UserRound },
+  { id: "relatorios", rotulo: "Relatórios", Icone: PieChart },
   { id: "regras", rotulo: "Regras de negócio", Icone: Settings },
 ];
 
@@ -4343,6 +4346,13 @@ export default function AdminPage() {
             // tabela `clientes`, então leva o id REAL — ver DetalheCliente.
             onAgendarPara={agendarComGateDePendencia}
           />
+        )}
+
+        {/* Relatórios: resumo mensal (concluídos por tipo de serviço e
+            desfecho dos agendamentos), particionado pelo estabelecimento
+            resolvido. Busca e navegação de mês ficam dentro do componente. */}
+        {!carregando && !erro && viewPai === "relatorios" && (
+          <Relatorios estabelecimentoId={estabelecimento.id} />
         )}
 
         {/* Regras de negócio: config do salão (escolha_profissional, sinal/Pix

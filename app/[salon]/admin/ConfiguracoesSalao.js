@@ -2931,7 +2931,7 @@ export default function ConfiguracoesSalao({
           aria-expanded={blocoAberto === "conclusaoManual"}
           className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
         >
-          <span className="font-semibold text-heading">Conclusão manual</span>
+          <span className="font-semibold text-heading">Configuração de relatórios</span>
           <span aria-hidden="true" className="shrink-0 text-xs text-body">
             {blocoAberto === "conclusaoManual" ? "▲" : "▼"}
           </span>
