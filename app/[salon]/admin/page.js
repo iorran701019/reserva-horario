@@ -33,6 +33,7 @@ import {
   profissionaisLivresNoHorario,
 } from "@/lib/disponibilidade";
 import {
+  chaveMesJanela,
   dataAgendavelComMes,
   mesesJanelaIndisponiveis,
   mesesDoAlcance,
@@ -470,11 +471,12 @@ export default function AdminPage() {
   // via localStorage (chave por estabelecimento + data), sem coluna nova.
   const [popupJanelaAberto, setPopupJanelaAberto] = useState(false);
 
-  // Popup diário de VIRADA DE MÊS: o mês corrente não tem registro em
-  // janela_agendamento_meses, ou seja, a agenda de hoje está fechada e a dona
-  // provavelmente não percebeu (ver o useEffect que o abre). Mesmo visual e
-  // mesmo disparo "uma vez por dia via localStorage" do popup acima — o que
-  // muda é só a condição.
+  // Popup diário de VIRADA DE MÊS: o mês corrente e/ou o seguinte não têm
+  // registro em janela_agendamento_meses, ou seja, a agenda está (ou vai
+  // amanhecer) fechada e a dona provavelmente não percebeu (ver
+  // mesesViradaFaltando e o useEffect que o abre). Mesmo visual e mesmo
+  // disparo "uma vez por dia via localStorage" do popup acima — o que muda é
+  // a condição e a chave, que carrega também os meses em falta.
   const [popupViradaMesAberto, setPopupViradaMesAberto] = useState(false);
 
   // true logo após clicar no banner "Agenda aberta até": sinaliza pro
@@ -816,6 +818,38 @@ export default function AdminPage() {
       linha.status === "aberto" &&
       Number(linha.ano) * 12 + Number(linha.mes) > ultimoOrdinalDoCard
   ).length;
+
+  // Meses cobrados pelo popup de virada de mês: o corrente e o seguinte
+  // (mesesDoAlcance(2) — fixo em 2, e não o alcance do salão: o seletor de
+  // alcance não desce de 3, então os dois sempre aparecem na grade de
+  // Regras) que NÃO têm registro. Só `== null`: 'fechado' explícito é
+  // decisão da dona e nunca cobra. Vazio enquanto o mapa DESTE salão não
+  // chegou ou quando a leitura falhou — nos dois casos "sem registro" seria
+  // afirmação falsa (ver o useEffect que abre o popup).
+  const mesesViradaFaltando =
+    estabelecimento?.id &&
+    mesesJanelaCarregadoDe === estabelecimento.id &&
+    !mesesJanelaComFalha
+      ? mesesDoAlcance(2).filter(
+          ({ ano, mes }) => statusDoMes(ano, mes, mesesJanela) == null
+        )
+      : [];
+
+  // Versão string dos meses acima ("2026-9_2026-10"): entra na chave do
+  // localStorage e é a dependência do useEffect — o array é recriado a cada
+  // render, a string só muda quando o conjunto de meses em falta muda.
+  const chaveMesesViradaFaltando = mesesViradaFaltando
+    .map(({ ano, mes }) => chaveMesJanela(ano, mes))
+    .join("_");
+
+  // Fechamento automático: a dona configurou os meses cobrados sem fechar o
+  // popup à mão. Ajuste de state DURANTE o render (padrão do React pra estado
+  // derivado de outro), e não num useEffect: assim o modal nunca chega a ser
+  // pintado vazio por um frame, e o state não fica preso em true pra reabrir
+  // sozinho — sem passar pelo localStorage — se um mês voltar a faltar.
+  if (popupViradaMesAberto && mesesViradaFaltando.length === 0) {
+    setPopupViradaMesAberto(false);
+  }
 
   // Cliente do atalho "Novo agendamento" (aba Histórico) que TEM pendente,
   // segurando o modal de aviso antes de abrir o wizard — mesmo papel que
@@ -1536,38 +1570,28 @@ export default function AdminPage() {
     setPopupJanelaAberto(true);
   }, [estabelecimento]);
 
-  // Popup diário de virada de mês: o MÊS DE HOJE não tem registro em
-  // janela_agendamento_meses. Com a regra fail-closed (ver mesAgendavel em
-  // lib/janelaAgendamento.js) isso significa que ninguém consegue agendar
-  // para este mês — é o aviso que evita a agenda amanhecer fechada sem
-  // ninguém notar, na virada.
+  // Popup diário de virada de mês: o mês corrente e/ou o seguinte não têm
+  // registro em janela_agendamento_meses (ver mesesViradaFaltando). Com a
+  // regra fail-closed (ver mesAgendavel em lib/janelaAgendamento.js) isso
+  // significa que ninguém consegue agendar nesses meses — é o aviso que evita
+  // a agenda amanhecer fechada sem ninguém notar, na virada. O mês seguinte
+  // entra pra dona ser cobrada ANTES da virada, não só no dia 1.
   //
   // Mesmo par (condição + "já mostrei hoje" no localStorage) do popup acima,
-  // com chave própria pra os dois não se calarem um ao outro. Espera o mapa
-  // DESTE salão ter chegado: com o Map ainda vazio por não ter carregado, a
-  // condição seria verdadeira em toda visita.
+  // com chave própria pra os dois não se calarem um ao outro. A chave leva,
+  // além da data, os meses em falta: resolvido um dos dois, o conjunto muda,
+  // a chave muda e o popup volta no MESMO dia cobrando o que sobrou — em vez
+  // de ficar calado até amanhã. As guardas de "mapa ainda não chegou" e
+  // "leitura falhou" já estão em mesesViradaFaltando (vazio nos dois casos).
   useEffect(() => {
-    if (!estabelecimento?.id || mesesJanelaCarregadoDe !== estabelecimento.id) {
-      return;
-    }
-    // Leitura falhou: o mês corrente não tem status POR NÃO TERMOS LIDO nada,
-    // e o agendamento segue liberado (fail-open em mesAgendavel). Avisar "este
-    // mês está fechado" aqui seria alarme falso.
-    if (mesesJanelaIndisponiveis(mesesJanela)) return;
+    if (!estabelecimento?.id || !chaveMesesViradaFaltando) return;
 
-    const agora = new Date();
-    if (
-      statusDoMes(agora.getFullYear(), agora.getMonth() + 1, mesesJanela) != null
-    ) {
-      return;
-    }
-
-    const chave = `virada_mes_popup_mostrado_${estabelecimento.id}_${hojeISOLocal()}`;
+    const chave = `virada_mes_popup_mostrado_${estabelecimento.id}_${hojeISOLocal()}_${chaveMesesViradaFaltando}`;
     if (window.localStorage.getItem(chave)) return;
 
     window.localStorage.setItem(chave, "1");
     setPopupViradaMesAberto(true);
-  }, [estabelecimento?.id, mesesJanela, mesesJanelaCarregadoDe]);
+  }, [estabelecimento?.id, chaveMesesViradaFaltando]);
 
   // Zera a confirmação da anotação ao abrir/fechar/trocar o modal de detalhe
   // (o textarea já recolhe sozinho por `idEditandoObservacao` estar atrelado ao
@@ -5010,11 +5034,14 @@ export default function AdminPage() {
       )}
 
       {/* Popup diário de virada de mês (ver o useEffect que abre
-          popupViradaMesAberto) — o mês corrente não tem status, logo está
-          fechado. Mesmo componente visual do popup acima; o botão faz a MESMA
-          navegação do banner "Agenda por mês": vai pra Regras de negócio com
-          o bloco "Janela de agendamento" já aberto e rolado até ele. */}
-      {popupViradaMesAberto && (
+          popupViradaMesAberto) — o mês corrente e/ou o seguinte não têm
+          status, logo estão fechados. O texto cita os meses de
+          mesesViradaFaltando e acompanha ao vivo se a dona resolver um deles
+          com o popup aberto. Mesmo componente visual do popup acima; o botão
+          faz a MESMA navegação do banner "Agenda por mês": vai pra Regras de
+          negócio com o bloco "Janela de agendamento" já aberto e rolado até
+          ele. */}
+      {popupViradaMesAberto && mesesViradaFaltando.length > 0 && (
         <div
           role="dialog"
           aria-modal="true"
@@ -5030,15 +5057,28 @@ export default function AdminPage() {
               id="titulo-popup-virada-mes"
               className="text-lg font-semibold text-heading"
             >
-              Este mês ainda está fechado
+              {mesesViradaFaltando.length > 1
+                ? "Meses ainda fechados na agenda"
+                : "Mês ainda fechado na agenda"}
             </h2>
+            {/* rotuloMesLongo sai em minúsculas ("setembro", ou
+                "janeiro/27" fora do ano corrente) — as frases começam em
+                "O mês de"/"Os meses de" pra nome de mês nunca abrir frase. */}
             <p className="mt-2 text-sm text-body">
-              O mês atual não tem status na agenda, então{" "}
+              {mesesViradaFaltando.length > 1 ? "Os meses de " : "O mês de "}
+              <span className="font-medium text-heading">
+                {mesesViradaFaltando
+                  .map(({ ano, mes }) => rotuloMesLongo(ano, mes))
+                  .join(" e ")}
+              </span>{" "}
+              {mesesViradaFaltando.length > 1 ? "não têm" : "não tem"} status
+              na agenda, então{" "}
               <span className="font-medium text-heading">
                 ninguém consegue agendar
               </span>{" "}
-              nele. Abra o mês em Regras de negócio pra voltar a receber
-              agendamentos.
+              {mesesViradaFaltando.length > 1 ? "neles" : "nele"}. Abra{" "}
+              {mesesViradaFaltando.length > 1 ? "os meses" : "o mês"} em Regras
+              de negócio pra voltar a receber agendamentos.
             </p>
 
             <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
