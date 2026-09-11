@@ -2669,11 +2669,12 @@ export default function AdminPage() {
                 // Profissional só é informação útil com 2+ ativos: com 0 ou 1 o
                 // salão é a própria dona e a linha vira ruído. Mesmo critério de
                 // rotuloAba/iconeAba (a aba vira "Horários"). null = contagem
-                // ainda carregando, mantém o padrão de mostrar. Extraído do JSX
+                // ainda carregando, esconde até saber. Extraído do JSX
                 // porque agora decide também se o accordion tem conteúdo.
                 const mostrarProfissional =
                   Boolean(item.profissional_nome) &&
-                  !(qtdProfissionaisAtivos != null && qtdProfissionaisAtivos <= 1);
+                  qtdProfissionaisAtivos != null &&
+                  qtdProfissionaisAtivos > 1;
 
                 const respostasServico =
                   respostasPorAgendamento.get(item.id) ?? [];
@@ -3366,7 +3367,9 @@ export default function AdminPage() {
                             {item.servicos?.nome ?? "—"}
                           </span>
                         </span>
-                        {item.profissional_nome && (
+                        {Boolean(item.profissional_nome) &&
+                          qtdProfissionaisAtivos != null &&
+                          qtdProfissionaisAtivos > 1 && (
                           <span className="inline-flex min-w-0 items-center gap-1.5">
                             <span className="text-body">Profissional</span>
                             <span className="min-w-0 break-words font-medium">
@@ -3737,7 +3740,9 @@ export default function AdminPage() {
                             {item.servicos?.nome ?? "—"}
                           </span>
                         </span>
-                        {item.profissional_nome && (
+                        {Boolean(item.profissional_nome) &&
+                          qtdProfissionaisAtivos != null &&
+                          qtdProfissionaisAtivos > 1 && (
                           <span className="inline-flex min-w-0 items-center gap-1.5">
                             <span className="text-body">Profissional</span>
                             <span className="min-w-0 break-words font-medium">
@@ -4279,7 +4284,9 @@ export default function AdminPage() {
                   ))}
                 </ul>
               )}
-              {selecionado.profissional_nome && (
+              {Boolean(selecionado.profissional_nome) &&
+                qtdProfissionaisAtivos != null &&
+                qtdProfissionaisAtivos > 1 && (
                 <div className="flex justify-between gap-3">
                   <dt className="text-body">Profissional</dt>
                   <dd className="text-right font-medium text-heading">
@@ -4857,9 +4864,13 @@ export default function AdminPage() {
                 <> · {agendamentoParaAlterarData.servicos.nome}</>
               )}
             </p>
-            <p className="mt-1 text-xs text-muted">
-              Profissional: {agendamentoParaAlterarData.profissional_nome ?? "—"}
-            </p>
+            {Boolean(agendamentoParaAlterarData.profissional_nome) &&
+              qtdProfissionaisAtivos != null &&
+              qtdProfissionaisAtivos > 1 && (
+                <p className="mt-1 text-xs text-muted">
+                  Profissional: {agendamentoParaAlterarData.profissional_nome ?? "—"}
+                </p>
+              )}
 
             <div className="mt-4">
               <span className="mb-1 block text-sm font-medium text-body">
