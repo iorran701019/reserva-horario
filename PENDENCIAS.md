@@ -7,11 +7,20 @@
 - Fail-open silencioso em `lib/estabelecimento.js` (`abacatepay_conectado: true` em erro de leitura): roda no browser da cliente, então um `console.warn` ali não ajuda a dona a perceber. Se quiser alertar a dona de fato, o lugar certo é instrumentar a rota `/api/abacatepay/conectado`.
 - Rebaixamento silencioso da cascata de sinal Pix pra "desligado" (quando falta chave manual e credencial AbacatePay ao mesmo tempo): hoje o único aviso é o badge visual em Configurações e Pendentes — não há notificação ativa. Escolha de design consciente, mas vale reavaliar se algum tenant real cair nesse estado.
 
-### Sinal obrigatório para etiqueta "Lista de Bloqueio" (nova, Sessão 56)
+### Sinal obrigatório para etiqueta "Lista de Bloqueio" (Sessão 56)
 - **Valéria (produção)** não tem nenhuma etiqueta cadastrada (nem as 5 padrão do checklist de novo tenant) — o checkbox "Cobrar sinal de clientes na Lista de Bloqueio" fica desabilitado pra esse tenant até alguém criar as etiquetas retroativamente.
-- **Staging** está incompleto: só a Laysla tem etiquetas, e "Lista de Bloqueio" precisou ser criada manualmente pra viabilizar o teste desta sessão. Flávia, Junior e Valéria não têm etiqueta nenhuma em staging — dificulta testes futuros de qualquer feature baseada em etiqueta nesse ambiente.
-- Erro HTTP 400 recorrente no console do `/agendar`, sem URL identificada — apareceu em pelo menos duas sessões diferentes (respiro do botão de contato, Sessão 55/56; teste da Lista de Bloqueio, Sessão 56). Não bloqueou nenhum fluxo testado, mas a origem não foi rastreada ainda.
+- **Staging** está incompleto: só a Laysla tem etiquetas, e "Lista de Bloqueio" precisou ser criada manualmente pra viabilizar o teste da Sessão 56. Flávia, Junior e Valéria não têm etiqueta nenhuma em staging — dificulta testes futuros de qualquer feature baseada em etiqueta nesse ambiente.
 - Cards antigos duplicados de cancelamento em produção (anteriores a 27/08, já registrados abaixo em "Limpar lixo de teste") agora ficam **visualmente idênticos** depois da troca de título ("{nome} cancelou o agendamento" nos dois) — antes dava pra diferenciar pelo texto. Não é bug novo, só ficou mais difícil de notar a olho; arquivar quando conveniente.
+
+### Ocultar preço/duração globais (nova, Sessão 57)
+- **Junior (produção) não foi ajustada.** Só Laysla (`ocultar_duracao_servicos=true`) e Flávia (default) foram configuradas nesta sessão, refletindo o estado real que cada uma tinha por serviço. A Junior tem o mesmo padrão de uso real da Laysla (duração oculta em 16 de 29 serviços/manutenções ativos e inativos) e ficou com os dois toggles no default (`false`/`false`) — decidir com o Iorran e rodar o UPDATE equivalente, senão a Junior passa a mostrar duração que hoje escondia.
+- Colunas antigas `servicos.ocultar_preco` e `servicos.ocultar_duracao` continuam no banco sem uso (a UI não lê nem grava mais nelas) — candidatas a remoção futura numa limpeza de schema.
+- Com preço oculto, o bloco "Sua última manutenção já passou do prazo…" continua aparecendo, só sem o valor numérico. Se preferir sumir com o bloco inteiro nesse caso, é um ajuste de uma linha.
+
+### Popup de virada de mês — 2 meses (nova, Sessão 57)
+- Aviso de React pré-existente: "Cannot update AdminPage while rendering ConfiguracoesSalao", em `salvarMes` (`ConfiguracoesSalao.js:1591`) — não afeta funcionamento, mas vale corrigir numa sessão futura.
+- Seletor "Meses editáveis" mostra "3 meses" mesmo quando o alcance real do salão é 4 (o default) — o dropdown só oferece 3/6/12, sem opção pra 4. Ajustar pra refletir o valor real ou incluir a opção.
+- Salão de Teste (staging) ficou com setembro e outubro/2026 gravados como "Fechado" depois do teste manual desta sessão. Pra repetir o teste do zero (voltar ao estado "sem registro"), é preciso apagar essas duas linhas de `janela_agendamento_meses` no banco.
 
 ### Bug: navegação por voltar físico a partir do Pix (baixa prioridade)
 - **Modo edição, não investigado ao vivo ainda.** Cliente chega no Pix, usa "editar" (entra em modo edição), volta várias vezes com o botão físico do navegador até a etapa "1-serviços" e continua voltando. Esperado: `sairDaEdicao` deveria levar de volta ao protocolo/Pix. Observado: cai no Painel do cliente (se já cadastrado) ou na tela inicial pedindo WhatsApp (se cliente novo) — contraria o que o código deveria fazer. Não perde dado nem trava o fluxo (cliente só precisa recomeçar a edição), mas o destino errado é uma falha real, ainda sem diagnóstico.
@@ -43,8 +52,13 @@
 - Bug `jaPendente` não passado ao `BlocoConfirmacaoPix` do wizard — editar um agendamento já `pendente` reabre o bloco cru e reinicia a janela do protocolo (48h) sem necessidade. A variante observada com o Júnior (polling confirmava no banco, tela não reagia) foi resolvida como efeito colateral do fix da Sessão 52 — sobra só uma variante benigna no restore de sessão, sem corrupção de dado.
 - `calendar_import_ignorados` ausente em produção — importação do Google Calendar possivelmente afetada, não confirmado na prática.
 - Dívida técnica de tipos em `ConfiguracoesSalao.js` (`servicoManutencaoExternaId`) e `ModalVincularCliente.js` (`patch.servico_id`).
+- Erro HTTP 400 recorrente no console, sem URL identificada — apareceu em pelo menos três sessões diferentes (respiro do botão de contato, Sessão 55/56; teste da Lista de Bloqueio, Sessão 56; teste do popup de virada de mês no `/admin`, Sessão 57). Não é exclusivo do `/agendar`. Não bloqueou nenhum fluxo testado, mas a origem não foi rastreada ainda.
 
 ## Backlog
 - Callback de patch para `sinal_regra` em `ConfiguracoesSalao.js` → `AdminPage`, evitando staleness do aviso de Pendentes até reload da página.
 - Confirmar no código real como `clienteEhNovo` é calculado em `precisaSinal` (ramo `'novos'`) — discutido em profundidade numa sessão anterior, não investigado ainda.
 - Criar as 5 etiquetas padrão retroativamente para a Valéria (produção) e para Flávia/Junior/Valéria em staging, alinhando com o `NOVO_TENANT_CHECKLIST.md`.
+
+### Ocultar preço/duração globais (nova, Sessão 57)
+- Colunas antigas `servicos.ocultar_preco` e `servicos.ocultar_duracao` continuam no banco sem uso (a UI não lê nem grava mais nelas) — candidatas a remoção futura numa limpeza de schema.
+- Com preço oculto, o bloco "Sua última manutenção já passou do prazo…" continua aparecendo, só sem o valor numérico. Se preferir sumir com o bloco inteiro nesse caso, é um ajuste de uma linha.

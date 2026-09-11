@@ -52,6 +52,7 @@ Documento vivo. Atualizar conforme o protocolo evoluir (não é regra fixa e imu
 Depois de merges e SQLs do dia, Claude gera:
 - O handoff da sessão.
 - O diff exato para o `PENDENCIAS.md` (o que entra em Resolvido, o que sai de Em aberto, cada item com a sessão de referência entre parênteses).
+- **Conferência de SQL staging → produção** (ver regra dedicada abaixo) — o resultado dessa conferência entra no handoff, mesmo quando não há pendência (registrar "nenhum SQL de schema pendente de replicar" é tão válido quanto listar um item em aberto).
 
 Iorran só cola o bloco pronto — nunca marca `[x]` manualmente. Itens marcados `[x]` sem handoff correspondente precisam ser reconfirmados antes de serem tratados como fechados.
 
@@ -150,4 +151,17 @@ Iorran — dá pra testar mudanças visuais direto ali, sem precisar de push pra
 staging. Vale como primeira opção de teste pra ajustes de UI antes de subir
 pra staging de verdade.
 
-*Última atualização: 10/09 (regra de "uma demanda por vez" + teste via celular).*
+## Regra: conferência de SQL staging → produção antes de fechar sessão
+
+No fechamento de toda sessão que rodou algum SQL de schema (ALTER/CREATE, não
+limpeza de dados de teste), Claude lista de volta cada bloco de SQL rodado
+durante a sessão e confirma, um por um, se já foi replicado em produção — não
+basta ter sido "planejado" ou "confirmado em staging". Se algum ficou só em
+staging (esquecido, ou porque o merge foi adiado), isso é reportado
+explicitamente como pendência de schema em aberto no handoff, nunca deixado
+implícito. Motivo: coluna nova sem réplica em produção passa despercebida até
+alguém mexer justamente naquele campo — vira bug fantasma, difícil de
+diagnosticar, porque o código já assume que a coluna existe nos dois
+ambientes.
+
+*Última atualização: 10/09 (regra de conferência SQL staging → produção).*
