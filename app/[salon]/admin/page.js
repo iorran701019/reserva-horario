@@ -496,6 +496,15 @@ export default function AdminPage() {
     setVerAguardandoConclusao(false);
   }
 
+  // Flag da conclusão manual (Configurações -> "Conclusão manual"). Desligada,
+  // a sub-aba "Conclusão" some — e se ela estava aberta, volta pro inbox em vez
+  // de deixar a tela presa numa aba que não existe mais. Mesmo ajuste durante
+  // o render do reset acima.
+  const conclusaoManualAtiva = Boolean(estabelecimento?.conclusao_manual_ativa);
+  if (!conclusaoManualAtiva && verAguardandoConclusao) {
+    setVerAguardandoConclusao(false);
+  }
+
   // Drawer lateral de navegação (mobile-first): substitui a antiga barra de abas
   // fixa. `true` = aberto. Selecionar uma aba troca `viewPai` e fecha o drawer.
   const [drawerAberto, setDrawerAberto] = useState(false);
@@ -2154,8 +2163,15 @@ export default function AdminPage() {
   // etiquetasConclusaoPorTelefone). Mesmo helper, sem query nova. Lista vazia
   // não zera o Map: sobra entrada que nenhum card lê, inofensivo (o render
   // busca por telefone), e evita setState síncrono no corpo do efeito.
+  // Com conclusão manual desligada a lista nem renderiza — não gasta a query.
   useEffect(() => {
-    if (!estabelecimento?.id || !chaveTelefonesConclusao) return;
+    if (
+      !estabelecimento?.id ||
+      !estabelecimento?.conclusao_manual_ativa ||
+      !chaveTelefonesConclusao
+    ) {
+      return;
+    }
 
     let ativo = true;
     buscarEtiquetasPorTelefones(
@@ -2168,7 +2184,7 @@ export default function AdminPage() {
     return () => {
       ativo = false;
     };
-  }, [estabelecimento?.id, chaveTelefonesConclusao]);
+  }, [estabelecimento?.id, estabelecimento?.conclusao_manual_ativa, chaveTelefonesConclusao]);
 
   // Autenticado, mas sem perfil vinculado (conta órfã): não há salão a resolver.
   // Vem ANTES do guard de carregamento — nesse caso `estabelecimento` continua
@@ -2612,8 +2628,10 @@ export default function AdminPage() {
             O contador fica na aba 2 (antes ficava no drawer): é a única lista
             que acumula sozinha com o tempo (todo confirmado vira item quando
             o horário passa) e some sozinha com o cron. Sem o número, a dona
-            não sabe que tem algo ali. */}
-        {viewPai === "pendentes" ? (
+            não sabe que tem algo ali. Com conclusão manual desligada
+            (estabelecimentos.conclusao_manual_ativa) não há aba 2: cai no
+            título simples abaixo, como era antes da feature. */}
+        {viewPai === "pendentes" && conclusaoManualAtiva ? (
           <div
             role="tablist"
             aria-label="Pendentes"
@@ -3697,7 +3715,11 @@ export default function AdminPage() {
             registra a falta —, com o valor padrão do serviço e opção de
             corrigir (CardConclusaoAtendimento, o MESMO card do "Editar" do
             Histórico). O patch local tira o item da lista na hora. */}
-        {!carregando && !erro && viewPai === "pendentes" && verAguardandoConclusao && (
+        {!carregando &&
+          !erro &&
+          viewPai === "pendentes" &&
+          conclusaoManualAtiva &&
+          verAguardandoConclusao && (
           aguardandoConclusao.length === 0 ? (
             <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
               Nenhum atendimento aguardando conclusão.
@@ -4061,8 +4083,9 @@ export default function AdminPage() {
                             confirmação". Vale mesmo depois de
                             concluido_automaticamente=true: é a porta pra
                             corrigir o valor ou registrar uma falta que o cron
-                            não tinha como saber. */}
-                        {item.status === "concluido" && (
+                            não tinha como saber. Some junto com a aba
+                            quando a conclusão manual está desligada. */}
+                        {item.status === "concluido" && conclusaoManualAtiva && (
                           <button
                             type="button"
                             onClick={() =>
@@ -4078,7 +4101,9 @@ export default function AdminPage() {
                         )}
                       </div>
 
-                      {idEditandoConclusao === item.id && item.status === "concluido" && (
+                      {idEditandoConclusao === item.id &&
+                        item.status === "concluido" &&
+                        conclusaoManualAtiva && (
                         <div className="mt-3">
                           <CardConclusaoAtendimento
                             agendamento={item}
@@ -4363,6 +4388,15 @@ export default function AdminPage() {
             // ele o card de meses do Painel ficaria com o mapa do mount até
             // um reload.
             onMesesJanelaAtualizados={setMesesJanela}
+            // Mesmo patch dos anteriores, para a conclusão manual: é esta
+            // cópia que decide se a sub-aba "Conclusão" de Pendentes e o
+            // "Editar" do Histórico aparecem. Sem isto, desligar aqui e voltar
+            // pra Pendentes ainda mostraria a aba até um reload.
+            onConclusaoManualAtivaAtualizada={(ativa) =>
+              setEstabelecimento((atual) =>
+                atual ? { ...atual, conclusao_manual_ativa: ativa } : atual
+              )
+            }
             focarBlocoJanela={focarJanelaAgendamento}
             onFocarBlocoJanelaConsumido={() => setFocarJanelaAgendamento(false)}
             onCadastrarProfissional={irParaCadastroProfissional}

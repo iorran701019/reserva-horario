@@ -134,6 +134,12 @@ export default function ConfiguracoesSalao({
   // continuaria lendo o valor do mount — configurar o prazo e ir direto
   // agendar não dispararia o aviso até um reload. Opcional (no-op por padrão).
   onPrazoMinimoAtualizado = () => {},
+  // Mesmo padrão acima, para a flag de conclusão manual (ver
+  // alternarConclusaoManualAtiva abaixo): chamado com o novo booleano pra
+  // AdminPage patchar sua própria cópia de `estabelecimento` — é ela que
+  // decide se a sub-aba "Conclusão" de Pendentes e o "Editar" do Histórico
+  // aparecem. Opcional (no-op por padrão).
+  onConclusaoManualAtivaAtualizada = () => {},
   // true quando a navegação veio do banner "Agenda aberta até" (ver page.js) —
   // abre o bloco "Janela de agendamento" (accordion) já expandido e rola até
   // ele. Consumido uma vez (ver useEffect abaixo) via
@@ -402,6 +408,15 @@ export default function ConfiguracoesSalao({
   const [erroFidelidade, setErroFidelidade] = useState("");
   const [statusFidelidade, setStatusFidelidade] = useState("");
 
+  // Conclusão manual: liga a sub-aba "Conclusão" de Pendentes no /admin, onde
+  // a dona confirma ou cancela um atendimento antes do cron concluir sozinho.
+  // `confirmadoExpiraHoras` é o prazo desse cron (string pro <select>; "" =
+  // coluna nula). undefined = ainda carregando.
+  const [conclusaoManualAtiva, setConclusaoManualAtiva] = useState(undefined);
+  const [confirmadoExpiraHoras, setConfirmadoExpiraHoras] = useState("");
+  const [erroConclusaoManual, setErroConclusaoManual] = useState("");
+  const [statusConclusaoManual, setStatusConclusaoManual] = useState("");
+
   // Foto de perfil (bucket 'fotos-perfil' do Supabase Storage, caminho fixo
   // `${estabelecimento.id}/perfil.<extensao>` — sempre sobrescreve, nunca
   // acumula lixo). foto_perfil_posicao vira x/y (0-100) pros sliders; string
@@ -467,7 +482,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, reserva_provisoria_expira_horas, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, reserva_provisoria_expira_horas, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data, conclusao_manual_ativa, confirmado_expira_horas"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -489,6 +504,7 @@ export default function ConfiguracoesSalao({
         setErroGoogleCalendar(error.message);
         setErroJanela(error.message);
         setErroAntecedenciaMinima(error.message);
+        setErroConclusaoManual(error.message);
         return;
       }
       setErro("");
@@ -548,6 +564,12 @@ export default function ConfiguracoesSalao({
       );
       setFidelidadeContaManutencao(data?.fidelidade_conta_manutencao ?? true);
       setFidelidadeDescricaoBrinde(data?.fidelidade_descricao_brinde ?? "");
+
+      setErroConclusaoManual("");
+      setConclusaoManualAtiva(Boolean(data?.conclusao_manual_ativa));
+      setConfirmadoExpiraHoras(
+        data?.confirmado_expira_horas == null ? "" : String(data.confirmado_expira_horas)
+      );
 
       setErroFoto("");
       setFotoPerfilUrl(data?.foto_perfil_url ?? null);
@@ -1253,6 +1275,55 @@ export default function ConfiguracoesSalao({
     setFidelidadeContaManutencao(novo);
     const falhou = await salvarFidelidade({ fidelidadeContaManutencao: novo });
     if (falhou) setFidelidadeContaManutencao(!novo);
+  }
+
+  // Grava uma coluna do bloco "Conclusão manual". Mesmo molde de
+  // salvarFidelidade: .select("id") pra pegar o 0-linhas silencioso da RLS e
+  // devolve true quando FALHOU, pra quem chamou reverter o valor otimista.
+  async function salvarConclusaoManual(patch) {
+    setStatusConclusaoManual("salvando");
+    setErroConclusaoManual("");
+
+    const { data: linhas, error } = await supabase
+      .from("estabelecimentos")
+      .update(patch)
+      .eq("id", estabelecimento.id)
+      .select("id");
+
+    if (error || !linhas?.length) {
+      setStatusConclusaoManual("");
+      setErroConclusaoManual(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
+      return true;
+    }
+
+    setStatusConclusaoManual("salvo");
+    return false;
+  }
+
+  // Alterna e grava na hora, mesmo padrão otimista de `alternarFidelidadeAtiva`.
+  // Só avisa o pai depois de gravado — ele esconde/mostra a sub-aba
+  // "Conclusão" com base nisso, e não pode ficar à frente do banco.
+  async function alternarConclusaoManualAtiva() {
+    const novo = !conclusaoManualAtiva;
+    setConclusaoManualAtiva(novo);
+    const falhou = await salvarConclusaoManual({ conclusao_manual_ativa: novo });
+    if (falhou) {
+      setConclusaoManualAtiva(!novo);
+      return;
+    }
+    onConclusaoManualAtivaAtualizada(novo);
+  }
+
+  // Grava o prazo da conclusão automática ao trocar o <select> (48/72/96 —
+  // "4 dias" é gravado como 96 horas). Otimista com rollback pro valor
+  // anterior, mesmo padrão dos toggles acima.
+  async function alterarConfirmadoExpiraHoras(valor) {
+    const anterior = confirmadoExpiraHoras;
+    setConfirmadoExpiraHoras(valor);
+    const falhou = await salvarConclusaoManual({
+      confirmado_expira_horas: parseInt(valor, 10),
+    });
+    if (falhou) setConfirmadoExpiraHoras(anterior);
   }
 
   // Sobe o arquivo pro bucket 'fotos-perfil', sempre no mesmo caminho (não
@@ -1995,6 +2066,7 @@ export default function ConfiguracoesSalao({
   const carregandoPrazoMinimo = prazoMinimoDias === undefined;
   const carregandoLinkLocalizacao = linkLocalizacao === undefined;
   const carregandoFidelidade = fidelidadeAtiva === undefined;
+  const carregandoConclusaoManual = conclusaoManualAtiva === undefined;
   const carregandoFoto = fotoPerfilUrl === undefined;
   const carregandoGoogleCalendar = googleCalendarAtivo === undefined;
   const carregandoJanela = janelaAgendamentoFim === undefined;
@@ -2847,6 +2919,103 @@ export default function ConfiguracoesSalao({
                 <p className="mt-2 text-xs text-red-600">{erroPrazoMinimo}</p>
               )}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bloco: Conclusão manual */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("conclusaoManual")}
+          aria-expanded={blocoAberto === "conclusaoManual"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Conclusão manual</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "conclusaoManual" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "conclusaoManual" && (
+          <div className="border-t border-border p-4 space-y-4">
+            <p className="text-xs text-muted">
+              Permite confirmar ou cancelar manualmente um atendimento antes da
+              conclusão automática do sistema.
+            </p>
+
+            <div className="flex items-start justify-between gap-3">
+              <label
+                htmlFor="toggle-conclusao-manual"
+                className="block text-sm font-medium text-heading"
+              >
+                Conclusão manual ativa
+              </label>
+              <button
+                id="toggle-conclusao-manual"
+                type="button"
+                role="switch"
+                aria-checked={Boolean(conclusaoManualAtiva)}
+                onClick={alternarConclusaoManualAtiva}
+                disabled={carregandoConclusaoManual}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                  conclusaoManualAtiva ? "bg-primary" : "bg-border"
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                    conclusaoManualAtiva ? "translate-x-5" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Prazo da conclusão automática: só faz sentido com a feature
+                ligada. "4 dias" grava 96 (a coluna é em horas). Valor do banco
+                fora das 3 opções (ou nulo) vira uma opção extra, pra o select
+                não mostrar 48h mentindo sobre o que está gravado. */}
+            {conclusaoManualAtiva && (
+              <div>
+                <label
+                  htmlFor="confirmado-expira-horas"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Conclusão automática após
+                </label>
+                <select
+                  id="confirmado-expira-horas"
+                  value={confirmadoExpiraHoras}
+                  onChange={(e) => alterarConfirmadoExpiraHoras(e.target.value)}
+                  disabled={carregandoConclusaoManual}
+                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {!["48", "72", "96"].includes(confirmadoExpiraHoras) && (
+                    <option value={confirmadoExpiraHoras} disabled>
+                      {confirmadoExpiraHoras === ""
+                        ? "Não configurado"
+                        : `${confirmadoExpiraHoras}h (atual)`}
+                    </option>
+                  )}
+                  <option value="48">48h</option>
+                  <option value="72">72h</option>
+                  <option value="96">4 dias</option>
+                </select>
+                <p className="mt-1 text-xs text-muted">
+                  Tempo depois do horário do atendimento até o sistema marcar
+                  como concluído sozinho.
+                </p>
+              </div>
+            )}
+
+            {statusConclusaoManual === "salvando" && (
+              <p className="text-xs text-muted">Salvando…</p>
+            )}
+            {statusConclusaoManual === "salvo" && !erroConclusaoManual && (
+              <p className="text-xs font-medium text-green-600">Salvo ✓</p>
+            )}
+            {erroConclusaoManual && (
+              <p className="text-xs text-red-600">{erroConclusaoManual}</p>
+            )}
           </div>
         )}
       </div>
