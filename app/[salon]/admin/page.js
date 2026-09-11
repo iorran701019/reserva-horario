@@ -2564,7 +2564,7 @@ export default function AdminPage() {
           >
             {[
               { aguardando: false, rotulo: "Pendentes", Icone: Inbox },
-              { aguardando: true, rotulo: "Aguardando Conclusão", Icone: ClipboardCheck },
+              { aguardando: true, rotulo: "Conclusão", Icone: ClipboardCheck },
             ].map(({ aguardando, rotulo, Icone }) => {
               const ativa = verAguardandoConclusao === aguardando;
               return (
