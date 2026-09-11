@@ -353,6 +353,21 @@ function abrirWhatsApp(telefone, mensagem) {
   window.open(linkWhatsApp(telefone, mensagem), "_blank", "noopener,noreferrer");
 }
 
+// Critério da lista "Aguardando Conclusão" (sub-toggle de Pendentes, ver
+// `aguardandoConclusao` no render). Extraído porque a busca de etiquetas
+// dessa aba (ver chaveTelefonesConclusao) precisa do MESMO recorte antes das
+// guardas de carregamento, onde `aguardandoConclusao` ainda não existe.
+function estaAguardandoConclusao(item, agora) {
+  return (
+    item.status === "confirmado" &&
+    !item.concluido_automaticamente &&
+    Boolean(item.telefone) &&
+    Boolean(item.data) &&
+    Boolean(item.horario) &&
+    fimDoAtendimento(item) < agora
+  );
+}
+
 // Helper PURO (sem setState): lê todos os agendamentos do estabelecimento,
 // próximos primeiro (data e depois horário). Devolve sempre { dados, error }
 // pra quem chama decidir o que fazer com o estado. Fonte única da query no
@@ -561,6 +576,14 @@ export default function AdminPage() {
   // difere da carregada no MESMO render, antes de o efeito rodar.
   // null = nada carregado ainda.
   const [chaveEtiquetasCarregada, setChaveEtiquetasCarregada] = useState(null);
+
+  // Etiqueta por telefone pros cards da aba "Aguardando Conclusão" (mesmo
+  // formato do Map acima). State PRÓPRIO de propósito: juntar esses telefones
+  // na chave de cima faria etiquetasProntas oscilar a cada confirmado que
+  // entra/sai da Conclusão e desabilitaria Confirmar/Cancelar do inbox por
+  // um instante sem motivo. Aqui não há gate: Map vazio só não mostra badge.
+  const [etiquetasConclusaoPorTelefone, setEtiquetasConclusaoPorTelefone] =
+    useState(new Map());
 
   // Gate de etiqueta do inbox: segura o Confirmar/Cancelar quando a etiqueta
   // da cliente pede atenção. null = nenhum aviso na tela. Guarda a ação
@@ -2095,7 +2118,7 @@ export default function AdminPage() {
   // próximo update) e troca só a etiqueta.
   function patchEtiquetaPorTelefone(telefone, nova) {
     const chave = String(telefone ?? "").replace(/\D/g, "");
-    setEtiquetasPorTelefone((atual) => {
+    const aplicar = (atual) => {
       const anterior = atual.get(chave);
       if (!anterior) return atual;
       const proximo = new Map(atual);
@@ -2104,8 +2127,48 @@ export default function AdminPage() {
         etiqueta: nova ? { nome: nova.nome, cor: nova.cor } : null,
       });
       return proximo;
-    });
+    };
+    // A mesma cliente pode ter um pendente E um atendimento aguardando
+    // conclusão: patcha os dois Maps, senão o badge da outra aba ficaria
+    // velho até a lista mudar. Telefone ausente num deles = no-op.
+    setEtiquetasPorTelefone(aplicar);
+    setEtiquetasConclusaoPorTelefone(aplicar);
   }
+
+  // Telefones da aba "Aguardando Conclusão" (mesmo recorte de
+  // `aguardandoConclusao`, via estaAguardandoConclusao), em string ordenada
+  // pelo mesmo motivo de chaveTelefonesPendentes: dependência de efeito
+  // estável entre renders.
+  const chaveTelefonesConclusao = [
+    ...new Set(
+      agendamentos
+        .filter((item) => estaAguardandoConclusao(item, agora))
+        .map((item) => String(item.telefone).replace(/\D/g, ""))
+        .filter(Boolean)
+    ),
+  ]
+    .sort()
+    .join(",");
+
+  // Busca as etiquetas desses telefones, separada da de Pendentes (ver
+  // etiquetasConclusaoPorTelefone). Mesmo helper, sem query nova. Lista vazia
+  // não zera o Map: sobra entrada que nenhum card lê, inofensivo (o render
+  // busca por telefone), e evita setState síncrono no corpo do efeito.
+  useEffect(() => {
+    if (!estabelecimento?.id || !chaveTelefonesConclusao) return;
+
+    let ativo = true;
+    buscarEtiquetasPorTelefones(
+      estabelecimento.id,
+      chaveTelefonesConclusao.split(",")
+    ).then((mapa) => {
+      if (ativo) setEtiquetasConclusaoPorTelefone(mapa);
+    });
+
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento?.id, chaveTelefonesConclusao]);
 
   // Autenticado, mas sem perfil vinculado (conta órfã): não há salão a resolver.
   // Vem ANTES do guard de carregamento — nesse caso `estabelecimento` continua
@@ -2275,14 +2338,8 @@ export default function AdminPage() {
   // Calendar sem cliente vinculado não tem de quem cobrar nem a quem
   // registrar falta. `agendamentos` já vem asc, então o mais antigo (o mais
   // perto de ser concluído automaticamente) aparece primeiro.
-  const aguardandoConclusao = agendamentos.filter(
-    (item) =>
-      item.status === "confirmado" &&
-      !item.concluido_automaticamente &&
-      item.telefone &&
-      item.data &&
-      item.horario &&
-      fimDoAtendimento(item) < agora
+  const aguardandoConclusao = agendamentos.filter((item) =>
+    estaAguardandoConclusao(item, agora)
   );
 
   // Intercepta Confirmar/Cancelar do inbox pra checar a etiqueta da cliente
@@ -3647,40 +3704,72 @@ export default function AdminPage() {
             </p>
           ) : (
             <ul className="space-y-3">
-              {aguardandoConclusao.map((item) => (
+              {aguardandoConclusao.map((item) => {
+                // { clienteId, etiqueta } do telefone, ou undefined se nenhum
+                // cliente cadastrado casa com ele (aí não mostra nada).
+                const entradaEtiqueta = etiquetasConclusaoPorTelefone.get(
+                  String(item.telefone ?? "").replace(/\D/g, "")
+                );
+                // Mesma regra do card de Pendentes (e8eb43f): profissional só
+                // informa algo com 2+ ativos; null = contagem carregando.
+                const mostrarProfissional =
+                  Boolean(item.profissional_nome) &&
+                  qtdProfissionaisAtivos != null &&
+                  qtdProfissionaisAtivos > 1;
+
+                return (
                 <li
                   key={item.id}
                   className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border"
                 >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-heading">
+                  {/* Cabeçalho: só o nome (o telefone saiu — a ação aqui é
+                      registrar o desfecho, não contatar). Tags à direita, em
+                      linha, mesmo arranjo do card de Pendentes. */}
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="min-w-0 truncate font-medium text-heading">
                       {item.nome_cliente}
                     </p>
-                    <p className="mt-0.5 text-sm text-body">{item.telefone}</p>
+                    <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                      {entradaEtiqueta && (
+                        <SeletorEtiquetaRapido
+                          estabelecimentoId={estabelecimento.id}
+                          clienteId={entradaEtiqueta.clienteId}
+                          etiqueta={entradaEtiqueta.etiqueta}
+                          onEtiquetaAlterada={(nova) =>
+                            patchEtiquetaPorTelefone(item.telefone, nova)
+                          }
+                        />
+                      )}
+                      <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-blue-100">
+                        Aguardando Conclusão
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-body">
-                    <span className="inline-flex min-w-0 items-center gap-1.5">
-                      <span className="text-body">Data</span>
-                      <span className="font-medium">{formatarData(item.data)}</span>
-                    </span>
-                    <span className="inline-flex min-w-0 items-center gap-1.5">
-                      <span className="text-body">Horário</span>
-                      <span className="font-medium">{formatarHorario(item.horario)}</span>
-                    </span>
-                    <span className="flex min-w-0 basis-full flex-col items-start gap-0.5 sm:basis-auto sm:flex-row sm:items-center sm:gap-1.5">
-                      <span className="text-body">Serviço</span>
-                      <span className="min-w-0 break-words font-medium">
+                  {/* Data/horário em destaque + serviço, sem rótulos: mesma
+                      estrutura do bloco do card de Pendentes. Cor ÍNDIGO de
+                      propósito: âmbar já é Pendentes, vermelho é o card de
+                      cancelamento e azul é "Fora da janela"; índigo fica na
+                      família fria do chip azul acima sem colidir com nenhum. */}
+                  <div className="mt-3 rounded-lg bg-indigo-50 px-3 py-2 ring-1 ring-indigo-200">
+                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                      <span className="text-lg font-bold leading-tight tracking-tight text-heading">
+                        {formatarData(item.data)}
+                      </span>
+                      <span className="text-lg font-bold leading-tight tracking-tight text-heading">
+                        {formatarHorario(item.horario)}
+                      </span>
+                      {/* servico_livre mantido (o de Pendentes não tem):
+                          importado do Google Calendar pode chegar aqui sem
+                          servico_id. */}
+                      <span className="min-w-0 basis-full break-words text-sm text-body sm:basis-auto">
                         {item.servicos?.nome ?? item.servico_livre ?? "—"}
                       </span>
-                    </span>
-                    {item.profissional_nome && (
-                      <span className="inline-flex min-w-0 items-center gap-1.5">
-                        <span className="text-body">Profissional</span>
-                        <span className="min-w-0 break-words font-medium">
-                          {item.profissional_nome}
-                        </span>
-                      </span>
+                    </div>
+                    {mostrarProfissional && (
+                      <p className="mt-0.5 min-w-0 break-words text-xs text-body">
+                        Profissional: {item.profissional_nome}
+                      </p>
                     )}
                   </div>
 
@@ -3691,7 +3780,8 @@ export default function AdminPage() {
                     />
                   </div>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )
         )}
