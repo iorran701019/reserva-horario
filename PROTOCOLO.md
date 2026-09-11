@@ -18,6 +18,8 @@ Documento vivo. Atualizar conforme o protocolo evoluir (não é regra fixa e imu
 
 **Confirmação de execução:** Iorran sempre traz de volta o output real do que rodou no VSCode (git status, git log, resultado de commit/merge/push etc.) antes de Claude assumir que um passo deu certo. Claude nunca presume sucesso sem ver o output colado.
 
+**Ida pra `main`/produção:** por padrão, o fluxo termina em `staging`. Subir pra `main` exige decisão explícita do Iorran na própria sessão, mesmo quando o trabalho já está validado em staging há várias sessões — não é assumido automaticamente.
+
 ---
 
 ## 2. Regras de commit message
@@ -52,7 +54,7 @@ Documento vivo. Atualizar conforme o protocolo evoluir (não é regra fixa e imu
 Depois de merges e SQLs do dia, Claude gera:
 - O handoff da sessão.
 - O diff exato para o `PENDENCIAS.md` (o que entra em Resolvido, o que sai de Em aberto, cada item com a sessão de referência entre parênteses).
-- **Conferência de SQL staging → produção** (ver regra dedicada abaixo) — o resultado dessa conferência entra no handoff, mesmo quando não há pendência (registrar "nenhum SQL de schema pendente de replicar" é tão válido quanto listar um item em aberto).
+- **Conferência de SQL staging → produção** — o resultado dessa conferência entra no handoff, mesmo quando não há pendência (registrar "nenhum SQL de schema pendente de replicar" é tão válido quanto listar um item em aberto).
 
 Iorran só cola o bloco pronto — nunca marca `[x]` manualmente. Itens marcados `[x]` sem handoff correspondente precisam ser reconfirmados antes de serem tratados como fechados.
 
@@ -80,15 +82,17 @@ Iorran só cola o bloco pronto — nunca marca `[x]` manualmente. Itens marcados
 - Textos de WhatsApp vivem só em `lib/whatsapp.js`, como funções nomeadas.
 - Reaproveitar hooks, máquinas de estado e componentes visuais existentes antes de criar novos — sinalizar soluções complicadas demais e sugerir caminho mais simples.
 - Sempre investigar (raio-x / prompt somente leitura) antes de implementar.
+- **Nome do profissional só aparece em telas de agendamento com 2+ profissionais ativos** (`qtdProfissionaisAtivos > 1`; `null`/contagem carregando também esconde, nunca mostra por padrão). Regra permanente desde a Sessão 59 — qualquer novo ponto que exiba `profissional_nome` deve seguir essa condição.
+- Toda alteração de status feita por decisão da própria dona dentro do `/admin` (cancelar, resolver conflito de prazo, marcar exceção de conclusão) é tratada como "ação do salão" pra fins de estatística — independente do gatilho que levou a essa decisão (ex: conflito de prazo detectado pelo sistema ainda conta como cancelamento do salão, porque foi ela quem clicou).
 
 ---
 
 ## 8. Ferramentas e arquivos-chave
 
-- **Stack:** Next.js (App Router, JS), Supabase (Postgres + Storage + Auth + pg_cron + pg_net), Tailwind v4, Vercel (Hobby — atenção ao timeout de 60s).
-- **Ambientes Supabase:** staging (`reserva-staging`) e produção (`pwlvjaenryzdkatmrhul`) — projetos separados, sequências de ID independentes.
+- **Stack:** Next.js (App Router, JS), Supabase (Postgres + Storage + Auth + pg_cron + pg_net), Tailwind v4, Vercel (Hobby — atenção ao timeout de 60s), Recharts (gráficos, desde a Sessão 59).
+- **Ambientes Supabase:** staging (`reserva-staging` / `yebwkchcrvebvvjvvvyu`) e produção (`pwlvjaenryzdkatmrhul`) — projetos separados, sequências de ID independentes.
 - **Arquivos de controle:** `PENDENCIAS.md`, `QA_CHECKLIST.md`, `DEPLOY_CHECKLIST.md`, `NOVO_TENANT_CHECKLIST.md`, `THEMING.md`.
-- **Libs-chave:** `lib/disponibilidade.js`, `lib/whatsapp.js`, `lib/particao.js`, `lib/cliqueFora.js`, `lib/checagemWhatsapp.js`, `lib/comprimirImagem.js`, `lib/temas.js`.
+- **Libs-chave:** `lib/disponibilidade.js`, `lib/whatsapp.js`, `lib/particao.js`, `lib/cliqueFora.js`, `lib/checagemWhatsapp.js`, `lib/comprimirImagem.js`, `lib/temas.js`, `lib/conclusao.js`, `lib/mes.js` (navegação mensal, `mesDeHoje`/`rotuloMes`).
 
 ---
 
@@ -110,58 +114,30 @@ Iorran só cola o bloco pronto — nunca marca `[x]` manualmente. Itens marcados
 
 ## Regra: checagem de base antes de nova branch
 
-Antes de todo `git checkout -b`, rodar `git branch` (sem argumento) pra confirmar
-em qual branch você está. Só criar a nova branch se estiver em `main` limpa —
-se estiver em outra branch de trabalho, decidir explicitamente: mergear ela
-primeiro, ou nomear a nova como dependente da atual (ramificação consciente,
-não acidental).
+Antes de todo `git checkout -b`, rodar `git branch` (sem argumento) pra confirmar em qual branch você está. Só criar a nova branch se estiver em `main` limpa — se estiver em outra branch de trabalho, decidir explicitamente: mergear ela primeiro, ou nomear a nova como dependente da atual (ramificação consciente, não acidental).
 
 ## Regra: branches concorrentes no mesmo arquivo/bloco
 
-Ao abrir uma demanda nova, checar se alguma branch ainda não mergeada em `main`
-toca o mesmo arquivo. Se tocar, preferir sequenciar (mergear a primeira até
-`main` + `staging` antes de começar a segunda) em vez de paralelizar — evita
-conflito de merge por divergência estrutural no mesmo bloco. Só paralelizar
-quando as branches tocam arquivos ou blocos claramente distintos.
+Ao abrir uma demanda nova, checar se alguma branch ainda não mergeada em `main` toca o mesmo arquivo. Se tocar, preferir sequenciar (mergear a primeira até `main` + `staging` antes de começar a segunda) em vez de paralelizar — evita conflito de merge por divergência estrutural no mesmo bloco. Só paralelizar quando as branches tocam arquivos ou blocos claramente distintos.
 
 ## Regra: comandos de merge/push rodados fora da visão do Claude Code
 
-Sempre que um merge, checkout ou push for rodado no terminal sem passar por um
-prompt do Claude Code (ex: comandos de fluxo Git que o Iorran roda direto após
-receber do chat), avisar explicitamente no próximo prompt pra ele — algo como
-"um merge de staging aconteceu entre sua última leitura e agora, rodado por mim
-via terminal, branch X em Y". Evita o agente interpretar estado de Git
-inesperado (MERGE_HEAD, conflitos) como anomalia ou ação própria não lembrada.
+Sempre que um merge, checkout ou push for rodado no terminal sem passar por um prompt do Claude Code (ex: comandos de fluxo Git que o Iorran roda direto após receber do chat), avisar explicitamente no próximo prompt pra ele — algo como "um merge de staging aconteceu entre sua última leitura e agora, rodado por mim via terminal, branch X em Y". Evita o agente interpretar estado de Git inesperado (MERGE_HEAD, conflitos) como anomalia ou ação própria não lembrada.
 
 ## Regra: uma demanda por vez
 
-Mesmo quando Iorran lança várias demandas de uma vez no início da sessão, Claude
-não deve organizá-las e emendar a fila sozinho. O fluxo correto é: declarar uma
-demanda, completar o ciclo inteiro (branch → raio-x → diff → teste → merge), e só
-então perguntar explicitamente se segue pra próxima da lista ou se a sessão fecha
-ali. Isso existe porque triagem de várias demandas de uma vez já causou perda de
-pendência sem ficar claro pra Iorran — algo parecia resolvido "no papel" sem
-nunca ter virado branch de verdade. Vale mesmo que pareça repetitivo perguntar a
-cada fechamento.
+Mesmo quando Iorran lança várias demandas de uma vez no início da sessão, Claude não deve organizá-las e emendar a fila sozinho. O fluxo correto é: declarar uma demanda, completar o ciclo inteiro (branch → raio-x → diff → teste → merge), e só então perguntar explicitamente se segue pra próxima da lista ou se a sessão fecha ali. Isso existe porque triagem de várias demandas de uma vez já causou perda de pendência sem ficar claro pra Iorran — algo parecia resolvido "no papel" sem nunca ter virado branch de verdade. Vale mesmo que pareça repetitivo perguntar a cada fechamento.
 
 ## Regra: teste rápido via celular
 
-O localhost (`npm run staging`) está salvo como ícone na tela do celular de
-Iorran — dá pra testar mudanças visuais direto ali, sem precisar de push pra
-staging. Vale como primeira opção de teste pra ajustes de UI antes de subir
-pra staging de verdade.
+O localhost (`npm run staging`) está salvo como ícone na tela do celular de Iorran — dá pra testar mudanças visuais direto ali, sem precisar de push pra staging. Vale como primeira opção de teste pra ajustes de UI antes de subir pra staging de verdade.
 
 ## Regra: conferência de SQL staging → produção antes de fechar sessão
 
-No fechamento de toda sessão que rodou algum SQL de schema (ALTER/CREATE, não
-limpeza de dados de teste), Claude lista de volta cada bloco de SQL rodado
-durante a sessão e confirma, um por um, se já foi replicado em produção — não
-basta ter sido "planejado" ou "confirmado em staging". Se algum ficou só em
-staging (esquecido, ou porque o merge foi adiado), isso é reportado
-explicitamente como pendência de schema em aberto no handoff, nunca deixado
-implícito. Motivo: coluna nova sem réplica em produção passa despercebida até
-alguém mexer justamente naquele campo — vira bug fantasma, difícil de
-diagnosticar, porque o código já assume que a coluna existe nos dois
-ambientes.
+No fechamento de toda sessão que rodou algum SQL de schema (ALTER/CREATE, não limpeza de dados de teste), Claude lista de volta cada bloco de SQL rodado durante a sessão e confirma, um por um, se já foi replicado em produção — não basta ter sido "planejado" ou "confirmado em staging". Se algum ficou só em staging (esquecido, ou porque o merge foi adiado), isso é reportado explicitamente como pendência de schema em aberto no handoff, nunca deixado implícito. Motivo: coluna nova sem réplica em produção passa despercebida até alguém mexer justamente naquele campo — vira bug fantasma, difícil de diagnosticar, porque o código já assume que a coluna existe nos dois ambientes.
 
-*Última atualização: 10/09 (regra de conferência SQL staging → produção).*
+## Regra: decisões de negócio ambíguas exigem exemplo concreto, não princípio abstrato
+
+Quando uma regra de negócio nova tem zona cinzenta (ex: "isso conta como cancelamento do salão ou não?"), pedir ao Iorran um exemplo real do dia a dia em vez de insistir numa pergunta abstrata — a resposta concreta costuma resolver a ambiguidade de forma mais rápida e precisa que alternativas de múltipla escolha genéricas.
+
+*Última atualização: 11/09 (regra de decisão por exemplo concreto; princípios de arquitetura sobre profissional e cancelamento do salão; Recharts e lib/conclusao.js/lib/mes.js no item 8; ida pra main como decisão explícita no item 1).*

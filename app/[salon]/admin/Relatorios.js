@@ -1,15 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import {
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { supabase } from "@/lib/supabaseClient";
 import { fimDoAtendimento } from "@/lib/particao";
-import { mesDeHoje, rotuloMes } from "@/lib/mes";
+import { chaveMes, mesDeHoje, rotuloMes } from "@/lib/mes";
 import NavegacaoMes from "@/components/NavegacaoMes";
 
 // Aba "Relatórios" do /admin: resumo mensal dos atendimentos fechados do
 // salão, em dois gráficos de pizza (tipo de serviço dos concluídos; desfecho
-// de tudo). Busca client-side, sem RPC — só o mês selecionado.
+// de tudo) e um gráfico de linha de concluídos ao longo do tempo. Busca
+// client-side, sem RPC — o mês selecionado, mais o semestre quando a linha
+// está no modo "Mês".
 //
 // Props:
 //   estabelecimentoId – id do salão resolvido pelo slug (particiona a query).
@@ -93,6 +107,56 @@ function montarResumo(linhas, agora) {
   return { desfecho, tipo, estimados };
 }
 
+// Quantos meses o modo "Mês" cobre (o selecionado + os 5 anteriores).
+const MESES_SEMESTRE = 6;
+
+// Nº de dias de "YYYY-MM": dia 0 do mês seguinte é o último deste.
+function diasDoMes(chave) {
+  const [ano, mes] = chave.split("-").map(Number);
+  return new Date(ano, mes, 0).getDate();
+}
+
+// "set", "out"... — o eixo X do modo "Mês" tem 6 rótulos e não cabe
+// "setembro" no celular. O toLocaleDateString pt-BR devolve "set." com ponto.
+function rotuloMesCurto(chave) {
+  const [ano, mes] = chave.split("-").map(Number);
+  return new Date(ano, mes - 1, 1)
+    .toLocaleDateString("pt-BR", { month: "short" })
+    .replace(".", "");
+}
+
+// Baldes do eixo X (na ordem de exibição), um por dia do mês selecionado.
+function baldesPorDia(chave) {
+  return Array.from({ length: diasDoMes(chave) }, (_, i) => ({
+    chave: `${chave}-${String(i + 1).padStart(2, "0")}`,
+    rotulo: String(i + 1),
+  }));
+}
+
+// Baldes do eixo X do semestre: o mês selecionado é o ÚLTIMO ponto.
+function baldesPorMes(chave) {
+  return Array.from({ length: MESES_SEMESTRE }, (_, i) => {
+    const m = deslocarMes(chave, i - (MESES_SEMESTRE - 1));
+    return { chave: m, rotulo: rotuloMesCurto(m) };
+  });
+}
+
+// Série de concluídos por balde. "Concluído" é o mesmo critério das pizzas
+// (classificarDesfecho), somando comum + manutenção — o gráfico de linha é
+// volume de atendimento, não composição. Os baldes vêm prontos de fora porque
+// dia/mês sem atendimento precisa aparecer como zero, não sumir do eixo.
+function montarSerie(linhas, agora, baldes, chaveDe) {
+  const contagem = new Map(baldes.map((b) => [b.chave, 0]));
+
+  for (const item of linhas) {
+    if (classificarDesfecho(item, agora) !== "concluido") continue;
+    const chave = chaveDe(item);
+    if (contagem.has(chave)) contagem.set(chave, contagem.get(chave) + 1);
+  }
+
+  return baldes.map((b) => ({ rotulo: b.rotulo, valor: contagem.get(b.chave) }));
+}
+
 function GraficoPizza({ titulo, categorias, contagens, observacao }) {
   const dados = categorias
     .map((c) => ({ ...c, valor: contagens[c.id] }))
@@ -134,6 +198,108 @@ function GraficoPizza({ titulo, categorias, contagens, observacao }) {
   );
 }
 
+// Busca as linhas fechadas de [inicio, fim) — mesma query/seleção das pizzas,
+// extraída porque o modo "Mês" do gráfico de linha precisa do mesmo formato
+// num intervalo de 6 meses.
+async function buscarFechados(estabelecimentoId, inicio, fim) {
+  const { data, error } = await supabase
+    .from("agendamentos")
+    .select(
+      "id, data, horario, status, cancelado_por_cliente, cancelado_pelo_salao, nao_compareceu, expirado_automaticamente, servico_id, servicos(duracao_min, eh_manutencao, manutencao_externa)"
+    )
+    .eq("estabelecimento_id", estabelecimentoId)
+    .eq("finalizado", true)
+    .in("status", ["concluido", "confirmado", "cancelado"])
+    .gte("data", inicio)
+    .lt("data", fim);
+
+  // Eleva duracao_min ao topo do item — é de lá que fimDoAtendimento lê
+  // (mesmo tratamento de buscarAgendamentos em page.js).
+  const linhas = (data ?? []).map((item) => ({
+    ...item,
+    duracao_min: item.servicos?.duracao_min ?? null,
+  }));
+
+  return { linhas, erro: error?.message ?? "" };
+}
+
+const MODOS_SERIE = [
+  { id: "dia", rotulo: "Dia" },
+  { id: "mes", rotulo: "Mês" },
+];
+
+// Mesmo componente de linha nos dois modos — só a série (e o rótulo do eixo)
+// muda. `dados` é null enquanto o semestre do modo "Mês" ainda está vindo.
+function GraficoLinha({ titulo, dados, modo, onModo, erro }) {
+  const total = dados?.reduce((soma, p) => soma + p.valor, 0) ?? 0;
+
+  return (
+    <div className="rounded-xl bg-card p-4 shadow-sm ring-1 ring-border">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-medium text-heading">{titulo}</h3>
+        <div className="flex rounded-lg bg-surface p-0.5 ring-1 ring-border">
+          {MODOS_SERIE.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => onModo(m.id)}
+              aria-pressed={modo === m.id}
+              className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+                modo === m.id
+                  ? "bg-card text-heading shadow-sm"
+                  : "text-muted hover:text-heading"
+              }`}
+            >
+              {m.rotulo}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {erro ? (
+        <p className="py-16 text-center text-sm text-red-700">{erro}</p>
+      ) : dados === null ? (
+        <p className="py-16 text-center text-sm text-muted">Carregando...</p>
+      ) : total === 0 ? (
+        <p className="py-16 text-center text-sm text-muted">
+          {modo === "dia" ? "Sem dados neste mês." : "Sem dados neste semestre."}
+        </p>
+      ) : (
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={dados} margin={{ top: 8, right: 8, bottom: 0, left: -24 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis
+                dataKey="rotulo"
+                tick={{ fontSize: 11, fill: "var(--muted)" }}
+                interval="preserveStartEnd"
+                minTickGap={12}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: "var(--muted)" }}
+                allowDecimals={false}
+                width={44}
+              />
+              <Tooltip
+                formatter={(valor) => [valor, "Concluídos"]}
+                labelFormatter={(rotulo) => (modo === "dia" ? `Dia ${rotulo}` : rotulo)}
+              />
+              <Line
+                type="monotone"
+                dataKey="valor"
+                stroke="#10b981"
+                strokeWidth={2}
+                dot={{ r: 2 }}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Relatorios({ estabelecimentoId }) {
   const [mesSelecionado, setMesSelecionado] = useState(() => mesDeHoje());
 
@@ -142,33 +308,23 @@ export default function Relatorios({ estabelecimentoId }) {
   // começo do effect — trocar de mês mostra o loading sem render extra.
   const [resultado, setResultado] = useState(null);
 
+  // Gráfico de linha: "dia" (um ponto por dia do mês) ou "mes" (semestre que
+  // termina no mês selecionado). O semestre tem busca própria, também marcada
+  // com o mês a que pertence.
+  const [modoSerie, setModoSerie] = useState("dia");
+  const [semestre, setSemestre] = useState(null);
+
   useEffect(() => {
     let ativo = true;
 
     async function carregar() {
-      const inicio = `${mesSelecionado}-01`;
-      const fim = `${deslocarMes(mesSelecionado, 1)}-01`;
-
-      const { data, error } = await supabase
-        .from("agendamentos")
-        .select(
-          "id, data, horario, status, cancelado_por_cliente, cancelado_pelo_salao, nao_compareceu, expirado_automaticamente, servico_id, servicos(duracao_min, eh_manutencao, manutencao_externa)"
-        )
-        .eq("estabelecimento_id", estabelecimentoId)
-        .eq("finalizado", true)
-        .in("status", ["concluido", "confirmado", "cancelado"])
-        .gte("data", inicio)
-        .lt("data", fim);
-
+      const { linhas, erro } = await buscarFechados(
+        estabelecimentoId,
+        `${mesSelecionado}-01`,
+        `${deslocarMes(mesSelecionado, 1)}-01`
+      );
       if (!ativo) return;
-
-      // Eleva duracao_min ao topo do item — é de lá que fimDoAtendimento lê
-      // (mesmo tratamento de buscarAgendamentos em page.js).
-      const linhas = (data ?? []).map((item) => ({
-        ...item,
-        duracao_min: item.servicos?.duracao_min ?? null,
-      }));
-      setResultado({ mes: mesSelecionado, linhas, erro: error?.message ?? "" });
+      setResultado({ mes: mesSelecionado, linhas, erro });
     }
 
     carregar();
@@ -176,6 +332,28 @@ export default function Relatorios({ estabelecimentoId }) {
       ativo = false;
     };
   }, [estabelecimentoId, mesSelecionado]);
+
+  // Busca do semestre, só quando o gráfico de linha está em "Mês" — no modo
+  // "Dia" a série sai das linhas do mês que as pizzas já carregaram.
+  useEffect(() => {
+    if (modoSerie !== "mes") return undefined;
+    let ativo = true;
+
+    async function carregar() {
+      const { linhas, erro } = await buscarFechados(
+        estabelecimentoId,
+        `${deslocarMes(mesSelecionado, -(MESES_SEMESTRE - 1))}-01`,
+        `${deslocarMes(mesSelecionado, 1)}-01`
+      );
+      if (!ativo) return;
+      setSemestre({ mes: mesSelecionado, linhas, erro });
+    }
+
+    carregar();
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimentoId, mesSelecionado, modoSerie]);
 
   const atual = mesDeHoje();
   const carregando = resultado?.mes !== mesSelecionado;
@@ -187,6 +365,22 @@ export default function Relatorios({ estabelecimentoId }) {
   const totalCancelamentos = resumo
     ? resumo.desfecho.cliente + resumo.desfecho.salao + resumo.desfecho.expirado
     : 0;
+
+  // Série da linha: null enquanto a busca daquele modo não chegou (o modo
+  // "dia" reaproveita as linhas que as pizzas já têm).
+  const semestreDoMes = semestre?.mes === mesSelecionado ? semestre : null;
+  const erroSemestre = semestreDoMes?.erro ?? "";
+  const semestreProntas = erroSemestre ? null : (semestreDoMes?.linhas ?? null);
+  let serie = null;
+  if (resumo) {
+    serie =
+      modoSerie === "dia"
+        ? montarSerie(resultado.linhas, agora, baldesPorDia(mesSelecionado), (i) => i.data)
+        : semestreProntas &&
+          montarSerie(semestreProntas, agora, baldesPorMes(mesSelecionado), (i) =>
+            chaveMes(i.data)
+          );
+  }
 
   return (
     <div>
@@ -234,6 +428,16 @@ export default function Relatorios({ estabelecimentoId }) {
               titulo="Desfecho dos agendamentos"
               categorias={DESFECHOS}
               contagens={resumo.desfecho}
+            />
+          </div>
+
+          <div className="mt-4">
+            <GraficoLinha
+              titulo="Atendimentos concluídos"
+              dados={serie ?? null}
+              modo={modoSerie}
+              onModo={setModoSerie}
+              erro={modoSerie === "mes" ? erroSemestre : ""}
             />
           </div>
         </>
