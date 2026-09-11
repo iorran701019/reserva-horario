@@ -65,7 +65,7 @@ export async function POST(request) {
   const { data: atual, error: erroAtual } = await supabaseAdmin
     .from("agendamentos")
     .select(
-      "id, estabelecimento_id, nome_cliente, telefone, status, pendente_desde, abacatepay_pago_em, abacatepay_expira_em, abacatepay_br_code, abacatepay_br_code_base64"
+      "id, estabelecimento_id, nome_cliente, telefone, status, pendente_desde, sinal_valor_centavos, abacatepay_pago_em, abacatepay_expira_em, abacatepay_br_code, abacatepay_br_code_base64"
     )
     .eq("id", agendamentoId)
     .maybeSingle();
@@ -140,6 +140,10 @@ export async function POST(request) {
       // acontecer aqui é cair em `now()`.
       pendente_desde: atual.pendente_desde ?? atual.abacatepay_pago_em,
       sinal_declarado_pago: true,
+      // Valor do sinal gravado na criação da cobrança (ver gerar-cobranca):
+      // é o que foi PAGO, então viaja com o pagamento — a config atual do
+      // salão pode já ser outra.
+      sinal_valor_centavos: atual.sinal_valor_centavos,
       finalizado: true,
       // `abacatepay_cobranca_id` NÃO é copiado: a coluna tem UNIQUE
       // (abacatepay_cobranca_id_unico) no banco, então duplicá-lo na linha

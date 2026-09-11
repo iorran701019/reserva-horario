@@ -117,6 +117,12 @@ export default function BlocoConfirmacaoPix({
   // falha (o upload, por exemplo, já subiu o arquivo e não deve desfazer
   // nada). Nunca desfaz o checkbox nem apaga o comprovante — a cliente segue
   // com o gesto dela registrado em tela e um "Tentar novamente" à mão.
+  //
+  // `sinal_valor_centavos` vai no MESMO update, copiado do salão: é o valor
+  // que este bloco mostra em tela ("exige um sinal de R$X") e que a cliente
+  // acabou de declarar ter pago. Sai da prop, não de uma leitura nova, de
+  // propósito — é o número que ela viu; a config do salão pode mudar depois,
+  // e sem esta cópia o valor do sinal ficaria irrecuperável.
   async function marcarPendente() {
     if (!agendamentoId) return false;
     if (marcadoPendenteParaRef.current === agendamentoId) return true;
@@ -133,6 +139,7 @@ export default function BlocoConfirmacaoPix({
       .update({
         status: "pendente",
         sinal_declarado_pago: true,
+        sinal_valor_centavos: estabelecimento.sinal_valor_centavos ?? null,
         pendente_desde: new Date().toISOString(),
       })
       .eq("id", agendamentoId)

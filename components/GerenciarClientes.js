@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MessageCircleOff, X } from "lucide-react";
+import { CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MessageCircleOff, Pencil, X } from "lucide-react";
+import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
+import { formatarPreco } from "@/lib/preco";
 import NavegacaoMes from "@/components/NavegacaoMes";
 import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
 import {
@@ -144,7 +146,7 @@ const ROTULO_TIPO_OBSERVACAO = {
 };
 
 // Texto + cor do badge de cada categoria do Histórico (ver rotuloHistorico,
-// lib/particao). buscarHistoricoCompleto só traz confirmado/cancelado (nunca
+// lib/particao). buscarHistoricoCompleto só traz concluido/cancelado (nunca
 // "caducado" — pendente vencido), mas a entrada fica aqui por completude.
 const HISTORICO_BADGE = {
   expirado: { rotulo: "Expirado", classe: "bg-gray-100 text-gray-700 ring-gray-200" },
@@ -207,6 +209,9 @@ function DetalheCliente({
   const [historicoAberto, setHistoricoAberto] = useState(false);
   const [historico, setHistorico] = useState(null);
   const [carregandoHistorico, setCarregandoHistorico] = useState(false);
+  // Id do concluído com o card de conclusão aberto pelo botão "Editar" (mesmo
+  // card do Histórico geral, ver CardConclusaoAtendimento). null = nenhum.
+  const [idEditandoConclusao, setIdEditandoConclusao] = useState(null);
 
   // Reordena por status (Expirado, Cancelado, Concluído — ver
   // ordenarHistoricoPorStatus) preservando a ordem cronológica que já vem da
@@ -710,6 +715,44 @@ function DetalheCliente({
                             >
                               {meta.rotulo}
                             </span>
+                            {item.status === "concluido" &&
+                              item.valor_cobrado_centavos != null && (
+                                <span>{formatarPreco(item.valor_cobrado_centavos)}</span>
+                              )}
+                            {/* "Editar" só nos concluídos GRAVADOS (cron ou
+                                dona), mesma regra do Histórico geral. Corrige
+                                o valor ou registra a falta; o patch atualiza a
+                                lista local sem refazer a busca. */}
+                            {item.status === "concluido" && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setIdEditandoConclusao((atual) =>
+                                    atual === item.id ? null : item.id
+                                  )
+                                }
+                                className="ml-auto inline-flex items-center gap-1 rounded-lg bg-card px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                                Editar
+                              </button>
+                            )}
+                            {idEditandoConclusao === item.id && item.status === "concluido" && (
+                              <div className="basis-full">
+                                <CardConclusaoAtendimento
+                                  agendamento={item}
+                                  onSalvo={(patch) => {
+                                    setHistorico((atual) =>
+                                      (atual ?? []).map((h) =>
+                                        h.id === item.id ? { ...h, ...patch } : h
+                                      )
+                                    );
+                                    setIdEditandoConclusao(null);
+                                  }}
+                                  onFechar={() => setIdEditandoConclusao(null)}
+                                />
+                              </div>
+                            )}
                             {/* Respostas do popup de perguntas do serviço (ver
                                 lib/agendamentoRespostas), quando houver. */}
                             {(item.respostas ?? []).length > 0 && (

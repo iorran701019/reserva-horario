@@ -39,18 +39,19 @@ const SELO_STATUS = {
 
 // Rótulo do item em "Histórico recente" (abaixo): cancelado -> "Cancelado"
 // (ou "Expirado" se foi o cron de reserva provisória que cancelou, ver
-// agendamentos.expirado_automaticamente); confirmado (só chega aqui já com o
-// horário passado, ver classificarAgendamento) -> "Concluído";
-// pendente/aguardando_sinal que passou do horário sem confirmação ->
-// "Vencido" (nunca foi de fato atendido — não é "Concluído"). Mesma
-// distinção já feita em rotuloHistorico/HISTORICO_META do /admin (ver
+// agendamentos.expirado_automaticamente); concluido (gravado pelo cron ou
+// pela dona) -> "Concluído". buscarHistoricoRecente só traz esses dois
+// status — SEM branch pra "confirmado" de propósito: mapear confirmado pra
+// "Concluído" aqui foi o que escondeu um confirmado futuro rotulado como
+// atendido. O "Vencido" final é só fallback pra status inesperado. Mesma
+// distinção de rotuloHistorico/HISTORICO_META do /admin (ver
 // app/[salon]/admin/page.js), reimplementada aqui porque este componente não
 // importa daquele arquivo (client-facing, sem acesso ao admin).
 function rotuloHistoricoItem(item) {
   if (item.status === "cancelado") {
     return item.expirado_automaticamente ? "Expirado" : "Cancelado";
   }
-  if (item.status === "confirmado") return "Concluído";
+  if (item.status === "concluido") return "Concluído";
   return "Vencido";
 }
 
@@ -158,9 +159,9 @@ export default function PainelCliente({
   ]);
 
   // Histórico recente (concluídos/cancelados): a query já filtra por status e
-  // janela de dias, mas "já terminou" depende da hora atual — reaproveita
-  // classificarAgendamento (mesma regra do /admin) em vez de duplicar a lógica
-  // de "passou" aqui.
+  // janela de dias. Como só vem concluido/cancelado, classificarAgendamento
+  // sempre devolve "historico" — o filtro fica como guarda (mesma regra do
+  // /admin) caso a lista de status da query volte a crescer.
   useEffect(() => {
     let ativo = true;
     buscarHistoricoRecente(

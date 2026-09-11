@@ -27,6 +27,7 @@ import {
   buscarVencimentoManutencao,
 } from "@/lib/manutencaoSugerida";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
+import { ehStatusSucesso } from "@/lib/particao";
 import {
   cancelarAgendamentoCliente,
   buscarConflitoPrazoMinimo,
@@ -3164,7 +3165,9 @@ export default function FormularioAgendamento({
   function aoStatusSinalMudar(statusRecebido) {
     setStatusPixReserva({ id: reservaId, aguardando: false });
 
-    if (statusRecebido !== "pendente" && statusRecebido !== "confirmado") {
+    // Mesma regra de ehPagamentoConfirmado (BlocoQrCodeAbacatePay):
+    // pendente, confirmado ou concluido = o sinal foi pago.
+    if (statusRecebido !== "pendente" && !ehStatusSucesso(statusRecebido)) {
       setErro(
         "Esta reserva não está mais aguardando o sinal — ela foi cancelada ou o prazo do Pix expirou. Escolha um horário de novo para continuar."
       );
@@ -3529,7 +3532,8 @@ export default function FormularioAgendamento({
       // (marcar a caixa / anexar o comprovante), então normalmente este
       // update não muda nada. Ele sobra pro caso de a linha ainda estar em
       // "aguardando_sinal" quando o submit chega — e por isso carimba
-      // pendente_desde igual, senão a janela de protocolo nasceria vazia.
+      // pendente_desde igual, senão a janela de protocolo nasceria vazia. Pelo
+      // mesmo motivo grava sinal_valor_centavos junto (ver marcarPendente).
       if (precisaSinal && sinalDeclarado) {
         // .select("id") pelo mesmo motivo do BlocoConfirmacaoPix: update
         // barrado por RLS volta error null e zero linhas, e sem checar isso a
@@ -3540,6 +3544,7 @@ export default function FormularioAgendamento({
           .from("agendamentos")
           .update({
             sinal_declarado_pago: true,
+            sinal_valor_centavos: estabelecimento.sinal_valor_centavos ?? null,
             status: "pendente",
             pendente_desde: new Date().toISOString(),
           })

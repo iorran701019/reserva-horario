@@ -70,8 +70,11 @@ import {
   MessageCircleOff,
   Clock,
   Info,
+  ClipboardCheck,
+  Pencil,
 } from "lucide-react";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
+import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
 import ModalClientePendente from "@/components/ModalClientePendente";
 import ModalPrazoMinimo from "@/components/ModalPrazoMinimo";
@@ -321,6 +324,8 @@ const NOME_ETIQUETA_CLIENTE_NOVA = "cliente nova";
 // Abas-pai do topo, partição DERIVADA (lib/particao) — nenhum status novo no
 // banco. "Pendentes" é o inbox (pendentes futuros que precisam de ação);
 // "Painel" mostra o calendário; "Histórico" e "Agendar" entram em breve.
+// "Aguardando Conclusão" NÃO é aba-pai: é um sub-toggle dentro de "Pendentes"
+// (ver `verAguardandoConclusao`).
 const ABAS_PAI = [
   { id: "pendentes", rotulo: "Pendentes", Icone: Inbox },
   { id: "painel", rotulo: "Painel", Icone: Calendar },
@@ -357,7 +362,7 @@ function abrirWhatsApp(telefone, mensagem) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, expirado_automaticamente, sinal_declarado_pago, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -461,6 +466,20 @@ export default function AdminPage() {
     const abaNaUrl = searchParams.get("aba") || "pendentes";
     setViewPai((atual) => (atual === abaNaUrl ? atual : abaNaUrl));
   }, [searchParams]);
+
+  // Sub-toggle da aba Pendentes: `false` = inbox (padrão), `true` = lista
+  // "Aguardando Conclusão". Não vai pra URL de propósito — nunca deve ser
+  // lembrado: toda troca de viewPai (sair pra Painel/Histórico/Agendar e
+  // voltar, por qualquer caminho — drawer, voltar do navegador, atalhos que
+  // chamam setViewPai) reseta pro inbox. Ajuste durante o render (padrão
+  // "valor da renderização anterior" do React) em vez de useEffect, pra não
+  // pintar um frame com a lista errada antes do reset.
+  const [verAguardandoConclusao, setVerAguardandoConclusao] = useState(false);
+  const [viewPaiAnterior, setViewPaiAnterior] = useState(viewPai);
+  if (viewPai !== viewPaiAnterior) {
+    setViewPaiAnterior(viewPai);
+    setVerAguardandoConclusao(false);
+  }
 
   // Drawer lateral de navegação (mobile-first): substitui a antiga barra de abas
   // fixa. `true` = aberto. Selecionar uma aba troca `viewPai` e fecha o drawer.
@@ -724,6 +743,9 @@ export default function AdminPage() {
   const [rascunhoAnotHistorico, setRascunhoAnotHistorico] = useState("");
   const [salvandoAnotHistorico, setSalvandoAnotHistorico] = useState(false);
   const [okAnotHistorico, setOkAnotHistorico] = useState(null);
+  // Id do concluído do Histórico com o card de conclusão aberto pelo botão
+  // "Editar" (ver CardConclusaoAtendimento). null = nenhum.
+  const [idEditandoConclusao, setIdEditandoConclusao] = useState(null);
   // Filtro ativo da aba Histórico (ver FILTROS_HISTORICO). "todos" = sem filtro.
   const [filtroHistorico, setFiltroHistorico] = useState("todos");
 
@@ -1878,15 +1900,25 @@ export default function AdminPage() {
   // histórico).
   const agora = new Date();
 
-  // Histórico (aba "Histórico"): tudo arquivado — cancelados, pendentes
-  // caducados e confirmados concluídos. Ordenado do mais recente pro mais
-  // antigo (data+horário desc); a query vem asc, então invertemos a chave.
+  // Histórico (aba "Histórico"): tudo arquivado — concluídos, cancelados e
+  // pendentes caducados. "confirmado" fica de fora mesmo com o horário já
+  // passado (classificarAgendamento o manda pra "historico"): se ainda não
+  // aconteceu é Painel, se já passou e a dona não decidiu é "Aguardando
+  // confirmação" — só vira Histórico quando gravado como concluido/cancelado
+  // (mesma regra de buscarHistoricoCompleto/buscarHistoricoRecente).
+  // Ordenado do mais recente pro mais antigo (data+horário desc); a query
+  // vem asc, então invertemos a chave.
   // Calculado ANTES dos guards de carregamento/sem-perfil abaixo (mesmo com
   // `agendamentos` ainda vazio) porque alimenta o hook useNavegacaoTrimestre
   // logo em seguida — hook precisa rodar sempre na mesma ordem entre renders
   // (Rules of Hooks), não pode ficar atrás de um `return` condicional.
   const historico = agendamentos
-    .filter((item) => classificarAgendamento(item, agora) === "historico" && item.telefone)
+    .filter(
+      (item) =>
+        item.status !== "confirmado" &&
+        classificarAgendamento(item, agora) === "historico" &&
+        item.telefone
+    )
     .sort((a, b) => {
       const chaveA = `${a.data ?? ""} ${a.horario ?? ""}`;
       const chaveB = `${b.data ?? ""} ${b.horario ?? ""}`;
@@ -2232,6 +2264,27 @@ export default function AdminPage() {
       return chaveA.localeCompare(chaveB);
     });
 
+  // "Aguardando Conclusão" (sub-toggle de Pendentes): DERIVADA, mesmo padrão
+  // de inbox/foraDaJanela — nenhuma query extra. São os confirmados cujo atendimento já terminou
+  // (fimDoAtendimento, o mesmo critério de "passou" de classificarAgendamento)
+  // e que o cron ainda não concluiu. Quando o cron roda (depois de
+  // estabelecimentos.confirmado_expira_horas), o status vira "concluido" e o
+  // item sai daqui sozinho no próximo carregamento; quando a dona responde o
+  // card, o patch local (status concluido/cancelado) tira na hora.
+  // item.telefone: mesmo guard do histórico — evento importado do Google
+  // Calendar sem cliente vinculado não tem de quem cobrar nem a quem
+  // registrar falta. `agendamentos` já vem asc, então o mais antigo (o mais
+  // perto de ser concluído automaticamente) aparece primeiro.
+  const aguardandoConclusao = agendamentos.filter(
+    (item) =>
+      item.status === "confirmado" &&
+      !item.concluido_automaticamente &&
+      item.telefone &&
+      item.data &&
+      item.horario &&
+      fimDoAtendimento(item) < agora
+  );
+
   // Intercepta Confirmar/Cancelar do inbox pra checar a etiqueta da cliente
   // ANTES de agir. `executar` é a ação original (o mesmo callback que o botão
   // rodaria sozinho): o gate ou a chama na hora, ou a guarda pro modal.
@@ -2494,12 +2547,57 @@ export default function AdminPage() {
           )}
 
         {/* Título da seção ativa (a barra de abas virou drawer). O ícone espelha
-            o da aba correspondente no drawer. */}
-        <div className="mb-4 flex items-center gap-2 text-heading">
-          {/* eslint-disable-next-line react-hooks/static-components -- IconeAbaAtiva só escolhe entre ícones já existentes, nunca cria um novo */}
-          <IconeAbaAtiva className="h-5 w-5 shrink-0 text-body" />
-          <h2 className="text-base font-semibold">{rotuloAba(abaAtiva)}</h2>
-        </div>
+            o da aba correspondente no drawer. Na aba Pendentes o título dá
+            lugar às duas abas "de pasta" (a primeira já é o próprio título:
+            Inbox + "Pendentes"). Seleção entre duas opções sempre visíveis,
+            não liga/desliga. A ativa (bg-card + borda com a base na cor do
+            card) "cola" na linha de baixo; a inativa fica só no texto body.
+            O contador fica na aba 2 (antes ficava no drawer): é a única lista
+            que acumula sozinha com o tempo (todo confirmado vira item quando
+            o horário passa) e some sozinha com o cron. Sem o número, a dona
+            não sabe que tem algo ali. */}
+        {viewPai === "pendentes" ? (
+          <div
+            role="tablist"
+            aria-label="Pendentes"
+            className="mb-4 flex items-end gap-1 border-b border-border"
+          >
+            {[
+              { aguardando: false, rotulo: "Pendentes", Icone: Inbox },
+              { aguardando: true, rotulo: "Aguardando Conclusão", Icone: ClipboardCheck },
+            ].map(({ aguardando, rotulo, Icone }) => {
+              const ativa = verAguardandoConclusao === aguardando;
+              return (
+                <button
+                  key={rotulo}
+                  type="button"
+                  role="tab"
+                  aria-selected={ativa}
+                  onClick={() => setVerAguardandoConclusao(aguardando)}
+                  className={`-mb-px inline-flex min-w-0 items-center gap-2 rounded-t-lg border px-3 py-2 text-sm font-semibold transition ${
+                    ativa
+                      ? "border-border border-b-card bg-card text-heading"
+                      : "border-transparent text-body hover:text-heading"
+                  }`}
+                >
+                  <Icone className="h-5 w-5 shrink-0" />
+                  <span className="truncate">{rotulo}</span>
+                  {aguardando && aguardandoConclusao.length > 0 && (
+                    <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
+                      {aguardandoConclusao.length}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mb-4 flex items-center gap-2 text-heading">
+            {/* eslint-disable-next-line react-hooks/static-components -- IconeAbaAtiva só escolhe entre ícones já existentes, nunca cria um novo */}
+            <IconeAbaAtiva className="h-5 w-5 shrink-0 text-body" />
+            <h2 className="text-base font-semibold">{rotuloAba(abaAtiva)}</h2>
+          </div>
+        )}
 
         {carregando && (
           <p className="rounded-lg bg-card px-4 py-3 text-sm text-body shadow-sm ring-1 ring-border">
@@ -2517,7 +2615,7 @@ export default function AdminPage() {
             ainda no futuro. Pendentes que já passaram caem em "historico" e
             somem daqui. Confirmar/Cancelar usam os MESMOS handlers de sempre
             (incl. o modal); o refresh derivado faz o item sair do inbox sozinho. */}
-        {!carregando && !erro && viewPai === "pendentes" && (
+        {!carregando && !erro && viewPai === "pendentes" && !verAguardandoConclusao && (
           inbox.length === 0 && pendenciasAdmin.length === 0 && foraDaJanela.length === 0 ? (
             <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
               Nenhuma pendência.
@@ -3532,6 +3630,69 @@ export default function AdminPage() {
           )
         )}
 
+        {/* Aguardando Conclusão (sub-toggle da aba Pendentes, ver
+            `verAguardandoConclusao`): confirmados cujo horário já passou e que
+            o cron ainda não concluiu (ver `aguardandoConclusao`). Cada card
+            pergunta "Concluiu normalmente?" — Sim conclui antes do prazo, Não
+            registra a falta —, com o valor padrão do serviço e opção de
+            corrigir (CardConclusaoAtendimento, o MESMO card do "Editar" do
+            Histórico). O patch local tira o item da lista na hora. */}
+        {!carregando && !erro && viewPai === "pendentes" && verAguardandoConclusao && (
+          aguardandoConclusao.length === 0 ? (
+            <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
+              Nenhum atendimento aguardando conclusão.
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {aguardandoConclusao.map((item) => (
+                <li
+                  key={item.id}
+                  className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-heading">
+                      {item.nome_cliente}
+                    </p>
+                    <p className="mt-0.5 text-sm text-body">{item.telefone}</p>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-body">
+                    <span className="inline-flex min-w-0 items-center gap-1.5">
+                      <span className="text-body">Data</span>
+                      <span className="font-medium">{formatarData(item.data)}</span>
+                    </span>
+                    <span className="inline-flex min-w-0 items-center gap-1.5">
+                      <span className="text-body">Horário</span>
+                      <span className="font-medium">{formatarHorario(item.horario)}</span>
+                    </span>
+                    <span className="flex min-w-0 basis-full flex-col items-start gap-0.5 sm:basis-auto sm:flex-row sm:items-center sm:gap-1.5">
+                      <span className="text-body">Serviço</span>
+                      <span className="min-w-0 break-words font-medium">
+                        {item.servicos?.nome ?? item.servico_livre ?? "—"}
+                      </span>
+                    </span>
+                    {item.profissional_nome && (
+                      <span className="inline-flex min-w-0 items-center gap-1.5">
+                        <span className="text-body">Profissional</span>
+                        <span className="min-w-0 break-words font-medium">
+                          {item.profissional_nome}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-3">
+                    <CardConclusaoAtendimento
+                      agendamento={item}
+                      onSalvo={(patch) => atualizarItemLocal(item.id, patch)}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )
+        )}
+
         {/* Painel: calendário FullCalendar derivado dos agendamentos já
             carregados (pendentes/confirmados). Foco em uso mobile. */}
         {!carregando && !erro && viewPai === "painel" && (
@@ -3549,8 +3710,8 @@ export default function AdminPage() {
           />
         )}
 
-        {/* Histórico: tudo arquivado (classificarAgendamento === "historico"),
-            mais recente primeiro. Filtro por categoria + ação de reativação.
+        {/* Histórico: tudo arquivado (ver `historico` — classificarAgendamento
+            === "historico", menos confirmado), mais recente primeiro. Filtro por categoria + ação de reativação.
             É lista (não calendário) — clique aqui NÃO abre o modal do Painel. */}
         {!carregando && !erro && viewPai === "historico" && (
           <>
@@ -3745,6 +3906,15 @@ export default function AdminPage() {
                             </span>
                           </span>
                         )}
+                        {item.status === "concluido" &&
+                          item.valor_cobrado_centavos != null && (
+                            <span className="inline-flex min-w-0 items-center gap-1.5">
+                              <span className="text-body">Valor</span>
+                              <span className="font-medium">
+                                {formatarPreco(item.valor_cobrado_centavos)}
+                              </span>
+                            </span>
+                          )}
                       </div>
 
                       <div className="mt-4 flex flex-wrap gap-2">
@@ -3789,7 +3959,42 @@ export default function AdminPage() {
                           <CalendarPlus className="h-4 w-4" />
                           Novo agendamento
                         </button>
+
+                        {/* Só concluídos GRAVADOS (status "concluido", pelo
+                            cron ou pela dona) — um confirmado passado ainda
+                            sem conclusão responde pela aba "Aguardando
+                            confirmação". Vale mesmo depois de
+                            concluido_automaticamente=true: é a porta pra
+                            corrigir o valor ou registrar uma falta que o cron
+                            não tinha como saber. */}
+                        {item.status === "concluido" && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setIdEditandoConclusao((atual) =>
+                                atual === item.id ? null : item.id
+                              )
+                            }
+                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                          >
+                            <Pencil className="h-4 w-4" />
+                            Editar
+                          </button>
+                        )}
                       </div>
+
+                      {idEditandoConclusao === item.id && item.status === "concluido" && (
+                        <div className="mt-3">
+                          <CardConclusaoAtendimento
+                            agendamento={item}
+                            onSalvo={(patch) => {
+                              atualizarItemLocal(item.id, patch);
+                              setIdEditandoConclusao(null);
+                            }}
+                            onFechar={() => setIdEditandoConclusao(null)}
+                          />
+                        </div>
+                      )}
 
                       {/* Anotação do atendimento (agendamentos.observacao). Só no
                           Histórico — o dono registra o que foi feito. Com nota:
@@ -4118,6 +4323,9 @@ export default function AdminPage() {
                   type="button"
                   onClick={() => {
                     setViewPai(aba.id);
+                    // Tocar em "Pendentes" já estando nela também volta pro
+                    // inbox (sem troca de viewPai o reset automático não roda).
+                    setVerAguardandoConclusao(false);
                     setDrawerAberto(false);
                     setAvisoAgendar("");
                     setClienteParaAgendar(null);

@@ -168,6 +168,11 @@ export async function POST(request) {
   // cobrança já existe na AbacatePay e o cliente precisa do QR Code. O custo
   // de não ter gravado é só a reutilização da linha 5 (a próxima visita cria
   // outra cobrança), não vale segurar o pagamento por isso.
+  //
+  // `sinal_valor_centavos` é o MESMO valor mandado como `amount` acima,
+  // gravado já na criação e não na confirmação: o valor da cobrança não muda
+  // depois de criada, e a config do salão pode mudar (ou ser apagada) antes do
+  // atendimento — sem esta cópia o valor do sinal ficaria irrecuperável.
   const { data: linhas, error: erroUpdate } = await supabaseAdmin
     .from("agendamentos")
     .update({
@@ -175,6 +180,7 @@ export async function POST(request) {
       abacatepay_expira_em: dados.expiresAt,
       abacatepay_br_code: dados.brCode,
       abacatepay_br_code_base64: dados.brCodeBase64,
+      sinal_valor_centavos: estabelecimento.sinal_valor_centavos,
     })
     .eq("id", agendamento.id)
     .select("id");

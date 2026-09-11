@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatarPreco } from "@/lib/preco";
 import { montarResumoAgendamento } from "@/lib/data";
+import { ehStatusSucesso } from "@/lib/particao";
 
 // Intervalo do polling de status. 5s é o compromisso entre a cliente ver a
 // tela virar logo depois de pagar no app do banco e não martelar a API do
@@ -26,8 +27,11 @@ function srcDoQrCode(brCodeBase64) {
 // "aguardando_sinal" (o salão cancelou, o pg_cron expirou a reserva) encerram
 // o polling do mesmo jeito, mas quem decide o que mostrar neles é o pai: aqui
 // não há como distinguir um do outro sem reler a linha, e essa leitura é dele.
+// "concluido" entra junto com "confirmado" (ver STATUS_SUCESSO em
+// lib/particao): na prática a tela não fica aberta tanto tempo, mas se ficar,
+// um atendimento concluído não pode virar "falha de pagamento".
 function ehPagamentoConfirmado(status) {
-  return status === "pendente" || status === "confirmado";
+  return status === "pendente" || ehStatusSucesso(status);
 }
 
 // Bloco do sinal quando o salão usa cobrança AUTOMÁTICA

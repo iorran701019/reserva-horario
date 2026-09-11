@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { sincronizarEventoComGoogle } from "@/lib/googleCalendarSync";
+import { STATUS_SUCESSO } from "@/lib/particao";
 
 export const maxDuration = 60;
 
@@ -130,13 +131,16 @@ export async function GET(request) {
   // paralelo) pra não estourar limite de requisições da API do Google;
   // reusa o MESMO accessToken já obtido na troca do code acima. Uma falha
   // isolada só loga e segue pros próximos, não trava o resto do loop.
+  // STATUS_SUCESSO (confirmado + concluido): com o cron concluindo os
+  // passados, filtrar só "confirmado" deixaria o histórico de fora — o
+  // contrário da decisão de incluir passados.
   const { data: agendamentosConfirmados } = await supabaseAdmin
     .from("agendamentos")
     .select(
       "id, nome_cliente, telefone, data, horario, duracao_min, status, servico_livre, google_event_id, estabelecimento_id, servicos(nome), estabelecimentos(google_calendar_ordem_titulo)"
     )
     .eq("estabelecimento_id", estabelecimentoId)
-    .eq("status", "confirmado");
+    .in("status", STATUS_SUCESSO);
 
   let totalSincronizados = 0;
   for (const agendamento of agendamentosConfirmados ?? []) {
