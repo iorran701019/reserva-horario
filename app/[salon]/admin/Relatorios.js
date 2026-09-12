@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Cell,
   Legend,
@@ -228,10 +230,13 @@ const MODOS_SERIE = [
   { id: "mes", rotulo: "Mês" },
 ];
 
-// Mesmo componente de linha nos dois modos — só a série (e o rótulo do eixo)
-// muda. `dados` é null enquanto o semestre do modo "Mês" ainda está vindo.
+// Mesmos eixos/tooltip nos dois modos — só o container e a série mudam:
+// "Dia" usa barras (um ponto por dia do mês fica ilegível como linha no
+// mobile) e "Mês" segue como linha. `dados` é null enquanto o semestre do
+// modo "Mês" ainda está vindo.
 function GraficoLinha({ titulo, dados, modo, onModo, erro }) {
   const total = dados?.reduce((soma, p) => soma + p.valor, 0) ?? 0;
+  const Grafico = modo === "dia" ? BarChart : LineChart;
 
   return (
     <div className="rounded-xl bg-card p-4 shadow-sm ring-1 ring-border">
@@ -267,7 +272,7 @@ function GraficoLinha({ titulo, dados, modo, onModo, erro }) {
       ) : (
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={dados} margin={{ top: 8, right: 8, bottom: 0, left: -24 }}>
+            <Grafico data={dados} margin={{ top: 8, right: 8, bottom: 0, left: -24 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
               <XAxis
                 dataKey="rotulo"
@@ -284,15 +289,25 @@ function GraficoLinha({ titulo, dados, modo, onModo, erro }) {
                 formatter={(valor) => [valor, "Concluídos"]}
                 labelFormatter={(rotulo) => (modo === "dia" ? `Dia ${rotulo}` : rotulo)}
               />
-              <Line
-                type="monotone"
-                dataKey="valor"
-                stroke="#10b981"
-                strokeWidth={2}
-                dot={{ r: 2 }}
-                isAnimationActive={false}
-              />
-            </LineChart>
+              {modo === "dia" ? (
+                <Bar
+                  dataKey="valor"
+                  fill="#10b981"
+                  radius={[2, 2, 0, 0]}
+                  maxBarSize={20}
+                  isAnimationActive={false}
+                />
+              ) : (
+                <Line
+                  type="monotone"
+                  dataKey="valor"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  dot={{ r: 2 }}
+                  isAnimationActive={false}
+                />
+              )}
+            </Grafico>
           </ResponsiveContainer>
         </div>
       )}
