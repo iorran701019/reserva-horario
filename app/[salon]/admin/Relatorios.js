@@ -19,7 +19,7 @@ import {
 } from "recharts";
 import { supabase } from "@/lib/supabaseClient";
 import { formatarPreco } from "@/lib/preco";
-import { fimDoAtendimento } from "@/lib/particao";
+import { fimDaRevisaoDeConclusao } from "@/lib/particao";
 import { chaveMes, mesDeHoje, rotuloMes } from "@/lib/mes";
 import NavegacaoMes from "@/components/NavegacaoMes";
 
@@ -33,7 +33,10 @@ import NavegacaoMes from "@/components/NavegacaoMes";
 // linha está no modo "Mês".
 //
 // Props:
-//   estabelecimentoId – id do salão resolvido pelo slug (particiona a query).
+//   estabelecimento – o salão inteiro. `id` particiona a query; além dele, o
+//     relatório precisa de `conclusao_manual_ativa` + `confirmado_expira_horas`
+//     pra saber quando um confirmado vencido já pode ser contado como
+//     concluído (ver fimDaRevisaoDeConclusao em lib/particao.js).
 
 // Categorias do gráfico de desfecho. As cores são fixas (não seguem o tema do
 // salão) porque precisam continuar distinguíveis entre si em qualquer tema.
@@ -59,10 +62,15 @@ function deslocarMes(chave, delta) {
 }
 
 // Desfecho de uma linha, ou null se ela ainda não entra no relatório.
-//   "concluido" — status 'concluido', OU 'confirmado' cujo atendimento já
-//                 terminou (fimDoAtendimento < agora — mesmo critério de
-//                 estaAguardandoConclusao em page.js). Confirmado futuro NÃO
-//                 conta ainda: retorna null.
+//   "concluido" — status 'concluido', OU 'confirmado' cujo PRAZO DE CONCLUSÃO
+//                 já passou (fimDaRevisaoDeConclusao < agora). Esse prazo é o
+//                 fim do atendimento quando a conclusão manual está desligada,
+//                 e fim + confirmado_expira_horas quando está ligada — o mesmo
+//                 relógio do cron que grava o status. Confirmado que ainda
+//                 está na janela de revisão da dona NÃO conta: o desfecho
+//                 depende dela responder o card ("concluiu" ou "não
+//                 compareceu"), e antecipar isso faria a pizza afirmar um
+//                 resultado que ainda pode virar cancelamento.
 //   "cliente"   — cancelado com cancelado_por_cliente.
 //   "salao"     — cancelado com cancelado_pelo_salao OU nao_compareceu (o
 //                 "Não compareceu" da conclusão grava status cancelado, ver
@@ -72,10 +80,15 @@ function deslocarMes(chave, delta) {
 //   "estimado"  — cancelado sem nenhuma das quatro flags: cancelamentos
 //                 anteriores à coluna cancelado_pelo_salao. Soma em "Salão"
 //                 no gráfico, mas é contado à parte pra legenda de estimativa.
-function classificarDesfecho(item, agora) {
+function classificarDesfecho(item, agora, estabelecimento) {
   if (item.status === "concluido") return "concluido";
   if (item.status === "confirmado") {
-    return fimDoAtendimento(item) < agora ? "concluido" : null;
+    // Mesmas guardas de estaAguardandoConclusao (page.js): sem telefone é
+    // evento importado do Google Calendar sem cliente vinculado — não aparece
+    // na aba de revisão e não deve virar estatística de atendimento. data e
+    // horario são o que fimDoAtendimento lê; ausentes, não há prazo a calcular.
+    if (!item.telefone || !item.data || !item.horario) return null;
+    return fimDaRevisaoDeConclusao(item, estabelecimento) < agora ? "concluido" : null;
   }
   if (item.status !== "cancelado") return null;
   if (item.cancelado_por_cliente) return "cliente";
@@ -94,13 +107,13 @@ function classificarTipoServico(item) {
   return "comum";
 }
 
-function montarResumo(linhas, agora) {
+function montarResumo(linhas, agora, estabelecimento) {
   const desfecho = { concluido: 0, cliente: 0, salao: 0, expirado: 0 };
   const tipo = { comum: 0, interna: 0, externa: 0 };
   let estimados = 0;
 
   for (const item of linhas) {
-    const categoria = classificarDesfecho(item, agora);
+    const categoria = classificarDesfecho(item, agora, estabelecimento);
     if (categoria === null) continue;
     if (categoria === "estimado") {
       estimados += 1;
@@ -152,11 +165,11 @@ function baldesPorMes(chave) {
 // (classificarDesfecho), somando comum + manutenção — o gráfico de linha é
 // volume de atendimento, não composição. Os baldes vêm prontos de fora porque
 // dia/mês sem atendimento precisa aparecer como zero, não sumir do eixo.
-function montarSerie(linhas, agora, baldes, chaveDe) {
+function montarSerie(linhas, agora, estabelecimento, baldes, chaveDe) {
   const contagem = new Map(baldes.map((b) => [b.chave, 0]));
 
   for (const item of linhas) {
-    if (classificarDesfecho(item, agora) !== "concluido") continue;
+    if (classificarDesfecho(item, agora, estabelecimento) !== "concluido") continue;
     const chave = chaveDe(item);
     if (contagem.has(chave)) contagem.set(chave, contagem.get(chave) + 1);
   }
@@ -263,7 +276,7 @@ async function buscarFechados(estabelecimentoId, inicio, fim) {
   const { data, error } = await supabase
     .from("agendamentos")
     .select(
-      "id, data, horario, status, cancelado_por_cliente, cancelado_pelo_salao, nao_compareceu, expirado_automaticamente, valor_cobrado_centavos, sinal_declarado_pago, sinal_valor_centavos, servico_id, servicos(duracao_min, eh_manutencao, manutencao_externa)"
+      "id, data, horario, telefone, duracao_min, status, cancelado_por_cliente, cancelado_pelo_salao, nao_compareceu, expirado_automaticamente, valor_cobrado_centavos, sinal_declarado_pago, sinal_valor_centavos, servico_id, servicos(duracao_min, eh_manutencao, manutencao_externa)"
     )
     .eq("estabelecimento_id", estabelecimentoId)
     .eq("finalizado", true)
@@ -271,11 +284,16 @@ async function buscarFechados(estabelecimentoId, inicio, fim) {
     .gte("data", inicio)
     .lt("data", fim);
 
-  // Eleva duracao_min ao topo do item — é de lá que fimDoAtendimento lê
-  // (mesmo tratamento de buscarAgendamentos em page.js).
+  // duracao_min no topo do item é de onde fimDoAtendimento lê. Aqui a COLUNA
+  // agendamentos.duracao_min vem primeiro, e o join só cobre o caso dela vir
+  // nula: é a coluna que alimenta `periodo` (o tstzrange do EXCLUDE), e é
+  // upper(periodo) que o cron compara pra decidir a conclusão. Ler
+  // servicos.duracao_min primeiro — como buscarAgendamentos em page.js ainda
+  // faz — desalinha o relatório do cron justamente nos servico_livre, que não
+  // têm join e caíam no padrão de 40 min mesmo tendo 60 gravados.
   const linhas = (data ?? []).map((item) => ({
     ...item,
-    duracao_min: item.servicos?.duracao_min ?? null,
+    duracao_min: item.duracao_min ?? item.servicos?.duracao_min ?? null,
   }));
 
   return { linhas, erro: error?.message ?? "" };
@@ -422,7 +440,8 @@ function Indicador({ rotulo, valor, observacao }) {
   );
 }
 
-export default function Relatorios({ estabelecimentoId }) {
+export default function Relatorios({ estabelecimento }) {
+  const estabelecimentoId = estabelecimento.id;
   const [mesSelecionado, setMesSelecionado] = useState(() => mesDeHoje());
   const [verFinanceiro, setVerFinanceiro] = useState(false);
 
@@ -484,7 +503,8 @@ export default function Relatorios({ estabelecimentoId }) {
 
   // Um único `agora` pra classificar tudo no render (mesmo padrão de page.js).
   const agora = new Date();
-  const resumo = carregando || erro ? null : montarResumo(resultado.linhas, agora);
+  const resumo =
+    carregando || erro ? null : montarResumo(resultado.linhas, agora, estabelecimento);
   const totalCancelamentos = resumo
     ? resumo.desfecho.cliente + resumo.desfecho.salao + resumo.desfecho.expirado
     : 0;
@@ -502,9 +522,15 @@ export default function Relatorios({ estabelecimentoId }) {
   if (resumo) {
     serie =
       modoSerie === "dia"
-        ? montarSerie(resultado.linhas, agora, baldesPorDia(mesSelecionado), (i) => i.data)
+        ? montarSerie(
+            resultado.linhas,
+            agora,
+            estabelecimento,
+            baldesPorDia(mesSelecionado),
+            (i) => i.data
+          )
         : semestreProntas &&
-          montarSerie(semestreProntas, agora, baldesPorMes(mesSelecionado), (i) =>
+          montarSerie(semestreProntas, agora, estabelecimento, baldesPorMes(mesSelecionado), (i) =>
             chaveMes(i.data)
           );
     serieReceita =

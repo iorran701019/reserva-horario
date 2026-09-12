@@ -4294,7 +4294,7 @@ export default function AdminPage() {
             desfecho dos agendamentos), particionado pelo estabelecimento
             resolvido. Busca e navegação de mês ficam dentro do componente. */}
         {!carregando && !erro && viewPai === "relatorios" && (
-          <Relatorios estabelecimentoId={estabelecimento.id} />
+          <Relatorios estabelecimento={estabelecimento} />
         )}
 
         {/* Regras de negócio: config do salão (escolha_profissional, sinal/Pix
