@@ -321,14 +321,6 @@ export default function ConfiguracoesSalao({
   // GerenciarServicos.js.
   const [servicosAtivos, setServicosAtivos] = useState([]);
 
-  // Horas até uma reserva provisória (pendente/aguardando_sinal, criada
-  // antecipadamente pelo wizard público — ver FormularioAgendamento) parar de
-  // bloquear disponibilidade (ver lib/disponibilidade.js ->
-  // calcularVagasPorHorario). String pro input; undefined = ainda carregando.
-  const [reservaExpiraHoras, setReservaExpiraHoras] = useState(undefined);
-  const [erroReservaExpira, setErroReservaExpira] = useState("");
-  const [statusReservaExpira, setStatusReservaExpira] = useState("");
-
   // Antecedência mínima (em horas) pra cliente agendar pelo app (ver
   // lib/disponibilidade.js -> filtrarPorAntecedenciaMinima). String do
   // <select> ("" = "Nenhum"/null, senão "12"/"24"/"48"); undefined = ainda
@@ -482,7 +474,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, reserva_provisoria_expira_horas, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data, conclusao_manual_ativa, confirmado_expira_horas"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data, conclusao_manual_ativa, confirmado_expira_horas"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -496,7 +488,6 @@ export default function ConfiguracoesSalao({
         setErroCaducidade(error.message);
         setErroValorCheio(error.message);
         setErroManutencaoExterna(error.message);
-        setErroReservaExpira(error.message);
         setErroCancelamentoPrazo(error.message);
         setErroLinkLocalizacao(error.message);
         setErroFidelidade(error.message);
@@ -532,13 +523,6 @@ export default function ConfiguracoesSalao({
 
       setErroManutencaoExterna("");
       setServicoManutencaoExternaId(data?.servico_manutencao_externa_id ?? "");
-
-      setErroReservaExpira("");
-      setReservaExpiraHoras(
-        data?.reserva_provisoria_expira_horas == null
-          ? ""
-          : String(data.reserva_provisoria_expira_horas)
-      );
 
       setErroCancelamentoPrazo("");
       setCancelamentoPrazoHoras(
@@ -771,12 +755,6 @@ export default function ConfiguracoesSalao({
     const t = setTimeout(() => setStatusManutencaoExterna(""), 2500);
     return () => clearTimeout(t);
   }, [statusManutencaoExterna]);
-
-  useEffect(() => {
-    if (statusReservaExpira !== "salvo") return;
-    const t = setTimeout(() => setStatusReservaExpira(""), 2500);
-    return () => clearTimeout(t);
-  }, [statusReservaExpira]);
 
   useEffect(() => {
     if (statusCancelamentoPrazo !== "salvo") return;
@@ -1105,36 +1083,6 @@ export default function ConfiguracoesSalao({
 
     setServicoManutencaoExternaId(novoValorStr);
     setStatusManutencaoExterna("salvo");
-  }
-
-  // Exige um inteiro > 0 (não faz sentido "nunca expira" aqui — a coluna já
-  // nasce com default 48 no banco). Valor inválido/vazio reverte pro último
-  // válido carregado, sem gravar.
-  async function salvarReservaExpira() {
-    const horas = parseInt(reservaExpiraHoras, 10);
-
-    if (!Number.isInteger(horas) || horas <= 0) {
-      setErroReservaExpira("Informe um número de horas maior que 0.");
-      return;
-    }
-
-    setStatusReservaExpira("salvando");
-    setErroReservaExpira("");
-
-    const { data: linhas, error } = await supabase
-      .from("estabelecimentos")
-      .update({ reserva_provisoria_expira_horas: horas })
-      .eq("id", estabelecimento.id)
-      .select("id");
-
-    if (error || !linhas?.length) {
-      setStatusReservaExpira("");
-      setErroReservaExpira(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
-      return;
-    }
-
-    setReservaExpiraHoras(String(horas));
-    setStatusReservaExpira("salvo");
   }
 
   // Aceita 0 (sem trava de prazo — comportamento atual do botão "Cancelar" no
@@ -1513,8 +1461,8 @@ export default function ConfiguracoesSalao({
   }
 
   // Grava janela_agendamento_fim. Campo obrigatório: novaData vazia não salva
-  // (mesmo padrão de validação-sem-revert de salvarReservaExpira/salvarCancelamentoPrazo
-  // acima — só mostra o erro e devolve).
+  // (mesmo padrão de validação-sem-revert de salvarCancelamentoPrazo acima —
+  // só mostra o erro e devolve).
   //
   // Se novaData REDUZ a janela atual (novaData < janelaAgendamentoFim já
   // salvo) e existe pelo menos um agendamento com data > novaData e status
@@ -2061,7 +2009,6 @@ export default function ConfiguracoesSalao({
   const carregandoCaducidade = caducidadeDias === undefined;
   const carregandoValorCheio = valorCheioAposPrazo === undefined;
   const carregandoManutencaoExterna = servicoManutencaoExternaId === undefined;
-  const carregandoReservaExpira = reservaExpiraHoras === undefined;
   const carregandoCancelamentoPrazo = cancelamentoPrazoHoras === undefined;
   const carregandoPrazoMinimo = prazoMinimoDias === undefined;
   const carregandoLinkLocalizacao = linkLocalizacao === undefined;
@@ -2842,42 +2789,6 @@ export default function ConfiguracoesSalao({
               )}
               {erroCancelamentoPrazo && (
                 <p className="mt-2 text-xs text-red-600">{erroCancelamentoPrazo}</p>
-              )}
-            </div>
-
-            <div>
-              <label
-                htmlFor="reserva-expira-horas"
-                className="mb-1 block text-sm font-medium text-body"
-              >
-                Expiração de reserva provisória (horas)
-              </label>
-              <input
-                id="reserva-expira-horas"
-                type="number"
-                min="1"
-                step="1"
-                inputMode="numeric"
-                value={reservaExpiraHoras ?? ""}
-                onChange={(e) => setReservaExpiraHoras(e.target.value)}
-                onBlur={salvarReservaExpira}
-                disabled={carregandoReservaExpira}
-                placeholder="48"
-                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-              />
-              <p className="mt-1 text-xs text-muted">
-                Cancelar reservas pendentes não confirmadas após quantas
-                horas?
-              </p>
-
-              {statusReservaExpira === "salvando" && (
-                <p className="mt-2 text-xs text-muted">Salvando…</p>
-              )}
-              {statusReservaExpira === "salvo" && !erroReservaExpira && (
-                <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
-              )}
-              {erroReservaExpira && (
-                <p className="mt-2 text-xs text-red-600">{erroReservaExpira}</p>
               )}
             </div>
 

@@ -100,9 +100,10 @@ export async function GET(request) {
 
   // PENDING e EXPIRED não mexem no banco. Em especial o EXPIRED: quem devolve
   // o horário pra grade é a expiração automática que já existe
-  // (expirar_reservas_pendentes no pg_cron, pela mesma janela
-  // reserva_provisoria_expira_horas que governa o expiresIn da cobrança).
-  // Cancelar aqui duplicaria essa regra em dois lugares.
+  // (expirar_pendentes_vencidos no pg_cron, que expira o pendente pelo HORÁRIO
+  // do serviço). A validade do QR Code é outra régua — a constante
+  // EXPIRACAO_PIX_HORAS da rota gerar-cobranca —, e as duas são
+  // independentes de propósito. Cancelar aqui duplicaria a regra do cron.
   if (statusAbacate !== "PAID") {
     return Response.json({ status: "aguardando_sinal" });
   }

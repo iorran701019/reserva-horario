@@ -14,6 +14,14 @@ function supabaseServiceRole() {
 
 const ABACATEPAY_BASE = "https://api.abacatepay.com/v2/transparents";
 
+// Validade do QR Code Pix, em horas. É uma constante do projeto, NÃO uma
+// configuração por salão: a dona não tem por que decidir quanto tempo um QR
+// Code vive. Antes isso vinha de `estabelecimentos.reserva_provisoria_expira_horas`,
+// mas aquela coluna só serve pra limpar rascunho abandonado no meio do wizard
+// (finalizado = false, bloco (a) de expirar_pendentes_vencidos) — nunca teve
+// relação real com o Pix, era coincidência de usarem a mesma coluna.
+const EXPIRACAO_PIX_HORAS = 24;
+
 export async function POST(request) {
   const corpo = await request.json().catch(() => null);
   const agendamentoId = corpo?.agendamentoId;
@@ -60,14 +68,11 @@ export async function POST(request) {
     return Response.json({ pago: true, status: agendamento.status });
   }
 
-  // `reserva_provisoria_expira_horas` é a MESMA janela que já governa o
-  // status aguardando_sinal no resto do projeto (lib/disponibilidade.js e a
-  // função expirar_reservas_pendentes do banco). O Pix precisa expirar junto:
-  // um QR Code vivo depois da reserva ter caducado cobraria por um horário
-  // que já voltou pra grade.
+  // Só o valor do sinal e o método de cobrança: a validade do QR Code é a
+  // constante EXPIRACAO_PIX_HORAS lá em cima, não vem do salão.
   const { data: estabelecimento, error: erroEstabelecimento } = await supabaseAdmin
     .from("estabelecimentos")
-    .select("sinal_valor_centavos, metodo_cobranca_pix, reserva_provisoria_expira_horas")
+    .select("sinal_valor_centavos, metodo_cobranca_pix")
     .eq("id", agendamento.estabelecimento_id)
     .maybeSingle();
 
@@ -133,9 +138,7 @@ export async function POST(request) {
     });
   }
 
-  const expiraHoras = Number(estabelecimento.reserva_provisoria_expira_horas);
-  const expiresIn =
-    Number.isFinite(expiraHoras) && expiraHoras > 0 ? Math.round(expiraHoras * 3600) : undefined;
+  const expiresIn = EXPIRACAO_PIX_HORAS * 3600;
 
   let dados;
   try {
@@ -147,7 +150,7 @@ export async function POST(request) {
         data: {
           amount: estabelecimento.sinal_valor_centavos,
           description: "Sinal de reserva",
-          ...(expiresIn ? { expiresIn } : {}),
+          expiresIn,
         },
       }),
     });
