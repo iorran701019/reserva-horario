@@ -3709,6 +3709,14 @@ export default function FormularioAgendamento({
       profissional_id: profissionalId,
       status,
       sinal_declarado_pago: sinalDeclarado,
+      // Mesma cópia que marcarPendente (components/BlocoConfirmacaoPix.js) faz
+      // no fluxo público: o valor vai junto com a declaração de pagamento,
+      // senão o sinal fica registrado como pago sem número nenhum e some do
+      // card de Relatórios. Só quando de fato houve declaração — sem ela não há
+      // valor a guardar, e um número aqui viraria sinal fantasma.
+      sinal_valor_centavos: sinalDeclarado
+        ? estabelecimento.sinal_valor_centavos ?? null
+        : null,
       finalizado: true,
     };
     const { data, error } = await supabase

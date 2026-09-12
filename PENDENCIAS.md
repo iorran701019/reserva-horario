@@ -23,7 +23,6 @@
 - **Dados de teste em staging** (Laysla, `estabelecimento_id=3`) ainda não limpos: `Teste Aguardando Confirmação`, `Teste Editar no Histórico`, `Teste Sinal - Aguardando Conclusão`, `Teste Sinal - Editar Histórico`, `Teste Sinal - Sem Valor Registrado`. Os dois "Molde F1" da cliente `xuxa` são dado pré-existente — não apagar sem confirmar.
 - Falta (`cancelado` + `nao_compareceu=true`) aparece como "Cancelado" no Histórico, sem rótulo próprio de "Não compareceu"/"Cancelado pelo card de Conclusão". Decidir se vale distinguir visualmente.
 - Badge de fidelidade, depois de "Editar" um concluído na ficha do cliente, só recalcula ao reabrir a ficha.
-- Cobranças AbacatePay criadas antes do deploy original desta feature (QR ainda válido, reaproveitado) ficam sem `sinal_valor_centavos` — caem no estado "sinal pago, valor não registrado".
 - Segundo comprovante Pix enviado com a linha já em `pendente` não faz UPDATE (comportamento pré-existente) — também não grava o valor do sinal nesse caso.
 - Remarcação no fluxo manual (não-AbacatePay) cancela e recria a linha; a nova linha volta pra `aguardando_sinal` e só recebe `sinal_valor_centavos` quando a cliente declarar o pagamento de novo.
 

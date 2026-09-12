@@ -187,18 +187,31 @@ function montarSerie(linhas, agora, estabelecimento, baldes, chaveDe) {
 //   ticket   – receita / quantos concluídos TÊM valor. Dividir pelo total de
 //              concluídos puxaria a média pra baixo por causa dos antigos,
 //              fechados antes da coluna existir. null quando não há nenhum.
+//   sinaisRetidos – soma de sinal_valor_centavos das linhas CANCELADAS que
+//              tinham o sinal pago. Fica FORA de `receita` e de `sinais` de
+//              propósito: é dinheiro que entrou sem atendimento, e misturar
+//              inflaria tanto a receita quanto o ticket médio. Também não sai
+//              no gráfico de Receita, que é só valor_cobrado_centavos.
 function montarFinanceiro(linhas) {
   let receita = 0;
   let sinais = 0;
   let comValor = 0;
+  let sinaisRetidos = 0;
 
   for (const item of linhas) {
+    const sinalPago = item.sinal_declarado_pago && item.sinal_valor_centavos != null;
+
+    if (item.status === "cancelado") {
+      if (sinalPago) sinaisRetidos += item.sinal_valor_centavos;
+      continue;
+    }
+
     if (item.status !== "concluido") continue;
     if (item.valor_cobrado_centavos != null) {
       receita += item.valor_cobrado_centavos;
       comValor += 1;
     }
-    if (item.sinal_declarado_pago && item.sinal_valor_centavos != null) {
+    if (sinalPago) {
       sinais += item.sinal_valor_centavos;
     }
   }
@@ -206,6 +219,7 @@ function montarFinanceiro(linhas) {
   return {
     receita,
     sinais,
+    sinaisRetidos,
     comValor,
     semValor: linhas.filter(
       (i) => i.status === "concluido" && i.valor_cobrado_centavos == null
@@ -632,9 +646,14 @@ export default function Relatorios({ estabelecimento }) {
 
       {financeiro && verFinanceiro && (
         <>
-          <div className="mb-4 grid gap-3 sm:grid-cols-3">
+          <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Indicador rotulo="Receita do mês" valor={formatarPreco(financeiro.receita)} />
             <Indicador rotulo="Sinais recebidos" valor={formatarPreco(financeiro.sinais)} />
+            <Indicador
+              rotulo="Sinais retidos (cancelados)"
+              valor={formatarPreco(financeiro.sinaisRetidos)}
+              observacao="Não entra na receita. Estorno feito por fora do app não aparece aqui."
+            />
             <Indicador
               rotulo="Ticket médio"
               valor={financeiro.ticket == null ? "—" : formatarPreco(financeiro.ticket)}
