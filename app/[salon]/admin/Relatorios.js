@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ChartPie, Wallet } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -17,15 +18,19 @@ import {
   YAxis,
 } from "recharts";
 import { supabase } from "@/lib/supabaseClient";
+import { formatarPreco } from "@/lib/preco";
 import { fimDoAtendimento } from "@/lib/particao";
 import { chaveMes, mesDeHoje, rotuloMes } from "@/lib/mes";
 import NavegacaoMes from "@/components/NavegacaoMes";
 
-// Aba "Relatórios" do /admin: resumo mensal dos atendimentos fechados do
-// salão, em dois gráficos de pizza (tipo de serviço dos concluídos; desfecho
-// de tudo) e um gráfico de linha de concluídos ao longo do tempo. Busca
-// client-side, sem RPC — o mês selecionado, mais o semestre quando a linha
-// está no modo "Mês".
+// Aba "Relatórios" do /admin, dividida em duas sub-abas sobre o MESMO mês
+// (uma busca só, uma NavegacaoMes só):
+//   "Atividades" – dois gráficos de pizza (tipo de serviço dos concluídos;
+//                  desfecho de tudo) e um gráfico de linha de concluídos.
+//   "Financeiro" – receita/sinais/ticket médio do mês e a mesma linha, mas
+//                  somando valor_cobrado_centavos em vez de contar registros.
+// Busca client-side, sem RPC — o mês selecionado, mais o semestre quando a
+// linha está no modo "Mês".
 //
 // Props:
 //   estabelecimentoId – id do salão resolvido pelo slug (particiona a query).
@@ -159,6 +164,57 @@ function montarSerie(linhas, agora, baldes, chaveDe) {
   return baldes.map((b) => ({ rotulo: b.rotulo, valor: contagem.get(b.chave) }));
 }
 
+// Números do topo da sub-aba Financeiro. Aqui "concluído" é literalmente
+// status 'concluido' — não o critério mais largo de classificarDesfecho: só a
+// conclusão (manual ou pelo cron concluir_agendamentos_confirmados_vencidos)
+// grava valor_cobrado_centavos, então um 'confirmado' vencido ainda não tem
+// dinheiro pra somar.
+//   receita  – soma de valor_cobrado_centavos.
+//   sinais   – soma de sinal_valor_centavos dos que declararam o Pix pago.
+//   ticket   – receita / quantos concluídos TÊM valor. Dividir pelo total de
+//              concluídos puxaria a média pra baixo por causa dos antigos,
+//              fechados antes da coluna existir. null quando não há nenhum.
+function montarFinanceiro(linhas) {
+  let receita = 0;
+  let sinais = 0;
+  let comValor = 0;
+
+  for (const item of linhas) {
+    if (item.status !== "concluido") continue;
+    if (item.valor_cobrado_centavos != null) {
+      receita += item.valor_cobrado_centavos;
+      comValor += 1;
+    }
+    if (item.sinal_declarado_pago && item.sinal_valor_centavos != null) {
+      sinais += item.sinal_valor_centavos;
+    }
+  }
+
+  return {
+    receita,
+    sinais,
+    comValor,
+    semValor: linhas.filter(
+      (i) => i.status === "concluido" && i.valor_cobrado_centavos == null
+    ).length,
+    ticket: comValor > 0 ? Math.round(receita / comValor) : null,
+  };
+}
+
+// Mesma forma de montarSerie (baldes prontos de fora, zero onde não houve
+// nada), mas somando centavos em vez de contar linhas.
+function montarSerieReceita(linhas, baldes, chaveDe) {
+  const soma = new Map(baldes.map((b) => [b.chave, 0]));
+
+  for (const item of linhas) {
+    if (item.status !== "concluido" || item.valor_cobrado_centavos == null) continue;
+    const chave = chaveDe(item);
+    if (soma.has(chave)) soma.set(chave, soma.get(chave) + item.valor_cobrado_centavos);
+  }
+
+  return baldes.map((b) => ({ rotulo: b.rotulo, valor: soma.get(b.chave) }));
+}
+
 function GraficoPizza({ titulo, categorias, contagens, observacao }) {
   const dados = categorias
     .map((c) => ({ ...c, valor: contagens[c.id] }))
@@ -207,7 +263,7 @@ async function buscarFechados(estabelecimentoId, inicio, fim) {
   const { data, error } = await supabase
     .from("agendamentos")
     .select(
-      "id, data, horario, status, cancelado_por_cliente, cancelado_pelo_salao, nao_compareceu, expirado_automaticamente, servico_id, servicos(duracao_min, eh_manutencao, manutencao_externa)"
+      "id, data, horario, status, cancelado_por_cliente, cancelado_pelo_salao, nao_compareceu, expirado_automaticamente, valor_cobrado_centavos, sinal_declarado_pago, sinal_valor_centavos, servico_id, servicos(duracao_min, eh_manutencao, manutencao_externa)"
     )
     .eq("estabelecimento_id", estabelecimentoId)
     .eq("finalizado", true)
@@ -234,7 +290,22 @@ const MODOS_SERIE = [
 // "Dia" usa barras (um ponto por dia do mês fica ilegível como linha no
 // mobile) e "Mês" segue como linha. `dados` é null enquanto o semestre do
 // modo "Mês" ainda está vindo.
-function GraficoLinha({ titulo, dados, modo, onModo, erro }) {
+//
+// `rotuloSerie`/`formatarTooltip`/`formatarEixo`/`cor` existem só pro
+// Financeiro reusar o MESMO gráfico com valores em centavos e uma cor própria
+// (azul, pra não confundir com a contagem de atendimentos); os defaults
+// reproduzem exatamente o gráfico da sub-aba Atividades.
+function GraficoLinha({
+  titulo,
+  dados,
+  modo,
+  onModo,
+  erro,
+  rotuloSerie = "Concluídos",
+  formatarTooltip = (valor) => valor,
+  formatarEixo,
+  cor = "#10b981",
+}) {
   const total = dados?.reduce((soma, p) => soma + p.valor, 0) ?? 0;
   const Grafico = modo === "dia" ? BarChart : LineChart;
 
@@ -270,29 +341,46 @@ function GraficoLinha({ titulo, dados, modo, onModo, erro }) {
           {modo === "dia" ? "Sem dados neste mês." : "Sem dados neste semestre."}
         </p>
       ) : (
+        // O modo "Dia" reserva 16px embaixo pro label do eixo; o modo "Mês"
+        // não tem label (os nomes dos meses já se explicam) e segue sem margem.
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
-            <Grafico data={dados} margin={{ top: 8, right: 8, bottom: 0, left: -24 }}>
+            <Grafico
+              data={dados}
+              margin={{ top: 8, right: 8, bottom: modo === "dia" ? 16 : 0, left: -24 }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
               <XAxis
                 dataKey="rotulo"
                 tick={{ fontSize: 11, fill: "var(--muted)" }}
                 interval="preserveStartEnd"
                 minTickGap={12}
+                label={
+                  modo === "dia"
+                    ? {
+                        value: "Dia do mês",
+                        position: "insideBottom",
+                        offset: -12,
+                        fill: "var(--muted)",
+                        fontSize: 11,
+                      }
+                    : undefined
+                }
               />
               <YAxis
                 tick={{ fontSize: 11, fill: "var(--muted)" }}
                 allowDecimals={false}
                 width={44}
+                tickFormatter={formatarEixo}
               />
               <Tooltip
-                formatter={(valor) => [valor, "Concluídos"]}
+                formatter={(valor) => [formatarTooltip(valor), rotuloSerie]}
                 labelFormatter={(rotulo) => (modo === "dia" ? `Dia ${rotulo}` : rotulo)}
               />
               {modo === "dia" ? (
                 <Bar
                   dataKey="valor"
-                  fill="#10b981"
+                  fill={cor}
                   radius={[2, 2, 0, 0]}
                   maxBarSize={20}
                   isAnimationActive={false}
@@ -301,7 +389,7 @@ function GraficoLinha({ titulo, dados, modo, onModo, erro }) {
                 <Line
                   type="monotone"
                   dataKey="valor"
-                  stroke="#10b981"
+                  stroke={cor}
                   strokeWidth={2}
                   dot={{ r: 2 }}
                   isAnimationActive={false}
@@ -315,8 +403,28 @@ function GraficoLinha({ titulo, dados, modo, onModo, erro }) {
   );
 }
 
+// Sub-abas de Relatórios, no mesmo padrão "de pasta" de Pendentes/Conclusão
+// em page.js. Estado local booleano (fora da URL), como verAguardandoConclusao.
+const SUB_ABAS = [
+  { financeiro: false, rotulo: "Atividades", Icone: ChartPie },
+  { financeiro: true, rotulo: "Financeiro", Icone: Wallet },
+];
+
+// Número grande do topo do Financeiro. `observacao` é a letrinha embaixo (só
+// o ticket médio usa, pra dizer sobre quantos atendimentos é a média).
+function Indicador({ rotulo, valor, observacao }) {
+  return (
+    <div className="rounded-xl bg-card p-4 shadow-sm ring-1 ring-border">
+      <p className="text-xs font-medium text-muted">{rotulo}</p>
+      <p className="mt-1 text-xl font-semibold text-heading">{valor}</p>
+      {observacao && <p className="mt-1 text-xs text-muted">{observacao}</p>}
+    </div>
+  );
+}
+
 export default function Relatorios({ estabelecimentoId }) {
   const [mesSelecionado, setMesSelecionado] = useState(() => mesDeHoje());
+  const [verFinanceiro, setVerFinanceiro] = useState(false);
 
   // Resultado da última busca, marcado com o mês a que pertence. "Carregando"
   // é derivado (resultado de outro mês ou nenhum) em vez de um setState no
@@ -381,12 +489,16 @@ export default function Relatorios({ estabelecimentoId }) {
     ? resumo.desfecho.cliente + resumo.desfecho.salao + resumo.desfecho.expirado
     : 0;
 
-  // Série da linha: null enquanto a busca daquele modo não chegou (o modo
-  // "dia" reaproveita as linhas que as pizzas já têm).
+  const financeiro = carregando || erro ? null : montarFinanceiro(resultado.linhas);
+
+  // Séries da linha: null enquanto a busca daquele modo não chegou (o modo
+  // "dia" reaproveita as linhas que as pizzas já têm). As duas sub-abas
+  // dividem o mesmo `modoSerie`, então saem juntas do mesmo conjunto.
   const semestreDoMes = semestre?.mes === mesSelecionado ? semestre : null;
   const erroSemestre = semestreDoMes?.erro ?? "";
   const semestreProntas = erroSemestre ? null : (semestreDoMes?.linhas ?? null);
   let serie = null;
+  let serieReceita = null;
   if (resumo) {
     serie =
       modoSerie === "dia"
@@ -395,10 +507,44 @@ export default function Relatorios({ estabelecimentoId }) {
           montarSerie(semestreProntas, agora, baldesPorMes(mesSelecionado), (i) =>
             chaveMes(i.data)
           );
+    serieReceita =
+      modoSerie === "dia"
+        ? montarSerieReceita(resultado.linhas, baldesPorDia(mesSelecionado), (i) => i.data)
+        : semestreProntas &&
+          montarSerieReceita(semestreProntas, baldesPorMes(mesSelecionado), (i) =>
+            chaveMes(i.data)
+          );
   }
 
   return (
     <div>
+      <div
+        role="tablist"
+        aria-label="Relatórios"
+        className="mb-4 flex items-end gap-1 border-b border-border"
+      >
+        {SUB_ABAS.map(({ financeiro: ehFinanceiro, rotulo, Icone }) => {
+          const ativa = verFinanceiro === ehFinanceiro;
+          return (
+            <button
+              key={rotulo}
+              type="button"
+              role="tab"
+              aria-selected={ativa}
+              onClick={() => setVerFinanceiro(ehFinanceiro)}
+              className={`-mb-px inline-flex min-w-0 items-center gap-2 rounded-t-lg border px-3 py-2 text-sm font-semibold transition ${
+                ativa
+                  ? "border-border border-b-card bg-card text-heading"
+                  : "border-transparent text-body hover:text-heading"
+              }`}
+            >
+              <Icone className="h-5 w-5 shrink-0" />
+              <span className="truncate">{rotulo}</span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Mesmo controle do Histórico, com estado local: "<" sempre anda (mês
           vazio mostra zeros), ">" para no mês corrente — mês futuro ainda não
           tem atendimento concluído. */}
@@ -420,7 +566,7 @@ export default function Relatorios({ estabelecimentoId }) {
         </p>
       )}
 
-      {resumo && (
+      {resumo && !verFinanceiro && (
         <>
           <div className="mb-4 space-y-1 text-sm text-body">
             <p>
@@ -455,6 +601,42 @@ export default function Relatorios({ estabelecimentoId }) {
               erro={modoSerie === "mes" ? erroSemestre : ""}
             />
           </div>
+        </>
+      )}
+
+      {financeiro && verFinanceiro && (
+        <>
+          <div className="mb-4 grid gap-3 sm:grid-cols-3">
+            <Indicador rotulo="Receita do mês" valor={formatarPreco(financeiro.receita)} />
+            <Indicador rotulo="Sinais recebidos" valor={formatarPreco(financeiro.sinais)} />
+            <Indicador
+              rotulo="Ticket médio"
+              valor={financeiro.ticket == null ? "—" : formatarPreco(financeiro.ticket)}
+              observacao={
+                financeiro.ticket == null
+                  ? "Nenhum concluído com valor neste mês."
+                  : `Média de ${financeiro.comValor} ${
+                      financeiro.comValor === 1 ? "atendimento" : "atendimentos"
+                    }${
+                      financeiro.semValor > 0
+                        ? ` (${financeiro.semValor} sem valor registrado)`
+                        : ""
+                    }.`
+              }
+            />
+          </div>
+
+          <GraficoLinha
+            titulo="Receita"
+            dados={serieReceita ?? null}
+            modo={modoSerie}
+            onModo={setModoSerie}
+            erro={modoSerie === "mes" ? erroSemestre : ""}
+            rotuloSerie="Receita"
+            formatarTooltip={formatarPreco}
+            formatarEixo={(centavos) => Math.round(centavos / 100)}
+            cor="#3b82f6"
+          />
         </>
       )}
     </div>
