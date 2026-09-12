@@ -198,31 +198,9 @@ function rotuloStatus(status) {
   return status;
 }
 
-// Badge "Expira em Xh" da aba Pendentes (ver inbox mais abaixo): só aparece
-// nos 48h antes do fim da reserva provisória, pra não poluir a UI logo na
-// criação. Limite separado (18h) decide a cor de alerta (azul -> vermelho).
-const LIMITE_BADGE_EXPIRA_HORAS = 48;
-const LIMITE_BADGE_EXPIRA_VERMELHO_HORAS = 18;
-
 // Quantos "Agendamentos confirmados" o card de pendente mostra antes de
 // truncar o resto atrás do "+N outros" (ver inbox mais abaixo).
 const MAX_CONFIRMADOS_VISIVEIS = 2;
-
-// Horas restantes até a reserva provisória do item expirar
-// (created_at + estabelecimentos.reserva_provisoria_expira_horas), ou null se
-// o salão não configurou expiração (coluna nula) — nesse caso nenhum badge
-// deve aparecer. Valor CRU (sem arredondar, pode ser negativo se já passou do
-// prazo): quem renderiza decide o corte de exibição (LIMITE_BADGE_EXPIRA_HORAS)
-// e o arredondamento pro texto; a ordenação do inbox usa o valor cru direto.
-// Função PURA — não muda nada no banco nem tira o item do inbox (a reserva
-// provisória hoje só afeta este contador visual, nada mais).
-function horasRestantesReserva(item, estabelecimento, agora) {
-  const expiraHoras = estabelecimento?.reserva_provisoria_expira_horas;
-  if (expiraHoras == null || !item.created_at) return null;
-
-  const horasDesdeCriacao = (agora - new Date(item.created_at)) / (1000 * 60 * 60);
-  return Number(expiraHoras) - horasDesdeCriacao;
-}
 
 // Texto + cores do badge por categoria do histórico (rotuloHistorico, ver
 // lib/particao — fonte única da categorização, compartilhada com
@@ -2249,30 +2227,13 @@ export default function AdminPage() {
   const inbox = agendamentos
     .filter(
       (item) => classificarAgendamento(item, agora) === "inbox" && item.finalizado && item.telefone
-    )
-    // Itens com contador ativo (<=48h pra expirar a reserva) primeiro, mais
-    // próximos de expirar no topo; os demais mantêm a ordem cronológica de
-    // sempre (sort é estável, então "não mexe" nesse grupo, ver
-    // horasRestantesReserva).
-    .sort((a, b) => {
-      const restA = horasRestantesReserva(a, estabelecimento, agora);
-      const restB = horasRestantesReserva(b, estabelecimento, agora);
-      const ativoA = restA != null && restA <= LIMITE_BADGE_EXPIRA_HORAS;
-      const ativoB = restB != null && restB <= LIMITE_BADGE_EXPIRA_HORAS;
-      if (ativoA && ativoB) return restA - restB;
-      if (ativoA !== ativoB) return ativoA ? -1 : 1;
-      return 0;
-    });
+    );
 
   // Mesmo `inbox` acima, agrupado por cliente pra render (a aba mostra os
   // cards de uma mesma pessoa juntos, numa moldura só). NÃO reordena nada:
   // Map preserva ordem de inserção, então o grupo entra na lista geral na
-  // posição do seu PRIMEIRO membro no inbox já ordenado — que é justamente o
-  // mais prioritário —, e dentro do grupo os itens saem na mesma ordem
-  // relativa, ou seja pela MESMA regra (horasRestantesReserva +
-  // LIMITE_BADGE_EXPIRA_HORAS). Sem segundo sort: o critério de prioridade
-  // continua existindo em um lugar só, e qualquer mudança nele se propaga
-  // sozinha pros dois níveis.
+  // posição do seu PRIMEIRO membro no inbox, e dentro do grupo os itens saem
+  // na mesma ordem relativa — cronológica nos dois níveis, sem segundo sort.
   // A chave do Map é o telefone normalizado (só dígitos) pra unir a mesma
   // cliente gravada com formatações diferentes em agendamentos distintos; o
   // `telefone` do grupo guarda o valor ORIGINAL do primeiro item, porque a
@@ -2825,14 +2786,6 @@ export default function AdminPage() {
                 const confirmadosOcultos =
                   outrosAgendamentos.length - MAX_CONFIRMADOS_VISIVEIS;
 
-                // Contador "Expira em Xh" (ver horasRestantesReserva acima):
-                // null enquanto o salão não configurou expiração, ou fora da
-                // janela de 48h. mostrarBadgeExpira controla só a exibição; o
-                // valor cru (não arredondado) decide a cor.
-                const horasRestantes = horasRestantesReserva(item, estabelecimento, agora);
-                const mostrarBadgeExpira =
-                  horasRestantes != null && horasRestantes <= LIMITE_BADGE_EXPIRA_HORAS;
-
                 // { clienteId, etiqueta } do telefone deste card, ou undefined
                 // se nenhum cliente cadastrado casa com ele.
                 const entradaEtiqueta = etiquetasPorTelefone.get(
@@ -2967,17 +2920,6 @@ export default function AdminPage() {
                           }
                           onFechar={fecharPopoverEtiqueta}
                         />
-                      )}
-                      {mostrarBadgeExpira && (
-                        <span
-                          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${
-                            horasRestantes <= LIMITE_BADGE_EXPIRA_VERMELHO_HORAS
-                              ? "bg-red-50 text-red-600 ring-red-100"
-                              : "bg-blue-50 text-blue-700 ring-blue-100"
-                          }`}
-                        >
-                          Expira em {Math.max(0, Math.round(horasRestantes))}h
-                        </span>
                       )}
                     </div>
                   </div>
