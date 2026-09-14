@@ -3658,11 +3658,11 @@ export default function AdminPage() {
                   {/* Cabeçalho: só o nome (o telefone saiu — a ação aqui é
                       registrar o desfecho, não contatar). Tags à direita, em
                       linha, mesmo arranjo do card de Pendentes. */}
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="min-w-0 truncate font-medium text-heading">
+                  <div className="flex flex-col gap-1.5">
+                    <p className="font-medium text-heading">
                       {item.nome_cliente}
                     </p>
-                    <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
                       {entradaEtiqueta && (
                         <SeletorEtiquetaRapido
                           estabelecimentoId={estabelecimento.id}
