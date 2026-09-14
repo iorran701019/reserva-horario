@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChartPie, Wallet } from "lucide-react";
+import {
+  CalendarX,
+  ChartPie,
+  CheckCircle2,
+  HandCoins,
+  Lock,
+  Receipt,
+  Wallet,
+} from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -192,16 +200,21 @@ function montarSerie(linhas, agora, estabelecimento, baldes, chaveDe) {
 //              propósito: é dinheiro que entrou sem atendimento, e misturar
 //              inflaria tanto a receita quanto o ticket médio. Também não sai
 //              no gráfico de Receita, que é só valor_cobrado_centavos.
-//   porForma – { pix, dinheiro, credito, debito } -> { quantidade, valor }
-//              dos concluídos COM valor (mesma base da receita, então a soma
-//              dos quatro bate com ela). forma_pagamento_servico null conta
-//              como pix.
+//   porForma – { pix, dinheiro, credito, debito, nao_especificado }
+//              -> { quantidade, valor } dos concluídos COM valor (mesma base
+//              da receita, então a soma das cinco bate com ela).
+//              forma_pagamento_servico null ou fora dos quatro ids conta como
+//              nao_especificado.
+// Cores na mesma família dos quadrados de CardConclusaoAtendimento (tom -500).
 const FORMAS_PAGAMENTO = [
-  { id: "pix", rotulo: "Pix" },
-  { id: "dinheiro", rotulo: "Dinheiro" },
-  { id: "credito", rotulo: "Crédito" },
-  { id: "debito", rotulo: "Débito" },
+  { id: "pix", rotulo: "Pix", cor: "#14b8a6" },
+  { id: "dinheiro", rotulo: "Dinheiro", cor: "#22c55e" },
+  { id: "credito", rotulo: "Crédito", cor: "#3b82f6" },
+  { id: "debito", rotulo: "Débito", cor: "#a855f7" },
+  { id: "nao_especificado", rotulo: "Não especificado", cor: "#94a3b8" },
 ];
+
+const FORMAS_PAGAMENTO_VALIDAS = new Set(["pix", "dinheiro", "credito", "debito"]);
 
 function montarFinanceiro(linhas) {
   let receita = 0;
@@ -224,9 +237,14 @@ function montarFinanceiro(linhas) {
     if (item.valor_cobrado_centavos != null) {
       receita += item.valor_cobrado_centavos;
       comValor += 1;
-      // Valor fora do check (não deveria existir) também cai em pix, pra a
-      // soma dos quatro nunca divergir da receita.
-      const forma = porForma[item.forma_pagamento_servico] ?? porForma.pix;
+      // Valor fora do check (não deveria existir) também cai em
+      // nao_especificado, pra a soma das cinco nunca divergir da receita.
+      const forma =
+        porForma[
+          FORMAS_PAGAMENTO_VALIDAS.has(item.forma_pagamento_servico)
+            ? item.forma_pagamento_servico
+            : "nao_especificado"
+        ];
       forma.quantidade += 1;
       forma.valor += item.valor_cobrado_centavos;
     }
@@ -262,7 +280,7 @@ function montarSerieReceita(linhas, baldes, chaveDe) {
   return baldes.map((b) => ({ rotulo: b.rotulo, valor: soma.get(b.chave) }));
 }
 
-function GraficoPizza({ titulo, categorias, contagens, observacao }) {
+function GraficoPizza({ titulo, categorias, contagens, observacao, formatarValor = (v) => v }) {
   const dados = categorias
     .map((c) => ({ ...c, valor: contagens[c.id] }))
     .filter((c) => c.valor > 0);
@@ -291,7 +309,7 @@ function GraficoPizza({ titulo, categorias, contagens, observacao }) {
                 ))}
               </Pie>
               <Tooltip
-                formatter={(valor) => `${valor} (${Math.round((valor / total) * 100)}%)`}
+                formatter={(valor) => `${formatarValor(valor)} (${Math.round((valor / total) * 100)}%)`}
               />
               <Legend />
             </PieChart>
@@ -462,37 +480,33 @@ const SUB_ABAS = [
   { financeiro: true, rotulo: "Financeiro", Icone: Wallet },
 ];
 
-// Número grande do topo do Financeiro. `observacao` é a letrinha embaixo (só
-// o ticket médio usa, pra dizer sobre quantos atendimentos é a média).
-function Indicador({ rotulo, valor, observacao }) {
+// Chip do ícone no canto do Indicador. Classes literais (o Tailwind só gera o
+// que aparece escrito).
+const CORES_INDICADOR = {
+  emerald: { chip: "bg-emerald-50 text-emerald-600" },
+  teal: { chip: "bg-teal-50 text-teal-600" },
+  amber: { chip: "bg-amber-50 text-amber-600" },
+  sky: { chip: "bg-sky-50 text-sky-600" },
+};
+
+// Número grande do topo de Atividades e do Financeiro. `observacao` é a
+// letrinha embaixo; `icone` (componente Lucide) vai num chip à direita do
+// rótulo, na cor `cor` (chave de CORES_INDICADOR).
+function Indicador({ rotulo, valor, observacao, icone: Icone, cor = "sky" }) {
   return (
     <div className="rounded-xl bg-card p-4 shadow-sm ring-1 ring-border">
-      <p className="text-xs font-medium text-muted">{rotulo}</p>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-medium text-muted">{rotulo}</p>
+        {Icone && (
+          <div
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${CORES_INDICADOR[cor].chip}`}
+          >
+            <Icone className="h-4.5 w-4.5" />
+          </div>
+        )}
+      </div>
       <p className="mt-1 text-xl font-semibold text-heading">{valor}</p>
       {observacao && <p className="mt-1 text-xs text-muted">{observacao}</p>}
-    </div>
-  );
-}
-
-// Mesmo cartão do Indicador, com uma linha por forma de pagamento no lugar do
-// número único.
-function IndicadorFormasPagamento({ porForma }) {
-  return (
-    <div className="rounded-xl bg-card p-4 shadow-sm ring-1 ring-border">
-      <p className="text-xs font-medium text-muted">Receita por forma de pagamento</p>
-      <ul className="mt-1 space-y-0.5">
-        {FORMAS_PAGAMENTO.map((f) => (
-          <li key={f.id} className="flex items-baseline justify-between gap-2 text-sm">
-            <span className="text-body">
-              {f.rotulo} <span className="text-xs text-muted">({porForma[f.id].quantidade})</span>
-            </span>
-            <span className="font-semibold text-heading">
-              {formatarPreco(porForma[f.id].valor)}
-            </span>
-          </li>
-        ))}
-      </ul>
-      <p className="mt-1 text-xs text-muted">Sem forma informada conta como Pix.</p>
     </div>
   );
 }
@@ -651,15 +665,19 @@ export default function Relatorios({ estabelecimento }) {
 
       {resumo && !verFinanceiro && (
         <>
-          <div className="mb-4 space-y-1 text-sm text-body">
-            <p>
-              <span className="font-medium text-heading">{resumo.desfecho.concluido}</span>{" "}
-              {resumo.desfecho.concluido === 1 ? "atendimento concluído" : "atendimentos concluídos"}
-            </p>
-            <p>
-              <span className="font-medium text-heading">{totalCancelamentos}</span>{" "}
-              {totalCancelamentos === 1 ? "cancelamento" : "cancelamentos"}
-            </p>
+          <div className="mb-4 grid grid-cols-2 gap-3">
+            <Indicador
+              rotulo="Atendimentos concluídos"
+              valor={resumo.desfecho.concluido}
+              icone={CheckCircle2}
+              cor="emerald"
+            />
+            <Indicador
+              rotulo="Cancelamentos"
+              valor={totalCancelamentos}
+              icone={CalendarX}
+              cor="amber"
+            />
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -690,16 +708,30 @@ export default function Relatorios({ estabelecimento }) {
       {financeiro && verFinanceiro && (
         <>
           <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Indicador rotulo="Receita do mês" valor={formatarPreco(financeiro.receita)} />
-            <Indicador rotulo="Sinais recebidos" valor={formatarPreco(financeiro.sinais)} />
+            <Indicador
+              rotulo="Receita do mês"
+              valor={formatarPreco(financeiro.receita)}
+              icone={Wallet}
+              cor="emerald"
+            />
+            <Indicador
+              rotulo="Sinais recebidos"
+              valor={formatarPreco(financeiro.sinais)}
+              icone={HandCoins}
+              cor="teal"
+            />
             <Indicador
               rotulo="Sinais retidos (cancelados)"
               valor={formatarPreco(financeiro.sinaisRetidos)}
+              icone={Lock}
+              cor="amber"
               observacao="Não entra na receita. Estorno feito por fora do app não aparece aqui."
             />
             <Indicador
               rotulo="Ticket médio"
               valor={financeiro.ticket == null ? "—" : formatarPreco(financeiro.ticket)}
+              icone={Receipt}
+              cor="sky"
               observacao={
                 financeiro.ticket == null
                   ? "Nenhum concluído com valor neste mês."
@@ -712,7 +744,18 @@ export default function Relatorios({ estabelecimento }) {
                     }.`
               }
             />
-            <IndicadorFormasPagamento porForma={financeiro.porForma} />
+          </div>
+
+          <div className="mb-4 grid gap-4 md:grid-cols-2">
+            <GraficoPizza
+              titulo="Receita por forma de pagamento"
+              categorias={FORMAS_PAGAMENTO}
+              contagens={Object.fromEntries(
+                FORMAS_PAGAMENTO.map((f) => [f.id, financeiro.porForma[f.id].valor])
+              )}
+              formatarValor={formatarPreco}
+              observacao='"Não especificado" são atendimentos sem forma de pagamento declarada.'
+            />
           </div>
 
           <GraficoLinha
