@@ -731,10 +731,14 @@ function DetalheCliente({
                                     atual === item.id ? null : item.id
                                   )
                                 }
-                                className="ml-auto inline-flex items-center gap-1 rounded-lg bg-card px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                                className={`ml-auto inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium ring-1 transition ${
+                                  item.editado_manualmente_em
+                                    ? "bg-card text-body ring-border hover:bg-surface"
+                                    : "bg-amber-50 text-amber-700 ring-amber-200 hover:bg-amber-100"
+                                }`}
                               >
                                 <Pencil className="h-3.5 w-3.5" />
-                                Editar
+                                {item.editado_manualmente_em ? "Editado" : "Editar"}
                               </button>
                             )}
                             {idEditandoConclusao === item.id && item.status === "concluido" && (

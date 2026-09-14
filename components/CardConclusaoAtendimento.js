@@ -208,17 +208,36 @@ export default function CardConclusaoAtendimento({ agendamento, onSalvo, onFecha
       return;
     }
 
+    // editado_manualmente_em no patch local só pra acender o "Editado" na
+    // hora; o valor gravado vem de registrarValorCobrado/concluirAgendamento
+    // (mesmo instante, ms de diferença).
+    const editadoManualmenteEm = new Date().toISOString();
     onSalvo(
       jaConcluido
-        ? { ...extras, valor_cobrado_centavos: valorCentavos }
-        : { ...extras, status: "concluido", valor_cobrado_centavos: valorCentavos }
+        ? {
+            ...extras,
+            valor_cobrado_centavos: valorCentavos,
+            editado_manualmente_em: editadoManualmenteEm,
+          }
+        : {
+            ...extras,
+            status: "concluido",
+            valor_cobrado_centavos: valorCentavos,
+            editado_manualmente_em: editadoManualmenteEm,
+          }
     );
   }
 
   async function handleNaoCompareceu() {
     setSalvando(true);
     setErro("");
-    const { ok, erro: erroSalvar } = await marcarNaoCompareceu(agendamento.id, patchSinal);
+    // Status de ANTES da ação: decide se a falta é edição de um concluído
+    // (marca editado_manualmente_em) ou a marcação original.
+    const { ok, erro: erroSalvar } = await marcarNaoCompareceu(
+      agendamento.id,
+      patchSinal,
+      agendamento.status
+    );
     setSalvando(false);
 
     if (!ok) {
@@ -226,7 +245,12 @@ export default function CardConclusaoAtendimento({ agendamento, onSalvo, onFecha
       return;
     }
 
-    onSalvo({ ...patchSinal, status: "cancelado", nao_compareceu: true });
+    onSalvo({
+      ...patchSinal,
+      ...(jaConcluido ? { editado_manualmente_em: new Date().toISOString() } : {}),
+      status: "cancelado",
+      nao_compareceu: true,
+    });
   }
 
   return (

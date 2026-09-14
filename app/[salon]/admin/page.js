@@ -358,7 +358,7 @@ function estaAguardandoConclusao(item, agora) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, editado_manualmente_em, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -3905,8 +3905,10 @@ export default function AdminPage() {
                       key={item.id}
                       className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border"
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
+                      {/* Empilhado: nome + telefone em cima, selo numa linha
+                          própria abaixo, alinhado à esquerda. */}
+                      <div className="flex flex-col items-start gap-2">
+                        <div className="min-w-0 max-w-full">
                           <button
                             type="button"
                             onClick={() =>
@@ -3915,7 +3917,7 @@ export default function AdminPage() {
                                 { scroll: false }
                               )
                             }
-                            className="truncate text-left font-medium text-blue-600 underline-offset-2 hover:underline"
+                            className="max-w-full truncate text-left font-medium text-blue-600 underline-offset-2 hover:underline"
                           >
                             {item.nome_cliente}
                           </button>
@@ -3927,7 +3929,7 @@ export default function AdminPage() {
                         {/* Rótulo derivado (Concluído/Vencido/Cancelado). O
                             status cru no banco NÃO muda. */}
                         <span
-                          className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${meta.classe}`}
+                          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${meta.classe}`}
                         >
                           {meta.rotulo}
                         </span>
@@ -4038,10 +4040,14 @@ export default function AdminPage() {
                                 atual === item.id ? null : item.id
                               )
                             }
-                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                            className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium ring-1 transition ${
+                              item.editado_manualmente_em
+                                ? "bg-card text-body ring-border hover:bg-surface"
+                                : "bg-amber-50 text-amber-700 ring-amber-200 hover:bg-amber-100"
+                            }`}
                           >
                             <Pencil className="h-4 w-4" />
-                            Editar
+                            {item.editado_manualmente_em ? "Editado" : "Editar"}
                           </button>
                         )}
                       </div>
