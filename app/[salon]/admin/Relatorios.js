@@ -192,11 +192,25 @@ function montarSerie(linhas, agora, estabelecimento, baldes, chaveDe) {
 //              propósito: é dinheiro que entrou sem atendimento, e misturar
 //              inflaria tanto a receita quanto o ticket médio. Também não sai
 //              no gráfico de Receita, que é só valor_cobrado_centavos.
+//   porForma – { pix, dinheiro, credito, debito } -> { quantidade, valor }
+//              dos concluídos COM valor (mesma base da receita, então a soma
+//              dos quatro bate com ela). forma_pagamento_servico null conta
+//              como pix.
+const FORMAS_PAGAMENTO = [
+  { id: "pix", rotulo: "Pix" },
+  { id: "dinheiro", rotulo: "Dinheiro" },
+  { id: "credito", rotulo: "Crédito" },
+  { id: "debito", rotulo: "Débito" },
+];
+
 function montarFinanceiro(linhas) {
   let receita = 0;
   let sinais = 0;
   let comValor = 0;
   let sinaisRetidos = 0;
+  const porForma = Object.fromEntries(
+    FORMAS_PAGAMENTO.map((f) => [f.id, { quantidade: 0, valor: 0 }])
+  );
 
   for (const item of linhas) {
     const sinalPago = item.sinal_declarado_pago && item.sinal_valor_centavos != null;
@@ -210,6 +224,11 @@ function montarFinanceiro(linhas) {
     if (item.valor_cobrado_centavos != null) {
       receita += item.valor_cobrado_centavos;
       comValor += 1;
+      // Valor fora do check (não deveria existir) também cai em pix, pra a
+      // soma dos quatro nunca divergir da receita.
+      const forma = porForma[item.forma_pagamento_servico] ?? porForma.pix;
+      forma.quantidade += 1;
+      forma.valor += item.valor_cobrado_centavos;
     }
     if (sinalPago) {
       sinais += item.sinal_valor_centavos;
@@ -220,6 +239,7 @@ function montarFinanceiro(linhas) {
     receita,
     sinais,
     sinaisRetidos,
+    porForma,
     comValor,
     semValor: linhas.filter(
       (i) => i.status === "concluido" && i.valor_cobrado_centavos == null
@@ -290,7 +310,7 @@ async function buscarFechados(estabelecimentoId, inicio, fim) {
   const { data, error } = await supabase
     .from("agendamentos")
     .select(
-      "id, data, horario, telefone, duracao_min, status, cancelado_por_cliente, cancelado_pelo_salao, nao_compareceu, expirado_automaticamente, valor_cobrado_centavos, sinal_declarado_pago, sinal_valor_centavos, servico_id, servicos(duracao_min, eh_manutencao, manutencao_externa)"
+      "id, data, horario, telefone, duracao_min, status, cancelado_por_cliente, cancelado_pelo_salao, nao_compareceu, expirado_automaticamente, valor_cobrado_centavos, forma_pagamento_servico, sinal_declarado_pago, sinal_valor_centavos, servico_id, servicos(duracao_min, eh_manutencao, manutencao_externa)"
     )
     .eq("estabelecimento_id", estabelecimentoId)
     .eq("finalizado", true)
@@ -450,6 +470,29 @@ function Indicador({ rotulo, valor, observacao }) {
       <p className="text-xs font-medium text-muted">{rotulo}</p>
       <p className="mt-1 text-xl font-semibold text-heading">{valor}</p>
       {observacao && <p className="mt-1 text-xs text-muted">{observacao}</p>}
+    </div>
+  );
+}
+
+// Mesmo cartão do Indicador, com uma linha por forma de pagamento no lugar do
+// número único.
+function IndicadorFormasPagamento({ porForma }) {
+  return (
+    <div className="rounded-xl bg-card p-4 shadow-sm ring-1 ring-border">
+      <p className="text-xs font-medium text-muted">Receita por forma de pagamento</p>
+      <ul className="mt-1 space-y-0.5">
+        {FORMAS_PAGAMENTO.map((f) => (
+          <li key={f.id} className="flex items-baseline justify-between gap-2 text-sm">
+            <span className="text-body">
+              {f.rotulo} <span className="text-xs text-muted">({porForma[f.id].quantidade})</span>
+            </span>
+            <span className="font-semibold text-heading">
+              {formatarPreco(porForma[f.id].valor)}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1 text-xs text-muted">Sem forma informada conta como Pix.</p>
     </div>
   );
 }
@@ -669,6 +712,7 @@ export default function Relatorios({ estabelecimento }) {
                     }.`
               }
             />
+            <IndicadorFormasPagamento porForma={financeiro.porForma} />
           </div>
 
           <GraficoLinha
