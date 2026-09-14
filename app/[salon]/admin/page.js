@@ -38,7 +38,6 @@ import {
   mesesJanelaIndisponiveis,
   mesesDoAlcance,
   statusDoMes,
-  diasRestantesJanela,
 } from "@/lib/janelaAgendamento";
 import { rotuloMesLongo } from "@/lib/mes";
 import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
@@ -112,14 +111,6 @@ function formatarData(data) {
   if (!data) return "—";
   const [ano, mes, dia] = data.split("-");
   return `${dia}/${mes}`;
-}
-
-// Formata "2026-06-25" como "25/06/2026" — usado no banner/popup da janela de
-// agendamento, onde o ano importa (diferente de formatarData acima).
-function formatarDataComAno(data) {
-  if (!data) return "—";
-  const [ano, mes, dia] = data.split("-");
-  return `${dia}/${mes}/${ano}`;
 }
 
 // "YYYY-MM-DD" de hoje em horário LOCAL — usado só pra chave do localStorage
@@ -489,11 +480,6 @@ export default function AdminPage() {
   // Drawer lateral de navegação (mobile-first): substitui a antiga barra de abas
   // fixa. `true` = aberto. Selecionar uma aba troca `viewPai` e fecha o drawer.
   const [drawerAberto, setDrawerAberto] = useState(false);
-
-  // Popup diário de aviso da janela de agendamento (abaixo de 30 dias
-  // restantes — ver useEffect mais abaixo). "Já mostrei hoje" é controlado
-  // via localStorage (chave por estabelecimento + data), sem coluna nova.
-  const [popupJanelaAberto, setPopupJanelaAberto] = useState(false);
 
   // Popup diário de VIRADA DE MÊS: o mês corrente e/ou o seguinte não têm
   // registro em janela_agendamento_meses, ou seja, a agenda está (ou vai
@@ -1585,26 +1571,6 @@ export default function AdminPage() {
     };
   }, [autenticado, salon]);
 
-  // Popup diário da janela de agendamento: dispara uma vez, quando o
-  // estabelecimento resolve e faltam menos de 30 dias pro fim da janela
-  // configurada (ver diasRestantesJanela). "Já mostrei hoje" via localStorage
-  // — chave por estabelecimento + data de hoje, sem precisar de coluna nova
-  // nem de zerar nada à meia-noite (a chave de ontem simplesmente nunca mais
-  // bate). Sem estabelecimento.janela_agendamento_fim (salão não configurou
-  // ainda), não há o que avisar.
-  useEffect(() => {
-    if (!estabelecimento?.id || !estabelecimento?.janela_agendamento_fim) return;
-
-    const dias = diasRestantesJanela(estabelecimento.janela_agendamento_fim);
-    if (dias == null || dias >= 30) return;
-
-    const chave = `janela_popup_mostrado_${estabelecimento.id}_${hojeISOLocal()}`;
-    if (window.localStorage.getItem(chave)) return;
-
-    window.localStorage.setItem(chave, "1");
-    setPopupJanelaAberto(true);
-  }, [estabelecimento]);
-
   // Popup diário de virada de mês: o mês corrente e/ou o seguinte não têm
   // registro em janela_agendamento_meses (ver mesesViradaFaltando). Com a
   // regra fail-closed (ver mesAgendavel em lib/janelaAgendamento.js) isso
@@ -2474,9 +2440,9 @@ export default function AdminPage() {
         {/* Banner da janela de agendamento: só na aba Painel (viewPai ===
             "painel", ver ABAS_PAI) — nas outras abas (Profissionais, Regras
             de negócio, etc.) ele só poluía a tela sem contexto. O popup
-            diário (abaixo de 30 dias restantes, ver useEffect/
-            popupJanelaAberto) NÃO é afetado por essa condição: continua
-            disparando em qualquer aba, independente daqui. Clique navega
+            diário de virada de mês (ver useEffect/popupViradaMesAberto) NÃO
+            é afetado por essa condição: continua disparando em qualquer aba,
+            independente daqui. Clique navega
             direto pro bloco "Janela de agendamento" em Regras de negócio, já
             aberto e rolado até ele (ver focarJanelaAgendamento +
             ConfiguracoesSalao). Visual de botão de verdade (sombra, anel
@@ -5281,58 +5247,6 @@ export default function AdminPage() {
           setIdParaVincular(null);
         }}
       />
-
-      {/* Popup diário da janela de agendamento (ver useEffect que abre
-          popupJanelaAberto) — abaixo de 30 dias restantes, uma vez por dia. */}
-      {popupJanelaAberto && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="titulo-popup-janela"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
-          onClick={() => setPopupJanelaAberto(false)}
-        >
-          <div
-            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2
-              id="titulo-popup-janela"
-              className="text-lg font-semibold text-heading"
-            >
-              Sua agenda está perto do fim
-            </h2>
-            <p className="mt-2 text-sm text-body">
-              A agenda está aberta só até{" "}
-              <span className="font-medium text-heading">
-                {formatarDataComAno(estabelecimento.janela_agendamento_fim)}
-              </span>
-              . Configure uma nova data em Regras de negócio pra continuar
-              recebendo agendamentos.
-            </p>
-
-            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
-              <button
-                type="button"
-                onClick={() => {
-                  setPopupJanelaAberto(false);
-                  setViewPai("regras");
-                }}
-                className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
-              >
-                Ir para Regras de negócio
-              </button>
-              <button
-                type="button"
-                onClick={() => setPopupJanelaAberto(false)}
-                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
-              >
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Popup diário de virada de mês (ver o useEffect que abre
           popupViradaMesAberto) — o mês corrente e/ou o seguinte não têm
