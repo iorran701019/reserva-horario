@@ -107,3 +107,24 @@ Residual desta sessão:
 - Callback de patch para `sinal_regra` em `ConfiguracoesSalao.js` → `AdminPage`, evitando staleness do aviso de Pendentes até reload.
 - Confirmar no código real como `clienteEhNovo` é calculado em `precisaSinal` (ramo `'novos'`).
 - Criar as 5 etiquetas padrão retroativamente para a Valéria (produção) e para Flávia/Junior/Valéria em staging.
+
+
+# Pendências — reserva-horario
+
+## Em aberto
+
+- Limpar os 3 agendamentos de teste na Laysla de **staging** (`TESTE QA - Sinal Pago`, `TESTE QA - Sem Sinal`, `TESTE QA - Marca Editado`, estabelecimento_id=3).
+- Mensagem de WhatsApp "Fora da janela" (`MENSAGEM_FORA_DA_JANELA`, `lib/whatsapp.js`) pode citar `janela_agendamento_fim`, uma data que não tem mais relação com a disponibilidade real — avaliar se o texto `{janela_fim}` deve ser removido ou substituído.
+- Campo `janela_agendamento_fim` está escondido em Regras de negócio (`ConfiguracoesSalao.js:2417`, `{false && (`) sem nenhuma UI de edição — decidir entre reexibir editável ou remover de vez (coluna, loaders, save).
+- Sem backfill retroativo de `editado_manualmente_em`: agendamentos concluídos manualmente antes de 14/09 não aparecem marcados como "Editado" no Histórico. Rodar só se a dona sentir falta.
+- Efeito colateral aceito: marcar "Não compareceu" sobre um item já concluído grava a correção do sinal, mas nenhuma tela mostra a marca depois (o item vira cancelado e o botão "Editar" some desses cards).
+
+## Backlog
+
+- Auditoria não iniciada: alinhamento de colunas de `estabelecimentos` entre `lib/estabelecimento.js` e `lib/perfil.js`.
+- Auditoria não iniciada: varredura livre de padrões de risco não previstos.
+- Investigar `calendar_import_ignorados` ausente em produção.
+- Divergência de roles na policy `agendamentos` entre staging e produção.
+- Bug pré-existente: `jaPendente` nunca passado ao `BlocoConfirmacaoPix` pelo wizard.
+- Sessão dedicada ao Programa de Fidelidade (botão "agendar brinde" sem handler, expiração de 12 meses, notificação).
+- Dívida técnica de tipos: `ConfiguracoesSalao.js` (`servicoManutencaoExternaId`) e `ModalVincularCliente.js` (`patch.servico_id`).
