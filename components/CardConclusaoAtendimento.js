@@ -18,6 +18,35 @@ function reaisParaCentavos(reais) {
   return Math.round(numero * 100);
 }
 
+// Quadrados de forma_pagamento_servico. Classes literais (o Tailwind só gera
+// o que aparece escrito): `base` sem seleção, `ativo` selecionado.
+const FORMAS_PAGAMENTO = [
+  {
+    id: "pix",
+    rotulo: "Pix",
+    base: "bg-teal-50 text-teal-700 ring-teal-100",
+    ativo: "bg-teal-100 text-teal-800 ring-2 ring-teal-500",
+  },
+  {
+    id: "dinheiro",
+    rotulo: "Dinheiro",
+    base: "bg-green-50 text-green-700 ring-green-100",
+    ativo: "bg-green-100 text-green-800 ring-2 ring-green-500",
+  },
+  {
+    id: "credito",
+    rotulo: "Crédito",
+    base: "bg-blue-50 text-blue-700 ring-blue-100",
+    ativo: "bg-blue-100 text-blue-800 ring-2 ring-blue-500",
+  },
+  {
+    id: "debito",
+    rotulo: "Débito",
+    base: "bg-purple-50 text-purple-700 ring-purple-100",
+    ativo: "bg-purple-100 text-purple-800 ring-2 ring-purple-500",
+  },
+];
+
 // Centavos -> texto do campo ("35.00"); "" quando não há valor.
 function centavosParaTexto(centavos) {
   return centavos != null ? (centavos / 100).toFixed(2) : "";
@@ -44,6 +73,16 @@ function centavosParaTexto(centavos) {
 // informa o que recebeu ALÉM do sinal e o total é esse valor + o sinal; nos
 // outros dois, o valor cheio.
 //
+// Com sinal registrado, o bloco pergunta "A cliente pagou mesmo o sinal Pix?",
+// começando pelo sinal_declarado_pago gravado. A resposta é LOCAL até a ação:
+// "Não" faz o card se comportar como sem sinal (sem a conta Sinal + Restante)
+// e o Sim/Cancelado grava, no mesmo UPDATE, sinal_declarado_pago com a
+// resposta. sinal_valor_centavos fica intocado.
+//
+// Abaixo, os quadrados de forma de pagamento (Pix/Dinheiro/Crédito/Débito),
+// seleção única e opcional — clicar no selecionado desmarca. Vão junto com o
+// Sim (forma_pagamento_servico); nenhum selecionado grava null.
+//
 // "Substituir valor" é uma edição LOCAL: "Salvar valor" só troca o valor
 // exibido (e o que o Sim vai gravar) e sai do modo edição; "Cancelar" volta
 // ao valor anterior. Nada vai pro banco até o Sim — assim a dona sempre tem
@@ -53,9 +92,10 @@ function centavosParaTexto(centavos) {
 //   agendamento – precisa de id, status, valor_cobrado_centavos,
 //                 servicos.preco_centavos (valor padrão quando ainda não há
 //                 valor cobrado gravado), sinal_declarado_pago e
-//                 sinal_valor_centavos.
+//                 sinal_valor_centavos; forma_pagamento_servico opcional.
 //   onSalvo     – recebe o patch gravado ({ status, valor_cobrado_centavos,
-//                 nao_compareceu }, só os campos que mudaram), pra quem chama
+//                 nao_compareceu, forma_pagamento_servico, sinal_* }, só os
+//                 campos que foram gravados), pra quem chama
 //                 refletir no estado local sem refazer a busca.
 //   onFechar    – opcional; mostra um "Cancelar" que fecha o card sem gravar
 //                 (usado pelo "Editar" do Histórico).
@@ -68,7 +108,20 @@ export default function CardConclusaoAtendimento({ agendamento, onSalvo, onFecha
   const [valorSubstituido, setValorSubstituido] = useState(null);
   const valorAtual = valorSubstituido ?? valorPadrao;
 
-  const comSinal = temSinal(agendamento);
+  // Houve sinal nesse agendamento: decide se a pergunta de confirmação
+  // aparece. Não dá pra ser só temSinal: um "não" já gravado deixa
+  // sinal_declarado_pago=false, mas preserva sinal_valor_centavos — é por ele
+  // que o Editar do Histórico ainda reconhece o sinal e mostra "Não" marcado.
+  const sinalRegistrado =
+    temSinal(agendamento) || agendamento.sinal_valor_centavos != null;
+  // Resposta da pergunta, começando pelo que está gravado.
+  const [sinalConfirmado, setSinalConfirmado] = useState(temSinal(agendamento));
+  // Sinal que vale pro card: o "não" sobrescreve antes de qualquer conta.
+  const comSinal = sinalRegistrado && sinalConfirmado;
+
+  const [formaPagamento, setFormaPagamento] = useState(
+    agendamento.forma_pagamento_servico ?? null
+  );
   // Valor do sinal só quando dá pra fazer a conta (estado 2). null nos outros
   // dois estados — é o que decide o bloco e o rótulo do campo.
   const sinalCentavos = comSinal ? agendamento.sinal_valor_centavos ?? null : null;
@@ -124,14 +177,30 @@ export default function CardConclusaoAtendimento({ agendamento, onSalvo, onFecha
     setCorrigindo(false);
   }
 
+  // Troca a resposta do sinal. Um valor substituído no estado com a conta já
+  // tem o sinal somado; mudar de estado sem limpar deixaria esse total
+  // incoerente com o novo bloco, então volta ao valor padrão.
+  function responderSinal(pagou) {
+    if (pagou === sinalConfirmado) return;
+    setSinalConfirmado(pagou);
+    setValorSubstituido(null);
+    setErro("");
+  }
+
+  // Campo do sinal a sobrescrever: sempre que a pergunta aparece, grava a
+  // resposta. sinal_valor_centavos NUNCA é tocado — o valor fica preservado e
+  // quem decide se ele conta é sinal_declarado_pago.
+  const patchSinal = sinalRegistrado ? { sinal_declarado_pago: sinalConfirmado } : {};
+
   async function handleSim() {
     const valorCentavos = valorAtual;
+    const extras = { ...patchSinal, forma_pagamento_servico: formaPagamento };
 
     setSalvando(true);
     setErro("");
     const { ok, erro: erroSalvar } = jaConcluido
-      ? await registrarValorCobrado(agendamento.id, valorCentavos)
-      : await concluirAgendamento(agendamento.id, valorCentavos);
+      ? await registrarValorCobrado(agendamento.id, valorCentavos, extras)
+      : await concluirAgendamento(agendamento.id, valorCentavos, extras);
     setSalvando(false);
 
     if (!ok) {
@@ -141,15 +210,15 @@ export default function CardConclusaoAtendimento({ agendamento, onSalvo, onFecha
 
     onSalvo(
       jaConcluido
-        ? { valor_cobrado_centavos: valorCentavos }
-        : { status: "concluido", valor_cobrado_centavos: valorCentavos }
+        ? { ...extras, valor_cobrado_centavos: valorCentavos }
+        : { ...extras, status: "concluido", valor_cobrado_centavos: valorCentavos }
     );
   }
 
   async function handleNaoCompareceu() {
     setSalvando(true);
     setErro("");
-    const { ok, erro: erroSalvar } = await marcarNaoCompareceu(agendamento.id);
+    const { ok, erro: erroSalvar } = await marcarNaoCompareceu(agendamento.id, patchSinal);
     setSalvando(false);
 
     if (!ok) {
@@ -157,13 +226,51 @@ export default function CardConclusaoAtendimento({ agendamento, onSalvo, onFecha
       return;
     }
 
-    onSalvo({ status: "cancelado", nao_compareceu: true });
+    onSalvo({ ...patchSinal, status: "cancelado", nao_compareceu: true });
   }
 
   return (
     <div className="space-y-3 rounded-xl bg-surface p-3 ring-1 ring-border">
+      {sinalRegistrado && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className="text-sm text-body">A cliente pagou mesmo o sinal Pix?</p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={salvando || corrigindo}
+              aria-pressed={sinalConfirmado}
+              onClick={() => responderSinal(true)}
+              className={`rounded-lg px-3 py-1 text-sm font-medium transition disabled:opacity-60 ${
+                sinalConfirmado
+                  ? "bg-green-100 text-green-800 ring-2 ring-green-500"
+                  : "bg-card text-body ring-1 ring-border hover:bg-surface"
+              }`}
+            >
+              Sim
+            </button>
+            <button
+              type="button"
+              disabled={salvando || corrigindo}
+              aria-pressed={!sinalConfirmado}
+              onClick={() => responderSinal(false)}
+              className={`rounded-lg px-3 py-1 text-sm font-medium transition disabled:opacity-60 ${
+                !sinalConfirmado
+                  ? "bg-red-100 text-red-800 ring-2 ring-red-500"
+                  : "bg-card text-body ring-1 ring-border hover:bg-surface"
+              }`}
+            >
+              Não
+            </button>
+          </div>
+        </div>
+      )}
+
       {!comSinal ? (
-        <p className="text-sm text-body">Sem pagamento de sinal</p>
+        <p className="text-sm text-body">
+          {sinalRegistrado
+            ? "Sinal marcado como não pago: não entra na conta"
+            : "Sem pagamento de sinal"}
+        </p>
       ) : sinalCentavos != null ? (
         <div className="space-y-0.5 text-sm text-body">
           <p>
@@ -185,6 +292,31 @@ export default function CardConclusaoAtendimento({ agendamento, onSalvo, onFecha
         </div>
       ) : (
         <p className="text-sm text-body">Sinal já pago (valor não registrado)</p>
+      )}
+
+      {!cancelado && (
+        <div>
+          <p className="mb-1 text-xs font-medium text-body">Forma de pagamento</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {FORMAS_PAGAMENTO.map((forma) => {
+              const selecionada = formaPagamento === forma.id;
+              return (
+                <button
+                  key={forma.id}
+                  type="button"
+                  disabled={salvando}
+                  aria-pressed={selecionada}
+                  onClick={() => setFormaPagamento(selecionada ? null : forma.id)}
+                  className={`rounded-lg px-3 py-2.5 text-sm font-medium transition disabled:opacity-60 ${
+                    selecionada ? forma.ativo : `ring-1 ${forma.base}`
+                  }`}
+                >
+                  {forma.rotulo}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       <p className="text-sm font-semibold text-heading">Concluiu normalmente?</p>
