@@ -14,6 +14,13 @@
 - Confirmar merge de `fix/lista-ignorados-import-calendar` e `fix/equipe-acordeao` pra `main`, se ainda não tiver sido feito.
 - Opcional: apagar o tenant `padrao-novo` de staging ou mantê-lo como referência permanente do tema padrão.
 
+### CRM Comercial — fase 1 (Sessão 63)
+- Testar ao vivo em staging (nada foi testado no browser): arraste entre colunas, select de status no celular, cadastro rápido com tag nova, detalhe + interações, popup de perda e reabertura.
+- Testar o gatilho de demonstração: sucesso (agendamento termina `confirmado` no Painel do `acolhe-comercial`), horário ocupado (23P01), e os dois rollbacks (update do lead falhando → agendamento apagado; promoção a `confirmado` falhando → agendamento apagado + lead revertido).
+- Decidir se o push "Pendente: {nome}" disparado pelo insert transitório da demonstração incomoda (só chega a quem ativou notificação no tenant `acolhe-comercial`).
+- Schema do CRM (`leads`, `tags`, `lead_tags`, `interacoes` + RLS), tenant `acolhe-comercial` e profissional existem **só em staging** — replicar antes de qualquer ida pra produção.
+- Conferir as decisões de implementação listadas no handoff da Sessão 63 (trecho do card, `ultimo_contato_em` automático, `data_conversao`, Convertidos no Follow-up).
+
 ### Dados de teste a limpar
 - Staging, Laysla (`estabelecimento_id=3`): vários lotes nunca limpos — `Teste Aguardando Confirmação`, `Teste Editar no Histórico`, `Teste Sinal - Aguardando Conclusão`, `Teste Sinal - Editar Histórico`, `Teste Sinal - Sem Valor Registrado`, `TESTE QA - Sinal Pago`, `TESTE QA - Sem Sinal`, `TESTE QA - Marca Editado`. Os dois "Molde F1" da cliente `xuxa` são dado pré-existente — não apagar.
 - Salão de Teste (staging): setembro e outubro/2026 gravados como `'fechado'` em `janela_agendamento_meses` (efeito colateral de teste da Sessão 57).
