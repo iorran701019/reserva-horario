@@ -61,6 +61,8 @@ no override. São sinalização, não identidade visual, e valem igual em qualqu
 - **`'esquerda'`** (Laysla) — uma imagem só em `tema.marca`, alinhada à esquerda do header;
   nome + subtítulo do estabelecimento em texto (fonte `tema.fonteDisplay`), centralizados no
   espaço restante à direita.
+- **`'direita'`** (Julia) — mesmo bloco de `'esquerda'` espelhado (`flex-row-reverse`):
+  nome/tagline à esquerda, `tema.marca` colada na borda direita.
 - **`'centralizado'`** — mesma ideia de `marca` + nome em texto, mas o símbolo fica
   centralizado no header em vez de à esquerda (útil quando o cliente não pediu um layout
   assimétrico).
