@@ -132,8 +132,13 @@ export async function GET(request) {
 
   try {
     const eventos = await listarEventosFuturos(accessToken, calendarId);
-    const { candidatos, ignoradosPorCatalogo } = montarCandidatos({ eventos, idsExcluidos, servicos });
-    return Response.json({ candidatos, ignorados_por_catalogo: ignoradosPorCatalogo, profissional_id: profissionalId });
+    const { candidatos, eventosIgnorados } = montarCandidatos({ eventos, idsExcluidos, servicos });
+    return Response.json({
+      candidatos,
+      ignorados_por_catalogo: eventosIgnorados.length,
+      eventos_ignorados: eventosIgnorados,
+      profissional_id: profissionalId,
+    });
   } catch (erro) {
     console.error("Falha ao buscar candidatos de importação do Google Calendar", estabelecimentoId, erro);
     return Response.json({ erro: "Não foi possível buscar os eventos do Google Calendar." }, { status: 502 });

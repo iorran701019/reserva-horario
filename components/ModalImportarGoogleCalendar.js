@@ -39,10 +39,11 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
   const [erroCalendario, setErroCalendario] = useState("");
 
   const [candidatos, setCandidatos] = useState(null);
-  const [ignoradosPorCatalogo, setIgnoradosPorCatalogo] = useState(0);
+  const [eventosIgnorados, setEventosIgnorados] = useState([]);
   const [buscandoCandidatos, setBuscandoCandidatos] = useState(false);
   const [erroCandidatos, setErroCandidatos] = useState("");
   const [listaExpandida, setListaExpandida] = useState(false);
+  const [ignoradosExpandido, setIgnoradosExpandido] = useState(false);
 
   const [enviando, setEnviando] = useState(false);
   const [resumoImportacao, setResumoImportacao] = useState(null);
@@ -122,6 +123,7 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
     setErroCandidatos("");
     setResumoImportacao(null);
     setListaExpandida(false);
+    setIgnoradosExpandido(false);
     try {
       const headers = await cabecalhoAutorizacao();
       const resposta = await fetch(
@@ -131,7 +133,7 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
       const corpo = await resposta.json();
       if (!resposta.ok || corpo.erro) throw new Error(corpo.erro ?? "Falha ao buscar candidatos.");
       setCandidatos(corpo.candidatos ?? []);
-      setIgnoradosPorCatalogo(corpo.ignorados_por_catalogo ?? 0);
+      setEventosIgnorados(corpo.eventos_ignorados ?? []);
     } catch (erro) {
       setErroCandidatos(erro.message);
     } finally {
@@ -302,12 +304,40 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
                     <p className="mt-3 text-sm text-body">Nenhum candidato novo encontrado.</p>
                   )}
 
-                  {candidatos && ignoradosPorCatalogo > 0 && (
-                    <p className="mt-1 text-xs text-muted">
-                      {ignoradosPorCatalogo === 1
-                        ? "1 evento foi ignorado por não parecer atendimento."
-                        : `${ignoradosPorCatalogo} eventos foram ignorados por não parecerem atendimento.`}
-                    </p>
+                  {/* Eventos que não bateram com o catálogo (ver
+                      montarCandidatos). Só visualização — referência pra
+                      decisão manual, sem nenhuma ação por linha. */}
+                  {candidatos && eventosIgnorados.length > 0 && (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => setIgnoradosExpandido((v) => !v)}
+                        aria-expanded={ignoradosExpandido}
+                        className="flex w-full items-center justify-between gap-3 rounded-xl bg-surface px-3 py-2.5 text-left"
+                      >
+                        <span className="text-sm text-body">
+                          {eventosIgnorados.length === 1
+                            ? "1 evento pessoal ignorado"
+                            : `${eventosIgnorados.length} eventos pessoais ignorados`}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted">{ignoradosExpandido ? "▲" : "▼"}</span>
+                      </button>
+
+                      {ignoradosExpandido && (
+                        <ul className="mt-2 divide-y divide-border/60 rounded-xl bg-surface">
+                          {eventosIgnorados.map((e) => (
+                            <li key={e.google_event_id} className="px-3 py-2.5">
+                              <p className="truncate text-sm text-heading">
+                                {e.titulo_original || "(sem título)"}
+                              </p>
+                              <p className="text-xs text-muted">
+                                {formatarData(e.data)} às {e.horario}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                   )}
 
                   {/* Resumo retrátil: por padrão só mostra a contagem. A lista
