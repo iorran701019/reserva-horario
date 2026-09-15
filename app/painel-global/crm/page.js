@@ -5,13 +5,22 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { useSessaoAdmin } from "@/hooks/useSessaoAdmin";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
-import { formatarDataBR } from "@/lib/data";
-import { MOTIVOS_PERDA, STATUS_ATIVOS, STATUS_TODOS, hojeISO, rotulo } from "@/lib/crm";
+import { formatarDataBR, formatarHorario } from "@/lib/data";
+import {
+  MOTIVOS_PERDA,
+  SELECT_LEADS_COM_ATENDIMENTO,
+  STATUS_ATIVOS,
+  STATUS_TODOS,
+  hojeISO,
+  rotulo,
+  tipoDoAtendimento,
+} from "@/lib/crm";
 import CardLead from "./CardLead";
 import DetalheLead from "./DetalheLead";
-import ModalDemonstracao from "./ModalDemonstracao";
+import ModalAtendimento from "./ModalAtendimento";
 import ModalNovoLead from "./ModalNovoLead";
 import ModalPerda from "./ModalPerda";
+import TiposAtendimento from "./TiposAtendimento";
 import { CLASSE_BOTAO_PRIMARIO, MensagemErro } from "./ui";
 
 // CRM comercial do Acolhe. Mesma guarda do /painel-global (useSessaoAdmin sem
@@ -21,6 +30,7 @@ const VISOES = [
   { id: "quadro", rotulo: "Quadro" },
   { id: "perdidos", rotulo: "Perdidos" },
   { id: "followup", rotulo: "Follow-up" },
+  { id: "tipos", rotulo: "Tipos de atendimento" },
 ];
 
 export default function CrmPage() {
@@ -32,18 +42,23 @@ export default function CrmPage() {
   const [tags, setTags] = useState([]);
   const [leadTags, setLeadTags] = useState([]);
   const [interacoes, setInteracoes] = useState([]);
+  const [tiposAtendimento, setTiposAtendimento] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
 
   const [novoLeadAberto, setNovoLeadAberto] = useState(false);
   const [leadAbertoId, setLeadAbertoId] = useState(null);
-  const [leadDemonstracao, setLeadDemonstracao] = useState(null);
+  // { lead, tipos } — tipos já filtrados pro contexto em que o modal abriu.
+  const [atendimento, setAtendimento] = useState(null);
   const [leadPerda, setLeadPerda] = useState(null);
   const [colunaAlvo, setColunaAlvo] = useState(null);
 
   const carregar = useCallback(async () => {
-    const [rLeads, rTags, rLeadTags, rInteracoes] = await Promise.all([
-      supabase.from("leads").select("*").order("atualizado_em", { ascending: false }),
+    const [rLeads, rTags, rLeadTags, rInteracoes, rTipos] = await Promise.all([
+      supabase
+        .from("leads")
+        .select(SELECT_LEADS_COM_ATENDIMENTO)
+        .order("atualizado_em", { ascending: false }),
       supabase.from("tags").select("id, nome, cor").order("nome"),
       supabase.from("lead_tags").select("lead_id, tag_id"),
       supabase
@@ -51,13 +66,15 @@ export default function CrmPage() {
         .select("id, lead_id, data, canal, descricao, criado_em")
         .order("data", { ascending: false })
         .order("criado_em", { ascending: false }),
+      supabase.from("tipos_atendimento").select("*").order("nome"),
     ]);
-    const falha = [rLeads, rTags, rLeadTags, rInteracoes].find((r) => r.error);
+    const falha = [rLeads, rTags, rLeadTags, rInteracoes, rTipos].find((r) => r.error);
     setErro(falha ? falha.error.message : "");
     setLeads(rLeads.data ?? []);
     setTags(rTags.data ?? []);
     setLeadTags(rLeadTags.data ?? []);
     setInteracoes(rInteracoes.data ?? []);
+    setTiposAtendimento(rTipos.data ?? []);
     setCarregando(false);
   }, []);
 
@@ -100,16 +117,26 @@ export default function CrmPage() {
     return recente?.descricao ?? lead.observacoes ?? "";
   }
 
+  const tiposAtivos = tiposAtendimento.filter((t) => t.ativo);
+
+  function abrirAtendimento(lead) {
+    setAtendimento({ lead, tipos: tiposAtivos });
+  }
+
   // Ponto único de mudança de status (arraste, select do card, detalhe).
-  //   demonstracao → não grava aqui: abre o modal, que cria o agendamento e
-  //                  só então move o lead (lib/crm.js criarDemonstracao);
+  //   etapa que algum tipo ativo move (move_para_status; hoje, Demonstração)
+  //                → não grava aqui: abre o ModalAtendimento só com esses
+  //                  tipos, e marcarAtendimento (lib/crm.js) move o lead
+  //                  depois de criar o agendamento. Fechar o modal = status
+  //                  não muda. Sem tipo que mova pra etapa, grava direto;
   //   perdido      → grava e abre o popup opcional de motivo;
   //   convertido   → grava data_conversao se ainda não tiver;
   //   reabrir um perdido mantém motivo_perda/observacao_perda (histórico).
   async function mudarStatus(lead, novoStatus) {
     if (!lead || lead.status === novoStatus) return;
-    if (novoStatus === "demonstracao") {
-      setLeadDemonstracao(lead);
+    const tiposQueMovem = tiposAtivos.filter((t) => t.move_para_status === novoStatus);
+    if (tiposQueMovem.length) {
+      setAtendimento({ lead, tipos: tiposQueMovem });
       return;
     }
 
@@ -277,8 +304,10 @@ export default function CrmPage() {
               ))}
             </div>
           )
-        ) : (
+        ) : visao === "followup" ? (
           <FollowUp leads={ativos} onAbrir={setLeadAbertoId} />
+        ) : (
+          <TiposAtendimento tipos={tiposAtendimento} onAlterado={carregar} />
         )}
       </div>
 
@@ -305,16 +334,18 @@ export default function CrmPage() {
           onTagCriada={adicionarTag}
           onFechar={() => setLeadAbertoId(null)}
           onMudarStatus={mudarStatus}
+          onMarcarAtendimento={abrirAtendimento}
           onAlterado={carregar}
         />
       )}
 
-      {leadDemonstracao && (
-        <ModalDemonstracao
-          lead={leadDemonstracao}
-          onFechar={() => setLeadDemonstracao(null)}
+      {atendimento && (
+        <ModalAtendimento
+          lead={atendimento.lead}
+          tipos={atendimento.tipos}
+          onFechar={() => setAtendimento(null)}
           onConcluido={() => {
-            setLeadDemonstracao(null);
+            setAtendimento(null);
             carregar();
           }}
         />
@@ -334,18 +365,20 @@ export default function CrmPage() {
   );
 }
 
-// Follow-up: leads fora de Perdidos com próximo contato marcado, em três
-// blocos pela data. Ordenados por data (crescente) dentro de cada bloco.
+// Follow-up: leads fora de Perdidos com próximo atendimento marcado (join em
+// agendamentos via proximo_atendimento_agendamento_id), em três blocos pela
+// data. Ordenados por data + horário (crescente) dentro de cada bloco.
 function FollowUp({ leads, onAbrir }) {
   const hoje = hojeISO();
+  const chave = (l) => `${l.proximo_atendimento.data} ${l.proximo_atendimento.horario}`;
   const comData = leads
-    .filter((l) => l.proximo_contato_em)
-    .sort((a, b) => a.proximo_contato_em.localeCompare(b.proximo_contato_em));
+    .filter((l) => l.proximo_atendimento)
+    .sort((a, b) => chave(a).localeCompare(chave(b)));
 
   const blocos = [
-    { id: "atrasados", titulo: "🔴 Atrasados", itens: comData.filter((l) => l.proximo_contato_em < hoje) },
-    { id: "hoje", titulo: "🟡 Hoje", itens: comData.filter((l) => l.proximo_contato_em === hoje) },
-    { id: "proximos", titulo: "🔵 Próximos", itens: comData.filter((l) => l.proximo_contato_em > hoje) },
+    { id: "atrasados", titulo: "🔴 Atrasados", itens: comData.filter((l) => l.proximo_atendimento.data < hoje) },
+    { id: "hoje", titulo: "🟡 Hoje", itens: comData.filter((l) => l.proximo_atendimento.data === hoje) },
+    { id: "proximos", titulo: "🔵 Próximos", itens: comData.filter((l) => l.proximo_atendimento.data > hoje) },
   ];
 
   return (
@@ -368,9 +401,14 @@ function FollowUp({ leads, onAbrir }) {
                   >
                     <span>
                       <span className="block text-sm font-medium text-heading">{lead.nome}</span>
-                      <span className="block text-xs text-muted">{rotulo(STATUS_TODOS, lead.status)}</span>
+                      <span className="block text-xs text-muted">
+                        {tipoDoAtendimento(lead.proximo_atendimento)} · {rotulo(STATUS_TODOS, lead.status)}
+                      </span>
                     </span>
-                    <span className="shrink-0 text-xs text-body">{formatarDataBR(lead.proximo_contato_em)}</span>
+                    <span className="shrink-0 text-right text-xs text-body">
+                      {formatarDataBR(lead.proximo_atendimento.data)}
+                      <span className="block">{formatarHorario(lead.proximo_atendimento.horario)}</span>
+                    </span>
                   </button>
                 </li>
               ))}

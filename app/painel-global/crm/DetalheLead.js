@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import { formatarDataBR, formatarHorario } from "@/lib/data";
@@ -11,6 +11,7 @@ import {
   STATUS_TODOS,
   hojeISO,
   rotulo,
+  tipoDoAtendimento,
 } from "@/lib/crm";
 import SeletorTags from "./SeletorTags";
 import {
@@ -30,7 +31,6 @@ const CAMPOS_EDITAVEIS = [
   "tipo_profissional",
   "origem",
   "observacoes",
-  "proximo_contato_em",
   "ultimo_contato_em",
   "indicado_por_lead_id",
   "motivo_perda",
@@ -43,8 +43,9 @@ function formInicial(lead) {
 
 // Detalhe do lead. Dados básicos têm botão "Salvar" próprio; status e tags
 // gravam na hora (status passa pelo mesmo mudarStatus do quadro, pra
-// demonstração/perda dispararem igual). Montado com key={lead.id} pela
-// página, então o form reinicia ao trocar de lead.
+// atendimento/perda dispararem igual). "Marcar/Remarcar" abre o
+// ModalAtendimento com todos os tipos ativos, em qualquer status. Montado com
+// key={lead.id} pela página, então o form reinicia ao trocar de lead.
 export default function DetalheLead({
   lead,
   leads,
@@ -54,6 +55,7 @@ export default function DetalheLead({
   onTagCriada,
   onFechar,
   onMudarStatus,
+  onMarcarAtendimento,
   onAlterado,
 }) {
   const [form, setForm] = useState(() => formInicial(lead));
@@ -68,28 +70,7 @@ export default function DetalheLead({
   const [salvandoInteracao, setSalvandoInteracao] = useState(false);
   const [erroInteracao, setErroInteracao] = useState("");
 
-  const [demonstracao, setDemonstracao] = useState(null);
-
-  // Resumo do agendamento de demonstração vinculado (uuid). Só leitura —
-  // cancelamento continua manual, no Painel.
-  useEffect(() => {
-    let ativo = true;
-    (async () => {
-      if (!lead.agendamento_demonstracao_id) {
-        setDemonstracao(null);
-        return;
-      }
-      const { data } = await supabase
-        .from("agendamentos")
-        .select("id, data, horario, status")
-        .eq("id", lead.agendamento_demonstracao_id)
-        .maybeSingle();
-      if (ativo) setDemonstracao(data ?? null);
-    })();
-    return () => {
-      ativo = false;
-    };
-  }, [lead.agendamento_demonstracao_id]);
+  const atendimento = lead.proximo_atendimento;
 
   function campo(nome) {
     return {
@@ -199,12 +180,24 @@ export default function DetalheLead({
               Convertido em {formatarDataBR(lead.data_conversao)}
             </p>
           )}
-          {demonstracao && (
-            <p className="pb-2 text-xs text-muted">
-              Demonstração: {formatarDataBR(demonstracao.data)} às{" "}
-              {formatarHorario(demonstracao.horario)} ({demonstracao.status})
-            </p>
-          )}
+        </section>
+
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface p-3 ring-1 ring-border">
+          <div>
+            <h3 className="text-sm font-semibold text-heading">Próximo atendimento</h3>
+            {atendimento ? (
+              <p className="text-sm text-body">
+                {tipoDoAtendimento(atendimento)} — {formatarDataBR(atendimento.data)} às{" "}
+                {formatarHorario(atendimento.horario)}
+                <span className="text-xs text-muted"> · {atendimento.duracao_min} min</span>
+              </p>
+            ) : (
+              <p className="text-xs text-muted">Nenhum atendimento marcado.</p>
+            )}
+          </div>
+          <button type="button" onClick={() => onMarcarAtendimento(lead)} className={CLASSE_BOTAO_SECUNDARIO}>
+            {atendimento ? "Remarcar" : "Marcar atendimento"}
+          </button>
         </section>
 
         <section>
@@ -240,9 +233,6 @@ export default function DetalheLead({
                   </option>
                 ))}
               </select>
-            </Campo>
-            <Campo rotulo="Próximo contato">
-              <input {...campo("proximo_contato_em")} type="date" className={CLASSE_INPUT} />
             </Campo>
             <Campo rotulo="Último contato">
               <input {...campo("ultimo_contato_em")} type="date" className={CLASSE_INPUT} />

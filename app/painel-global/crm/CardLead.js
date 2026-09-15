@@ -1,20 +1,22 @@
 "use client";
 
 import { classesBadgeEtiqueta } from "@/components/SeletorEtiquetaRapido";
-import { formatarDataBR } from "@/lib/data";
-import { STATUS_TODOS, hojeISO } from "@/lib/crm";
+import { formatarDataBR, formatarHorario } from "@/lib/data";
+import { STATUS_TODOS, hojeISO, tipoDoAtendimento } from "@/lib/crm";
 
 // Card do lead (quadro, Perdidos). Arrastável via drag and drop nativo; o
 // <select> de status é a alternativa pro toque no celular, onde o arraste
 // HTML5 não funciona — ele fica visível em qualquer largura.
+// `lead.proximo_atendimento` vem do join em agendamentos (page.js).
 export default function CardLead({ lead, tags, trecho, onAbrir, onMudarStatus }) {
   const hoje = hojeISO();
+  const atendimento = lead.proximo_atendimento;
   const corContato =
-    !lead.proximo_contato_em
+    !atendimento
       ? ""
-      : lead.proximo_contato_em < hoje
+      : atendimento.data < hoje
         ? "text-red-700"
-        : lead.proximo_contato_em === hoje
+        : atendimento.data === hoje
           ? "text-amber-700"
           : "text-body";
 
@@ -45,9 +47,10 @@ export default function CardLead({ lead, tags, trecho, onAbrir, onMudarStatus })
         </div>
       )}
 
-      {lead.proximo_contato_em && (
+      {atendimento && (
         <p className={`mt-2 text-xs font-medium ${corContato}`}>
-          Próximo contato: {formatarDataBR(lead.proximo_contato_em)}
+          {tipoDoAtendimento(atendimento)}: {formatarDataBR(atendimento.data)} às{" "}
+          {formatarHorario(atendimento.horario)}
         </p>
       )}
 

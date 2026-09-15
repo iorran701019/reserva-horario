@@ -13,7 +13,7 @@ Primeira fase do CRM comercial do Acolhe, dentro do `/painel-global`, pra acompa
 - **Trecho do card:** descrição da interação mais recente; se não tiver, cai em `leads.observacoes`.
 - **Nova interação empurra `ultimo_contato_em`** quando a data da interação é mais nova que o valor atual.
 - **Mudar pra `convertido`** grava `data_conversao = hoje`, só se ainda estiver vazia.
-- **Follow-up** lista todos os leads fora de Perdidos, inclusive Convertidos, desde que tenham `proximo_contato_em`.
+- **Follow-up** lista todos os leads fora de Perdidos, inclusive Convertidos, desde que tenham `proximo_atendimento_agendamento_id` (data/hora via join em agendamentos — `proximo_contato_em` virou legado, sessão feat/atendimento-tipado).
 - **Status inicial no cadastro rápido** não oferece `demonstracao`, porque ela exige o agendamento. O lead é criado e depois movido no quadro.
 - **`atualizado_em`** é gravado pelo app em todo update, porque não se sabe se existe trigger no banco.
 - **`tags.cor`** guarda a mesma chave de paleta das etiquetas de cliente (`CORES_ETIQUETA`: violeta, azul…), não hex.

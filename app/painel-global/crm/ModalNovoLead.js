@@ -15,7 +15,8 @@ import {
 
 // Cadastro rápido: só `nome` é obrigatório. Status inicial não oferece
 // `demonstracao` (exige o agendamento — o lead entra e depois é movido pelo
-// quadro, que dispara o gatilho) nem `perdido`.
+// quadro, que dispara o gatilho) nem `perdido`. Sem campo de próximo
+// contato: o primeiro atendimento é marcado depois, no detalhe do lead.
 const STATUS_INICIAIS = STATUS_ATIVOS.filter((s) => s.id !== "demonstracao");
 
 export default function ModalNovoLead({ tags, onTagCriada, onFechar, onCriado }) {
@@ -27,7 +28,6 @@ export default function ModalNovoLead({ tags, onTagCriada, onFechar, onCriado })
     tipo_profissional: "",
     origem: "",
     status: "novo",
-    proximo_contato_em: "",
     observacoes: "",
   });
   const [tagIds, setTagIds] = useState([]);
@@ -123,9 +123,6 @@ export default function ModalNovoLead({ tags, onTagCriada, onFechar, onCriado })
                 </option>
               ))}
             </select>
-          </Campo>
-          <Campo rotulo="Próximo contato">
-            <input {...campo("proximo_contato_em")} type="date" className={CLASSE_INPUT} />
           </Campo>
         </div>
         <div>
