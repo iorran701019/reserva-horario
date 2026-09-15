@@ -65,9 +65,18 @@ Não precisa de setup inicial, mas explicar pro dono como funciona: "Bloquear ho
 algo que normalmente estaria aberto; "Liberar horário" abre algo pontual fora do padrão.
 Mudança recorrente de verdade = editar a agenda normal (item 2), não uma exceção.
 
-## 7. Identidade visual (opcional)
-Se o cliente tiver marca própria, ver `THEMING.md` — extrair paleta real, montar entrada em
-`lib/temas.js`, processar logo se houver.
+## 7. Identidade visual (substituir o padrão)
+Todo tenant novo já nasce com `TEMA_PADRAO` (`lib/temas.js`) automaticamente: paleta rosa +
+logo genérica (`/images/generico/logo-generico.png`) à esquerda e nome do estabelecimento
+(`estabelecimentos.nome`) em texto. Não precisa fazer nada pra ele "ter tema".
+
+Substituir o padrão só quando o cliente tiver marca própria (logo e/ou paleta):
+- Ver `THEMING.md` — extrair a paleta real e processar a logo, se houver.
+- Criar entrada própria em `TEMAS_POR_SLUG` com o slug do tenant (a entrada tem precedência
+  sobre `TEMA_PADRAO`). Objeto próprio, não alias de `TEMA_PADRAO` — assim ajustes futuros no
+  padrão não reskinnam esse tenant.
+- Sem logo: omitir `marca` — o Hero cai no nome em texto centralizado, nas cores do tema
+  (ex.: `teste`).
 
 ## 8. Login de produção
 - Criar o usuário em Authentication → Users (Supabase) com e-mail/senha reais do dono.

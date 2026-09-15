@@ -20,10 +20,14 @@ import { buscarTema } from "@/lib/temas";
 //   própria, conforme tema.layoutMarca:
 //     'esquerda'        → monograma (esquerda) + nome/tagline empilhados
 //                          (direita), nas cores do tema (ex.: laysla).
+//     'direita'         → mesmo bloco de 'esquerda', espelhado: nome/tagline
+//                          à esquerda, marca colada na borda direita (ex.: julia).
 //     'pilha-completa'  → símbolo + wordmark empilhados e centralizados,
 //                          sem nome em texto — a imagem já contém a marca
 //                          por extenso (ex.: flavia).
-//   Sem tema cadastrado (todo o resto), o Hero não muda em nada.
+//   Tema sem tema.marca (ex.: teste) cai no título em texto centralizado,
+//   só que com as cores do tema. Slug sem entrada própria recebe TEMA_PADRAO
+//   (ver lib/temas.js), então na prática todo tenant tem tema.
 
 const NOME_LOJA = process.env.NEXT_PUBLIC_NOME_LOJA || "Agendamento";
 
@@ -73,8 +77,14 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
   // Combinado com achatarLogo (scaleY) direto na <Image> do monograma no
   // layout 'esquerda' — não se aplica ao layoutMarca 'pilha-completa', que
   // não tem monograma isolado do wordmark.
+  // alturaMonograma (ex.: julia) — override COMPLETO do className de altura
+  // do monograma (substitui o par fixo compacto/normal, não soma). Quando
+  // presente, escalaMonograma é ignorado: a redução vem da altura real, que
+  // (ao contrário do scale) também libera espaço no flex pro nome/tagline.
   const transformMonograma = [
-    tema?.escalaMonograma ? `scale(${tema.escalaMonograma})` : null,
+    tema?.escalaMonograma && !tema?.alturaMonograma
+      ? `scale(${tema.escalaMonograma})`
+      : null,
     transformLogo,
   ]
     .filter(Boolean)
@@ -95,7 +105,7 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
         backgroundPosition: "center 25%",
       }
     : tema
-    ? { background: tema.bgHeader }
+    ? { background: tema.fundoHero ?? tema.bgHeader }
     : {
         backgroundImage:
           "linear-gradient(180deg, var(--color-card), var(--color-border))",
@@ -163,14 +173,20 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
             preload
           />
         </div>
-      ) : tema ? (
+      ) : tema?.marca ? (
         // Marca (monograma) é o elemento de destaque: grande e colada na
         // borda esquerda (mx-auto max-w-md replica o inset do conteúdo
         // abaixo do Hero). Nome/tagline ocupam o espaço restante (flex-1) e
         // ficam centralizados NESSE espaço — respiro tanto da marca quanto
         // da borda direita, sem grudar em nenhum dos dois.
+        // 'direita' (ex.: julia) reaproveita este mesmo bloco espelhado via
+        // flex-row-reverse: a ordem no DOM (marca → divisor → texto) vira
+        // texto | divisor | marca na tela, com a marca colada na borda direita.
         <div
-          className="relative mx-auto flex w-full max-w-md items-center gap-4"
+          className={[
+            "relative mx-auto flex w-full max-w-md items-center gap-4",
+            tema.layoutMarca === "direita" ? "flex-row-reverse" : "",
+          ].join(" ")}
           style={{ transform: transformBlocoMarca }}
         >
           <Image
@@ -179,7 +195,10 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
             width={266}
             height={338}
             style={{ transform: transformMonograma }}
-            className={compacto ? "h-16 w-auto sm:h-20" : "h-24 w-auto sm:h-28"}
+            className={
+              tema.alturaMonograma ??
+              (compacto ? "h-16 w-auto sm:h-20" : "h-24 w-auto sm:h-28")
+            }
             preload
           />
           {tema.dividorHeader && (
@@ -216,8 +235,11 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
                 <h1
                   className={[
                     tema.fonteDisplay,
-                    "font-medium tracking-tight",
-                    compacto ? "text-2xl sm:text-3xl" : "text-3xl sm:text-4xl",
+                    "font-medium tracking-tight break-words",
+                    // tamanhoNome (ex.: julia) — override completo do par de
+                    // tamanho compacto/normal; ausente, mantém o padrão.
+                    tema.tamanhoNome ??
+                      (compacto ? "text-2xl sm:text-3xl" : "text-3xl sm:text-4xl"),
                   ].join(" ")}
                   style={{ color: tema.textoSecundario }}
                 >
@@ -239,15 +261,20 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
           </div>
         </div>
       ) : (
+        // Texto simples centralizado: sem tema OU tema personalizado sem
+        // tema.marca (ex.: teste). Com tema, a cor do título vem de
+        // tema.textoPrincipal (e a fonte de tema.fonteDisplay, se houver).
         <h1
           className={[
             // `relative` mantém o título acima do overlay.
-            "relative font-display font-semibold tracking-tight",
+            "relative font-semibold tracking-tight",
+            tema?.fonteDisplay ?? "font-display",
             usaFoto
               ? "text-white [text-shadow:0_2px_8px_rgba(0,0,0,0.6)]"
               : "text-heading",
             compacto ? "text-2xl sm:text-3xl" : "text-4xl sm:text-5xl",
           ].join(" ")}
+          style={tema && !usaFoto ? { color: tema.textoPrincipal } : undefined}
         >
           {nome || NOME_LOJA}
         </h1>
