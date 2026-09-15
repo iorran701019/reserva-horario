@@ -3615,19 +3615,36 @@ export default function ConfiguracoesSalao({
       {/* Bloco: Equipe — atalho pra cadastrar profissional. O wizard de
           criação mora em GerenciarProfissionais (aba Profissionais); este
           botão só troca de aba e dispara ele remotamente (ver
-          onCadastrarProfissional / gatilhoNovoProfissional em page.js). */}
-      <div className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
-        <p className="text-sm font-medium text-heading">Equipe</p>
-        <p className="mt-1 text-xs text-muted">
-          Adicione um novo profissional à equipe.
-        </p>
+          onCadastrarProfissional / gatilhoNovoProfissional em page.js).
+          Acordeão igual aos blocos abaixo (Google Calendar, Localização,
+          Foto de perfil), por consistência visual. */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
         <button
           type="button"
-          onClick={onCadastrarProfissional}
-          className="mt-3 inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+          onClick={() => alternarBloco("equipe")}
+          aria-expanded={blocoAberto === "equipe"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
         >
-          Cadastrar novo profissional
+          <span className="font-semibold text-heading">Equipe</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "equipe" ? "▲" : "▼"}
+          </span>
         </button>
+
+        {blocoAberto === "equipe" && (
+          <div className="border-t border-border p-4">
+            <p className="text-xs text-muted">
+              Adicione um novo profissional à equipe.
+            </p>
+            <button
+              type="button"
+              onClick={onCadastrarProfissional}
+              className="mt-3 inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+            >
+              Cadastrar novo profissional
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Bloco: Google Calendar */}
