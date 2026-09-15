@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { useSessaoAdmin } from "@/hooks/useSessaoAdmin";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
@@ -717,13 +718,21 @@ export default function PainelGlobalPage() {
           <h1 className="font-display text-2xl font-bold text-heading">
             Painel Global
           </h1>
-          <button
-            type="button"
-            onClick={handleSair}
-            className="text-sm font-semibold text-red-600 transition hover:underline"
-          >
-            Sair
-          </button>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/painel-global/crm"
+              className="text-sm font-semibold text-primary transition hover:underline"
+            >
+              CRM
+            </Link>
+            <button
+              type="button"
+              onClick={handleSair}
+              className="text-sm font-semibold text-red-600 transition hover:underline"
+            >
+              Sair
+            </button>
+          </div>
         </header>
 
         <div className="mb-6">
