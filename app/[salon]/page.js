@@ -542,7 +542,6 @@ export default function AgendarPage() {
             data={form.data}
             horario={horario}
             nomeCliente={form.nome}
-            onNovoAgendamento={() => recomecarFluxo({ paraOWizard: true })}
             onVerAgendamentos={() => recomecarFluxo({ paraOWizard: false })}
             onEditar={() =>
               editarAgendamento({

@@ -2,10 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MapPin } from "lucide-react";
-import { linkWhatsApp, MENSAGEM_SOLICITACAO_ENVIADA } from "@/lib/whatsapp";
 import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
 import { formatarData } from "@/components/FormularioAgendamento";
-import IconeWhatsApp from "@/components/IconeWhatsApp";
 import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento";
 
 // Tela de protocolo ("Solicitação enviada!") do fluxo público. Era inline em
@@ -23,11 +21,10 @@ import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento"
 //   servicoNome / data / horario / nomeCliente – o que o card resume. `data`
 //                      é "YYYY-MM-DD" cru: a formatação é feita aqui, pra os
 //                      dois caminhos de entrada não divergirem.
-//   onNovoAgendamento – opcional; havendo, mostra "Fazer novo agendamento".
 //   onVerAgendamentos – opcional; havendo, mostra "Ver meus agendamentos" —
-//                      a saída desta tela pro PainelCliente. Sem ela (e sem
-//                      onNovoAgendamento) a cliente ficaria presa aqui
-//                      enquanto a janela de protocolo durasse.
+//                      a saída desta tela pro PainelCliente. Sem ela a
+//                      cliente ficaria presa aqui enquanto a janela de
+//                      protocolo durasse.
 //   onEditar          – opcional; havendo, mostra "Editar agendamento" (quem
 //                      monta reabre o wizard, ver agendamentoEmEdicao em
 //                      FormularioAgendamento).
@@ -42,7 +39,6 @@ export default function TelaSolicitacaoEnviada({
   data,
   horario,
   nomeCliente,
-  onNovoAgendamento = null,
   onVerAgendamentos = null,
   onEditar = null,
   onCancelado = null,
@@ -164,60 +160,13 @@ export default function TelaSolicitacaoEnviada({
         </a>
       )}
 
-      {onNovoAgendamento && (
-        <button
-          type="button"
-          onClick={onNovoAgendamento}
-          className={`w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover ${
-            estabelecimento.link_localizacao ? "mt-3" : "mt-6"
-          }`}
-        >
-          Fazer novo agendamento
-        </button>
-      )}
-
-      {onVerAgendamentos && (
-        <button
-          type="button"
-          onClick={onVerAgendamentos}
-          className={`w-full rounded-lg bg-surface px-4 py-2.5 font-medium text-heading ring-1 ring-border transition hover:bg-card ${
-            onNovoAgendamento || estabelecimento.link_localizacao ? "mt-3" : "mt-6"
-          }`}
-        >
-          Ver meus agendamentos
-        </button>
-      )}
-
-      <a
-        href={linkWhatsApp(
-          estabelecimento.whatsapp,
-          MENSAGEM_SOLICITACAO_ENVIADA(
-            {
-              servico: servicoNome,
-              data: dataFormatada,
-              horario,
-              nome: nomeCliente,
-            },
-            estabelecimento.msg_solicitacao_enviada
-          )
-        )}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={`flex w-full items-center justify-center gap-2 rounded-lg bg-card px-4 py-2.5 font-medium text-green-700 ring-1 ring-green-600 transition hover:bg-green-50 ${
-          onNovoAgendamento || onVerAgendamentos || estabelecimento.link_localizacao
-            ? "mt-3"
-            : "mt-6"
-        }`}
-      >
-        <IconeWhatsApp className="h-5 w-5" />
-        Falar no WhatsApp
-      </a>
-
       {podeAgir && onEditar && (
         <button
           type="button"
           onClick={onEditar}
-          className="mt-3 w-full rounded-lg bg-surface px-4 py-2.5 font-medium text-heading ring-1 ring-border transition hover:bg-card"
+          className={`w-full rounded-lg bg-surface px-4 py-2.5 font-medium text-heading ring-1 ring-border transition hover:bg-card ${
+            estabelecimento.link_localizacao ? "mt-3" : "mt-6"
+          }`}
         >
           Editar agendamento
         </button>
@@ -234,6 +183,20 @@ export default function TelaSolicitacaoEnviada({
           className="mt-3 w-full rounded-lg bg-card px-4 py-2.5 font-medium text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {cancelando ? "Cancelando..." : "Cancelar agendamento"}
+        </button>
+      )}
+
+      {onVerAgendamentos && (
+        <button
+          type="button"
+          onClick={onVerAgendamentos}
+          className={`w-full rounded-lg bg-surface px-4 py-2.5 font-medium text-heading ring-1 ring-border transition hover:bg-card ${
+            (podeAgir && (onEditar || onCancelado)) || estabelecimento.link_localizacao
+              ? "mt-3"
+              : "mt-6"
+          }`}
+        >
+          Ver meus agendamentos
         </button>
       )}
 
