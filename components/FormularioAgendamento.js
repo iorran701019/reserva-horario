@@ -2264,6 +2264,14 @@ export default function FormularioAgendamento({
     // sessão ainda pendente (ver pendenteRestaurarRef) — a escolha fresca da
     // cliente sempre vence sobre um rascunho antigo.
     pendenteRestaurarRef.current = null;
+    // /admin com pular_perguntas_adicionais_admin ligado: nem busca as
+    // perguntas — zera perguntasServico (sem sobra de uma seleção anterior) e
+    // avança com preço/duração base. modoLivre garante que /agendar nunca pula.
+    if (modoLivre && estabelecimento.pular_perguntas_adicionais_admin) {
+      setPerguntasServico([]);
+      avancarAposServico();
+      return;
+    }
     const perguntas = await buscarPerguntasServico(servico.id);
     setPerguntasServico(perguntas);
 

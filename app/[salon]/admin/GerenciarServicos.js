@@ -54,6 +54,12 @@ const TOGGLES_OCULTACAO = [
     descricao:
       "Esconde quanto tempo cada serviço dura na tela de agendamento (a do cliente e a aba Agendar).",
   },
+  {
+    coluna: "pular_perguntas_adicionais_admin",
+    rotulo: "Desativar perguntas de serviços (somente em /admin)",
+    descricao:
+      "Agendamentos criados em /admin não exibem perguntas como \"Formato da unha\". O preço e a duração do serviço serão os originais. Para o cliente, as perguntas continuam aparecendo normalmente.",
+  },
 ];
 
 // Estado inicial do formulário. `preco` fica em REAIS (string do input); só é
@@ -284,7 +290,11 @@ export default function GerenciarServicos({
   const [ocultacao, setOcultacao] = useState(() => ({
     ocultar_preco_servicos: Boolean(estabelecimento.ocultar_preco_servicos),
     ocultar_duracao_servicos: Boolean(estabelecimento.ocultar_duracao_servicos),
+    pular_perguntas_adicionais_admin: Boolean(estabelecimento.pular_perguntas_adicionais_admin),
   }));
+  // Bloco retrátil "Configuração" que envolve os toggles acima — fechado por
+  // padrão (mesmo padrão de "Serviços desativados").
+  const [configuracaoAberta, setConfiguracaoAberta] = useState(false);
   // Feedback de gravação: "" | "salvando" | "salvo".
   const [statusOcultacao, setStatusOcultacao] = useState("");
   const [erroOcultacao, setErroOcultacao] = useState("");
@@ -2462,7 +2472,21 @@ export default function GerenciarServicos({
               Logo abaixo de "Nova categoria"/"Novo serviço" porque diz como
               TODOS os serviços desta aba aparecem no agendamento. Mesmo switch
               do toggle de escolha de profissional em ConfiguracoesSalao. */}
-          <section className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+          <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+          <button
+            type="button"
+            onClick={() => setConfiguracaoAberta((v) => !v)}
+            aria-expanded={configuracaoAberta}
+            className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+          >
+            <span className="font-semibold text-heading">Configuração</span>
+            <span aria-hidden="true" className="shrink-0 text-xs text-body">
+              {configuracaoAberta ? "▲" : "▼"}
+            </span>
+          </button>
+
+          {configuracaoAberta && (
+          <section className="border-t border-border p-4">
             <div className="space-y-4">
               {TOGGLES_OCULTACAO.map(({ coluna, rotulo, descricao }) => (
                 <div key={coluna} className="flex items-start justify-between gap-3">
@@ -2508,6 +2532,8 @@ export default function GerenciarServicos({
             )}
             {erroOcultacao && <p className="mt-2 text-xs text-red-600">{erroOcultacao}</p>}
           </section>
+          )}
+          </div>
         </div>
       )}
 
