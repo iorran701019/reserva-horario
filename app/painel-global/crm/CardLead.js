@@ -1,7 +1,9 @@
 "use client";
 
+import IconeWhatsApp from "@/components/IconeWhatsApp";
 import { classesBadgeEtiqueta } from "@/components/SeletorEtiquetaRapido";
 import { STATUS_TODOS, urgenciaAtendimento } from "@/lib/crm";
+import { linkWhatsAppSemMensagem } from "@/lib/whatsapp";
 
 // Bolinha de urgência do próximo atendimento: a mesma classificação dos blocos
 // do Follow-up, sem o texto (data/hora ficam no detalhe e no Follow-up).
@@ -39,6 +41,25 @@ export default function CardLead({ lead, tags, trecho, onAbrir, onMudarStatus })
           />
         )}
         <span className="truncate">{lead.nome}</span>
+        {/* Conversa em branco no WhatsApp — mesmo link/visual verde do
+            "Entrar em contato" do inbox do /admin, reduzido a ícone pro card
+            compacto. Sem whatsapp no lead, não aparece. stopPropagation pra
+            não abrir o detalhe junto. */}
+        {lead.whatsapp && (
+          <button
+            type="button"
+            draggable={false}
+            onClick={(e) => {
+              e.stopPropagation();
+              window.open(linkWhatsAppSemMensagem(lead.whatsapp), "_blank", "noopener,noreferrer");
+            }}
+            aria-label="Abrir conversa no WhatsApp"
+            title="Abrir conversa no WhatsApp"
+            className="ml-auto inline-flex shrink-0 items-center justify-center rounded-full bg-green-50 p-1 text-green-700 ring-1 ring-green-200 transition hover:bg-green-100"
+          >
+            <IconeWhatsApp className="h-3 w-3" />
+          </button>
+        )}
       </p>
       {(lead.tipo_profissional || lead.cidade) && (
         <p className="crm-card-detalhe truncate text-body">
