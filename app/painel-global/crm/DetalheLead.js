@@ -4,6 +4,8 @@ import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import { formatarDataBR, formatarHorario } from "@/lib/data";
+import { linkWhatsAppSemMensagem } from "@/lib/whatsapp";
+import IconeWhatsApp from "@/components/IconeWhatsApp";
 import {
   CANAIS_INTERACAO,
   MOTIVOS_PERDA,
@@ -179,6 +181,20 @@ export default function DetalheLead({
             <p className="pb-2 text-xs text-muted">
               Convertido em {formatarDataBR(lead.data_conversao)}
             </p>
+          )}
+          {/* Mesmo botão do inbox de Pendentes do /admin (conversa em branco).
+              Lê o whatsapp SALVO do lead, não o do formulário em edição. */}
+          {lead.whatsapp && (
+            <button
+              type="button"
+              onClick={() =>
+                window.open(linkWhatsAppSemMensagem(lead.whatsapp), "_blank", "noopener,noreferrer")
+              }
+              className="mb-2 ml-auto inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 ring-1 ring-green-200 transition hover:bg-green-100"
+            >
+              <IconeWhatsApp className="h-3.5 w-3.5" />
+              Entrar em contato
+            </button>
           )}
         </section>
 

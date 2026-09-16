@@ -5,6 +5,8 @@ import { supabase } from "@/lib/supabaseClient";
 import { SLUG_TENANT_COMERCIAL } from "@/lib/crm";
 import { formatarDataBR, formatarHorario } from "@/lib/data";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
+import { linkWhatsAppSemMensagem } from "@/lib/whatsapp";
+import IconeWhatsApp from "@/components/IconeWhatsApp";
 import PainelCalendario from "@/app/[salon]/admin/PainelCalendario";
 
 // Aba "Agenda" do hub (ver HubPainelGlobal): o MESMO calendário do /admin de
@@ -110,14 +112,55 @@ export default function AbaAgenda() {
   // novo sem estado duplicado (mesmo padrão do modal de detalhe do /admin).
   const selecionado = agendamentos.find((item) => item.id === selecionadoId) ?? null;
 
+  // WhatsApp do modal. Item do CRM grava telefone null de propósito (lib/crm.js),
+  // então o número vem do lead que aponta pra esse agendamento — pelo
+  // próximo atendimento ou pela demonstração legada. Fora do CRM usa o
+  // telefone do próprio agendamento. Guarda o id junto pra não mostrar o
+  // número de um item anterior enquanto a busca do atual não volta.
+  const [whatsappLead, setWhatsappLead] = useState({ agendamentoId: null, whatsapp: null });
+  const idSelecionado = selecionado?.id ?? null;
+  const selecionadoDoCrm = selecionado?.origem === "crm";
+
+  useEffect(() => {
+    if (!idSelecionado || !selecionadoDoCrm) return;
+
+    let ativo = true;
+    (async () => {
+      const { data } = await supabase
+        .from("leads")
+        .select("whatsapp")
+        .or(
+          `proximo_atendimento_agendamento_id.eq.${idSelecionado},agendamento_demonstracao_id.eq.${idSelecionado}`
+        )
+        .not("whatsapp", "is", null)
+        .limit(1);
+      if (ativo) {
+        setWhatsappLead({ agendamentoId: idSelecionado, whatsapp: data?.[0]?.whatsapp ?? null });
+      }
+    })();
+
+    return () => {
+      ativo = false;
+    };
+  }, [idSelecionado, selecionadoDoCrm]);
+
+  const whatsappSelecionado = !selecionado
+    ? null
+    : selecionadoDoCrm
+      ? whatsappLead.agendamentoId === selecionado.id
+        ? whatsappLead.whatsapp
+        : null
+      : selecionado.telefone || null;
+
   function abrirDetalhe(item) {
     setSelecionadoId(item.id);
     setErroCancelar("");
   }
 
   // Mesmo update do /admin de salão (status + cancelado_pelo_salao). Sem
-  // mensagem de WhatsApp: aqui não existe cliente com telefone do outro lado,
-  // é a agenda comercial interna.
+  // mensagem automática de cancelamento: é a agenda comercial interna, não
+  // há texto padrão pra lead — o contato, se preciso, vai pelo botão
+  // "Entrar em contato" do modal.
   async function handleCancelar() {
     if (!selecionado || cancelando) return;
 
@@ -178,6 +221,19 @@ export default function AbaAgenda() {
             <h2 className="font-display text-lg font-bold text-heading">
               {selecionado.nome_cliente || "Sem nome"}
             </h2>
+
+            {whatsappSelecionado && (
+              <button
+                type="button"
+                onClick={() =>
+                  window.open(linkWhatsAppSemMensagem(whatsappSelecionado), "_blank", "noopener,noreferrer")
+                }
+                className="mt-1.5 inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 ring-1 ring-green-200 transition hover:bg-green-100"
+              >
+                <IconeWhatsApp className="h-3.5 w-3.5" />
+                Entrar em contato
+              </button>
+            )}
 
             <dl className="mt-3 space-y-1 text-sm text-body">
               <div className="flex justify-between gap-3">
