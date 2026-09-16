@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import { buscarPerfil } from "@/lib/perfil";
@@ -420,11 +419,6 @@ export default function AdminPage() {
   // Autenticado, mas sem linha em perfis (conta órfã): não há salão a resolver.
   // Troca todo o conteúdo pela tela "Conta sem salão vinculado".
   const [semPerfil, setSemPerfil] = useState(false);
-
-  // Papel do perfil logado (ver efeito de resolução de estabelecimento
-  // abaixo) — hoje só usado pra decidir se o link "Painel global" aparece no
-  // drawer (ver seção do rodapé). null = ainda não resolvido ou sem perfil.
-  const [papelUsuario, setPapelUsuario] = useState(null);
 
   const [agendamentos, setAgendamentos] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -1555,7 +1549,6 @@ export default function AdminPage() {
       }
 
       setSemPerfil(false);
-      setPapelUsuario(perfil?.papel ?? null);
 
       if (perfil.papel === "dono") {
         setEstabelecimento(perfil.estabelecimento ?? null);
@@ -4401,31 +4394,18 @@ export default function AdminPage() {
           {/* Item fixo, visível em qualquer aba (ver componente). */}
           <AtivarNotificacoes estabelecimento={estabelecimento} />
 
-          {/* Link fixo pro /painel-global, fora do sistema de abas (ver
-              ABAS_PAI) — só aparece pra quem tem papel 'global' no perfil. */}
-          {papelUsuario === "global" && (
-            <div className="border-t border-border p-2">
-              <Link
-                href="/painel-global"
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-body hover:bg-surface"
-              >
-                <Settings className="h-4 w-4" />
-                Painel global
-              </Link>
-            </div>
-          )}
-
           {/* Suporte da ACOLHE (o produto), não do salão: quem clica é a
               dona falando com quem mantém o sistema. Por isso o número vem de
               lib/acolhe.js, fixo, e NÃO de estabelecimento.whatsapp (que é o
               número dela mesma) nem das msg_* configuráveis por tenant.
-              Posição: depois de "Painel global" quando ele existe, depois das
-              notificações quando não — sem índice nem condicional, é só a
-              ordem do JSX; os dois blocos acima podem não renderizar
-              (papelUsuario !== "global"; AtivarNotificacoes devolve null em
-              navegador sem Push API) e este simplesmente sobe. Estilo do
-              padrão dominante do drawer (py-3/font-semibold/gap-3), não o
-              do "Painel global" logo acima, que é a exceção.
+              Posição: logo depois das notificações — sem índice nem
+              condicional, é só a ordem do JSX; o bloco acima pode não
+              renderizar (AtivarNotificacoes devolve null em navegador sem
+              Push API) e este simplesmente sobe. Estilo do padrão dominante
+              do drawer (py-3/font-semibold/gap-3).
+              (O atalho pro /painel-global ficava aqui, condicionado a
+              papelUsuario === "global"; saiu quando o painel virou hub — quem
+              tem o papel entra direto pela URL.)
               Link externo no molde já usado no resto do projeto: <a> com
               target="_blank" + rel="noopener noreferrer". */}
           <div className="border-t border-border p-2">

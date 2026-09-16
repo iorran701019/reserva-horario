@@ -90,6 +90,15 @@ function abreviarServico(servico) {
     return i === 0 ? cap : (cap.length > 4 ? cap.slice(0, 4) + "." : cap);
   }).join(" ");
 }
+// Rótulo de "serviço" de um atendimento do CRM comercial. `servico_livre` é
+// gravado como `${tipo.nome} — ${lead.nome}` (ver marcarAtendimento em
+// lib/crm.js); o nome do lead já vai em nome_cliente, então só a parte antes
+// do primeiro " — " entra no rótulo, pra não repetir o nome.
+function tipoAtendimentoCrm(servicoLivre) {
+  const texto = (servicoLivre || "").trim();
+  const corte = texto.indexOf(" — ");
+  return (corte === -1 ? texto : texto.slice(0, corte).trim()) || "Atendimento";
+}
 const hhmm = (d) => d ? `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` : "";
 
 // Date -> "YYYY-MM-DD" em horário LOCAL, componente-a-componente (evita o
@@ -363,9 +372,21 @@ export default function PainelCalendario({
           // (ocupação a tratar no Inbox). Confirmado sem telefone (importado
           // do Google Calendar, ainda sem cliente vinculado) → âmbar, rótulo
           // pede pra vincular. Caso contrário, confirmado normal (verde).
-          const pendente = classificarAgendamento(a) === "inbox";
-          const naoVinculado = !pendente && !a.telefone;
-          const cor = pendente
+          // Atendimento do CRM comercial (origem "crm", só chega aqui pela aba
+          // Agenda do hub — a query do /admin nem traz `origem`): verde e com
+          // nome, qualquer que seja o status. Fica FORA de `pendente` (senão
+          // some da Lista e vira "Pendente") e de `naoVinculado` (nasce sem
+          // telefone por construção, não é importação a vincular).
+          const crm = a.origem === "crm";
+          const inbox = classificarAgendamento(a) === "inbox";
+          const pendente = inbox && !crm;
+          const naoVinculado = !inbox && !crm && !a.telefone;
+          const servico = crm
+            ? tipoAtendimentoCrm(a.servico_livre)
+            : a.servicos?.nome ?? a.servico_livre ?? "serviço";
+          const cor = crm
+            ? CORES_EVENTO.confirmado
+            : pendente
             ? CORES_EVENTO.pendente
             : naoVinculado
             ? CORES_EVENTO.naoVinculado
@@ -378,7 +399,7 @@ export default function PainelCalendario({
               ? "Pendente"
               : naoVinculado
               ? `${a.nome_cliente} · Vincular cliente`
-              : `${a.nome_cliente} · ${a.servicos?.nome ?? a.servico_livre ?? "serviço"}`,
+              : `${a.nome_cliente} · ${servico}`,
             start: `${a.data}T${minParaHora(inicioMin)}`,
             end:
               duracao != null
@@ -395,9 +416,12 @@ export default function PainelCalendario({
               // eventContent troca o rótulo pelo pill "Vincular cliente" e o
               // eventClick abre o modal de vínculo em vez do de detalhe.
               naoVinculado,
+              // Atendimento do CRM comercial (ver acima) — o eventClick usa pra
+              // não deixar o clique inerte quando o status é pendente.
+              crm,
               // Valores crus do mesmo par usado no `title`, p/ abreviar no rótulo.
               nome_cliente: a.nome_cliente,
-              servico: a.servicos?.nome ?? a.servico_livre ?? "serviço",
+              servico,
             },
           };
         }),
@@ -559,7 +583,9 @@ export default function PainelCalendario({
   );
 
   // Lista (listaAgenda) só mostra CONFIRMADOS — pendentes ficam de fora dessa
-  // view (continuam normalmente em Dia/Mês, tratados no Inbox). Mês e Lista
+  // view (continuam normalmente em Dia/Mês, tratados no Inbox). Atendimento do
+  // CRM comercial nunca tem `pendente` true (ver eventosAgendamentos), então
+  // aparece aqui mesmo com status pendente. Mês e Lista
   // também ocultam ausências recorrentes (dia_semana): elas repetem o mesmo
   // padrão em todo dia da semana correspondente e só poluiriam o badge
   // "Ausente"/a lista sem agregar informação — só a view Dia continua
@@ -834,6 +860,14 @@ export default function PainelCalendario({
             // ações de sempre (leva B.2). O calendário apenas sinaliza a
             // seleção; estado/handlers ficam no /admin.
             const item = info.event.extendedProps.agendamento;
+            // CRM comercial: mesmo destino que teria pelo status (pendente ->
+            // onSelecionarPendente), mas sem cair no guard de "confirmado"
+            // abaixo, que deixaria o clique do pendente do CRM inerte.
+            if (info.event.extendedProps.crm) {
+              if (classificarAgendamento(item) === "inbox") onSelecionarPendente?.(item);
+              else onSelecionarConfirmado?.(item);
+              return;
+            }
             if (info.event.extendedProps.pendente) {
               onSelecionarPendente?.(item);
               return;
