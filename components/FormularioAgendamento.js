@@ -240,11 +240,10 @@ async function escolherMenosOcupado(estabelecimentoId, data, candidatos) {
   const contagem = new Map(candidatos.map((id) => [id, 0]));
 
   const { data: reservas, error } = await supabase
-    .from("agendamentos")
+    .from("slots_ocupados")
     .select("profissional_id")
     .eq("estabelecimento_id", estabelecimentoId)
-    .eq("data", data)
-    .neq("status", "cancelado");
+    .eq("data", data);
 
   if (!error) {
     for (const r of reservas ?? []) {
