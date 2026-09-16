@@ -15,6 +15,7 @@ import {
   rotulo,
   tipoDoAtendimento,
 } from "@/lib/crm";
+import SeletorCidade from "./SeletorCidade";
 import SeletorIndicacao from "./SeletorIndicacao";
 import SeletorTags from "./SeletorTags";
 import {
@@ -239,9 +240,7 @@ export default function DetalheLead({
             <Campo rotulo="Instagram">
               <input {...campo("instagram")} className={CLASSE_INPUT} />
             </Campo>
-            <Campo rotulo="Cidade">
-              <input {...campo("cidade")} className={CLASSE_INPUT} />
-            </Campo>
+            <SeletorCidade valor={form.cidade} onChange={(nome) => setForm((f) => ({ ...f, cidade: nome }))} />
             <Campo rotulo="Tipo de profissional">
               <input {...campo("tipo_profissional")} className={CLASSE_INPUT} />
             </Campo>

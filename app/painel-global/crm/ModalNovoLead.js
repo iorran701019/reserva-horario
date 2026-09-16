@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { ORIGENS, STATUS_ATIVOS, hojeISO } from "@/lib/crm";
+import SeletorCidade from "./SeletorCidade";
 import SeletorIndicacao from "./SeletorIndicacao";
 import SeletorTags from "./SeletorTags";
 import {
@@ -104,9 +105,7 @@ export default function ModalNovoLead({ leads, tags, onTagCriada, onFechar, onCr
           <Campo rotulo="Instagram">
             <input {...campo("instagram")} placeholder="@" className={CLASSE_INPUT} />
           </Campo>
-          <Campo rotulo="Cidade">
-            <input {...campo("cidade")} className={CLASSE_INPUT} />
-          </Campo>
+          <SeletorCidade valor={form.cidade} onChange={(nome) => setForm((f) => ({ ...f, cidade: nome }))} />
           <Campo rotulo="Tipo de profissional">
             <input {...campo("tipo_profissional")} placeholder="Ex.: manicure" className={CLASSE_INPUT} />
           </Campo>
