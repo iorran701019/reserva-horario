@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
+import IconeWhatsApp from "@/components/IconeWhatsApp";
+import { classesBadgeEtiqueta } from "@/components/SeletorEtiquetaRapido";
 import { formatarDataBR, formatarHorario } from "@/lib/data";
 import {
   MOTIVOS_PERDA,
@@ -15,6 +17,7 @@ import {
   tipoDoAtendimento,
   urgenciaAtendimento,
 } from "@/lib/crm";
+import { linkWhatsAppSemMensagem } from "@/lib/whatsapp";
 import CardLead from "./CardLead";
 import DetalheLead from "./DetalheLead";
 import ModalAtendimento from "./ModalAtendimento";
@@ -33,6 +36,7 @@ export const VISOES_CRM = [
   { id: "quadro", rotulo: "Quadro" },
   { id: "perdidos", rotulo: "Perdidos" },
   { id: "followup", rotulo: "Follow-up" },
+  { id: "clientes", rotulo: "Clientes" },
   { id: "tipos", rotulo: "Tipos de atendimento" },
 ];
 
@@ -278,6 +282,8 @@ export default function AbaCrm({ visao, novoLeadAberto, onFecharNovoLead, onCont
           )
         ) : visao === "followup" ? (
           <FollowUp leads={ativos} onAbrir={setLeadAbertoId} />
+        ) : visao === "clientes" ? (
+          <Clientes leads={leads} tagsDoLead={tagsDoLead} onAbrir={setLeadAbertoId} />
         ) : (
           <TiposAtendimento tipos={tiposAtendimento} onAlterado={carregar} />
         )}
@@ -392,5 +398,71 @@ function FollowUp({ leads, onAbrir }) {
         </section>
       ))}
     </div>
+  );
+}
+
+// Clientes: leads convertidos, só consulta. Mais recente primeiro por
+// data_conversao (gravada em mudarStatus/marcarAtendimento); convertido sem
+// data — legado de antes da coluna — vai pro fim. Clique abre o DetalheLead.
+function Clientes({ leads, tagsDoLead, onAbrir }) {
+  const clientes = leads
+    .filter((l) => l.status === "convertido")
+    .sort((a, b) => (b.data_conversao ?? "").localeCompare(a.data_conversao ?? ""));
+
+  if (clientes.length === 0) {
+    return <p className="text-sm text-body">Nenhum cliente convertido ainda.</p>;
+  }
+
+  return (
+    <ul className="mx-auto max-w-3xl divide-y divide-border rounded-2xl bg-card shadow-sm ring-1 ring-border">
+      {clientes.map((lead) => {
+        const tags = tagsDoLead(lead.id);
+        return (
+          <li
+            key={lead.id}
+            onClick={() => onAbrir(lead.id)}
+            className="flex cursor-pointer items-start gap-3 px-4 py-3 transition hover:bg-surface"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-heading">{lead.nome}</p>
+              {(lead.tipo_profissional || lead.cidade) && (
+                <p className="truncate text-xs text-body">
+                  {[lead.tipo_profissional, lead.cidade].filter(Boolean).join(" · ")}
+                </p>
+              )}
+              {tags.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {tags.map((tag) => (
+                    <span key={tag.id} className={classesBadgeEtiqueta(tag.cor)}>
+                      {tag.nome}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {lead.data_conversao && (
+                <p className="mt-1 text-xs text-muted">
+                  Cliente desde {formatarDataBR(lead.data_conversao)}
+                </p>
+              )}
+            </div>
+            {/* Mesmo botão do CardLead; stopPropagation pra não abrir o detalhe. */}
+            {lead.whatsapp && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(linkWhatsAppSemMensagem(lead.whatsapp), "_blank", "noopener,noreferrer");
+                }}
+                aria-label="Abrir conversa no WhatsApp"
+                title="Abrir conversa no WhatsApp"
+                className="inline-flex shrink-0 items-center justify-center rounded-full bg-green-50 p-2 text-green-700 ring-1 ring-green-200 transition hover:bg-green-100"
+              >
+                <IconeWhatsApp className="h-4 w-4" />
+              </button>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
