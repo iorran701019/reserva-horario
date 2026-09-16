@@ -3796,7 +3796,7 @@ export default function AdminPage() {
                     value={buscaClienteHistorico}
                     onChange={(e) => setBuscaClienteHistorico(e.target.value)}
                     placeholder="Filtrar por cliente..."
-                    className="w-full rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                    className="w-full rounded-lg border border-muted px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
                   />
                   {sugestoesClienteHistorico.length > 0 && (
                     <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg bg-card shadow-lg ring-1 ring-border">

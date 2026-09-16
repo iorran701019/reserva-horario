@@ -258,7 +258,7 @@ export default function IdentificacaoClienteAdmin({
             }}
             autoComplete="off"
             placeholder="Buscar cliente pelo nome"
-            className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+            className="w-full rounded-lg border border-muted px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
           />
 
           {/* Renderizado no fluxo normal (não absolute) — não há campo abaixo
