@@ -15,6 +15,7 @@ import {
   rotulo,
   tipoDoAtendimento,
 } from "@/lib/crm";
+import SeletorIndicacao from "./SeletorIndicacao";
 import SeletorTags from "./SeletorTags";
 import {
   CLASSE_BOTAO_PRIMARIO,
@@ -58,6 +59,7 @@ export default function DetalheLead({
   onFechar,
   onMudarStatus,
   onMarcarAtendimento,
+  onAbrirLead,
   onAlterado,
 }) {
   const [form, setForm] = useState(() => formInicial(lead));
@@ -65,7 +67,6 @@ export default function DetalheLead({
   const [status, setStatus] = useState("");
   const [erro, setErro] = useState("");
 
-  const [buscaIndicacao, setBuscaIndicacao] = useState("");
   const [erroTags, setErroTags] = useState("");
 
   const [novaInteracao, setNovaInteracao] = useState(null);
@@ -147,16 +148,8 @@ export default function DetalheLead({
     onAlterado();
   }
 
-  const indicadoPor = leads.find((l) => l.id === Number(form.indicado_por_lead_id));
-  const sugestoesIndicacao = buscaIndicacao.trim()
-    ? leads
-        .filter(
-          (l) =>
-            l.id !== lead.id &&
-            l.nome.toLowerCase().includes(buscaIndicacao.trim().toLowerCase())
-        )
-        .slice(0, 6)
-    : [];
+  // Vínculo SALVO (não o do form): o link no topo só reflete o que está gravado.
+  const indicadoPor = leads.find((l) => l.id === lead.indicado_por_lead_id);
 
   const mostrarPerda = lead.status === "perdido" || form.motivo_perda || form.observacao_perda;
 
@@ -180,6 +173,18 @@ export default function DetalheLead({
           {lead.data_conversao && (
             <p className="pb-2 text-xs text-muted">
               Convertido em {formatarDataBR(lead.data_conversao)}
+            </p>
+          )}
+          {indicadoPor && (
+            <p className="pb-2 text-xs text-muted">
+              Indicado por{" "}
+              <button
+                type="button"
+                onClick={() => onAbrirLead(indicadoPor.id)}
+                className="font-semibold text-primary hover:underline"
+              >
+                {indicadoPor.nome}
+              </button>
             </p>
           )}
           {/* Mesmo botão do inbox de Pendentes do /admin (conversa em branco).
@@ -255,49 +260,16 @@ export default function DetalheLead({
             </Campo>
           </div>
 
-          <div>
-            <span className="mb-1 block text-xs font-medium text-body">Indicado por</span>
-            {indicadoPor ? (
-              <div className="flex items-center gap-2 text-sm text-heading">
-                {indicadoPor.nome}
-                <button
-                  type="button"
-                  onClick={() => setForm((f) => ({ ...f, indicado_por_lead_id: "" }))}
-                  className="text-xs font-semibold text-red-600 hover:underline"
-                >
-                  remover
-                </button>
-              </div>
-            ) : (
-              <div className="relative">
-                <input
-                  value={buscaIndicacao}
-                  onChange={(e) => setBuscaIndicacao(e.target.value)}
-                  placeholder="Buscar lead pelo nome"
-                  className={CLASSE_INPUT}
-                />
-                {sugestoesIndicacao.length > 0 && (
-                  <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg bg-card shadow-lg ring-1 ring-border">
-                    {sugestoesIndicacao.map((l) => (
-                      <li key={l.id}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setForm((f) => ({ ...f, indicado_por_lead_id: l.id }));
-                            setBuscaIndicacao("");
-                          }}
-                          className="block w-full px-3 py-2 text-left text-sm text-heading hover:bg-surface"
-                        >
-                          {l.nome}
-                          {l.cidade ? <span className="text-xs text-muted"> · {l.cidade}</span> : null}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-          </div>
+          {/* Fora de "indicação" o seletor some, mas o valor fica no form e
+              é regravado como está: trocar a origem não apaga o vínculo. */}
+          {form.origem === "indicacao" && (
+            <SeletorIndicacao
+              leads={leads}
+              valor={form.indicado_por_lead_id}
+              excluirId={lead.id}
+              onChange={(id) => setForm((f) => ({ ...f, indicado_por_lead_id: id }))}
+            />
+          )}
 
           <Campo rotulo="Observações">
             <textarea {...campo("observacoes")} rows={3} className={CLASSE_INPUT} />

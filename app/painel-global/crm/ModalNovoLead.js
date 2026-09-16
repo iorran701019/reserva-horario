@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { ORIGENS, STATUS_ATIVOS, hojeISO } from "@/lib/crm";
+import SeletorIndicacao from "./SeletorIndicacao";
 import SeletorTags from "./SeletorTags";
 import {
   CLASSE_BOTAO_PRIMARIO,
@@ -19,7 +20,7 @@ import {
 // contato: o primeiro atendimento é marcado depois, no detalhe do lead.
 const STATUS_INICIAIS = STATUS_ATIVOS.filter((s) => s.id !== "demonstracao");
 
-export default function ModalNovoLead({ tags, onTagCriada, onFechar, onCriado }) {
+export default function ModalNovoLead({ leads, tags, onTagCriada, onFechar, onCriado }) {
   const [form, setForm] = useState({
     nome: "",
     whatsapp: "",
@@ -27,6 +28,7 @@ export default function ModalNovoLead({ tags, onTagCriada, onFechar, onCriado })
     cidade: "",
     tipo_profissional: "",
     origem: "",
+    indicado_por_lead_id: "",
     status: "novo",
     observacoes: "",
   });
@@ -51,6 +53,9 @@ export default function ModalNovoLead({ tags, onTagCriada, onFechar, onCriado })
     const payload = Object.fromEntries(
       Object.entries(form).map(([k, v]) => [k, typeof v === "string" ? v.trim() || null : v])
     );
+    // Vínculo só vale com origem = indicação (no cadastro não há valor
+    // anterior a preservar).
+    if (payload.origem !== "indicacao") payload.indicado_por_lead_id = null;
     if (payload.status === "convertido") payload.data_conversao = hojeISO();
 
     const { data: lead, error } = await supabase
@@ -125,6 +130,13 @@ export default function ModalNovoLead({ tags, onTagCriada, onFechar, onCriado })
             </select>
           </Campo>
         </div>
+        {form.origem === "indicacao" && (
+          <SeletorIndicacao
+            leads={leads}
+            valor={form.indicado_por_lead_id}
+            onChange={(id) => setForm((f) => ({ ...f, indicado_por_lead_id: id }))}
+          />
+        )}
         <div>
           <span className="mb-1 block text-xs font-medium text-body">Tags</span>
           <SeletorTags

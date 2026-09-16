@@ -291,6 +291,7 @@ export default function AbaCrm({ visao, novoLeadAberto, onFecharNovoLead, onCont
 
       {novoLeadAberto && (
         <ModalNovoLead
+          leads={leads}
           tags={tags}
           onTagCriada={adicionarTag}
           onFechar={onFecharNovoLead}
@@ -313,6 +314,7 @@ export default function AbaCrm({ visao, novoLeadAberto, onFecharNovoLead, onCont
           onFechar={() => setLeadAbertoId(null)}
           onMudarStatus={mudarStatus}
           onMarcarAtendimento={abrirAtendimento}
+          onAbrirLead={setLeadAbertoId}
           onAlterado={carregar}
         />
       )}
