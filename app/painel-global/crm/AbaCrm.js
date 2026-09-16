@@ -13,6 +13,7 @@ import {
   hojeISO,
   rotulo,
   tipoDoAtendimento,
+  urgenciaAtendimento,
 } from "@/lib/crm";
 import CardLead from "./CardLead";
 import DetalheLead from "./DetalheLead";
@@ -20,20 +21,22 @@ import ModalAtendimento from "./ModalAtendimento";
 import ModalNovoLead from "./ModalNovoLead";
 import ModalPerda from "./ModalPerda";
 import TiposAtendimento from "./TiposAtendimento";
-import { CLASSE_BOTAO_PRIMARIO, MensagemErro } from "./ui";
+import { MensagemErro } from "./ui";
 
 // CRM comercial do Acolhe, aba padrão do hub (ver HubPainelGlobal). A guarda
 // de sessão/papel 'global' mora no shell — chegar aqui já é permissão; a RLS
 // das 4 tabelas exige 'global' de qualquer jeito.
-const VISOES = [
+//
+// A troca de visão e o "+ Novo lead" ficam no menu da direita da barra do
+// shell; por isso `visao` e `novoLeadAberto` chegam por prop.
+export const VISOES_CRM = [
   { id: "quadro", rotulo: "Quadro" },
   { id: "perdidos", rotulo: "Perdidos" },
   { id: "followup", rotulo: "Follow-up" },
   { id: "tipos", rotulo: "Tipos de atendimento" },
 ];
 
-export default function AbaCrm() {
-  const [visao, setVisao] = useState("quadro");
+export default function AbaCrm({ visao, novoLeadAberto, onFecharNovoLead, onContagemPerdidos }) {
   const [leads, setLeads] = useState([]);
   const [tags, setTags] = useState([]);
   const [leadTags, setLeadTags] = useState([]);
@@ -42,7 +45,6 @@ export default function AbaCrm() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
 
-  const [novoLeadAberto, setNovoLeadAberto] = useState(false);
   const [leadAbertoId, setLeadAbertoId] = useState(null);
   // { lead, tipos } — tipos já filtrados pro contexto em que o modal abriu.
   const [atendimento, setAtendimento] = useState(null);
@@ -193,34 +195,14 @@ export default function AbaCrm() {
   const ativos = leads.filter((l) => l.status !== "perdido");
   const perdidos = leads.filter((l) => l.status === "perdido");
 
+  // A contagem aparece no menu da direita, que é do shell.
+  useEffect(() => {
+    onContagemPerdidos(perdidos.length);
+  }, [onContagemPerdidos, perdidos.length]);
+
   return (
     <>
-      <div className="mx-auto max-w-7xl">
-        {/* Título e "Sair" são do shell; aqui fica só a ação da aba. */}
-        <div className="mb-4 flex justify-end">
-          <button type="button" onClick={() => setNovoLeadAberto(true)} className={CLASSE_BOTAO_PRIMARIO}>
-            + Novo lead
-          </button>
-        </div>
-
-        <div className="mb-4 flex flex-wrap gap-2">
-          {VISOES.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setVisao(item.id)}
-              className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                visao === item.id
-                  ? "bg-primary text-white"
-                  : "bg-card text-body ring-1 ring-border hover:text-heading"
-              }`}
-            >
-              {item.rotulo}
-              {item.id === "perdidos" ? ` (${perdidos.length})` : ""}
-            </button>
-          ))}
-        </div>
-
+      <div className="crm mx-auto max-w-7xl">
         {erro && (
           <div className="mb-4">
             <MensagemErro>{erro}</MensagemErro>
@@ -230,7 +212,10 @@ export default function AbaCrm() {
         {carregando ? (
           <p className="text-sm text-body">Carregando leads...</p>
         ) : visao === "quadro" ? (
-          <div className="flex gap-3 overflow-x-auto pb-4">
+          // Grade 2×3 (3×2 a partir de md) que cabe inteira na tela; quem rola
+          // é a lista de cada coluna, não a página. Medidas em .crm-quadro
+          // (globals.css).
+          <div className="crm-quadro">
             {STATUS_ATIVOS.map((coluna) => {
               const daColuna = ativos.filter((l) => l.status === coluna.id);
               return (
@@ -242,17 +227,17 @@ export default function AbaCrm() {
                   }}
                   onDragLeave={() => setColunaAlvo((c) => (c === coluna.id ? null : c))}
                   onDrop={(e) => soltarNaColuna(e, coluna.id)}
-                  className={`flex w-64 shrink-0 flex-col rounded-2xl p-2 ring-1 transition ${
+                  className={`crm-coluna ring-1 transition ${
                     colunaAlvo === coluna.id ? "bg-primary/10 ring-primary" : "bg-card/60 ring-border"
                   }`}
                 >
-                  <h2 className="mb-2 flex items-center justify-between px-1 text-sm font-semibold text-heading">
-                    {coluna.rotulo}
-                    <span className="rounded-full bg-surface px-2 py-0.5 text-xs text-body ring-1 ring-border">
+                  <h2 className="crm-coluna-titulo text-heading">
+                    <span className="truncate">{coluna.rotulo}</span>
+                    <span className="crm-coluna-contagem bg-surface text-body ring-1 ring-border">
                       {daColuna.length}
                     </span>
                   </h2>
-                  <div className="flex min-h-24 flex-col gap-2">
+                  <div className="crm-coluna-lista">
                     {daColuna.map((lead) => (
                       <CardLead
                         key={lead.id}
@@ -302,9 +287,9 @@ export default function AbaCrm() {
         <ModalNovoLead
           tags={tags}
           onTagCriada={adicionarTag}
-          onFechar={() => setNovoLeadAberto(false)}
+          onFechar={onFecharNovoLead}
           onCriado={({ fechar }) => {
-            if (fechar) setNovoLeadAberto(false);
+            if (fechar) onFecharNovoLead();
             carregar();
           }}
         />
@@ -353,20 +338,23 @@ export default function AbaCrm() {
 }
 
 // Follow-up: leads fora de Perdidos com próximo atendimento marcado (join em
-// agendamentos via proximo_atendimento_agendamento_id), em três blocos pela
-// data. Ordenados por data + horário (crescente) dentro de cada bloco.
+// agendamentos via proximo_atendimento_agendamento_id), em três blocos por
+// urgenciaAtendimento (data + hora). Ordenados por data + horário (crescente) dentro de cada bloco.
 function FollowUp({ leads, onAbrir }) {
-  const hoje = hojeISO();
+  const agora = new Date();
   const chave = (l) => `${l.proximo_atendimento.data} ${l.proximo_atendimento.horario}`;
   const comData = leads
     .filter((l) => l.proximo_atendimento)
     .sort((a, b) => chave(a).localeCompare(chave(b)));
 
   const blocos = [
-    { id: "atrasados", titulo: "🔴 Atrasados", itens: comData.filter((l) => l.proximo_atendimento.data < hoje) },
-    { id: "hoje", titulo: "🟡 Hoje", itens: comData.filter((l) => l.proximo_atendimento.data === hoje) },
-    { id: "proximos", titulo: "🔵 Próximos", itens: comData.filter((l) => l.proximo_atendimento.data > hoje) },
-  ];
+    { id: "atrasado", titulo: "🔴 Atrasados" },
+    { id: "hoje", titulo: "🟡 Hoje" },
+    { id: "proximo", titulo: "🔵 Próximos" },
+  ].map((bloco) => ({
+    ...bloco,
+    itens: comData.filter((l) => urgenciaAtendimento(l.proximo_atendimento, agora) === bloco.id),
+  }));
 
   return (
     <div className="grid gap-4 md:grid-cols-3">

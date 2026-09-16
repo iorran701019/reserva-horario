@@ -4,12 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useSessaoAdmin } from "@/hooks/useSessaoAdmin";
-import AbaCrm from "./crm/AbaCrm";
+import AbaCrm, { VISOES_CRM } from "./crm/AbaCrm";
 import AbaAgenda from "./AbaAgenda";
 import AbaAuditoria from "./AbaAuditoria";
+import MenuSuspenso from "./MenuSuspenso";
 
 // Shell único do /painel-global: guarda de acesso (login + papel 'global'),
-// cabeçalho com "Sair" e a navegação entre as três abas. CRM, Agenda e
+// e a barra de navegação (dois menus suspensos) entre as três abas. CRM, Agenda e
 // Auditoria não repetem NADA disso — chegar a qualquer uma delas já significa
 // sessão válida com papel 'global'.
 //
@@ -52,6 +53,12 @@ export default function HubPainelGlobal({ abaInicial }) {
     ABAS.some((item) => item.id === abaInicial) ? abaInicial : ABA_PADRAO
   );
 
+  // Sub-navegação do CRM mora aqui, e não na AbaCrm, porque o menu da direita
+  // (na barra do shell) é quem troca a visão e abre o "+ Novo lead".
+  const [visaoCrm, setVisaoCrm] = useState("quadro");
+  const [novoLeadAberto, setNovoLeadAberto] = useState(false);
+  const [perdidosCrm, setPerdidosCrm] = useState(null);
+
   const autorizado = perfil?.papel === "global";
 
   function trocarAba(id) {
@@ -85,9 +92,8 @@ export default function HubPainelGlobal({ abaInicial }) {
     // de tela.
   }
 
-  async function handleSair() {
-    await supabase.auth.signOut();
-  }
+  // "Sair" saiu da UI temporariamente (reforma da barra compacta); quando
+  // voltar, é supabase.auth.signOut() — o onAuthStateChange cuida do resto.
 
   // Ainda verificando a sessão (getSession inicial não voltou).
   if (autenticado === null) {
@@ -189,45 +195,57 @@ export default function HubPainelGlobal({ abaInicial }) {
     );
   }
 
-  return (
-    <main className="min-h-screen bg-surface px-4 py-8">
-      <div className={`mx-auto mb-6 ${LARGURA_ABA[aba]}`}>
-        <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="font-display text-2xl font-bold text-heading">Painel Global</h1>
-          <button
-            type="button"
-            onClick={handleSair}
-            className="text-sm font-semibold text-red-600 transition hover:underline"
-          >
-            Sair
-          </button>
-        </header>
+  // Menu da direita: só existe onde há sub-navegação. Agenda não tem nenhuma,
+  // e as sub-abas da Auditoria (com o seletor de salão) ficam dentro do
+  // próprio conteúdo — então, fora do CRM, o menu é omitido.
+  // "Perdidos (n)" no item e, quando é a visão ativa, no botão também. A
+  // contagem chega da AbaCrm depois de carregar os leads.
+  const rotuloVisaoCrm = (v) =>
+    v.id === "perdidos" && perdidosCrm !== null ? `${v.rotulo} (${perdidosCrm})` : v.rotulo;
 
-        <nav className="flex flex-wrap gap-2">
-          {ABAS.map((item) => {
-            const ativa = aba === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => trocarAba(item.id)}
-                aria-current={ativa ? "page" : undefined}
-                className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                  ativa
-                    ? "bg-primary text-white"
-                    : "bg-card text-body ring-1 ring-border hover:text-heading"
-                }`}
-              >
-                {item.rotulo}
-              </button>
-            );
-          })}
-        </nav>
-      </div>
+  const menuDireita =
+    aba === "crm" ? (
+      <MenuSuspenso
+        alinhar="direita"
+        rotulo={rotuloVisaoCrm(VISOES_CRM.find((v) => v.id === visaoCrm))}
+        itens={[
+          { id: "novo-lead", rotulo: "+ Novo lead", onSelecionar: () => setNovoLeadAberto(true) },
+          ...VISOES_CRM.map((v) => ({
+            id: v.id,
+            rotulo: rotuloVisaoCrm(v),
+            ativo: v.id === visaoCrm,
+            onSelecionar: () => setVisaoCrm(v.id),
+          })),
+        ]}
+      />
+    ) : null;
+
+  return (
+    <main className="min-h-screen bg-surface px-4 py-3">
+      <nav className={`hub-barra mx-auto flex gap-2 ${LARGURA_ABA[aba]}`}>
+        {/* Rótulo fixo de propósito: a seção ativa aparece no destaque do item. */}
+        <MenuSuspenso
+          rotulo="Painel Global"
+          itens={ABAS.map((item) => ({
+            id: item.id,
+            rotulo: item.rotulo,
+            ativo: aba === item.id,
+            onSelecionar: () => trocarAba(item.id),
+          }))}
+        />
+        {menuDireita}
+      </nav>
 
       {/* Uma aba por vez, sem montar as outras: cada uma carrega os próprios
           dados no mount, e manter as três vivas dispararia query à toa. */}
-      {aba === "crm" && <AbaCrm />}
+      {aba === "crm" && (
+        <AbaCrm
+          visao={visaoCrm}
+          novoLeadAberto={novoLeadAberto}
+          onFecharNovoLead={() => setNovoLeadAberto(false)}
+          onContagemPerdidos={setPerdidosCrm}
+        />
+      )}
       {aba === "agenda" && (
         <div className="mx-auto max-w-5xl">
           <AbaAgenda />
