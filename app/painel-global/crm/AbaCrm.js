@@ -11,8 +11,10 @@ import {
   SELECT_LEADS_COM_ATENDIMENTO,
   STATUS_ATIVOS,
   STATUS_TODOS,
+  chaveCidade,
   expirarAtendimentoAoSairDoStatus,
   hojeISO,
+  opcoesCidade,
   rotulo,
   tipoDoAtendimento,
   urgenciaAtendimento,
@@ -20,6 +22,7 @@ import {
 import { linkWhatsAppSemMensagem } from "@/lib/whatsapp";
 import CardLead from "./CardLead";
 import DetalheLead from "./DetalheLead";
+import FiltroCidade from "./FiltroCidade";
 import ModalAtendimento from "./ModalAtendimento";
 import ModalNovoLead from "./ModalNovoLead";
 import ModalPerda from "./ModalPerda";
@@ -31,7 +34,9 @@ import { MensagemErro } from "./ui";
 // das 4 tabelas exige 'global' de qualquer jeito.
 //
 // A troca de visão e o "+ Novo lead" ficam no menu da direita da barra do
-// shell; por isso `visao` e `novoLeadAberto` chegam por prop.
+// shell; por isso `visao` e `novoLeadAberto` chegam por prop. O botão do
+// filtro de cidade também fica lá, então a seleção (`cidadesFiltro`, chaves de
+// chaveCidade) e o aberto/fechado do painel chegam por prop do mesmo jeito.
 export const VISOES_CRM = [
   { id: "quadro", rotulo: "Quadro" },
   { id: "perdidos", rotulo: "Perdidos" },
@@ -40,7 +45,16 @@ export const VISOES_CRM = [
   { id: "tipos", rotulo: "Tipos de atendimento" },
 ];
 
-export default function AbaCrm({ visao, novoLeadAberto, onFecharNovoLead, onContagemPerdidos }) {
+export default function AbaCrm({
+  visao,
+  novoLeadAberto,
+  onFecharNovoLead,
+  onContagemPerdidos,
+  cidadesFiltro,
+  onCidadesFiltro,
+  filtroCidadeAberto,
+  onFecharFiltroCidade,
+}) {
   const [leads, setLeads] = useState([]);
   const [tags, setTags] = useState([]);
   const [leadTags, setLeadTags] = useState([]);
@@ -196,8 +210,30 @@ export default function AbaCrm({ visao, novoLeadAberto, onFecharNovoLead, onCont
   }
 
   const leadAberto = leads.find((l) => l.id === leadAbertoId);
-  const ativos = leads.filter((l) => l.status !== "perdido");
-  const perdidos = leads.filter((l) => l.status === "perdido");
+
+  // Filtro de cidade (OR entre as selecionadas) vale pra Quadro, Perdidos,
+  // Follow-up e Clientes. Modais, detalhe e arraste continuam com `leads`
+  // inteiro — o seletor de indicação, por exemplo, não deve sumir com ninguém.
+  const leadsFiltrados = cidadesFiltro.length
+    ? leads.filter((l) => cidadesFiltro.includes(chaveCidade(l.cidade)))
+    : leads;
+  const ativos = leadsFiltrados.filter((l) => l.status !== "perdido");
+  const perdidos = leadsFiltrados.filter((l) => l.status === "perdido");
+  const sufixoFiltro = cidadesFiltro.length ? " nas cidades filtradas" : "";
+
+  // Contagem dos chips = o que a visão atual mostraria só com aquela cidade.
+  const baseContagemCidade = (() => {
+    if (visao === "perdidos") return leads.filter((l) => l.status === "perdido");
+    if (visao === "clientes") return leads.filter((l) => l.status === "convertido");
+    const semPerdidos = leads.filter((l) => l.status !== "perdido");
+    return visao === "followup" ? semPerdidos.filter((l) => l.proximo_atendimento) : semPerdidos;
+  })();
+
+  function alternarCidade(chave) {
+    onCidadesFiltro(
+      cidadesFiltro.includes(chave) ? cidadesFiltro.filter((c) => c !== chave) : [...cidadesFiltro, chave]
+    );
+  }
 
   // A contagem aparece no menu da direita, que é do shell.
   useEffect(() => {
@@ -206,7 +242,17 @@ export default function AbaCrm({ visao, novoLeadAberto, onFecharNovoLead, onCont
 
   return (
     <>
-      <div className="crm mx-auto max-w-7xl">
+      <div className="crm relative mx-auto max-w-7xl">
+        {filtroCidadeAberto && !carregando && visao !== "tipos" && (
+          <FiltroCidade
+            opcoes={opcoesCidade(leads, baseContagemCidade)}
+            selecionadas={cidadesFiltro}
+            onAlternar={alternarCidade}
+            onLimpar={() => onCidadesFiltro([])}
+            onFechar={onFecharFiltroCidade}
+          />
+        )}
+
         {erro && (
           <div className="mb-4">
             <MensagemErro>{erro}</MensagemErro>
@@ -259,7 +305,7 @@ export default function AbaCrm({ visao, novoLeadAberto, onFecharNovoLead, onCont
           </div>
         ) : visao === "perdidos" ? (
           perdidos.length === 0 ? (
-            <p className="text-sm text-body">Nenhum lead perdido.</p>
+            <p className="text-sm text-body">Nenhum lead perdido{sufixoFiltro}.</p>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {perdidos.map((lead) => (
@@ -283,7 +329,7 @@ export default function AbaCrm({ visao, novoLeadAberto, onFecharNovoLead, onCont
         ) : visao === "followup" ? (
           <FollowUp leads={ativos} onAbrir={setLeadAbertoId} />
         ) : visao === "clientes" ? (
-          <Clientes leads={leads} tagsDoLead={tagsDoLead} onAbrir={setLeadAbertoId} />
+          <Clientes leads={leadsFiltrados} sufixoFiltro={sufixoFiltro} tagsDoLead={tagsDoLead} onAbrir={setLeadAbertoId} />
         ) : (
           <TiposAtendimento tipos={tiposAtendimento} onAlterado={carregar} />
         )}
@@ -406,13 +452,13 @@ function FollowUp({ leads, onAbrir }) {
 // Clientes: leads convertidos, só consulta. Mais recente primeiro por
 // data_conversao (gravada em mudarStatus/marcarAtendimento); convertido sem
 // data — legado de antes da coluna — vai pro fim. Clique abre o DetalheLead.
-function Clientes({ leads, tagsDoLead, onAbrir }) {
+function Clientes({ leads, sufixoFiltro, tagsDoLead, onAbrir }) {
   const clientes = leads
     .filter((l) => l.status === "convertido")
     .sort((a, b) => (b.data_conversao ?? "").localeCompare(a.data_conversao ?? ""));
 
   if (clientes.length === 0) {
-    return <p className="text-sm text-body">Nenhum cliente convertido ainda.</p>;
+    return <p className="text-sm text-body">Nenhum cliente convertido{sufixoFiltro || " ainda"}.</p>;
   }
 
   return (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useSessaoAdmin } from "@/hooks/useSessaoAdmin";
@@ -58,6 +58,11 @@ export default function HubPainelGlobal({ abaInicial }) {
   const [visaoCrm, setVisaoCrm] = useState("quadro");
   const [novoLeadAberto, setNovoLeadAberto] = useState(false);
   const [perdidosCrm, setPerdidosCrm] = useState(null);
+  // Filtro de cidade do CRM: o botão fica na barra (não empurra a grade do
+  // Quadro), o painel com os chips é da AbaCrm. Não persiste entre sessões.
+  const [cidadesFiltroCrm, setCidadesFiltroCrm] = useState([]);
+  const [filtroCidadeAberto, setFiltroCidadeAberto] = useState(false);
+  const fecharFiltroCidade = useCallback(() => setFiltroCidadeAberto(false), []);
 
   const autorizado = perfil?.papel === "global";
 
@@ -233,6 +238,22 @@ export default function HubPainelGlobal({ abaInicial }) {
             onSelecionar: () => trocarAba(item.id),
           }))}
         />
+        {aba === "crm" && visaoCrm !== "tipos" && (
+          <button
+            type="button"
+            data-filtro-cidade-botao
+            onClick={() => setFiltroCidadeAberto((a) => !a)}
+            aria-expanded={filtroCidadeAberto}
+            title="Filtrar por cidade"
+            className={`shrink-0 rounded-lg px-3 py-2 text-sm font-semibold ring-1 transition ${
+              cidadesFiltroCrm.length
+                ? "bg-primary text-white ring-primary"
+                : "bg-card text-heading ring-border hover:ring-primary/40"
+            }`}
+          >
+            {cidadesFiltroCrm.length ? `Cidades (${cidadesFiltroCrm.length})` : "Cidades"}
+          </button>
+        )}
         {menuDireita}
       </nav>
 
@@ -244,6 +265,10 @@ export default function HubPainelGlobal({ abaInicial }) {
           novoLeadAberto={novoLeadAberto}
           onFecharNovoLead={() => setNovoLeadAberto(false)}
           onContagemPerdidos={setPerdidosCrm}
+          cidadesFiltro={cidadesFiltroCrm}
+          onCidadesFiltro={setCidadesFiltroCrm}
+          filtroCidadeAberto={filtroCidadeAberto}
+          onFecharFiltroCidade={fecharFiltroCidade}
         />
       )}
       {aba === "agenda" && (
