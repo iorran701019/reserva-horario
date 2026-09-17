@@ -9,6 +9,7 @@ import { precisaAnamnese } from "@/lib/anamnese";
 import { buscarAgendamentosAtivos } from "@/lib/agendamentosCliente";
 import { classificarAgendamento } from "@/lib/particao";
 import Hero from "@/components/Hero";
+import AvisoTopo from "@/components/AvisoTopo";
 import RodapePagina from "@/components/RodapePagina";
 import IdentificacaoCliente from "@/components/IdentificacaoCliente";
 import FormularioAnamnese from "@/components/FormularioAnamnese";
@@ -534,6 +535,7 @@ export default function AgendarPage() {
         style={estiloTemaRaiz}
       >
         <Hero compacto nome={estabelecimento.nome} slug={estabelecimento.slug} />
+        <AvisoTopo slug={estabelecimento.slug} />
         <div className="flex flex-1 flex-col items-center justify-center px-4 py-10">
           <TelaSolicitacaoEnviada
             estabelecimento={estabelecimento}
@@ -566,17 +568,7 @@ export default function AgendarPage() {
       style={estiloTemaRaiz}
     >
       <Hero nome={estabelecimento.nome} slug={estabelecimento.slug} />
-      {/* Faixa de aviso por tenant (tema.avisoTopo, ex.: acolhe = demo). Âmbar
-          suave fixo em vez de cor do tema: precisa ler como aviso em qualquer
-          paleta. Sem o campo, nada é renderizado. */}
-      {temaAtivo?.avisoTopo && (
-        <div
-          role="note"
-          className="w-full border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs font-medium text-amber-900 sm:text-sm"
-        >
-          {temaAtivo.avisoTopo}
-        </div>
-      )}
+      <AvisoTopo slug={estabelecimento.slug} />
       {/* pt reduzido é o padrão pra TODOS os tenants agora — distância entre
           o fim do Hero e "Agende seu horário" enxuta por padrão, não só pra
           quem tem headerCompacto (esse flag continua valendo pros outros
