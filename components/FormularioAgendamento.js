@@ -2183,12 +2183,22 @@ export default function FormularioAgendamento({
   // origem antes, intercepta ANTES do alerta_mensagem. Sem isso, segue pra
   // checagem de alerta_mensagem e, sem alerta, direto pra seleção de fato
   // (mesmo comportamento de sempre).
+  //
+  // /admin com pular_perguntas_adicionais_admin ligado: os DOIS popups são
+  // pulados e o serviço é confirmado direto — mesma intenção do gate que já
+  // pula as perguntas do serviço em confirmarSelecaoServico. Pular o popup de
+  // manutenção equivale a "Sim, fiz aqui" (mantém eh_manutencao, e com ele a
+  // isenção de sinal — ver precisaSinal); a dona que quiser o serviço de
+  // origem ou o de manutenção externa escolhe o serviço certo na lista.
+  // `modoLivre` garante que o /agendar público nunca pula nada.
   function selecionarServico(servico) {
-    if (servico.eh_manutencao) {
+    const pularPopups =
+      modoLivre && estabelecimento.pular_perguntas_adicionais_admin;
+    if (servico.eh_manutencao && !pularPopups) {
       setManutencaoPendente(servico);
       return;
     }
-    if (servico.alerta_mensagem) {
+    if (servico.alerta_mensagem && !pularPopups) {
       setAlertaPendente(servico);
       return;
     }
