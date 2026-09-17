@@ -2200,6 +2200,7 @@ export default function ConfiguracoesSalao({
                     className="rounded-lg border border-border px-2 py-1 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <option value="3">3 meses</option>
+                    <option value="4">4 meses</option>
                     <option value="6">6 meses</option>
                     <option value="12">12 meses</option>
                   </select>
