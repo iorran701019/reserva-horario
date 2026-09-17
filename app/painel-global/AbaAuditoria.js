@@ -11,10 +11,185 @@ import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 // seletor de salão próprio e opera sobre qualquer estabelecimento ativo.
 // A guarda de sessão/papel e o "Sair" vivem no shell — este componente só
 // renderiza quando o acesso já foi liberado.
+//
+// "Alertas" é a ÚNICA sub-aba que não usa o <select> de salão: ela mostra
+// todos os salões de uma vez numa tabela, com carregamento próprio (ver
+// linhasAlertas). Por isso o seletor é escondido nela, e a coluna fica mais
+// larga (ver larguraConteudo) — a tabela não cabe nos max-w-2xl das outras.
 const ABAS = [
   { id: "cadastro", rotulo: "Cadastro" },
   { id: "anamnese", rotulo: "Anamnese" },
   { id: "horarios", rotulo: "Horários" },
+  { id: "alertas", rotulo: "Alertas" },
+];
+
+// Colunas booleanas de `estabelecimentos` editáveis na tabela da sub-aba
+// "Alertas" — uma por switch, na ordem em que aparecem. São as MESMAS colunas
+// que o /admin do próprio salão lê (as duas primeiras em GerenciarServicos,
+// via TOGGLES_OCULTACAO), então o que muda aqui já aparece lá.
+const FLAGS_ALERTAS = [
+  {
+    coluna: "pular_perguntas_adicionais_admin",
+    rotulo: "Pular perguntas adicionais (admin)",
+  },
+  { coluna: "ocultar_preco_servicos", rotulo: "Ocultar preço" },
+  { coluna: "ocultar_duracao_servicos", rotulo: "Ocultar duração" },
+];
+
+// Catálogo só-leitura dos avisos que NÃO têm controle nenhum hoje: texto
+// craftado direto no JSX, ou coluna sem tela pra editar. Existe pra que o
+// painel global mostre o mapa inteiro, não só a parte configurável — sem
+// toggle e sem link de edição de propósito: mexer em qualquer um destes é
+// mudança de código, não de configuração. Mantido à mão (não há catálogo de
+// strings no projeto); ao mexer nos avisos, atualizar aqui também.
+const CATALOGO_SEM_CONTROLE = [
+  {
+    id: "publico",
+    rotulo: "Fluxo público",
+    itens: [
+      {
+        nome: "Confirmar manutenção",
+        descricao:
+          "Pergunta se a cliente já está com alongamento ou gel ao tocar um serviço com eh_manutencao (FormularioAgendamento).",
+      },
+      {
+        nome: "Sinal Pix (manual)",
+        descricao:
+          "Aviso âmbar com o valor do sinal, a chave Pix e o checkbox de comprovante (BlocoConfirmacaoPix).",
+      },
+      {
+        nome: "Sinal Pix (AbacatePay)",
+        descricao:
+          "QR Code, código copiável e o alerta vermelho de reserva cancelada ou expirada (BlocoQrCodeAbacatePay).",
+      },
+      {
+        nome: "Cancelamento pela cliente",
+        descricao:
+          "Confirmação antes de cancelar, nos quatro botões de cancelar do público (ModalConfirmarCancelamento).",
+      },
+      {
+        nome: "Prazo mínimo entre agendamentos",
+        descricao:
+          "Avisa que já existe agendamento próximo e oferece três saídas (ModalPrazoMinimo); aparece também no /admin.",
+      },
+      {
+        nome: "WhatsApp em conflito",
+        descricao:
+          "Número já associado a outro cadastro, com botão pra falar com o salão (ModalConflitoWhatsapp).",
+      },
+      {
+        nome: "Alteração de WhatsApp",
+        descricao:
+          "Avisa que a troca também atualiza o histórico de agendamentos vinculado (ModalAlterarWhatsapp).",
+      },
+      {
+        nome: "Valor cheio da manutenção",
+        descricao:
+          "Explica que a manutenção passou do prazo e a cobrança será a do serviço completo (FormularioAgendamento).",
+      },
+      {
+        nome: "Avisos inline do wizard",
+        descricao:
+          "Sem serviço, profissional ou horário disponível, horário já tomado, falhas de reserva e o único window.alert do app.",
+      },
+      {
+        nome: "Prazo de cancelamento expirado",
+        descricao:
+          "No painel da cliente, avisa que o prazo passou e oferece contato com o salão (PainelCliente).",
+      },
+      {
+        nome: "Faixa de demonstração",
+        descricao:
+          "Tarja âmbar no topo, com texto fixo em lib/temas.js (avisoTopo); hoje só no tenant acolhe.",
+      },
+      {
+        nome: "Anamnese",
+        descricao:
+          "Validações e aceite de termos do formulário; o conteúdo vem de anamnese_modelos, editável na sub-aba Anamnese.",
+      },
+    ],
+  },
+  {
+    id: "admin",
+    rotulo: "Admin",
+    itens: [
+      {
+        nome: "Fora da janela de agendamento",
+        descricao:
+          "Confirma agendamento fora da janela; o mesmo texto está duplicado na aba Agendar e na aba Pendentes.",
+      },
+      {
+        nome: "Dia com restrição de agenda",
+        descricao:
+          "Avisa que o dia é restrito a uma etiqueta que este cliente não tem (FormularioAgendamento, modoLivre).",
+      },
+      {
+        nome: "Confirmar sem notificar",
+        descricao:
+          "Zona pequena do botão dividido; texto também duplicado entre a aba Agendar e a aba Pendentes.",
+      },
+      {
+        nome: "Cancelar agendamento (admin)",
+        descricao:
+          "Confirmação com o nome do cliente antes de cancelar e disparar a mensagem de WhatsApp.",
+      },
+      {
+        nome: "Gate de etiqueta",
+        descricao:
+          '"Cliente sem etiqueta" ou "Cliente Nova, já no 2º serviço" antes de confirmar; sem X, fundo nem Esc.',
+      },
+      {
+        nome: "Virada de mês",
+        descricao:
+          "Popup diário avisando que o mês não tem status na agenda e ninguém consegue agendar nele.",
+      },
+      {
+        nome: "Banner Agenda por mês",
+        descricao:
+          "Cartão clicável na aba Painel, com uma pílula por mês do alcance (verde, amarelo ou cinza).",
+      },
+      {
+        nome: "Cliente com pendente",
+        descricao:
+          "Avisa que a cliente já tem agendamento aguardando confirmação antes de abrir o wizard (ModalClientePendente).",
+      },
+      {
+        nome: "Badges de Pix no card pendente",
+        descricao:
+          "Quatro ramos mutuamente exclusivos sobre o estado do sinal, do gateway ao “não cobrado”.",
+      },
+      {
+        nome: "Sinal não cobrado",
+        descricao:
+          "Alerta vermelho em Regras de negócio quando falta a chave Pix ou a conta AbacatePay conectada.",
+      },
+      {
+        nome: "Reduzir janela de agendamento",
+        descricao:
+          "Avisa quantos agendamentos confirmados ficam além da nova data antes de aplicar a redução.",
+      },
+      {
+        nome: "Modais da aba Serviços",
+        descricao:
+          "Prazo em conflito, desativar, excluir permanentemente, apagar categoria, vínculo da manutenção, excluir pergunta.",
+      },
+      {
+        nome: "Modais da aba Profissionais",
+        descricao:
+          "Excluir datas avulsas, bloquear o dia inteiro (apagando liberações) e desativar profissional.",
+      },
+      {
+        nome: "Modais de clientes e agenda",
+        descricao:
+          "Desativar etiqueta, trocar profissional, alterar data e vincular cliente importado do Google Calendar.",
+      },
+      {
+        nome: "Confirmações nativas do navegador",
+        descricao:
+          "Três window.confirm fora do padrão visual: remover foto (duas telas) e troca de tipo de horário.",
+      },
+    ],
+  },
 ];
 
 // Modelo novo, ainda não gravado em anamnese_modelos (id null é o sinal pro
@@ -27,6 +202,12 @@ const MODELO_ANAMNESE_VAZIO = {
   secoes: [],
   declaracoes: [],
 };
+
+// Chave de statusFlags/erroFlags: o par (salão, coluna). A mesma flag aparece
+// em todas as linhas da tabela, então o "Salvo ✓" precisa saber QUAL linha.
+function chaveFlag(id, coluna) {
+  return `${id}-${coluna}`;
+}
 
 export default function AbaAuditoria() {
   const [estabelecimentos, setEstabelecimentos] = useState([]);
@@ -70,6 +251,23 @@ export default function AbaAuditoria() {
   const [statusGranularidade, setStatusGranularidade] = useState("");
   const [erroGranularidade, setErroGranularidade] = useState("");
 
+  // Sub-aba Alertas: uma linha por salão ATIVO, com as três flags, o aviso de
+  // regras e a contagem de serviços com alerta. undefined = carregando (mesmo
+  // significado das outras sub-abas), array = pronto. Não depende de
+  // `estabelecimentoId`: esta sub-aba mostra todos os salões de uma vez.
+  const [linhasAlertas, setLinhasAlertas] = useState(undefined);
+  const [erroLinhasAlertas, setErroLinhasAlertas] = useState("");
+
+  // status/erro por PAR (salão, coluna), não por coluna: a mesma flag existe
+  // em todas as linhas da tabela, e o "Salvo ✓" tem que aparecer só na que
+  // foi tocada. Chave = `${id}-${coluna}` (ver chaveFlag).
+  const [statusFlags, setStatusFlags] = useState({});
+  const [erroFlags, setErroFlags] = useState({});
+
+  // Grupo aberto do catálogo só-leitura ("publico" | "admin" | null). Um por
+  // vez, mesmo padrão de alternarBloco em ConfiguracoesSalao.js.
+  const [grupoCatalogoAberto, setGrupoCatalogoAberto] = useState(null);
+
   // Lista de salões ativos pro seletor. Sem guarda de papel: o shell só monta
   // esta aba depois de confirmar 'global', então chegar aqui já é permissão.
   useEffect(() => {
@@ -88,6 +286,77 @@ export default function AbaAuditoria() {
       ativo = false;
     };
   }, []);
+
+  // Carga da sub-aba Alertas: dispara na PRIMEIRA entrada nela e só — o
+  // `linhasAlertas !== undefined` abaixo é o que impede um refetch a cada
+  // troca de sub-aba (e o que faz o efeito ser inócuo nas outras três).
+  // Depois disso quem mantém a tabela em dia é o update otimista de
+  // salvarFlagAlerta, não uma releitura.
+  //
+  // Duas queries em PARALELO, nunca uma por salão: agregados do PostgREST
+  // estão desabilitados neste projeto (`select=...,count()` devolve PGRST123),
+  // então a contagem de serviços com alerta é feita aqui no cliente. A
+  // segunda query traz só `estabelecimento_id` — uma linha por serviço COM
+  // alerta, não por serviço.
+  useEffect(() => {
+    if (aba !== "alertas" || linhasAlertas !== undefined) return;
+
+    let ativo = true;
+
+    (async () => {
+      setErroLinhasAlertas("");
+
+      const [saloes, alertas] = await Promise.all([
+        supabase
+          .from("estabelecimentos")
+          .select(
+            "id, nome, slug, pular_perguntas_adicionais_admin, ocultar_preco_servicos, ocultar_duracao_servicos, aviso_regras_agendamento"
+          )
+          .eq("ativo", true)
+          .order("nome"),
+        supabase
+          .from("servicos")
+          .select("estabelecimento_id")
+          .not("alerta_mensagem", "is", null)
+          .eq("ativo", true),
+      ]);
+
+      if (!ativo) return;
+
+      if (saloes.error || alertas.error) {
+        setErroLinhasAlertas(
+          `Não foi possível carregar: ${mensagemFalhaSalvar(saloes.error ?? alertas.error)}`
+        );
+        // Fica em undefined de propósito: sem linha nenhuma pra mostrar, e
+        // reentrar na sub-aba tenta de novo.
+        return;
+      }
+
+      const porSalao = (alertas.data ?? []).reduce((acc, servico) => {
+        acc[servico.estabelecimento_id] = (acc[servico.estabelecimento_id] ?? 0) + 1;
+        return acc;
+      }, {});
+
+      setLinhasAlertas(
+        (saloes.data ?? []).map((salao) => ({
+          id: salao.id,
+          nome: salao.nome,
+          slug: salao.slug,
+          pular_perguntas_adicionais_admin: Boolean(salao.pular_perguntas_adicionais_admin),
+          ocultar_preco_servicos: Boolean(salao.ocultar_preco_servicos),
+          ocultar_duracao_servicos: Boolean(salao.ocultar_duracao_servicos),
+          // Só o preenchido/vazio interessa na tabela — o texto em si é
+          // editável no /admin do próprio salão, não aqui.
+          avisoPreenchido: Boolean(salao.aviso_regras_agendamento),
+          alertasAtivos: porSalao[salao.id] ?? 0,
+        }))
+      );
+    })();
+
+    return () => {
+      ativo = false;
+    };
+  }, [aba, linhasAlertas]);
 
   // Busca o cadastro_completo do salão selecionado sempre que a seleção muda.
   // Começa zerando pra undefined/""/"" ANTES de checar se há id — isso cobre
@@ -260,6 +529,28 @@ export default function AbaAuditoria() {
     const t = setTimeout(() => setStatusGranularidade(""), 2500);
     return () => clearTimeout(t);
   }, [statusGranularidade]);
+
+  // "Salvo ✓" da tabela de Alertas: mesmo padrão dos de cima, só que varre o
+  // mapa inteiro em vez de um campo — apaga de uma vez todas as chaves que
+  // estão em "salvo". Dois switches tocados em sequência compartilham o mesmo
+  // timer (o efeito reroda e o anterior é limpo), o que só atrasa o sumiço do
+  // primeiro; nada fica preso em tela.
+  useEffect(() => {
+    const salvos = Object.keys(statusFlags).filter((k) => statusFlags[k] === "salvo");
+    if (salvos.length === 0) return;
+
+    const t = setTimeout(() => {
+      setStatusFlags((atual) => {
+        const proximo = { ...atual };
+        salvos.forEach((k) => {
+          if (proximo[k] === "salvo") delete proximo[k];
+        });
+        return proximo;
+      });
+    }, 2500);
+
+    return () => clearTimeout(t);
+  }, [statusFlags]);
 
   function alterarTituloModelo(valor) {
     setModeloAnamnese((atual) => ({ ...atual, titulo: valor }));
@@ -572,9 +863,56 @@ export default function AbaAuditoria() {
     setStatusGranularidade("salvo");
   }
 
+  // Mesmo padrão de salvarCadastroCompleto (optimistic update com rollback em
+  // erro, grava direto no clique), com uma diferença: o valor anterior e o
+  // rollback vivem DENTRO de `linhasAlertas`, porque é a tabela que desenha o
+  // switch — não há um state por flag como nas outras sub-abas. Por isso
+  // `anterior` é lido da linha, e o rollback regrava a linha inteira.
+  //
+  // O `.select("id")` no fim é obrigatório, igual às demais: sem ele um UPDATE
+  // barrado por RLS volta sem `error` e com zero linhas, e a tabela mentiria
+  // "Salvo ✓" com o switch já virado.
+  async function salvarFlagAlerta(id, coluna, novoValor) {
+    const linha = (linhasAlertas ?? []).find((l) => l.id === id);
+    if (!linha || linha[coluna] === novoValor) return;
+
+    const anterior = linha[coluna];
+    const chave = chaveFlag(id, coluna);
+
+    const aplicar = (valor) =>
+      setLinhasAlertas((atual) =>
+        (atual ?? []).map((l) => (l.id === id ? { ...l, [coluna]: valor } : l))
+      );
+
+    aplicar(novoValor);
+    setStatusFlags((atual) => ({ ...atual, [chave]: "salvando" }));
+    setErroFlags((atual) => ({ ...atual, [chave]: "" }));
+
+    const { data: linhas, error } = await supabase
+      .from("estabelecimentos")
+      .update({ [coluna]: novoValor })
+      .eq("id", id)
+      .select("id");
+
+    if (error || !linhas?.length) {
+      aplicar(anterior);
+      setStatusFlags((atual) => ({ ...atual, [chave]: "" }));
+      setErroFlags((atual) => ({
+        ...atual,
+        [chave]: `Não foi possível salvar: ${mensagemFalhaSalvar(error)}`,
+      }));
+      return;
+    }
+
+    setStatusFlags((atual) => ({ ...atual, [chave]: "salvo" }));
+  }
+
   return (
     <>
-      <div className="mx-auto max-w-2xl">
+      <div className={`mx-auto ${aba === "alertas" ? "max-w-5xl" : "max-w-2xl"}`}>
+        {/* O seletor de salão não existe na sub-aba Alertas: lá a tabela já
+            mostra todos os salões, e um "salão atual" só confundiria. */}
+        {aba !== "alertas" && (
         <div className="mb-6">
           <label htmlFor="estabelecimento" className="mb-1 block text-sm font-medium text-body">
             Salão
@@ -593,6 +931,7 @@ export default function AbaAuditoria() {
             ))}
           </select>
         </div>
+        )}
 
         <div className="mb-4 flex gap-2">
           {ABAS.map((item) => {
@@ -1179,6 +1518,213 @@ export default function AbaAuditoria() {
                 )}
               </section>
             )}
+          </>
+        )}
+
+        {aba === "alertas" && (
+          <>
+            {/* Tabela de todos os salões ativos. Sem guarda de
+                `estabelecimentoId`: esta sub-aba não usa o seletor. */}
+            {erroLinhasAlertas ? (
+              <div className="rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
+                <p className="text-sm text-red-600">{erroLinhasAlertas}</p>
+              </div>
+            ) : linhasAlertas === undefined ? (
+              <div className="rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
+                <p className="text-sm text-muted">Carregando...</p>
+              </div>
+            ) : (
+              <section className="overflow-hidden rounded-2xl bg-card shadow-sm ring-1 ring-border">
+                <div className="border-b border-border p-4">
+                  <p className="text-sm font-medium text-heading">
+                    Alertas configuráveis por salão
+                  </p>
+                  <p className="mt-1 text-xs text-muted">
+                    Cada switch grava na mesma coluna que o /admin do próprio
+                    salão lê — a mudança aparece lá na hora. As duas últimas
+                    colunas são só leitura: o texto das regras e o alerta de
+                    cada serviço se editam no /admin do salão.
+                  </p>
+                </div>
+
+                {/* overflow-x-auto + min-w na tabela: são cinco colunas além
+                    do nome. Sem o min-w a tabela ENCOLHE pra caber em vez de
+                    rolar, e as células de texto quebram uma palavra por linha
+                    ("0 / serviços / com / alerta / ativo"). Com ele, abaixo de
+                    ~46rem a tabela rola na horizontal e cada coluna fica
+                    legível. */}
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[46rem] text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-surface">
+                        <th scope="col" className="px-4 py-2 font-medium text-body">
+                          Salão
+                        </th>
+                        {FLAGS_ALERTAS.map(({ coluna, rotulo }) => (
+                          <th
+                            key={coluna}
+                            scope="col"
+                            className="px-4 py-2 text-center font-medium text-body"
+                          >
+                            {rotulo}
+                          </th>
+                        ))}
+                        <th
+                          scope="col"
+                          className="whitespace-nowrap px-4 py-2 font-medium text-body"
+                        >
+                          Regras de agendamento
+                        </th>
+                        <th
+                          scope="col"
+                          className="whitespace-nowrap px-4 py-2 font-medium text-body"
+                        >
+                          Alertas de serviço
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-border">
+                      {linhasAlertas.map((linha) => (
+                        <tr key={linha.id}>
+                          <td className="px-4 py-3 align-top">
+                            <span className="block font-medium text-heading">{linha.nome}</span>
+                            <span className="block text-xs text-muted">/{linha.slug}</span>
+                          </td>
+
+                          {FLAGS_ALERTAS.map(({ coluna, rotulo }) => {
+                            const chave = chaveFlag(linha.id, coluna);
+                            const ligado = linha[coluna];
+                            return (
+                              <td key={coluna} className="px-4 py-3 align-top text-center">
+                                {/* Mesmo switch role="switch" dos toggles de
+                                    cadastro (ver salvarExigirEndereco): nada
+                                    de componente novo. aria-label carrega o
+                                    salão porque o <th> sozinho não diz qual
+                                    linha é, pra quem usa leitor de tela. */}
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={ligado}
+                                  aria-label={`${rotulo} — ${linha.nome}`}
+                                  onClick={() => salvarFlagAlerta(linha.id, coluna, !ligado)}
+                                  disabled={statusFlags[chave] === "salvando"}
+                                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                    ligado ? "bg-primary" : "bg-border"
+                                  }`}
+                                >
+                                  <span
+                                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                                      ligado ? "translate-x-5" : "translate-x-0.5"
+                                    }`}
+                                  />
+                                </button>
+
+                                {statusFlags[chave] === "salvando" && (
+                                  <p className="mt-1 text-xs text-muted">Salvando…</p>
+                                )}
+                                {statusFlags[chave] === "salvo" && !erroFlags[chave] && (
+                                  <p className="mt-1 text-xs font-medium text-green-600">
+                                    Salvo ✓
+                                  </p>
+                                )}
+                                {erroFlags[chave] && (
+                                  <p className="mt-1 text-xs text-red-600">{erroFlags[chave]}</p>
+                                )}
+                              </td>
+                            );
+                          })}
+
+                          <td className="px-4 py-3 align-top">
+                            <span
+                              className={
+                                linha.avisoPreenchido
+                                  ? "text-xs font-medium text-heading"
+                                  : "text-xs text-muted"
+                              }
+                            >
+                              {linha.avisoPreenchido ? "preenchido" : "vazio"}
+                            </span>
+                          </td>
+
+                          <td className="whitespace-nowrap px-4 py-3 align-top">
+                            <span
+                              className={
+                                linha.alertasAtivos > 0
+                                  ? "text-xs font-medium text-heading"
+                                  : "text-xs text-muted"
+                              }
+                            >
+                              {linha.alertasAtivos}{" "}
+                              {linha.alertasAtivos === 1 ? "serviço" : "serviços"} com alerta
+                              ativo
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+
+            {/* Catálogo só-leitura (ver CATALOGO_SEM_CONTROLE): não tem toggle
+                nem link de edição de propósito — mexer em qualquer um destes
+                é mudança de código, não de configuração. Um grupo aberto por
+                vez, mesmo padrão de alternarBloco em ConfiguracoesSalao.js. */}
+            <div className="mt-6">
+              <p className="text-sm font-medium text-heading">
+                Outros alertas do sistema (sem controle ainda)
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                Texto fixo no código, ou coluna sem tela pra editar. Catálogo
+                só pra consulta.
+              </p>
+
+              <div className="mt-3 space-y-2">
+                {CATALOGO_SEM_CONTROLE.map((grupo) => {
+                  const aberto = grupoCatalogoAberto === grupo.id;
+                  return (
+                    <div
+                      key={grupo.id}
+                      className="overflow-hidden rounded-2xl bg-card shadow-sm ring-1 ring-border"
+                    >
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setGrupoCatalogoAberto((atual) =>
+                            atual === grupo.id ? null : grupo.id
+                          )
+                        }
+                        aria-expanded={aberto}
+                        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+                      >
+                        <span className="flex min-w-0 items-baseline gap-2">
+                          <span className="font-semibold text-heading">{grupo.rotulo}</span>
+                          <span className="text-xs text-muted">
+                            {grupo.itens.length} itens
+                          </span>
+                        </span>
+                        <span aria-hidden="true" className="shrink-0 text-xs text-body">
+                          {aberto ? "▲" : "▼"}
+                        </span>
+                      </button>
+
+                      {aberto && (
+                        <ul className="divide-y divide-border border-t border-border">
+                          {grupo.itens.map((item) => (
+                            <li key={item.nome} className="px-4 py-3">
+                              <p className="text-sm font-medium text-heading">{item.nome}</p>
+                              <p className="mt-0.5 text-xs text-muted">{item.descricao}</p>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </>
         )}
       </div>
