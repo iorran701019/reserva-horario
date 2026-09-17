@@ -3,16 +3,24 @@
 ## Em aberto
 
 ### Segurança (prioridade alta)
+- **RLS de leitura anônima em `agendamentos` — vazamento confirmado, não hipotético.** A policy `leitura de slots para anonimos` (SELECT, role `anon`, `qual = true`) devolve todas as colunas de todos os salões pra qualquer requisição sem autenticação, incluindo `nome_cliente` e `telefone`. Confirmado com teste real via `curl` usando a chave pública, em staging e em produção (retornou dados de 3+ salões, incluindo clientes reais). Mapeamento completo dos pontos de leitura anon feito na Sessão 64: grupo A/B/C (cálculo de vagas/disponibilidade) já migrado pra ler a view `slots_ocupados` (ampliada com `id` e `profissional_id`, sem nome/telefone) — mergeado na `main`. Falta: RPC por telefone pros pontos D-J (histórico/painel da cliente), RPC por `id` pros pontos K/L/M (status de sinal/cancelamento), e resolver os INSERT/UPDATE com `.select("id")` que hoje dependem do SELECT anon aberto pra não quebrar (isso bloqueia o fechamento definitivo da policy). Entra na auditoria RLS da semana que vem, com prioridade alta.
 - Policy `"Público pode cancelar próprio agendamento"` (UPDATE, `agendamentos`) tem `qual = true` nos dois ambientes, sem checagem de dono — qualquer requisição anônima pode alterar qualquer linha, de qualquer salão. Ainda sem correção.
 - Bug intermitente, alta prioridade: pergunta condicional (filha) às vezes salva com `pergunta_pai_id`/`opcao_gatilho_id` NULL mesmo com o checkbox marcado — reproduzido em produção, causa raiz não encontrada. Ver `Handoff_Bug_Pergunta_Condicional_Nao_Salva.md`.
 
 ### Julia — onboarding (Sessão 62)
 - Decidir `modo_horario` do profissional (`'janela'` vs `'fixo'`) na conversa presencial e atualizar a linha em `profissionais` — hoje está em `'janela'` só como placeholder.
-- Confirmar com a Laysla o valor real do serviço "APLICAÇÃO COM DECORAÇÃO - SEMI ELABORADA" (hoje R$1,00 em produção, destoante dos R$150-170 dos serviços irmãos) e decidir sobre as 2 linhas "Manutenção vinda de outra profissional" sem categoria — só então replicar (ou não) pra Julia.
+- Confirmar com a Laysla o valor real do serviço "APLICAÇÃO COM DECORAÇÃO - SEMI ELABORADA" (id 82, hoje R$1,00 em produção). Atualização Sessão 64: a Laysla indicou que é um acréscimo de R$10 sobre outro serviço, não um serviço à parte — investigar se ele deveria ser uma opção do sistema de "perguntas de adicional" em vez de um item separado do catálogo. Decidir também sobre as 2 linhas "Manutenção vinda de outra profissional" sem categoria — só então replicar (ou não) pra Julia.
 - Testar ao vivo, com a conta Google da Julia, a lista de eventos ignorados na importação do Calendar (Sessão 62) e garimpar manualmente os que forem atendimento real.
 - Limpar os 3 clientes fictícios (Maria Julia, Joana da Silva, Francine Souza) e os 12 agendamentos de demonstração em **produção**, assim que a apresentação for aprovada.
 - Confirmar merge de `fix/lista-ignorados-import-calendar` e `fix/equipe-acordeao` pra `main`, se ainda não tiver sido feito.
 - Opcional: apagar o tenant `padrao-novo` de staging ou mantê-lo como referência permanente do tema padrão.
+
+### Laysla — financeiro (Sessão 64)
+- **Decisão de negócio:** relatório financeiro de agosto e setembro/2026 tratado como não confiável (histórico contaminado por 64 agendamentos importados do Google Calendar sem vínculo — `finalizado=false`, nunca entram no relatório — mais edições manuais de valor não investigadas a fundo, mais receita de curso dado a outras manicures, que o sistema não rastreia). Decidido não corrigir retroativamente. Medição "oficial" recomeça em outubro/2026, com todos os agendamentos feitos integralmente pelo app e conclusão em tempo real. Comparação entre a percepção da Laysla e o relatório do app prevista pra meados de outubro.
+- Os 64 agendamentos importados de ago/set ficam como estão (sem vínculo, sem `finalizado=true`) — ela pode vincular manualmente pelo modal se quiser, mas isso não é mais prioridade do produto.
+- **Atenção pra outubro:** orientar a Laysla a não editar/vincular nada de agosto ou setembro depois que outubro começar — isso não entra no relatório de outubro (a data do agendamento continua sendo a original), mas pode confundir a comparação prevista pro meio do mês.
+- Pendente: conversa presencial pra reconciliar o valor de setembro que ela tinha em mente (R$800 numa conversa, R$1.600 em outra, referente a curso dado a outras manicures) — número ainda inconsistente, não fechado.
+- Se ela quiser rastrear receita fora de agendamentos (cursos, etc.) no relatório no futuro, é pedido de funcionalidade nova, não correção — avaliar depois se ela confirmar interesse.
 
 ### CRM Comercial — fase 1 (Sessão 63)
 - Testar ao vivo em staging (nada foi testado no browser): arraste entre colunas, select de status no celular, cadastro rápido com tag nova, detalhe + interações, popup de perda e reabertura.
@@ -48,6 +56,7 @@
 - Bug de navegação por voltar físico a partir do Pix: modo edição não investigado ao vivo (`sairDaEdicao` deveria levar de volta ao Pix); no fluxo novo sem edição há toques "mortos", mexer no mecanismo tem risco desproporcional ao ganho.
 - Sincronização de colunas entre `lib/estabelecimento.js` e `lib/perfil.js` — as duas listas já divergem em vários campos.
 - Divergência de `roles` na policy `"Público pode cancelar próprio agendamento"` entre staging e produção — confirmar se é intencional (relacionado ao item de segurança acima, mas registrado à parte por ser sobre `roles`, não sobre a condição `qual`).
+- **Importação do Google Calendar sempre grava `finalizado=false`, inclusive quando o vínculo com cliente/serviço é feito depois** (manual pelo modal, ou automático quando o texto casa com uma cliente já cadastrada) — atendimentos importados e concluídos ficam permanentemente fora do relatório financeiro e de outras telas que exigem `finalizado=true` (contagem de "cliente nova", painel da cliente). Correção investigada e considerada segura (Sessão 64: incluir `finalizado: true` no UPDATE do `ModalVincularCliente.js` e na rota de importação automática), mas não aplicada — deprioritizado pra Laysla porque ela não vai mais importar do Calendar a partir de outubro, mas o bug se repete pra qualquer outro tenant que use essa importação (ex: Julia).
 
 ### Produto / UX
 - "Manutenção vinda de outro salão" (`servicos.manutencao_externa`) precisa de redesenho: hoje pode ser marcado em vários serviços, mas deveria ser único por estabelecimento (categoria conceitual), e mutuamente exclusivo com "Este item é uma manutenção" (manutenção externa não tem prazo próprio).
