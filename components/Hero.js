@@ -25,6 +25,8 @@ import { buscarTema } from "@/lib/temas";
 //     'pilha-completa'  → símbolo + wordmark empilhados e centralizados,
 //                          sem nome em texto — a imagem já contém a marca
 //                          por extenso (ex.: flavia).
+//     'centro'          → mesmo bloco de 'esquerda', marca centralizada na
+//                          largura do header (ex.: acolhe).
 //   Tema sem tema.marca (ex.: teste) cai no título em texto centralizado,
 //   só que com as cores do tema. Slug sem entrada própria recebe TEMA_PADRAO
 //   (ver lib/temas.js), então na prática todo tenant tem tema.
@@ -55,6 +57,13 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
   const temaBruto = buscarTema(slug);
   const tema = temaBruto?.personalizado ? temaBruto : null;
   const ehPilhaCompleta = tema?.layoutMarca === "pilha-completa";
+  // 'centro' (ex.: acolhe) — mesmo bloco de 'esquerda', só que com a marca
+  // centralizada na largura do header. Com ocultarNome e sem tagline/
+  // marcaTexto, a coluna de texto fica vazia e sai do layout (hidden), senão
+  // o gap-4 dela deslocaria a logo pra esquerda.
+  const ehCentro = tema?.layoutMarca === "centro";
+  const semTextoMarca =
+    tema?.ocultarNome && !tema?.tagline && !tema?.marcaTexto;
   // achatarLogo (ex.: laysla) — imagens de marca vieram mais alongadas
   // verticalmente do que o desejado; scaleY via CSS corrige sem reamostrar
   // os PNGs. Genérico: qualquer tenant com o mesmo problema reaproveita.
@@ -186,6 +195,7 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
           className={[
             "relative mx-auto flex w-full max-w-md items-center gap-4",
             tema.layoutMarca === "direita" ? "flex-row-reverse" : "",
+            ehCentro ? "justify-center" : "",
           ].join(" ")}
           style={{ transform: transformBlocoMarca }}
         >
@@ -211,7 +221,15 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
               style={{ backgroundColor: "var(--color-heading)" }}
             />
           )}
-          <div className="flex flex-1 flex-col items-center text-center">
+          <div
+            className={[
+              "flex flex-col items-center text-center",
+              // flex-1 empurraria a marca pra borda; no 'centro' o texto
+              // ocupa só a própria largura.
+              ehCentro ? "" : "flex-1",
+              ehCentro && semTextoMarca ? "hidden" : "",
+            ].join(" ")}
+          >
             {tema.marcaTexto ? (
               // Nome + tagline já vêm prontos na imagem (fonte original da
               // marca) — substitui o texto ao vivo, igual ao wordmark da
