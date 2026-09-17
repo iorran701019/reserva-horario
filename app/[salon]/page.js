@@ -566,6 +566,17 @@ export default function AgendarPage() {
       style={estiloTemaRaiz}
     >
       <Hero nome={estabelecimento.nome} slug={estabelecimento.slug} />
+      {/* Faixa de aviso por tenant (tema.avisoTopo, ex.: acolhe = demo). Âmbar
+          suave fixo em vez de cor do tema: precisa ler como aviso em qualquer
+          paleta. Sem o campo, nada é renderizado. */}
+      {temaAtivo?.avisoTopo && (
+        <div
+          role="note"
+          className="w-full border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs font-medium text-amber-900 sm:text-sm"
+        >
+          {temaAtivo.avisoTopo}
+        </div>
+      )}
       {/* pt reduzido é o padrão pra TODOS os tenants agora — distância entre
           o fim do Hero e "Agende seu horário" enxuta por padrão, não só pra
           quem tem headerCompacto (esse flag continua valendo pros outros

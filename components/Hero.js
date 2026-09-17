@@ -232,6 +232,8 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
               />
             ) : (
               <>
+                {/* ocultarNome (ex.: acolhe) — logo já traz a marca por extenso. */}
+                {!tema.ocultarNome && (
                 <h1
                   className={[
                     tema.fonteDisplay,
@@ -245,6 +247,7 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
                 >
                   {tema.nomeExibido || nome || NOME_LOJA}
                 </h1>
+                )}
                 {tema.tagline && (
                   <span
                     className={[
