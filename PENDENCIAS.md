@@ -7,6 +7,17 @@
 - Policy `"Público pode cancelar próprio agendamento"` (UPDATE, `agendamentos`) tem `qual = true` nos dois ambientes, sem checagem de dono — qualquer requisição anônima pode alterar qualquer linha, de qualquer salão. Ainda sem correção.
 - Bug intermitente, alta prioridade: pergunta condicional (filha) às vezes salva com `pergunta_pai_id`/`opcao_gatilho_id` NULL mesmo com o checkbox marcado — reproduzido em produção, causa raiz não encontrada. Ver `Handoff_Bug_Pergunta_Condicional_Nao_Salva.md`.
 
+### Página institucional /home — ajustes combinados, ainda não aplicados no código (Sessão 66)
+- Descrição de "Painel simples" enxugada, removendo a repetição da palavra "dados" — trecho já revisado, falta só aplicar em `SecaoRecursos.js`.
+- Eyebrow "Quem cuida da Acolhe" trocado por "Quem cuida de cada detalhe" em `SecaoSobre.js`, pra não repetir "Acolhe"/"cuidar" perto do h2 e da tagline — trecho já revisado, falta aplicar.
+- Tamanho da logo do header reduzido de ~400% pra faixa de 300–350% (unificar `h-24 w-auto sm:h-28` em só `h-24 w-auto`) em `app/home/page.js` — trecho já revisado, falta aplicar.
+- Ver detalhes e código pronto no handoff da Sessão 66.
+
+### Julia — login de acesso não resolvido (Sessão 66)
+- Usuário criado no Supabase Auth (UID `69d31ab1-95ce-4646-b38d-367df83bb059`) e vínculo feito em `perfis` (papel `dono`), mas a Julia não conseguiu acessar com ele.
+- Segundo usuário criado (UID `a2163818-7d3b-4676-bc29-fdd984805d84`) pra substituir o primeiro, mas o `UPDATE` em `perfis` não encontrou a linha esperada — suspeita forte de estar rodando num projeto Supabase (staging ou produção) diferente daquele onde o estabelecimento `julia` e o vínculo anterior foram criados.
+- Próximo passo: confirmar o projeto certo, refazer o vínculo com o UID novo, e decidir o que fazer com o usuário antigo no Authentication.
+
 ### Acolhe — tenant de demonstração (Sessão 65)
 - **Fotos das categorias:** o catálogo migrado da Laysla foi criado com `foto_url` em branco de propósito, porque as fotos originais são do salão real dela — decidir com ela (ou fotografar/gerar fotos próprias) antes de usar o Acolhe amplamente com manicures como prospecção.
 - Ainda não testado em produção depois do último deploy (texto novo da faixa, fonte, logo centralizada, botão "Acolhe") — conferir isso e o `/admin` do tenant.
