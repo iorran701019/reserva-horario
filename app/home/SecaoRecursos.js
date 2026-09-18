@@ -33,23 +33,7 @@ export default function SecaoRecursos() {
   return (
     <section id="o-que-e" className="scroll-mt-20 px-4 py-12 sm:py-20">
       <div className="mx-auto max-w-5xl">
-        <span className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-          O que é a Acolhe
-        </span>
-
-        <h2 className="mt-3 max-w-2xl font-display text-2xl font-semibold tracking-tight text-heading sm:text-3xl">
-          Menos tempo no WhatsApp, mais tempo com a mão na massa.
-        </h2>
-
-        <p className="mt-4 max-w-2xl text-base leading-relaxed text-body">
-          Cliente que some no dia do horário, conversa de remarcação que se
-          arrasta por dez mensagens, horário vago que ninguém avisou que ia
-          ficar vago. A Acolhe fecha essas três portas: a cliente marca pelo
-          seu link, paga o sinal por Pix na hora da reserva e recebe os avisos
-          de confirmação sozinha — você só abre o painel e vê o dia pronto.
-        </p>
-
-        <div className="mt-10 grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           {RECURSOS.map(({ icone: Icone, titulo, descricao }) => (
             <div
               key={titulo}

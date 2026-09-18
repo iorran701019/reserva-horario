@@ -9,7 +9,7 @@ export default function HeroHome() {
     <section className="px-4 py-12 sm:py-20">
       <div className="mx-auto grid max-w-5xl items-center gap-10 sm:grid-cols-2 sm:gap-12">
         <div className="text-center sm:text-left">
-          <span className="inline-flex items-center rounded-full bg-card px-3 py-1 text-xs font-medium text-muted ring-1 ring-border">
+          <span className="inline-flex items-center rounded-full bg-card px-4 py-1.5 text-sm font-semibold text-muted ring-1 ring-border">
             Feito para profissionais de beleza
           </span>
 

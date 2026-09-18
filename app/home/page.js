@@ -40,7 +40,7 @@ export default function HomePage() {
       <header className="sticky top-0 z-10 border-b border-border bg-surface/90 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3">
           <Link href="/home" aria-label="Acolhe" className="text-heading">
-            <IconeAcolhe className="h-7 w-auto" />
+            <IconeAcolhe className="h-24 w-auto sm:h-28" />
           </Link>
 
           <nav className="hidden items-center gap-6 sm:flex">
