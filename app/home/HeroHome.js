@@ -19,8 +19,7 @@ export default function HeroHome() {
 
           <p className="mt-4 text-base leading-relaxed text-body sm:text-lg">
             O Acolhe é o sistema de agendamento feito para manicures, nail
-            designers e profissionais de beleza que querem menos falta de
-            cliente e mais tempo pra cuidar do que importa de verdade: atender
+            designers e profissionais de beleza que buscam mais tempo pra cuidar do que importa de verdade: atender
             a cliente que está no salão.
           </p>
 
