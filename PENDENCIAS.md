@@ -95,7 +95,6 @@
 - Rebaixamento silencioso da cascata de sinal Pix pra "desligado" quando falta chave manual e credencial AbacatePay ao mesmo tempo.
 
 ### Limpeza de código
-- `components/LogoAcolheRodape.js` é código morto.
 - String de fallback `"a equipe"` duplicada em três lugares.
 - Colunas antigas `servicos.ocultar_preco` e `servicos.ocultar_duracao` sem uso.
 - Coluna `estabelecimentos.reserva_provisoria_expira_horas` ainda no banco, usada só pelo bloco de rascunho abandonado de `expirar_pendentes_vencidos` — `DROP COLUMN` fica pra depois, manual.
