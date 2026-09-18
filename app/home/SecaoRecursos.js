@@ -25,7 +25,7 @@ const RECURSOS = [
     icone: LayoutGrid,
     titulo: "Painel simples",
     descricao:
-      "Tenha em mão sua agenda e dados como histórico dos agendamentos, dados e anotações de cada cliente, relatórios financeiros, etc.",
+      "Tenha em mãos sua agenda, o histórico de cada cliente e relatórios financeiros, tudo em um só lugar.",
   },
 ];
 
