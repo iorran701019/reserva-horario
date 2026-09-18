@@ -7,6 +7,20 @@
 - Policy `"Público pode cancelar próprio agendamento"` (UPDATE, `agendamentos`) tem `qual = true` nos dois ambientes, sem checagem de dono — qualquer requisição anônima pode alterar qualquer linha, de qualquer salão. Ainda sem correção.
 - Bug intermitente, alta prioridade: pergunta condicional (filha) às vezes salva com `pergunta_pai_id`/`opcao_gatilho_id` NULL mesmo com o checkbox marcado — reproduzido em produção, causa raiz não encontrada. Ver `Handoff_Bug_Pergunta_Condicional_Nao_Salva.md`.
 
+### Acolhe — tenant de demonstração (Sessão 65)
+- **Fotos das categorias:** o catálogo migrado da Laysla foi criado com `foto_url` em branco de propósito, porque as fotos originais são do salão real dela — decidir com ela (ou fotografar/gerar fotos próprias) antes de usar o Acolhe amplamente com manicures como prospecção.
+- Ainda não testado em produção depois do último deploy (texto novo da faixa, fonte, logo centralizada, botão "Acolhe") — conferir isso e o `/admin` do tenant.
+- Quando a fase de demonstração terminar, decidir se o tenant `acolhe` fica permanente (`janela_agendamento_fim` está em 2030) ou é desativado.
+
+### Bug geral — botão flutuante do WhatsApp "grudando" (Sessão 65)
+- Confirmado por raio-x: o botão (`fixed`, recalculado só em `scroll`/`resize` via `IntersectionObserver`) pode ficar preso na posição de um layout anterior quando a altura do conteúdo muda sem esses dois eventos (troca de etapa do wizard, sumiço de campo, página mais curta que a tela). Não é específico do Acolhe — vale para todos os tenants (Laysla, Flávia, Julia etc.), variando só a frequência com que aparece por causa da geometria de cada um. Ainda não virou demanda própria (sem raio-x de correção, sem branch).
+
+### Layra — novo lead (Sessão 65)
+- Mencionada como potencial cliente nova; será preciso criar um tenant de staging pra ela quando o Iorran retomar esse assunto. Nada feito ainda.
+
+### Laysla — popups escondidos no /admin (Sessão 65)
+- **Nota de semântica registrada no código e aqui:** com `pular_perguntas_adicionais_admin` ligado, o popup de "Confirmar manutenção" nunca aparece no `/admin`, e pular esse popup equivale a escolher "Sim, fiz aqui" — os ramos "Sim, em outro salão" (`servico_manutencao_externa_id`) e "Não, está natural" (`servico_origem_id`) ficam inalcançáveis por lá enquanto o toggle estiver ligado. Se a Laysla usar esses dois ramos com frequência no dia a dia, vale reconsiderar o toggle; por ora foi o que ela pediu.
+
 ### Julia — onboarding (Sessão 62)
 - Decidir `modo_horario` do profissional (`'janela'` vs `'fixo'`) na conversa presencial e atualizar a linha em `profissionais` — hoje está em `'janela'` só como placeholder.
 - Confirmar com a Laysla o valor real do serviço "APLICAÇÃO COM DECORAÇÃO - SEMI ELABORADA" (id 82, hoje R$1,00 em produção). Atualização Sessão 64: a Laysla indicou que é um acréscimo de R$10 sobre outro serviço, não um serviço à parte — investigar se ele deveria ser uma opção do sistema de "perguntas de adicional" em vez de um item separado do catálogo. Decidir também sobre as 2 linhas "Manutenção vinda de outra profissional" sem categoria — só então replicar (ou não) pra Julia.
@@ -50,13 +64,13 @@
 - Marcar "Não compareceu" sobre um item já concluído corrige o sinal, mas nenhuma tela mostra essa marca depois — o item vira cancelado e o botão "Editar" some desses cards.
 - Sem backfill retroativo de `editado_manualmente_em`: concluídos manuais antes de 14/09 não aparecem marcados como "Editado" no Histórico.
 - Aviso de React pré-existente: "Cannot update AdminPage while rendering ConfiguracoesSalao" em `salvarMes`.
-- Seletor "Meses editáveis" mostra "3 meses" mesmo quando o alcance real é 4.
 - Erro HTTP 400 recorrente no console, origem ainda não identificada.
 - Dívida técnica de tipos: `ConfiguracoesSalao.js` (`servicoManutencaoExternaId` sem `String()`) e `ModalVincularCliente.js` (`patch.servico_id` grava string crua) — inofensivo hoje.
 - Bug de navegação por voltar físico a partir do Pix: modo edição não investigado ao vivo (`sairDaEdicao` deveria levar de volta ao Pix); no fluxo novo sem edição há toques "mortos", mexer no mecanismo tem risco desproporcional ao ganho.
 - Sincronização de colunas entre `lib/estabelecimento.js` e `lib/perfil.js` — as duas listas já divergem em vários campos.
 - Divergência de `roles` na policy `"Público pode cancelar próprio agendamento"` entre staging e produção — confirmar se é intencional (relacionado ao item de segurança acima, mas registrado à parte por ser sobre `roles`, não sobre a condição `qual`).
 - **Importação do Google Calendar sempre grava `finalizado=false`, inclusive quando o vínculo com cliente/serviço é feito depois** (manual pelo modal, ou automático quando o texto casa com uma cliente já cadastrada) — atendimentos importados e concluídos ficam permanentemente fora do relatório financeiro e de outras telas que exigem `finalizado=true` (contagem de "cliente nova", painel da cliente). Correção investigada e considerada segura (Sessão 64: incluir `finalizado: true` no UPDATE do `ModalVincularCliente.js` e na rota de importação automática), mas não aplicada — deprioritizado pra Laysla porque ela não vai mais importar do Calendar a partir de outubro, mas o bug se repete pra qualquer outro tenant que use essa importação (ex: Julia).
+- **Botão flutuante do WhatsApp pode "grudar" na posição de um layout anterior** quando a altura do conteúdo muda sem `scroll`/`resize` (ver seção própria acima, Sessão 65) — afeta todos os tenants, não só o Acolhe.
 
 ### Produto / UX
 - "Manutenção vinda de outro salão" (`servicos.manutencao_externa`) precisa de redesenho: hoje pode ser marcado em vários serviços, mas deveria ser único por estabelecimento (categoria conceitual), e mutuamente exclusivo com "Este item é uma manutenção" (manutenção externa não tem prazo próprio).
@@ -73,6 +87,7 @@
 - Default de "Cliente Fixo" em mês restrito não filtra por `ativa` em `etiquetasSelect`.
 - Insert de sinal pelo `/admin` (agendamento novo com sinal declarado) não foi exercitado ao vivo com sessão autenticada — confirmar visualmente que grava o valor certo.
 - Sinal retido histórico de cancelados ficou fora do backfill de sinal por incerteza de estorno não rastreável — se um dia quiser recuperar, precisa de critério próprio.
+- Rota estática `/home` (página institucional) colide conceitualmente com o segmento dinâmico `/[salon]`: o Next resolve sozinho (estático sempre vence dinâmico), então não é bloqueante, mas o slug `home` fica permanentemente indisponível para qualquer tenant futuro com esse nome.
 
 ### AbacatePay — itens residuais (baixo risco)
 - Remarcação (`app/api/agendamentos/remarcar/route.js`): restauração best-effort do status da linha antiga quando o insert da nova falha, sem transação atômica.
@@ -85,6 +100,7 @@
 - Colunas antigas `servicos.ocultar_preco` e `servicos.ocultar_duracao` sem uso.
 - Coluna `estabelecimentos.reserva_provisoria_expira_horas` ainda no banco, usada só pelo bloco de rascunho abandonado de `expirar_pendentes_vencidos` — `DROP COLUMN` fica pra depois, manual.
 - `buscarUltimasAnamnesesPorCliente` (`lib/anamnese.js`) sem consumidor no repo.
+- `components/BotaoServico` (`FormularioAgendamento.js`) é código morto — nenhum consumidor no repo.
 
 ## Backlog
 - Reforçar com Laysla (e futuras manicures) o uso da aba Ausências pra bloqueio de agenda pessoal, em vez de tentar automatizar leitura do Google Calendar pra bloqueio ao vivo (decisão de arquitetura da Sessão 62 — ver `Protocolo_Novo_Tenant.md`).
@@ -94,3 +110,4 @@
 - Auditoria não iniciada: alinhamento de colunas de `estabelecimentos` entre `lib/estabelecimento.js` e `lib/perfil.js` (mesmo item do bug acima, registrado aqui como auditoria formal a agendar).
 - Auditoria não iniciada: varredura livre de padrões de risco não previstos, continuação do raio-x de risco silencioso.
 - Fase futura: logo do `/admin` virar link pro Instagram do Acolhe.
+- Painel de Alertas (`/painel-global` → Auditoria → Alertas, Sessão 65): v1 cobre só os 3 toggles que já eram coluna do banco. Os ~27 itens da "Cesta 2" (popups 100% no código) ficam catalogados só como leitura — migrar item a item pra virar configurável, conforme a necessidade real for aparecendo (não de uma vez).
