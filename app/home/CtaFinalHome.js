@@ -11,14 +11,14 @@ import { linkWhatsApp } from "@/lib/whatsapp";
 // da dona que JÁ usa o painel pedindo ajuda; aqui quem escreve ainda não é
 // cliente, e a primeira frase precisa dizer de onde ela veio.
 const MENSAGEM_INTERESSE =
-  "Olá! Vi a página do Acolhe e quero conhecer o sistema de agendamento.";
+  "Olá! Vi a página da Acolhe e quero conhecer o sistema de agendamento.";
 
 export default function CtaFinalHome() {
   return (
     <section id="contato" className="scroll-mt-20 bg-heading px-4 py-14 sm:py-20">
       <div className="mx-auto max-w-2xl text-center">
         <h2 className="font-display text-2xl font-semibold tracking-tight text-card sm:text-3xl">
-          Quer parar de perder horário por falta de confirmação?
+          Quer organizar e otimizar a sua agenda?
         </h2>
 
         <p className="mt-4 text-base leading-relaxed text-card/80">

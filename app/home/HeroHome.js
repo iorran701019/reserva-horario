@@ -18,9 +18,10 @@ export default function HeroHome() {
           </h1>
 
           <p className="mt-4 text-base leading-relaxed text-body sm:text-lg">
-            O Acolhe é o sistema de agendamento feito para manicures, nail
-            designers e profissionais de beleza que buscam mais tempo pra cuidar do que importa de verdade: atender
-            a cliente que está no salão.
+            A Acolhe é o sistema de agendamento feito para manicures, nail
+            designers e profissionais de beleza que buscam ficar menos tempo no
+            WhatsApp e poder cuidar do que realmente importa: atender a cliente
+            que está no salão.
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -45,7 +46,7 @@ export default function HeroHome() {
         <div className="flex justify-center">
           <Image
             src="/images/home/print-demo.png"
-            alt="Tela de agendamento do Acolhe vista pela cliente"
+            alt="Tela de agendamento da Acolhe vista pela cliente"
             width={520}
             height={835}
             sizes="(min-width: 640px) 320px, 70vw"

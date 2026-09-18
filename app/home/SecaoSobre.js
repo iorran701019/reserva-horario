@@ -11,7 +11,7 @@ export default function SecaoSobre() {
         <div className="h-56 w-56 shrink-0 overflow-hidden rounded-full shadow-sm ring-1 ring-border">
           <Image
             src="/images/home/iorran.png"
-            alt="Iorran, criador do Acolhe"
+            alt="Iorran, criador da Acolhe"
             width={1087}
             height={1447}
             sizes="224px"
@@ -21,25 +21,18 @@ export default function SecaoSobre() {
 
         <div className="text-center sm:text-left">
           <span className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-            Quem está por trás
+            Quem cuida da Acolhe
           </span>
 
           <h2 className="mt-3 font-display text-2xl font-semibold tracking-tight text-heading sm:text-3xl">
-            Iorran, criador do Acolhe
+            Iorran, criador da Acolhe
           </h2>
 
           <p className="mt-4 text-base leading-relaxed text-body">
-            Sou desenvolvedor de sistemas, com formação em suporte de TI e
-            desenvolvimento full-stack. O Acolhe não nasceu de um plano de
-            negócio: nasceu de acompanhar manicures parceiras perdendo tempo e
-            dinheiro com agenda desorganizada — caderno, print de conversa,
-            horário marcado duas vezes, cliente que não aparece.
-          </p>
-
-          <p className="mt-4 text-base leading-relaxed text-body">
-            Sou baseado no Sul Fluminense (RJ) e atendo de perto: quem usa o
-            Acolhe fala comigo, não com um robô genérico de suporte. Cada
-            ajuste que entra no sistema veio de uma profissional real pedindo.
+            Tenho 37 anos de idade, com formação em TI (Desenvolvimento Full
+            Stack). Moro em Barra Mansa, região Sul Fluminense — RJ, onde faço
+            o atendimento às profissionais de beleza online e presencialmente.
+            Todo suporte do aplicativo é 100% humano e feito sob medida.
           </p>
         </div>
       </div>

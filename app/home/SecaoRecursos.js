@@ -7,7 +7,7 @@ const RECURSOS = [
     icone: CalendarClock,
     titulo: "Agendamento 24h",
     descricao:
-      "A cliente marca sozinha pelo link, a qualquer hora, sem você parar o atendimento pra responder.",
+      "A cliente marca sozinha pelo link, a qualquer hora. Depois, com calma, você confirma o agendamento dela dentro do app.",
   },
   {
     icone: Banknote,
@@ -25,7 +25,7 @@ const RECURSOS = [
     icone: LayoutGrid,
     titulo: "Painel simples",
     descricao:
-      "Sua agenda do dia, os pendentes e o histórico da cliente em uma tela só.",
+      "Tenha em mão sua agenda e dados como histórico dos agendamentos, dados e anotações de cada cliente, relatórios financeiros, etc.",
   },
 ];
 
@@ -34,7 +34,7 @@ export default function SecaoRecursos() {
     <section id="o-que-e" className="scroll-mt-20 px-4 py-12 sm:py-20">
       <div className="mx-auto max-w-5xl">
         <span className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-          O que é o Acolhe
+          O que é a Acolhe
         </span>
 
         <h2 className="mt-3 max-w-2xl font-display text-2xl font-semibold tracking-tight text-heading sm:text-3xl">
@@ -44,7 +44,7 @@ export default function SecaoRecursos() {
         <p className="mt-4 max-w-2xl text-base leading-relaxed text-body">
           Cliente que some no dia do horário, conversa de remarcação que se
           arrasta por dez mensagens, horário vago que ninguém avisou que ia
-          ficar vago. O Acolhe fecha essas três portas: a cliente marca pelo
+          ficar vago. A Acolhe fecha essas três portas: a cliente marca pelo
           seu link, paga o sinal por Pix na hora da reserva e recebe os avisos
           de confirmação sozinha — você só abre o painel e vê o dia pronto.
         </p>
