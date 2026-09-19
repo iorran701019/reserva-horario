@@ -2394,8 +2394,13 @@ export default function AdminPage() {
   const temaAtivo = tema?.personalizado ? tema : null;
   const estiloTemaRaiz = temaAtivo
     ? {
-        "--color-primary": temaAtivo.botao,
-        "--color-primary-hover": temaAtivo.botaoHover,
+        // botaoAdmin/botaoAdminHover (ex.: layra) — cor de botão própria do
+        // admin, separada da pública: a landing pode usar um tom claro de
+        // vitrine que não serve pra uma tela de trabalho cheia de botões.
+        // Sem os campos, cai no botao/botaoHover de sempre — nenhum outro
+        // tenant muda.
+        "--color-primary": temaAtivo.botaoAdmin ?? temaAtivo.botao,
+        "--color-primary-hover": temaAtivo.botaoAdminHover ?? temaAtivo.botaoHover,
         "--color-heading": temaAtivo.textoPrincipal,
         "--color-border": temaAtivo.bordaHeader,
         "--color-body": temaAtivo.textoSecundario,

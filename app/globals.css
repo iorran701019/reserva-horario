@@ -22,6 +22,12 @@
   --color-heading: #4a342a;
   --color-body: #5a4636;
   --color-muted: #b2967d;
+  /* Fundo dos campos de formulário. Default aponta pro card: antes desta
+     variável os inputs não tinham fundo nenhum (transparentes, mostrando o
+     bg-card do pai), então herdar o card aqui reproduz exatamente a aparência
+     anterior. Tenants que quiserem campo destacado sobrescrevem via
+     tema.bgCampo (ver app/[salon]/page.js e lib/temas.js). */
+  --color-field: var(--color-card);
   --font-sans: var(--font-hanken);
   --font-display: var(--font-fraunces);
   --font-cormorant: var(--font-cormorant-garamond);
@@ -35,6 +41,16 @@ body {
 
 h1, h2 {
   font-family: var(--font-fraunces), Georgia, serif;
+}
+
+/* Fundo padrão de todo campo de formulário. Os ~150 inputs do projeto não
+   tinham classe de fundo nenhuma (eram transparentes, mostrando o bg-card do
+   pai) e a classe está copiada em 76 pontos, sem componente compartilhado —
+   uma regra global aqui é o único jeito de dar cor própria ao campo sem
+   varrer todos eles. O default (--color-field = --color-card) mantém a
+   aparência de antes; só tenants com tema.bgCampo mudam. */
+input, select, textarea {
+  background-color: var(--color-field);
 }
 
 a:focus-visible, button:focus-visible {

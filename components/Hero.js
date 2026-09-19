@@ -99,6 +99,17 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
     .filter(Boolean)
     .join(" ") || undefined;
 
+  // headerMinH / headerPy (ex.: layra) — override por tenant das medidas do
+  // ramo `headerCompacto` (min-h e py). Esse ramo é compartilhado por
+  // laysla/junior/acolhe, então afinar o header de um tenant editando as
+  // strings fixas mexeria em todos; os dois campos deixam o ajuste local ao
+  // tema. Ausentes, cada ramo devolve exatamente as classes de antes — é o
+  // que garante zero mudança pros demais. São independentes entre si: dá pra
+  // definir só um dos dois. Lembrando que min-h é PISO: baixar só o py não
+  // afina o header enquanto o min-h for maior que conteúdo + padding.
+  const medidasHeaderCompacto = (minHPadrao, pyPadrao) =>
+    [tema?.headerMinH ?? minHPadrao, tema?.headerPy ?? pyPadrao].join(" ");
+
   // Fundo do hero:
   //  - com foto (valeria/junior): a imagem cobrindo o hero; o contraste do texto
   //    vem do overlay escuro + text-shadow, não de scrim claro;
@@ -139,12 +150,12 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
           ? ehPilhaCompleta
             ? "min-h-[70px] py-4 sm:min-h-[90px] sm:py-5"
             : tema?.headerCompacto
-            ? "min-h-[92px] py-3.5 sm:min-h-[108px]"
+            ? medidasHeaderCompacto("min-h-[92px] sm:min-h-[108px]", "py-3.5")
             : "min-h-[110px] py-8 sm:min-h-[130px]"
           : ehPilhaCompleta
           ? "min-h-[120px] py-6 sm:min-h-[150px] sm:py-7"
           : tema?.headerCompacto
-          ? "min-h-[136px] py-5 sm:min-h-[152px]"
+          ? medidasHeaderCompacto("min-h-[136px] sm:min-h-[152px]", "py-5")
           : "min-h-[180px] py-12 sm:min-h-[220px]",
       ].join(" ")}
       style={estiloFundo}
