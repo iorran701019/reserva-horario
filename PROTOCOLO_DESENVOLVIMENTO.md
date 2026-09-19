@@ -140,4 +140,17 @@ No fechamento de toda sessão que rodou algum SQL de schema (ALTER/CREATE, não 
 
 Quando uma regra de negócio nova tem zona cinzenta (ex: "isso conta como cancelamento do salão ou não?"), pedir ao Iorran um exemplo real do dia a dia em vez de insistir numa pergunta abstrata — a resposta concreta costuma resolver a ambiguidade de forma mais rápida e precisa que alternativas de múltipla escolha genéricas.
 
-*Última atualização: 11/09 (regra de decisão por exemplo concreto; princípios de arquitetura sobre profissional e cancelamento do salão; Recharts e lib/conclusao.js/lib/mes.js no item 8; ida pra main como decisão explícita no item 1).*
+## Regra: tenant-modelo de tema em staging (slug `css`)
+
+Antes de moldar a identidade visual (tema/CSS) de qualquer tenant novo, usar primeiro o
+tenant fixo `css` (id 8 em staging, ex-`padrao-novo`) — nunca editar tema direto num tenant
+que só existe em produção. Ele tem cadastro básico igual ao de um tenant novo (profissional,
+5 etiquetas padrão, janela até 2027), sem catálogo nem serviços.
+
+Fluxo: criar/editar temporariamente `TEMAS_POR_SLUG.css` em `lib/temas.js` com as
+cores/logo em teste → validar via localhost apontado pro staging → aprovado, copiar a
+configuração final pra entrada do tenant real → apagar a entrada `css` (ela cai sozinha de
+volta no `TEMA_PADRAO` — comportamento padrão de `buscarTema()`, sem precisar de código
+novo).
+
+*Última atualização: 19/09 (regra do tenant-modelo de tema em staging, slug `css`; regra de decisão por exemplo concreto; princípios de arquitetura sobre profissional e cancelamento do salão; Recharts e lib/conclusao.js/lib/mes.js no item 8; ida pra main como decisão explícita no item 1).*

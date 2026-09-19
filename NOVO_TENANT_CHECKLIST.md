@@ -100,15 +100,19 @@ Substituir o padrão só quando o cliente tiver marca própria (logo e/ou paleta
 Ao cadastrar um novo tenant (staging e produção), rodar o SQL abaixo trocando
 `<ID_DO_TENANT>` pelo `estabelecimento_id` real:
 
-​```sql
+```sql
 -- STAGING ou PRODUÇÃO (trocar <ID_DO_TENANT> pelo id real do novo tenant)
-insert into etiquetas_cliente (estabelecimento_id, nome, emoji, ordem, ativa) values
-  (<ID_DO_TENANT>, 'Cliente Fixo', null, 1, true),
-  (<ID_DO_TENANT>, 'Cliente Nova', null, 2, true),
-  (<ID_DO_TENANT>, 'Cliente Ocasional', null, 3, true),
-  (<ID_DO_TENANT>, 'Lista de Espera', null, 4, true),
-  (<ID_DO_TENANT>, 'Lista de Bloqueio', null, 5, true);
-​```
+insert into etiquetas_cliente (estabelecimento_id, nome, cor) values
+  (<ID_DO_TENANT>, 'Cliente Fixo', 'violeta'),
+  (<ID_DO_TENANT>, 'Cliente Nova', 'violeta'),
+  (<ID_DO_TENANT>, 'Cliente Ocasional', 'violeta'),
+  (<ID_DO_TENANT>, 'Lista de Espera', 'violeta'),
+  (<ID_DO_TENANT>, 'Lista de Bloqueio', 'violeta');
+```
+
+`cor` aceita só um enum fixo — hoje: `violeta`, `azul`, `rosa`, `esmeralda`, `indigo`,
+`ciano`, `fucsia`, `teal` (conferir a constraint `etiquetas_cliente_cor_check` antes de
+usar outro valor).
 
 Confirmar com `select * from etiquetas_cliente where estabelecimento_id = <ID_DO_TENANT>;`
 antes de considerar o passo concluído.

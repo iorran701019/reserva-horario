@@ -22,6 +22,7 @@ Tudo controlado por 3 pontos isolados — nunca hardcodear cor em componente.
    | `--color-muted`    | texto secundário/terciário                   |
    | `--color-surface`  | fundo do body/página                         |
    | `--color-card`     | fundo de cards, menu lateral do admin        |
+   | `--color-field`    | fundo de inputs e itens que precisam contrastar com `bg-card` (ex.: campo de telefone, chip de horário fixo, botão de ficha de cliente) — opcional por tenant via `tema.bgCampo`, cai em `--color-card` se ausente (sem regressão pra quem não define) |
 
 3. **Override no runtime** — em `app/[salon]/page.js` e `app/[salon]/admin` (wrapper mais
    externo de cada árvore), um `style` inline sobrescreve as 8 variáveis acima. O gatilho
@@ -45,6 +46,11 @@ Tudo controlado por 3 pontos isolados — nunca hardcodear cor em componente.
    } : {};
    ```
 
+   O **admin pode ter cor de botão própria**, separada do público: `tema.botaoAdmin` /
+   `tema.botaoAdminHover`, com fallback pra `tema.botao` / `tema.botaoHover` quando
+   ausentes. Útil quando o botão público é claro (dourado) e precisaria de troca de cor de
+   texto pra funcionar no admin também.
+
    Com isso, qualquer componente que já usa os tokens herda a cor certa automaticamente —
    **não** criar `if (slug === 'x')` espalhado nos componentes. Se um componente ainda usa
    hex direto em vez do token, o bug está nele, não no motor de tema.
@@ -63,7 +69,7 @@ no override. São sinalização, não identidade visual, e valem igual em qualqu
   espaço restante à direita.
 - **`'direita'`** (Julia) — mesmo bloco de `'esquerda'` espelhado (`flex-row-reverse`):
   nome/tagline à esquerda, `tema.marca` colada na borda direita.
-- **`'centralizado'`** — mesma ideia de `marca` + nome em texto, mas o símbolo fica
+- **`'centro'`** — mesma ideia de `marca` + nome em texto, mas o símbolo fica
   centralizado no header em vez de à esquerda (útil quando o cliente não pediu um layout
   assimétrico).
 - **`'pilha-completa'`** (Flávia/Ahazou) — usado quando o próprio material de marca já tem
@@ -73,6 +79,10 @@ no override. São sinalização, não identidade visual, e valem igual em qualqu
   nenhum texto adicional** — as imagens já contêm a marca completa.
 - Ausência de `layoutMarca` (tenants sem tema próprio) — comportamento original, nome em
   texto simples centralizado, sem nenhuma imagem.
+
+Campo booleano **`ocultarNome`**: some com o `<h1>` do nome ao lado da logo quando a
+`marca` já traz o nome escrito por extenso — usar junto com `layoutMarca: 'centro'` quando
+o SVG/PNG já é um lockup completo (ver `acolhe`, `julia`, `layra`).
 
 ### Padrão: logo em múltiplas peças
 
@@ -143,10 +153,15 @@ primeiro tenant serve pra todos.
 
 ## Passo a passo pra um tenant novo com identidade própria
 
+0. **Moldar a identidade visual primeiro no tenant-modelo de staging** (slug `css`,
+   `TEMAS_POR_SLUG.css`) — nunca editar tema direto num tenant que só existe em produção.
+   Testar via localhost, aprovar, copiar a configuração final pro tenant real, e então
+   apagar a entrada `css` de `lib/temas.js` (ela volta sozinha pro `TEMA_PADRAO` — ver
+   `buscarTema()`).
 1. Extrair a paleta real do material de marca do cliente (nunca estimar — processar a
    imagem/PDF e ler os valores de pixel, ver script acima).
 2. Avaliar o logo: cabe como uma imagem só (`marca` + `layoutMarca: 'esquerda'` ou
-   `'centralizado'`), ou precisa virar múltiplas peças (`marcaSimbolo`/`marcaTexto` +
+   `'centro'`), ou precisa virar múltiplas peças (`marcaSimbolo`/`marcaTexto` +
    `layoutMarca: 'pilha-completa'`)? Ver seção "logo em múltiplas peças" acima.
 3. Definir os valores de `TEMAS_POR_SLUG[slug]`: bgHeader, bgBody, bordaHeader,
    textoPrincipal, textoSecundario, botao, botaoHover, campos de imagem conforme o item 2,

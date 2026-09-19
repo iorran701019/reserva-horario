@@ -13,12 +13,19 @@
 - Tamanho da logo do header reduzido de ~400% pra faixa de 300–350% (unificar `h-24 w-auto sm:h-28` em só `h-24 w-auto`) em `app/home/page.js` — trecho já revisado, falta aplicar.
 - Ver detalhes e código pronto no handoff da Sessão 66.
 
-### Layra e Laryssa — onboarding (Sessão 67)
-- Criação bruta concluída em **produção** (sem staging, por pedido explícito, pra não sobrecarregar o plano free): `estabelecimentos`, `profissionais`, 5 etiquetas padrão e janela de agendamento (set-dez/2026) para as duas.
-- Layra: nail designer, `modo_horario='fixo'`, cadastro rápido, granularidade 60min.
-- Laryssa: maquiagem, `modo_horario='janela'` (**placeholder**, mesma situação que a Julia teve — precisa de conversa real pra decidir fixo vs. janela antes de considerar resolvido), cadastro rápido, granularidade 60min.
-- `segmento` de ambas gravado como `manicure_podologia` por não existir valor próprio no CHECK constraint (só aceita esse ou `salao_barbershop`) — sem efeito funcional hoje, avaliar se compensa adicionar um valor novo se o nicho de maquiagem/nail design crescer.
-- **Catálogo, tema, mensagens de WhatsApp e regras de negócio de nenhuma das duas foram iniciados** — combinado tratar uma piloto de cada vez, começando quando o Iorran retomar.
+### Layra — configuração avançada (Sessão 67 → sessão de 19/09)
+- Catálogo completo no ar em produção: categorias Unhas Naturais e Alongamentos, 5 serviços base + 2 manutenções vinculadas por `servico_origem_id`, sem janela de prazo (preço único, a pedido dela), vínculo `servico_profissional` inserido pra todos.
+- Identidade visual completa: logo SVG própria (lockup "Layra Bonfim Nail Studio"), paleta bege-palha/dourado/preto em `TEMAS_POR_SLUG.layra`, header mais fino, contraste ajustado entre item e container em serviço/dia/horário/campo do WhatsApp/chips de horário fixo/ficha do cliente (público e `/admin`), botão de ação dourado no público e bronze no `/admin` (contraste de texto resolvido nos dois).
+- Horários fixos cadastrados: segunda a sexta 10h/13h/15h/17h, sábado 8h30/10h30, sem atendimento domingo.
+- Login de produção vinculado (UID `16e126c7-7606-473f-95ab-eb4d640b091e`, perfil `dono`).
+- **Falta:** mensagens de WhatsApp personalizadas, chave Pix (aguardando ela passar), foto de perfil.
+
+### Laryssa — onboarding (Sessão 67, sem avanço desde então)
+- Criação bruta concluída em produção: `estabelecimentos`, `profissionais`, 5 etiquetas padrão, janela de agendamento (set-dez/2026).
+- Maquiagem, `modo_horario='janela'` (**placeholder**, mesma situação que a Julia teve — precisa de conversa real pra decidir fixo vs. janela antes de considerar resolvido), cadastro rápido, granularidade 60min.
+- `segmento` gravado como `manicure_podologia` por não existir valor próprio no CHECK constraint — sem efeito funcional hoje.
+- **Catálogo, tema, mensagens de WhatsApp e regras de negócio ainda não iniciados.**
+- Antes de moldar o tema dela: usar primeiro o tenant-modelo `css` em staging (ver `PROTOCOLO.md`), nunca editar direto no tenant real.
 
 ### Popups no /admin — investigação fechada, confirmação pendente (Sessão 67)
 - Confirmado que os únicos dois popups de aviso de serviço (`alerta_mensagem` e "Confirmar manutenção") já respeitam `modoLivre` + `pular_perguntas_adicionais_admin`, e esse toggle já está `true` em todos os tenants reais (Flávia, Julia, Laysla, Acolhe-comercial). Não existe popup "Selecione a manutenção" implementado (só comentário morto no código) nem aviso de "vence em N dias" fora do `PainelCliente.js` (fluxo público). Não sobrou nada pra codar.
@@ -31,7 +38,7 @@
 ### Julia — pendências residuais (Sessão 62, atualizado na Sessão 67)
 - Testar ao vivo, com a conta Google da Julia, a lista de eventos ignorados na importação do Calendar (Sessão 62) e garimpar manualmente os que forem atendimento real.
 - Confirmar merge de `fix/lista-ignorados-import-calendar` e `fix/equipe-acordeao` pra `main`, se ainda não tiver sido feito.
-- Opcional: apagar o tenant `padrao-novo` de staging ou mantê-lo como referência permanente do tema padrão.
+- ~~Opcional: apagar ou manter `padrao-novo`~~ — **resolvido nesta sessão**: renomeado pra slug `css`, virou o tenant-modelo fixo e resetável de staging pra moldar tema de tenants futuros (ver `PROTOCOLO.md`).
 - **Terceiro UID de login gerado pro mesmo e-mail dela (`julia@julia.com`)** — vínculo em `perfis` refeito e funcionando (Sessão 67), mas o padrão de precisar recriar o login três vezes não foi investigado. Vale entender a causa (Supabase Auth recriando usuário? sessão expirando de forma anômala?) antes que aconteça de novo e gere mais vínculos órfãos.
 - Sinal fixo em R$50 (`sinal_regra='todos'`) foi a aproximação aceita pelo Iorran pro "50% do valor" que ela pediu — sistema não suporta sinal percentual hoje. Reavaliar se isso vira demanda de produto real.
 - ~~Decidir `modo_horario` do profissional~~ — **resolvido na Sessão 67** (`'fixo'`, confirmado por ela desde o início da sessão).
