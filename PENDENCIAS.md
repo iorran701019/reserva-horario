@@ -25,7 +25,7 @@
 - Maquiagem, `modo_horario='janela'` (**placeholder**, mesma situação que a Julia teve — precisa de conversa real pra decidir fixo vs. janela antes de considerar resolvido), cadastro rápido, granularidade 60min.
 - `segmento` gravado como `manicure_podologia` por não existir valor próprio no CHECK constraint — sem efeito funcional hoje.
 - **Catálogo, tema, mensagens de WhatsApp e regras de negócio ainda não iniciados.**
-- Antes de moldar o tema dela: usar primeiro o tenant-modelo `css` em staging (ver `PROTOCOLO.md`), nunca editar direto no tenant real.
+- Antes de moldar o tema dela: usar primeiro o tenant-modelo `css` em staging (ver `PROTOCOLO_DESENVOLVIMENTO.md`), nunca editar direto no tenant real.
 
 ### Popups no /admin — investigação fechada, confirmação pendente (Sessão 67)
 - Confirmado que os únicos dois popups de aviso de serviço (`alerta_mensagem` e "Confirmar manutenção") já respeitam `modoLivre` + `pular_perguntas_adicionais_admin`, e esse toggle já está `true` em todos os tenants reais (Flávia, Julia, Laysla, Acolhe-comercial). Não existe popup "Selecione a manutenção" implementado (só comentário morto no código) nem aviso de "vence em N dias" fora do `PainelCliente.js` (fluxo público). Não sobrou nada pra codar.
@@ -38,7 +38,7 @@
 ### Julia — pendências residuais (Sessão 62, atualizado na Sessão 67)
 - Testar ao vivo, com a conta Google da Julia, a lista de eventos ignorados na importação do Calendar (Sessão 62) e garimpar manualmente os que forem atendimento real.
 - Confirmar merge de `fix/lista-ignorados-import-calendar` e `fix/equipe-acordeao` pra `main`, se ainda não tiver sido feito.
-- ~~Opcional: apagar ou manter `padrao-novo`~~ — **resolvido nesta sessão**: renomeado pra slug `css`, virou o tenant-modelo fixo e resetável de staging pra moldar tema de tenants futuros (ver `PROTOCOLO.md`).
+- ~~Opcional: apagar ou manter `padrao-novo`~~ — **resolvido nesta sessão**: renomeado pra slug `css`, virou o tenant-modelo fixo e resetável de staging pra moldar tema de tenants futuros (ver `PROTOCOLO_DESENVOLVIMENTO.md`).
 - **Terceiro UID de login gerado pro mesmo e-mail dela (`julia@julia.com`)** — vínculo em `perfis` refeito e funcionando (Sessão 67), mas o padrão de precisar recriar o login três vezes não foi investigado. Vale entender a causa (Supabase Auth recriando usuário? sessão expirando de forma anômala?) antes que aconteça de novo e gere mais vínculos órfãos.
 - Sinal fixo em R$50 (`sinal_regra='todos'`) foi a aproximação aceita pelo Iorran pro "50% do valor" que ela pediu — sistema não suporta sinal percentual hoje. Reavaliar se isso vira demanda de produto real.
 - ~~Decidir `modo_horario` do profissional~~ — **resolvido na Sessão 67** (`'fixo'`, confirmado por ela desde o início da sessão).
