@@ -448,7 +448,7 @@ function GradeDias({ dias, onToggle, onCampo, onBlurCampo, mostrarAlmoco }) {
 // Chip removível de horário fixo — "HH:MM" + botão "x".
 function TagHorario({ horario, onRemover }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-xs font-medium text-heading ring-1 ring-border">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-field px-2.5 py-1 text-xs font-medium text-heading ring-1 ring-border">
       {horario}
       <button
         type="button"
@@ -490,7 +490,7 @@ function CamposHorariosFixos({ horarios, onAdicionar, onRemover, rotulo }) {
           type="button"
           onClick={adicionar}
           disabled={!novo}
-          className="rounded-lg bg-card px-2.5 py-1.5 text-sm font-medium text-primary ring-1 ring-primary/40 transition hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg bg-field px-2.5 py-1.5 text-sm font-medium text-primary ring-1 ring-primary/40 transition hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
         >
           + Adicionar
         </button>

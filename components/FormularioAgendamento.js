@@ -1483,7 +1483,7 @@ export default function FormularioAgendamento({
             ? tema
               ? ""
               : "bg-primary text-white ring-primary"
-            : "bg-field text-body ring-border hover:border-primary hover:ring-primary",
+            : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
         ].join(" ")}
         style={
           temaSelecionado
@@ -3966,7 +3966,7 @@ export default function FormularioAgendamento({
                     return (
                       <div
                         key={categoria.id}
-                        className="rounded-lg bg-card ring-1 ring-border"
+                        className="rounded-lg bg-field ring-1 ring-border"
                       >
                         {/* Cabeçalho: miniatura (opcional) + nome + seta. A
                             foto fica IRMÃ do botão, não dentro dele —
@@ -4001,7 +4001,7 @@ export default function FormularioAgendamento({
                             (block-level), o wrapper mede os 48px exatos e
                             as margens my-1/ml-1 dão o respiro simétrico. */}
                         <div
-                          className="flex w-full items-center gap-4 rounded-lg transition hover:bg-surface"
+                          className="flex w-full items-center gap-4 rounded-lg transition hover:bg-primary/10"
                           style={
                             tema && aberta
                               ? {

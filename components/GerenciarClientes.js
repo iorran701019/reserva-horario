@@ -424,7 +424,7 @@ function DetalheCliente({
       <button
         type="button"
         onClick={onVoltar}
-        className="inline-flex items-center gap-1.5 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface"
+        className="inline-flex items-center gap-1.5 rounded-lg bg-field px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-primary/10"
       >
         <ChevronLeft className="h-4 w-4" />
         Voltar
@@ -500,7 +500,7 @@ function DetalheCliente({
                   telefone: clienteAtual.whatsapp,
                 })
               }
-              className="inline-flex items-center gap-1.5 rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-field px-3 py-1.5 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
             >
               <CalendarPlus className="h-4 w-4" />
               Agendar
@@ -530,14 +530,14 @@ function DetalheCliente({
           <button
             type="button"
             onClick={() => setAlterandoWhatsapp(true)}
-            className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface"
+            className="rounded-lg bg-field px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-primary/10"
           >
             Alterar WhatsApp
           </button>
           <button
             type="button"
             onClick={() => setEditandoDados(true)}
-            className="rounded-lg bg-card px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-surface"
+            className="rounded-lg bg-field px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-primary/10"
           >
             Editar
           </button>
