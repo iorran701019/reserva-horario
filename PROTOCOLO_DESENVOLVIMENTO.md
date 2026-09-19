@@ -132,6 +132,23 @@ Mesmo quando Iorran lança várias demandas de uma vez no início da sessão, Cl
 
 O localhost (`npm run staging`) está salvo como ícone na tela do celular de Iorran — dá pra testar mudanças visuais direto ali, sem precisar de push pra staging. Vale como primeira opção de teste pra ajustes de UI antes de subir pra staging de verdade.
 
+## Regra: limpeza de branch ao fechar sessão
+
+Toda branch de feature mergeada em `main` durante a sessão atual é apagada (local +
+remoto) como parte do fechamento — não fica acumulando pra uma faxina futura. Por
+branch, junto com os comandos de merge já entregues:
+
+```bash
+git branch -d nome-da-branch
+git push origin --delete nome-da-branch
+```
+
+Nunca apagar `main` nem `staging` (branch permanente — alias estável usado pelos
+triggers de webhook, nunca deletar). Essa rotina cobre só as branches nascidas na
+própria sessão; o acúmulo histórico de branches antigas já mergeadas (a maior parte da
+saída de `git branch --merged main` hoje) segue como item de backlog à parte, tratado
+numa sessão dedicada de limpeza — não misturar os dois.
+
 ## Regra: conferência de SQL staging → produção antes de fechar sessão
 
 No fechamento de toda sessão que rodou algum SQL de schema (ALTER/CREATE, não limpeza de dados de teste), Claude lista de volta cada bloco de SQL rodado durante a sessão e confirma, um por um, se já foi replicado em produção — não basta ter sido "planejado" ou "confirmado em staging". Se algum ficou só em staging (esquecido, ou porque o merge foi adiado), isso é reportado explicitamente como pendência de schema em aberto no handoff, nunca deixado implícito. Motivo: coluna nova sem réplica em produção passa despercebida até alguém mexer justamente naquele campo — vira bug fantasma, difícil de diagnosticar, porque o código já assume que a coluna existe nos dois ambientes.
@@ -153,4 +170,4 @@ configuração final pra entrada do tenant real → apagar a entrada `css` (ela 
 volta no `TEMA_PADRAO` — comportamento padrão de `buscarTema()`, sem precisar de código
 novo).
 
-*Última atualização: 19/09 (regra do tenant-modelo de tema em staging, slug `css`; regra de decisão por exemplo concreto; princípios de arquitetura sobre profissional e cancelamento do salão; Recharts e lib/conclusao.js/lib/mes.js no item 8; ida pra main como decisão explícita no item 1).*
+*Última atualização: 19/09 (regra de limpeza de branch ao fechar sessão; regra do tenant-modelo de tema em staging, slug `css`; regra de decisão por exemplo concreto; princípios de arquitetura sobre profissional e cancelamento do salão; Recharts e lib/conclusao.js/lib/mes.js no item 8; ida pra main como decisão explícita no item 1).*
