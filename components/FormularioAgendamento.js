@@ -522,7 +522,7 @@ export function CalendarioDias({
                   ? "bg-green-50 text-body ring-1 ring-green-200 hover:border-primary hover:ring-primary"
                   : foraDoPrazo
                   ? "bg-orange-50 text-body ring-1 ring-orange-200 hover:border-primary hover:ring-primary"
-                  : "text-body ring-1 ring-border hover:border-primary hover:ring-primary",
+                  : "bg-field text-body ring-1 ring-border hover:border-primary hover:ring-primary",
                 liberado && !sel ? "border-2 border-dashed border-violet-300" : "",
               ].join(" ")}
             >
@@ -1483,7 +1483,7 @@ export default function FormularioAgendamento({
             ? tema
               ? ""
               : "bg-primary text-white ring-primary"
-            : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+            : "bg-field text-body ring-border hover:border-primary hover:ring-primary",
         ].join(" ")}
         style={
           temaSelecionado
@@ -3966,7 +3966,7 @@ export default function FormularioAgendamento({
                     return (
                       <div
                         key={categoria.id}
-                        className="rounded-lg ring-1 ring-border"
+                        className="rounded-lg bg-card ring-1 ring-border"
                       >
                         {/* Cabeçalho: miniatura (opcional) + nome + seta. A
                             foto fica IRMÃ do botão, não dentro dele —
@@ -4241,7 +4241,11 @@ export default function FormularioAgendamento({
                     )}
 
                     {horariosVisiveis.length > 0 && (
-                      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                      // Mesma moldura do calendário (CalendarioDias, acima):
+                      // rounded-xl/p-3/ring pra que os passos Data e Horário
+                      // fiquem com a mesma caixa. O bg-card aqui é o que dá
+                      // contraste aos slots, que passaram pra bg-field.
+                      <div className="grid grid-cols-3 gap-2 rounded-xl bg-card p-3 ring-1 ring-border sm:grid-cols-4">
                         {horariosVisiveis.map((slot) => {
                           // A grade só contém horários com pelo menos um
                           // profissional livre (no fluxo "cliente escolhe",
@@ -4260,7 +4264,7 @@ export default function FormularioAgendamento({
                                 "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
                                 selecionado
                                   ? "bg-primary text-white ring-primary"
-                                  : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+                                  : "bg-field text-body ring-border hover:border-primary hover:ring-primary",
                               ].join(" ")}
                             >
                               {slot}

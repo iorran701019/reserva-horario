@@ -2407,6 +2407,11 @@ export default function AdminPage() {
         "--color-muted": temaAtivo.textoSecundario,
         "--color-surface": temaAtivo.bgBody,
         "--color-card": temaAtivo.bgHeader,
+        // Mesma linha do fluxo público (app/[salon]/page.js): sem tema.bgCampo
+        // cai no bgHeader, que é o que --color-card já recebe — nenhum tenant
+        // sem o campo muda. Alcança os inputs (regra global do globals.css) e
+        // os dias do calendário, que CalendarioDias compartilha com o público.
+        "--color-field": temaAtivo.bgCampo ?? temaAtivo.bgHeader,
       }
     : undefined;
 
