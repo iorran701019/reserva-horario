@@ -13,10 +13,30 @@
 - Tamanho da logo do header reduzido de ~400% pra faixa de 300–350% (unificar `h-24 w-auto sm:h-28` em só `h-24 w-auto`) em `app/home/page.js` — trecho já revisado, falta aplicar.
 - Ver detalhes e código pronto no handoff da Sessão 66.
 
-### Julia — login de acesso não resolvido (Sessão 66)
-- Usuário criado no Supabase Auth (UID `69d31ab1-95ce-4646-b38d-367df83bb059`) e vínculo feito em `perfis` (papel `dono`), mas a Julia não conseguiu acessar com ele.
-- Segundo usuário criado (UID `a2163818-7d3b-4676-bc29-fdd984805d84`) pra substituir o primeiro, mas o `UPDATE` em `perfis` não encontrou a linha esperada — suspeita forte de estar rodando num projeto Supabase (staging ou produção) diferente daquele onde o estabelecimento `julia` e o vínculo anterior foram criados.
-- Próximo passo: confirmar o projeto certo, refazer o vínculo com o UID novo, e decidir o que fazer com o usuário antigo no Authentication.
+### Layra e Laryssa — onboarding (Sessão 67)
+- Criação bruta concluída em **produção** (sem staging, por pedido explícito, pra não sobrecarregar o plano free): `estabelecimentos`, `profissionais`, 5 etiquetas padrão e janela de agendamento (set-dez/2026) para as duas.
+- Layra: nail designer, `modo_horario='fixo'`, cadastro rápido, granularidade 60min.
+- Laryssa: maquiagem, `modo_horario='janela'` (**placeholder**, mesma situação que a Julia teve — precisa de conversa real pra decidir fixo vs. janela antes de considerar resolvido), cadastro rápido, granularidade 60min.
+- `segmento` de ambas gravado como `manicure_podologia` por não existir valor próprio no CHECK constraint (só aceita esse ou `salao_barbershop`) — sem efeito funcional hoje, avaliar se compensa adicionar um valor novo se o nicho de maquiagem/nail design crescer.
+- **Catálogo, tema, mensagens de WhatsApp e regras de negócio de nenhuma das duas foram iniciados** — combinado tratar uma piloto de cada vez, começando quando o Iorran retomar.
+
+### Popups no /admin — investigação fechada, confirmação pendente (Sessão 67)
+- Confirmado que os únicos dois popups de aviso de serviço (`alerta_mensagem` e "Confirmar manutenção") já respeitam `modoLivre` + `pular_perguntas_adicionais_admin`, e esse toggle já está `true` em todos os tenants reais (Flávia, Julia, Laysla, Acolhe-comercial). Não existe popup "Selecione a manutenção" implementado (só comentário morto no código) nem aviso de "vence em N dias" fora do `PainelCliente.js` (fluxo público). Não sobrou nada pra codar.
+- **Falta só a confirmação de campo**: aguardando resposta da Laysla e da Flávia se o relato original (aviso de "expiração de 30 dias" aparecendo no admin) ainda procede ou já estava resolvido. Até lá, tratar como resolvido.
+
+### Processo — catálogo criado por SQL direto não popula `servico_profissional` (Sessão 67)
+- Achado real na Julia: o vínculo `servico_profissional` (usado pelo motor de disponibilidade pra achar profissional elegível) só é gravado automaticamente pela tela `GerenciarServicos.js` no submit (desde a Sessão 15, quando salões solo passaram a ocultar o seletor). Um catálogo inteiro criado direto por SQL fica sem nenhum vínculo, e o `/agendar` reporta "nenhum profissional disponível" pra todos os serviços.
+- Corrigido retroativamente pra Julia (12 vínculos inseridos). **Fica como item de checklist permanente**: todo catálogo novo criado via banco (não pela tela) precisa desse INSERT manual em `servico_profissional` antes de considerar o tenant pronto.
+
+### Julia — pendências residuais (Sessão 62, atualizado na Sessão 67)
+- Testar ao vivo, com a conta Google da Julia, a lista de eventos ignorados na importação do Calendar (Sessão 62) e garimpar manualmente os que forem atendimento real.
+- Confirmar merge de `fix/lista-ignorados-import-calendar` e `fix/equipe-acordeao` pra `main`, se ainda não tiver sido feito.
+- Opcional: apagar o tenant `padrao-novo` de staging ou mantê-lo como referência permanente do tema padrão.
+- **Terceiro UID de login gerado pro mesmo e-mail dela (`julia@julia.com`)** — vínculo em `perfis` refeito e funcionando (Sessão 67), mas o padrão de precisar recriar o login três vezes não foi investigado. Vale entender a causa (Supabase Auth recriando usuário? sessão expirando de forma anômala?) antes que aconteça de novo e gere mais vínculos órfãos.
+- Sinal fixo em R$50 (`sinal_regra='todos'`) foi a aproximação aceita pelo Iorran pro "50% do valor" que ela pediu — sistema não suporta sinal percentual hoje. Reavaliar se isso vira demanda de produto real.
+- ~~Decidir `modo_horario` do profissional~~ — **resolvido na Sessão 67** (`'fixo'`, confirmado por ela desde o início da sessão).
+- ~~Valor do serviço "SEMI ELABORADA" / linhas "Manutenção vinda de outra profissional" sem categoria~~ — **obsoleto**: o catálogo copiado da Laysla (usado só pra demonstração) foi inteiramente apagado e recriado do zero com o material real da Julia na Sessão 67; esses itens específicos não existem mais no catálogo dela.
+- ~~Limpar os 3 clientes fictícios e os 12 agendamentos de demonstração~~ — **resolvido na Sessão 67**.
 
 ### Acolhe — tenant de demonstração (Sessão 65)
 - **Fotos das categorias:** o catálogo migrado da Laysla foi criado com `foto_url` em branco de propósito, porque as fotos originais são do salão real dela — decidir com ela (ou fotografar/gerar fotos próprias) antes de usar o Acolhe amplamente com manicures como prospecção.
@@ -26,19 +46,8 @@
 ### Bug geral — botão flutuante do WhatsApp "grudando" (Sessão 65)
 - Confirmado por raio-x: o botão (`fixed`, recalculado só em `scroll`/`resize` via `IntersectionObserver`) pode ficar preso na posição de um layout anterior quando a altura do conteúdo muda sem esses dois eventos (troca de etapa do wizard, sumiço de campo, página mais curta que a tela). Não é específico do Acolhe — vale para todos os tenants (Laysla, Flávia, Julia etc.), variando só a frequência com que aparece por causa da geometria de cada um. Ainda não virou demanda própria (sem raio-x de correção, sem branch).
 
-### Layra — novo lead (Sessão 65)
-- Mencionada como potencial cliente nova; será preciso criar um tenant de staging pra ela quando o Iorran retomar esse assunto. Nada feito ainda.
-
 ### Laysla — popups escondidos no /admin (Sessão 65)
 - **Nota de semântica registrada no código e aqui:** com `pular_perguntas_adicionais_admin` ligado, o popup de "Confirmar manutenção" nunca aparece no `/admin`, e pular esse popup equivale a escolher "Sim, fiz aqui" — os ramos "Sim, em outro salão" (`servico_manutencao_externa_id`) e "Não, está natural" (`servico_origem_id`) ficam inalcançáveis por lá enquanto o toggle estiver ligado. Se a Laysla usar esses dois ramos com frequência no dia a dia, vale reconsiderar o toggle; por ora foi o que ela pediu.
-
-### Julia — onboarding (Sessão 62)
-- Decidir `modo_horario` do profissional (`'janela'` vs `'fixo'`) na conversa presencial e atualizar a linha em `profissionais` — hoje está em `'janela'` só como placeholder.
-- Confirmar com a Laysla o valor real do serviço "APLICAÇÃO COM DECORAÇÃO - SEMI ELABORADA" (id 82, hoje R$1,00 em produção). Atualização Sessão 64: a Laysla indicou que é um acréscimo de R$10 sobre outro serviço, não um serviço à parte — investigar se ele deveria ser uma opção do sistema de "perguntas de adicional" em vez de um item separado do catálogo. Decidir também sobre as 2 linhas "Manutenção vinda de outra profissional" sem categoria — só então replicar (ou não) pra Julia.
-- Testar ao vivo, com a conta Google da Julia, a lista de eventos ignorados na importação do Calendar (Sessão 62) e garimpar manualmente os que forem atendimento real.
-- Limpar os 3 clientes fictícios (Maria Julia, Joana da Silva, Francine Souza) e os 12 agendamentos de demonstração em **produção**, assim que a apresentação for aprovada.
-- Confirmar merge de `fix/lista-ignorados-import-calendar` e `fix/equipe-acordeao` pra `main`, se ainda não tiver sido feito.
-- Opcional: apagar o tenant `padrao-novo` de staging ou mantê-lo como referência permanente do tema padrão.
 
 ### Laysla — financeiro (Sessão 64)
 - **Decisão de negócio:** relatório financeiro de agosto e setembro/2026 tratado como não confiável (histórico contaminado por 64 agendamentos importados do Google Calendar sem vínculo — `finalizado=false`, nunca entram no relatório — mais edições manuais de valor não investigadas a fundo, mais receita de curso dado a outras manicures, que o sistema não rastreia). Decidido não corrigir retroativamente. Medição "oficial" recomeça em outubro/2026, com todos os agendamentos feitos integralmente pelo app e conclusão em tempo real. Comparação entre a percepção da Laysla e o relatório do app prevista pra meados de outubro.
@@ -80,7 +89,7 @@
 - Bug de navegação por voltar físico a partir do Pix: modo edição não investigado ao vivo (`sairDaEdicao` deveria levar de volta ao Pix); no fluxo novo sem edição há toques "mortos", mexer no mecanismo tem risco desproporcional ao ganho.
 - Sincronização de colunas entre `lib/estabelecimento.js` e `lib/perfil.js` — as duas listas já divergem em vários campos.
 - Divergência de `roles` na policy `"Público pode cancelar próprio agendamento"` entre staging e produção — confirmar se é intencional (relacionado ao item de segurança acima, mas registrado à parte por ser sobre `roles`, não sobre a condição `qual`).
-- **Importação do Google Calendar sempre grava `finalizado=false`, inclusive quando o vínculo com cliente/serviço é feito depois** (manual pelo modal, ou automático quando o texto casa com uma cliente já cadastrada) — atendimentos importados e concluídos ficam permanentemente fora do relatório financeiro e de outras telas que exigem `finalizado=true` (contagem de "cliente nova", painel da cliente). Correção investigada e considerada segura (Sessão 64: incluir `finalizado: true` no UPDATE do `ModalVincularCliente.js` e na rota de importação automática), mas não aplicada — deprioritizado pra Laysla porque ela não vai mais importar do Calendar a partir de outubro, mas o bug se repete pra qualquer outro tenant que use essa importação (ex: Julia).
+- **Importação do Google Calendar sempre grava `finalizado=false`, inclusive quando o vínculo com cliente/serviço é feito depois** (manual pelo modal, ou automático quando o texto casa com uma cliente já cadastrada) — atendimentos importados e concluídos ficam permanentemente fora do relatório financeiro e de outras telas que exigem `finalizado=true` (contagem de "cliente nova", painel da cliente). Correção investigada e considerada segura (Sessão 64: incluir `finalizado: true` no UPDATE do `ModalVincularCliente.js` e na rota de importação automática), mas não aplicada — deprioritizado pra Laysla porque ela não vai mais importar do Calendar a partir de outubro, mas o bug se repete pra qualquer outro tenant que use essa importação (ex: Julia, se ela conectar o Calendar).
 - **Botão flutuante do WhatsApp pode "grudar" na posição de um layout anterior** quando a altura do conteúdo muda sem `scroll`/`resize` (ver seção própria acima, Sessão 65) — afeta todos os tenants, não só o Acolhe.
 
 ### Produto / UX
@@ -121,3 +130,4 @@
 - Auditoria não iniciada: varredura livre de padrões de risco não previstos, continuação do raio-x de risco silencioso.
 - Fase futura: logo do `/admin` virar link pro Instagram do Acolhe.
 - Painel de Alertas (`/painel-global` → Auditoria → Alertas, Sessão 65): v1 cobre só os 3 toggles que já eram coluna do banco. Os ~27 itens da "Cesta 2" (popups 100% no código) ficam catalogados só como leitura — migrar item a item pra virar configurável, conforme a necessidade real for aparecendo (não de uma vez).
+- Considerar suporte a sinal percentual (não só valor fixo) — motivado pelo pedido real da Julia ("sinal de 50%"), hoje contornado com um valor fixo aproximado.
