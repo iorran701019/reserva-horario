@@ -6,9 +6,9 @@ import { Shield, Sparkles, Heart } from "lucide-react";
 // específico — os ícones (escudo, brilho, coração) são fixos, não mudam por
 // tenant.
 const SELOS_PADRAO = [
-  "Atendimento personalizado",
-  "Qualidade premium",
-  "Feito com amor",
+  "Segurança e higiene",
+  "Excelência em cada detalhe",
+  "Dedicação e carinho",
 ];
 
 const ICONES = [Shield, Sparkles, Heart];
