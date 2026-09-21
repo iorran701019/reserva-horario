@@ -590,7 +590,7 @@ export default function AgendarPage() {
         <header className="mb-6 text-center">
           <h1 className="text-2xl font-bold text-heading">Agende seu horário</h1>
           <p className="mt-1 text-sm text-body">
-            Seu atendimento começa aqui.
+            {estabelecimento.mensagem_header || "Seu atendimento começa aqui."}
           </p>
         </header>
 
