@@ -2406,7 +2406,11 @@ export default function AdminPage() {
         "--color-body": temaAtivo.textoSecundario,
         "--color-muted": temaAtivo.textoSecundario,
         "--color-surface": temaAtivo.bgBody,
-        "--color-card": temaAtivo.bgHeader,
+        // bgCardAdmin (ex.: laryssa) — fundo de card próprio do admin, no
+        // mesmo molde do botaoAdmin: um card escuro de vitrine vira preto-
+        // sobre-preto aqui, já que o admin força on-card = textoPrincipal.
+        // Sem o campo, cai no bgHeader de sempre — nenhum outro tenant muda.
+        "--color-card": temaAtivo.bgCardAdmin ?? temaAtivo.bgHeader,
         // Mesma linha do fluxo público (app/[salon]/page.js): sem tema.bgCampo
         // cai no bgHeader, que é o que --color-card já recebe — nenhum tenant
         // sem o campo muda. Alcança os inputs (regra global do globals.css) e
