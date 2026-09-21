@@ -50,12 +50,12 @@ export default function ModalConfirmarCancelamento({
       <div className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border">
         <h2
           id="titulo-confirmar-cancelamento"
-          className="text-lg font-semibold text-heading"
+          className="text-lg font-semibold text-on-card"
         >
           Cancelar agendamento
         </h2>
 
-        <p className="mt-2 text-sm text-body">
+        <p className="mt-2 text-sm text-on-card">
           Tem certeza que deseja cancelar esse agendamento? O horário volta a
           ficar disponível para outras pessoas.
         </p>
@@ -79,7 +79,7 @@ export default function ModalConfirmarCancelamento({
             type="button"
             onClick={onFechar}
             disabled={cancelando}
-            className="flex-1 rounded-lg bg-card px-3 py-2.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex-1 rounded-lg bg-card px-3 py-2.5 text-sm font-medium text-on-card ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
           >
             Manter agendamento
           </button>

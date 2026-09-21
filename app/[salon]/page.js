@@ -523,6 +523,9 @@ export default function AgendarPage() {
         // --color-card já recebe — ou seja, o mesmo fundo transparente-sobre-
         // card de antes. Só quem define bgCampo (ex.: layra) destaca o campo.
         "--color-field": temaAtivo.bgCampo ?? temaAtivo.bgHeader,
+        // Texto direto sobre bg-card: sem tema.textoCard cai no textoPrincipal,
+        // que é o --color-heading acima — nenhum tenant sem o campo muda.
+        "--color-on-card": temaAtivo.textoCard ?? temaAtivo.textoPrincipal,
         // Texto sobre o botão primário. Fallback é o #fdfcfa do globals.css,
         // o branco-osso que todo tenant já tinha; tema.textoBotao existe pra
         // botão claro demais pra texto branco (ex.: o dourado da layra).

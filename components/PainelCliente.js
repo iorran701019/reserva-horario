@@ -332,10 +332,10 @@ export default function PainelCliente({
 
       {manutencaoSugerida && (
         <div className="rounded-xl bg-primary/5 p-4 ring-1 ring-primary/30">
-          <p className="text-sm font-semibold text-heading">
+          <p className="text-sm font-semibold text-on-card">
             Hora de renovar: {manutencaoSugerida.servico.nome}
           </p>
-          <p className="mt-1 text-sm text-body">
+          <p className="mt-1 text-sm text-on-card">
             {manutencaoSugerida.vencido
               ? `Venceu há ${manutencaoSugerida.dias} dia${manutencaoSugerida.dias === 1 ? "" : "s"}.`
               : manutencaoSugerida.dias === 0
@@ -353,10 +353,10 @@ export default function PainelCliente({
       )}
 
       <div>
-        <h2 className="text-lg font-semibold text-heading">
+        <h2 className="text-lg font-semibold text-on-card">
           Seus agendamentos
         </h2>
-        <p className="mt-1 text-sm text-body">
+        <p className="mt-1 text-sm text-on-card">
           Olá, {clienteAtual.nome}. Aqui está o que você já tem marcado.
         </p>
       </div>
@@ -366,7 +366,7 @@ export default function PainelCliente({
           href={estabelecimento.link_localizacao}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
         >
           <MapPin className="h-5 w-5" aria-hidden="true" />
           Ver localização
@@ -384,13 +384,13 @@ export default function PainelCliente({
       <button
         type="button"
         onClick={() => setEditando(true)}
-        className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+        className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
       >
         Atualizar meus dados
       </button>
 
       {agendamentos === null && (
-        <p className="text-sm text-body">Carregando...</p>
+        <p className="text-sm text-on-card">Carregando...</p>
       )}
 
       {agendamentos !== null && agendamentos.length === 0 && (
@@ -499,7 +499,7 @@ export default function PainelCliente({
 
       {historico !== null && historico.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-heading">
+          <h3 className="text-sm font-semibold text-on-card">
             Histórico recente
           </h3>
           {/* Altura travada em ~4 itens (cada linha é ~64px: py-2 + as duas
@@ -517,7 +517,7 @@ export default function PainelCliente({
                 className="flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm text-muted ring-1 ring-border"
               >
                 <span className="min-w-0">
-                  <span className="block text-body">
+                  <span className="block text-on-card">
                     {formatarData(item.data)} · {String(item.horario).slice(0, 5)}
                   </span>
                   <span className="block text-xs">

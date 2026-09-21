@@ -23,6 +23,7 @@ Tudo controlado por 3 pontos isolados — nunca hardcodear cor em componente.
    | `--color-surface`  | fundo do body/página                         |
    | `--color-card`     | fundo de cards, menu lateral do admin        |
    | `--color-field`    | fundo de inputs e itens que precisam contrastar com `bg-card` (ex.: campo de telefone, chip de horário fixo, botão de ficha de cliente) — opcional por tenant via `tema.bgCampo`, cai em `--color-card` se ausente (sem regressão pra quem não define) |
+   | `--color-on-card`  | texto que senta **direto** em cima de `bg-card` (classe `text-on-card`) — opcional por tenant via `tema.textoCard`, pra tenant com card escuro e texto claro. Cai em `tema.textoPrincipal` (= `--color-heading`) se ausente. **Não** usar em texto sobre `bg-field`/`bg-surface`, que continuam claros. O default em `globals.css` só vale fora do wrapper do tema: `var()` resolve no `:root`, então o override precisa estar nos dois wrappers (`page.js` e `admin/page.js`) |
 
 3. **Override no runtime** — em `app/[salon]/page.js` e `app/[salon]/admin` (wrapper mais
    externo de cada árvore), um `style` inline sobrescreve as 8 variáveis acima. O gatilho

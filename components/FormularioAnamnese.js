@@ -227,7 +227,7 @@ export default function FormularioAnamnese({
   if (modelo === undefined) {
     return (
       <div className="rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border">
-        <p className="text-sm text-body">Carregando anamnese...</p>
+        <p className="text-sm text-on-card">Carregando anamnese...</p>
       </div>
     );
   }
@@ -243,7 +243,7 @@ export default function FormularioAnamnese({
       className="space-y-6 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border"
     >
       {modelo.titulo && (
-        <h2 className="text-lg font-semibold text-heading">{modelo.titulo}</h2>
+        <h2 className="text-lg font-semibold text-on-card">{modelo.titulo}</h2>
       )}
 
       {(modelo.secoes ?? []).map((secao, si) => (

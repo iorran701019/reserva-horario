@@ -143,7 +143,7 @@ export default function ConfirmacaoSinal({
         <button
           type="button"
           onClick={onEditar}
-          className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+          className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
         >
           Editar agendamento
         </button>
@@ -153,7 +153,7 @@ export default function ConfirmacaoSinal({
         <button
           type="button"
           onClick={onVoltar}
-          className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+          className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
         >
           {rotuloVoltar}
         </button>

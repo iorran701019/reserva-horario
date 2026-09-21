@@ -102,11 +102,11 @@ export default function TelaSolicitacaoEnviada({
       <h1
         ref={tituloRef}
         tabIndex={-1}
-        className="mt-6 text-2xl font-bold text-heading outline-none"
+        className="mt-6 text-2xl font-bold text-on-card outline-none"
       >
         Solicitação enviada!
       </h1>
-      <p className="mt-2 text-sm text-body">
+      <p className="mt-2 text-sm text-on-card">
         Recebemos seu agendamento. Em breve o estabelecimento confirma seu horário.
       </p>
 

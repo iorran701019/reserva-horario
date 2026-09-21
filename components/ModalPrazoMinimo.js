@@ -68,19 +68,19 @@ export default function ModalPrazoMinimo({
         className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="titulo-prazo-minimo" className="text-lg font-semibold text-heading">
+        <h2 id="titulo-prazo-minimo" className="text-lg font-semibold text-on-card">
           Já existe um agendamento próximo
         </h2>
-        <p className="mt-2 text-sm text-body">
+        <p className="mt-2 text-sm text-on-card">
           Existe um agendamento
           {conflito.servicoNome ? ` de ${conflito.servicoNome}` : ""} em{" "}
-          <span className="font-medium text-heading">
+          <span className="font-medium text-on-card">
             {conflito.dataFormatada}
             {conflito.horario ? ` às ${conflito.horario}` : ""}
           </span>
           , a menos de {prazoDias}{" "}
           {prazoDias === 1 ? "dia" : "dias"} da data escolhida agora (
-          <span className="font-medium text-heading">
+          <span className="font-medium text-on-card">
             {dataNova}
             {horarioNovo ? ` às ${horarioNovo}` : ""}
           </span>
@@ -105,7 +105,7 @@ export default function ModalPrazoMinimo({
             type="button"
             onClick={onDesistirPublico ?? onDesistir}
             disabled={processando}
-            className="w-full rounded-lg bg-card px-4 py-2.5 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-lg bg-card px-4 py-2.5 text-sm font-medium text-on-card ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
           >
             Cancelar este e manter {conflito.dataFormatada}
           </button>
@@ -113,7 +113,7 @@ export default function ModalPrazoMinimo({
             type="button"
             onClick={onManterOsDois}
             disabled={processando}
-            className="w-full rounded-lg px-4 py-2 text-sm font-medium text-body transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-lg px-4 py-2 text-sm font-medium text-on-card transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
           >
             Manter dois agendamentos próximos
           </button>

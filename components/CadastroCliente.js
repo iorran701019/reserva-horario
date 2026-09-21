@@ -312,12 +312,12 @@ export default function CadastroCliente({
   return (
     <>
     <form onSubmit={handleSubmit} className="space-y-4">
-      <p className="text-sm text-body">
+      <p className="text-sm text-on-card">
         Complete seu cadastro para continuar.
       </p>
 
       <div>
-        <label htmlFor="cad-nome" className="mb-1 block text-sm font-medium text-body">
+        <label htmlFor="cad-nome" className="mb-1 block text-sm font-medium text-on-card">
           Nome
         </label>
         <input
@@ -335,7 +335,7 @@ export default function CadastroCliente({
       {exigirEndereco ? (
         <>
           <div>
-            <label htmlFor="cad-cep" className="mb-1 block text-sm font-medium text-body">
+            <label htmlFor="cad-cep" className="mb-1 block text-sm font-medium text-on-card">
               CEP
             </label>
             <input
@@ -353,7 +353,7 @@ export default function CadastroCliente({
           </div>
 
           <div>
-            <label htmlFor="cad-endereco" className="mb-1 block text-sm font-medium text-body">
+            <label htmlFor="cad-endereco" className="mb-1 block text-sm font-medium text-on-card">
               Endereço
             </label>
             <input
@@ -369,7 +369,7 @@ export default function CadastroCliente({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor="cad-numero" className="mb-1 block text-sm font-medium text-body">
+              <label htmlFor="cad-numero" className="mb-1 block text-sm font-medium text-on-card">
                 Número
               </label>
               <input
@@ -384,7 +384,7 @@ export default function CadastroCliente({
             </div>
 
             <div>
-              <label htmlFor="cad-complemento" className="mb-1 block text-sm font-medium text-body">
+              <label htmlFor="cad-complemento" className="mb-1 block text-sm font-medium text-on-card">
                 Complemento <span className="font-normal text-muted">(opcional)</span>
               </label>
               <input
@@ -400,7 +400,7 @@ export default function CadastroCliente({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor="cad-bairro" className="mb-1 block text-sm font-medium text-body">
+              <label htmlFor="cad-bairro" className="mb-1 block text-sm font-medium text-on-card">
                 Bairro
               </label>
               <input
@@ -415,7 +415,7 @@ export default function CadastroCliente({
             </div>
 
             <div>
-              <label htmlFor="cad-cidade" className="mb-1 block text-sm font-medium text-body">
+              <label htmlFor="cad-cidade" className="mb-1 block text-sm font-medium text-on-card">
                 Cidade
               </label>
               <input
@@ -431,7 +431,7 @@ export default function CadastroCliente({
           </div>
 
           <div>
-            <label htmlFor="cad-estado" className="mb-1 block text-sm font-medium text-body">
+            <label htmlFor="cad-estado" className="mb-1 block text-sm font-medium text-on-card">
               Estado
             </label>
             <input
@@ -448,7 +448,7 @@ export default function CadastroCliente({
         </>
       ) : (
         <div>
-          <label htmlFor="cad-contato-emergencia" className="mb-1 block text-sm font-medium text-body">
+          <label htmlFor="cad-contato-emergencia" className="mb-1 block text-sm font-medium text-on-card">
             Contato de emergência (WhatsApp) <span className="font-normal text-muted">(opcional)</span>
           </label>
           <input
@@ -476,7 +476,7 @@ export default function CadastroCliente({
       )}
 
       <div>
-        <label htmlFor="cad-nascimento" className="mb-1 block text-sm font-medium text-body">
+        <label htmlFor="cad-nascimento" className="mb-1 block text-sm font-medium text-on-card">
           Nascimento
         </label>
         <input
@@ -497,7 +497,7 @@ export default function CadastroCliente({
       </div>
 
       <div>
-        <label htmlFor="cad-whatsapp" className="mb-1 block text-sm font-medium text-body">
+        <label htmlFor="cad-whatsapp" className="mb-1 block text-sm font-medium text-on-card">
           WhatsApp
         </label>
         <input
@@ -525,7 +525,7 @@ export default function CadastroCliente({
       </div>
 
       <div>
-        <label htmlFor="cad-whatsapp-confirmacao" className="mb-1 block text-sm font-medium text-body">
+        <label htmlFor="cad-whatsapp-confirmacao" className="mb-1 block text-sm font-medium text-on-card">
           Confirme seu WhatsApp
         </label>
         <input
@@ -545,7 +545,7 @@ export default function CadastroCliente({
       </div>
 
       <div>
-        <label htmlFor="cad-instagram" className="mb-1 block text-sm font-medium text-body">
+        <label htmlFor="cad-instagram" className="mb-1 block text-sm font-medium text-on-card">
           Instagram <span className="font-normal text-muted">(opcional)</span>
         </label>
         <input

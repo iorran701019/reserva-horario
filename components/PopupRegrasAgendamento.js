@@ -42,7 +42,7 @@ export default function PopupRegrasAgendamento({ texto, onConfirmar }) {
           Aviso
         </h2>
 
-        <p className="whitespace-pre-wrap text-sm text-body">
+        <p className="whitespace-pre-wrap text-sm text-on-card">
           {formatarAviso(texto)}
         </p>
 

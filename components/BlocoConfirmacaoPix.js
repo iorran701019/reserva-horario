@@ -291,7 +291,7 @@ export default function BlocoConfirmacaoPix({
         </div>
 
         <div className="flex items-center gap-2 rounded-lg bg-card px-3 py-2 ring-1 ring-border">
-          <span className="min-w-0 flex-1 truncate text-sm text-heading">
+          <span className="min-w-0 flex-1 truncate text-sm text-on-card">
             {estabelecimento.sinal_chave_pix}
           </span>
           <button
@@ -346,7 +346,7 @@ export default function BlocoConfirmacaoPix({
             </button>
           </div>
 
-          <p className="mt-1.5 min-w-0 truncate text-sm text-body">
+          <p className="mt-1.5 min-w-0 truncate text-sm text-on-card">
             {nomeComprovante || "Imagem ou PDF (opcional)"}
           </p>
 

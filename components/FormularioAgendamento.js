@@ -413,7 +413,7 @@ export function CalendarioDias({
           onClick={onPrev}
           disabled={!podeVoltar}
           aria-label="Mês anterior"
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-on-card ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40"
         >
           <svg
             viewBox="0 0 24 24"
@@ -429,7 +429,7 @@ export function CalendarioDias({
           </svg>
         </button>
 
-        <span className="text-sm font-semibold capitalize text-heading">
+        <span className="text-sm font-semibold capitalize text-on-card">
           {rotuloMes}
         </span>
 
@@ -437,7 +437,7 @@ export function CalendarioDias({
           type="button"
           onClick={onNext}
           aria-label="Próximo mês"
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-body ring-1 ring-border transition hover:bg-surface"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-on-card ring-1 ring-border transition hover:bg-surface"
         >
           <svg
             viewBox="0 0 24 24"
@@ -1483,7 +1483,7 @@ export default function FormularioAgendamento({
             ? tema
               ? ""
               : "bg-primary text-white ring-primary"
-            : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+            : "bg-card text-on-card ring-border hover:border-primary hover:ring-primary",
         ].join(" ")}
         style={
           temaSelecionado
@@ -1501,7 +1501,7 @@ export default function FormularioAgendamento({
             <span
               className={[
                 "block text-sm",
-                temaSelecionado ? "" : selecionado ? "text-on-primary/90" : "text-body",
+                temaSelecionado ? "" : selecionado ? "text-on-primary/90" : "text-on-card",
               ].join(" ")}
             >
               {servico.duracao_min} min
@@ -3879,7 +3879,7 @@ export default function FormularioAgendamento({
                     ? "bg-primary text-white ring-primary"
                     : concluida
                     ? "bg-green-100 text-green-700 ring-green-200"
-                    : "bg-card text-body ring-border",
+                    : "bg-card text-on-card ring-border",
                 ].join(" ")}
                 aria-current={atual ? "step" : undefined}
               >
@@ -3924,7 +3924,7 @@ export default function FormularioAgendamento({
         {/* Etapa 1 — Serviço: alimenta a duração usada na geração de slots. */}
         {etapa === "servico" && (
           <div>
-            <span className="mb-1 block text-sm font-medium text-body">
+            <span className="mb-1 block text-sm font-medium text-on-card">
               Serviço
             </span>
 
@@ -3935,7 +3935,7 @@ export default function FormularioAgendamento({
             )}
 
             {carregandoServicos && (
-              <p className="text-sm text-body">Carregando serviços...</p>
+              <p className="text-sm text-on-card">Carregando serviços...</p>
             )}
 
             {!carregandoServicos && erroServicos && (
@@ -4055,7 +4055,7 @@ export default function FormularioAgendamento({
                 Escolher um leva à etapa de data. */}
             {escolherProfissional && servicoSelecionado && (
               <div ref={profissionalRef} className="mt-6">
-                <span className="mb-1 block text-sm font-medium text-body">
+                <span className="mb-1 block text-sm font-medium text-on-card">
                   Profissional
                 </span>
 
@@ -4079,7 +4079,7 @@ export default function FormularioAgendamento({
                             "flex items-center gap-3 rounded-xl px-4 py-3 text-left ring-1 transition",
                             selecionado
                               ? "bg-primary text-white ring-primary shadow-sm"
-                              : "bg-card text-body ring-border hover:border-primary hover:ring-primary hover:shadow-sm",
+                              : "bg-card text-on-card ring-border hover:border-primary hover:ring-primary hover:shadow-sm",
                           ].join(" ")}
                         >
                           <span
@@ -4138,7 +4138,7 @@ export default function FormularioAgendamento({
               <button
                 type="button"
                 onClick={voltarFisicoServico}
-                className="mt-6 w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                className="mt-6 w-full rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar
               </button>
@@ -4152,12 +4152,12 @@ export default function FormularioAgendamento({
         {etapa === "data" && (
           <>
             <div ref={dataRef}>
-              <span className="mb-1 block text-sm font-medium text-body">
+              <span className="mb-1 block text-sm font-medium text-on-card">
                 Data
               </span>
 
               {carregandoProfissionais ? (
-                <p className="text-sm text-body">
+                <p className="text-sm text-on-card">
                   Carregando disponibilidade...
                 </p>
               ) : semProfissionalParaAgendar || (!modoLivre && diasSemanaAtivos.size === 0) ? (
@@ -4189,7 +4189,7 @@ export default function FormularioAgendamento({
 
             {servicoSelecionado && form.data && (
               <div>
-                <span className="mb-1 block text-sm font-medium text-body">
+                <span className="mb-1 block text-sm font-medium text-on-card">
                   Horário
                   {escolherProfissional && profissionalSelecionado && (
                     <span className="font-normal text-muted">
@@ -4209,7 +4209,7 @@ export default function FormularioAgendamento({
                 )}
 
                 {carregandoSlots && (
-                  <p className="text-sm text-body">Carregando horários...</p>
+                  <p className="text-sm text-on-card">Carregando horários...</p>
                 )}
 
                 {!carregandoSlots && erroSlots && (
@@ -4315,8 +4315,8 @@ export default function FormularioAgendamento({
                                 selecionado
                                   ? "bg-primary text-white ring-primary"
                                   : bloqueado
-                                  ? "border-2 border-dashed border-violet-300 bg-card text-body ring-border hover:border-violet-400"
-                                  : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+                                  ? "border-2 border-dashed border-violet-300 bg-card text-on-card ring-border hover:border-violet-400"
+                                  : "bg-card text-on-card ring-border hover:border-primary hover:ring-primary",
                               ].join(" ")}
                             >
                               {horario}
@@ -4337,7 +4337,7 @@ export default function FormularioAgendamento({
                 {/* Gravação (público) ou cancelamento da tentativa anterior,
                     disparados ao tocar um horário — ver selecionarHorario. */}
                 {criandoReserva && (
-                  <p className="mt-2 text-sm text-body">Reservando horário...</p>
+                  <p className="mt-2 text-sm text-on-card">Reservando horário...</p>
                 )}
 
                 {erro && (
@@ -4351,7 +4351,7 @@ export default function FormularioAgendamento({
             <button
               type="button"
               onClick={voltarFisicoData}
-              className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
             >
               Voltar
             </button>
@@ -4406,7 +4406,7 @@ export default function FormularioAgendamento({
                     resolve o cliente por nome ANTES do wizard existir). Este
                     formulário livre é só o caminho público sem clienteInicial. */}
                 <div>
-                  <label htmlFor="nome" className="mb-1 block text-sm font-medium text-body">
+                  <label htmlFor="nome" className="mb-1 block text-sm font-medium text-on-card">
                     Nome
                   </label>
                   <input
@@ -4422,7 +4422,7 @@ export default function FormularioAgendamento({
                 </div>
 
                 <div>
-                  <label htmlFor="telefone" className="mb-1 block text-sm font-medium text-body">
+                  <label htmlFor="telefone" className="mb-1 block text-sm font-medium text-on-card">
                     WhatsApp
                   </label>
                   <input
@@ -4577,7 +4577,7 @@ export default function FormularioAgendamento({
                       type="button"
                       onClick={voltarParaEscolherHorario}
                       disabled={cancelandoReserva}
-                      className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+                      className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Voltar e escolher outro horário
                     </button>
@@ -4659,7 +4659,7 @@ export default function FormularioAgendamento({
               <button
                 type="button"
                 onClick={voltarFisicoDados}
-                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar
               </button>
@@ -4693,11 +4693,11 @@ export default function FormularioAgendamento({
           >
             <h2
               id="titulo-manutencao-pendente"
-              className="text-lg font-semibold text-heading"
+              className="text-lg font-semibold text-on-card"
             >
               Confirmar manutenção
             </h2>
-            <p className="mt-2 text-sm text-body">
+            <p className="mt-2 text-sm text-on-card">
               Você já está com as unhas de alongamento ou gel aplicadas?
             </p>
 
@@ -4712,14 +4712,14 @@ export default function FormularioAgendamento({
               <button
                 type="button"
                 onClick={confirmarManutencaoOutroSalao}
-                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
               >
                 Sim, em outro salão
               </button>
               <button
                 type="button"
                 onClick={recusarManutencao}
-                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
               >
                 Não, está natural
               </button>
@@ -4760,11 +4760,11 @@ export default function FormularioAgendamento({
               <div>
                 <h2
                   id="titulo-alerta-servico"
-                  className="text-lg font-semibold text-heading"
+                  className="text-lg font-semibold text-on-card"
                 >
                   Atenção
                 </h2>
-                <p className="mt-2 text-sm text-body">
+                <p className="mt-2 text-sm text-on-card">
                   {alertaPendente.alerta_mensagem}
                 </p>
               </div>
@@ -4781,7 +4781,7 @@ export default function FormularioAgendamento({
               <button
                 type="button"
                 onClick={cancelarAlerta}
-                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar
               </button>
@@ -4818,7 +4818,7 @@ export default function FormularioAgendamento({
                 .filter((pergunta) => perguntaDeveAparecer(pergunta, respostasPerguntas))
                 .map((pergunta) => (
                 <div key={pergunta.id}>
-                  <p className="mb-2 text-sm font-medium text-heading">{pergunta.texto}</p>
+                  <p className="mb-2 text-sm font-medium text-on-card">{pergunta.texto}</p>
 
                   {pergunta.tipo === "texto_livre" ? (
                     <textarea
@@ -4843,7 +4843,7 @@ export default function FormularioAgendamento({
                               "rounded-lg px-3 py-2 text-sm font-medium ring-1 transition",
                               selecionada
                                 ? "bg-primary text-white ring-primary"
-                                : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+                                : "bg-card text-on-card ring-border hover:border-primary hover:ring-primary",
                             ].join(" ")}
                           >
                             {opcao.label}
@@ -4884,7 +4884,7 @@ export default function FormularioAgendamento({
               <button
                 type="button"
                 onClick={cancelarModalPerguntas}
-                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar
               </button>
@@ -4923,11 +4923,11 @@ export default function FormularioAgendamento({
           >
             <h2
               id="titulo-confirmar-sem-notificar"
-              className="text-lg font-semibold text-heading"
+              className="text-lg font-semibold text-on-card"
             >
               Confirmar agendamento
             </h2>
-            <p className="mt-2 text-sm text-body">
+            <p className="mt-2 text-sm text-on-card">
               Confirmar agendamento sem notificar o cliente?
             </p>
 
@@ -4942,7 +4942,7 @@ export default function FormularioAgendamento({
               <button
                 type="button"
                 onClick={() => setPopupConfirmarSemNotificarAberto(false)}
-                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
               >
                 Cancelar
               </button>
@@ -4969,11 +4969,11 @@ export default function FormularioAgendamento({
           >
             <h2
               id="titulo-fora-da-janela"
-              className="text-lg font-semibold text-heading"
+              className="text-lg font-semibold text-on-card"
             >
               Fora da janela de agendamento
             </h2>
-            <p className="mt-2 text-sm text-body">
+            <p className="mt-2 text-sm text-on-card">
               Esse agendamento está fora da janela de agendamento do seu
               calendário. Deseja confirmar mesmo assim?
             </p>
@@ -4989,7 +4989,7 @@ export default function FormularioAgendamento({
               <button
                 type="button"
                 onClick={() => setMostrarPopupForaDaJanela(false)}
-                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
               >
                 Cancelar
               </button>
@@ -5019,11 +5019,11 @@ export default function FormularioAgendamento({
           >
             <h2
               id="titulo-restricao-etiqueta"
-              className="text-lg font-semibold text-heading"
+              className="text-lg font-semibold text-on-card"
             >
               Dia com restrição de agenda
             </h2>
-            <p className="mt-2 text-sm text-body">
+            <p className="mt-2 text-sm text-on-card">
               Esse dia está restrito a clientes de uma etiqueta específica, e
               este cliente não tem essa etiqueta. Deseja confirmar mesmo assim?
             </p>
@@ -5039,7 +5039,7 @@ export default function FormularioAgendamento({
               <button
                 type="button"
                 onClick={() => setMostrarPopupRestricao(false)}
-                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
               >
                 Cancelar
               </button>

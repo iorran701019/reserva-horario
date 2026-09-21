@@ -2412,6 +2412,13 @@ export default function AdminPage() {
         // sem o campo muda. Alcança os inputs (regra global do globals.css) e
         // os dias do calendário, que CalendarioDias compartilha com o público.
         "--color-field": temaAtivo.bgCampo ?? temaAtivo.bgHeader,
+        // Os componentes compartilhados com o público (FormularioAgendamento,
+        // CalendarioDias, modais) usam text-on-card. Aqui ele é SEMPRE o
+        // textoPrincipal — o admin ignora tema.textoCard de propósito (não
+        // herda o card escuro do público). A linha não pode sair: sem ela,
+        // --color-on-card resolveria no :root e cairia no heading GLOBAL
+        // (#4a342a), não no do tenant, em todo tenant.
+        "--color-on-card": temaAtivo.textoPrincipal,
       }
     : undefined;
 
