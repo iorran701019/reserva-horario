@@ -256,7 +256,15 @@ export default function Hero({ subtitulo, compacto = false, nome, slug }) {
                 width={1600}
                 height={289}
                 style={{ width: "auto", transform: transformWordmark }}
-                className={compacto ? "h-12 sm:h-14" : "h-16 sm:h-20"}
+                // alturaMarcaTexto (ex.: laryssa) — override COMPLETO da altura
+                // do wordmark, par do alturaMonograma. Com altura fixa e
+                // width:auto, um wordmark mais largo que a coluna é travado
+                // pelo max-width:100% e esticado na vertical (object-fit
+                // fill); a altura precisa caber na largura da coluna.
+                className={
+                  tema.alturaMarcaTexto ??
+                  (compacto ? "h-12 sm:h-14" : "h-16 sm:h-20")
+                }
                 preload
               />
             ) : (
