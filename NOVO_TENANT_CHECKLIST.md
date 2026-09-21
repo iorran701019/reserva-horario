@@ -14,9 +14,13 @@ values ('slug-aqui', 'Nome Real', '55...', 'manicure_podologia' | 'salao_barbers
 **Decisões a bater com o cliente antes de rodar:**
 - `cadastro_completo`: `true` = pede endereço completo (CEP/número/bairro/cidade) quando
   faltar; `false` = só nome + WhatsApp bastam, nunca pede endereço.
-- `sinal_regra`: cobra sinal de quem? (ninguém / só clientes novos / todos)
+- `sinal_regra`: cobra sinal de quem? (ninguém / só clientes novos / todos). Sem chave Pix
+  ainda, é normal deixar `'desligado'` e resolver numa sessão futura (não bloqueia o resto).
 - `granularidade_min`: só importa se o profissional for modo 'janela' — de quanto em
   quanto tempo a agenda abre horário (30 ou 60 min, geralmente).
+- `segmento`: hoje só aceita `'manicure_podologia'` ou `'salao_barbershop'` no CHECK
+  constraint. Pra profissionais fora desse escopo (ex.: maquiadora), gravar o valor
+  existente mais próximo — sem efeito funcional, é só rótulo interno (caso real: Laryssa).
 
 ## 2. Profissional(is)
 ```sql
@@ -32,12 +36,14 @@ espaçados"?
 
 - Se `janela`: configurar pela tela (aba Horários do profissional) — entrada/saída/almoço
   por dia da semana. Hoje o toggle "Tipo de agenda" está oculto na UI por decisão de
-  produto; trocar o modo é feito direto no banco quando necessário.
+  produto; trocar o modo é feito direto no banco quando necessário. Se os horários reais
+  ainda não estiverem definidos, tudo bem deixar o modo decidido e os horários como
+  placeholder temporário, preenchidos depois direto na tela (sem SQL).
 - Se `fixo`: inserir cada horário manualmente:
-  ```sql
+```sql
   insert into horarios_fixos (profissional_id, dia_semana, horario) values
     (<id>, <0=domingo..6=sábado>, 'HH:MM'), ...;
-  ```
+```
 
 ## 3. Serviços
 Cadastrar pela tela (aba Serviços) ou via INSERT em `servicos` — nome, duração, preço,
@@ -53,7 +59,8 @@ select id, <profissional_id> from servicos
 where estabelecimento_id = (select id from estabelecimentos where slug='slug-aqui');
 ```
 Sem esse passo, o `/agendar` mostra "Nenhum profissional atende este serviço" mesmo com
-tudo certo nas outras tabelas — já foi causa de bug real, conferir sempre.
+tudo certo nas outras tabelas — já foi causa de bug real, conferir sempre (repetiu na
+Laryssa, Sessão 21/09 — vira checklist permanente).
 
 ## 5. Anamnese (opcional)
 Só cria modelo se o negócio pedir explicitamente (ex.: procedimento que exige histórico de
@@ -72,25 +79,40 @@ logo genérica (`/images/generico/logo-generico.png`) à esquerda e nome do esta
 
 Substituir o padrão só quando o cliente tiver marca própria (logo e/ou paleta):
 - Ver `THEMING.md` — extrair a paleta real e processar a logo, se houver.
+- Antes de moldar em produção: usar o tenant-modelo `css` em staging (ver Protocolo de
+  Desenvolvimento), nunca editar tema direto num tenant que só existe em produção.
 - Criar entrada própria em `TEMAS_POR_SLUG` com o slug do tenant (a entrada tem precedência
   sobre `TEMA_PADRAO`). Objeto próprio, não alias de `TEMA_PADRAO` — assim ajustes futuros no
   padrão não reskinnam esse tenant.
 - Sem logo: omitir `marca` — o Hero cai no nome em texto centralizado, nas cores do tema
   (ex.: `teste`).
+- Logo vinda de foto/JPEG (não vetor) com composição alta/quadrada: separar ícone e
+  texto em dois arquivos e usar `layoutMarca: 'esquerda'`, em vez de espremer tudo num
+  lockup único — ver técnica no Protocolo de Desenvolvimento.
+- **Se `bgHeader` (ou `botao`) do tenant for escuro: definir também `bgCardAdmin`,
+  `botaoAdmin`/`botaoAdminHover` e `bordaAdmin`.** O `/admin` herda essas cores do público
+  e ignora `textoCard` de propósito — sem os campos próprios, card, drawer mobile e/ou
+  botões do admin ficam com texto ilegível (achado real: Laysla e Laryssa, Sessão 21/09).
+  Ver mecanismo completo no Protocolo de Desenvolvimento.
 
 ## 8. Login de produção
 - Criar o usuário em Authentication → Users (Supabase) com e-mail/senha reais do dono.
 - Vincular o perfil:
-  ```sql
+```sql
   insert into perfis (user_id, estabelecimento_id, papel)
   values ('<uuid do usuário criado>',
     (select id from estabelecimentos where slug='slug-aqui'), 'dono');
-  ```
+```
+- **Antes de inserir, confirmar que o UID não existe em `perfis`** (`select * from perfis
+  where user_id = '<uuid>'`) — `user_id` é chave primária, então um UID já vinculado a
+  outro tenant (ou duplicado por engano) falha com `23505` em vez de sobrescrever.
 
 ## 9. Checagem final antes de considerar "no ar"
 - [ ] RLS ativo e cobrindo `anon` + `authenticated` em toda tabela nova usada por esse tenant
 - [ ] Testar `/slug-aqui` (fluxo completo: identificação → serviço → data → confirmação)
 - [ ] Testar `/slug-aqui/admin` (login funciona, todas as abas carregam)
+- [ ] Se `bgHeader`/`botao` for escuro: conferir também `bgCardAdmin`/`botaoAdmin`/`bordaAdmin`
+      no `/admin` (Regras de negócio, drawer mobile, botões de Clientes/Serviços)
 - [ ] Confirmar que nenhum outro tenant mudou de comportamento (rodar smoke test rápido em
       `/teste` ou outro tenant de controle)
 

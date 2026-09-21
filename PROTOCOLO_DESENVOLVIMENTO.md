@@ -84,6 +84,8 @@ Iorran só cola o bloco pronto — nunca marca `[x]` manualmente. Itens marcados
 - Sempre investigar (raio-x / prompt somente leitura) antes de implementar.
 - **Nome do profissional só aparece em telas de agendamento com 2+ profissionais ativos** (`qtdProfissionaisAtivos > 1`; `null`/contagem carregando também esconde, nunca mostra por padrão). Regra permanente desde a Sessão 59 — qualquer novo ponto que exiba `profissional_nome` deve seguir essa condição.
 - Toda alteração de status feita por decisão da própria dona dentro do `/admin` (cancelar, resolver conflito de prazo, marcar exceção de conclusão) é tratada como "ação do salão" pra fins de estatística — independente do gatilho que levou a essa decisão (ex: conflito de prazo detectado pelo sistema ainda conta como cancelamento do salão, porque foi ela quem clicou).
+- **Tema do `/admin` pode divergir do público, campo a campo, sempre com fallback pro valor público correspondente:** `bgCardAdmin` (→ `--color-card`, fallback `bgHeader`), `botaoAdmin`/`botaoAdminHover` (→ `--color-primary`/hover, fallback `botao`/`botaoHover`), `bordaAdmin` (→ `--color-border`, fallback `bordaHeader`). Existe porque o admin ignora `textoCard` de propósito (sempre usa `textoPrincipal` como texto) — então um `bgHeader` ou `botao` escolhido pro público escuro/claro pode deixar o admin com texto ilegível, mesmo quando o público está perfeito. Regra prática: **todo tenant com `bgHeader` escuro precisa dos três campos** (ver `NOVO_TENANT_CHECKLIST.md`).
+- **Decisão de negócio que foge do escopo original do app (ex.: maquiadora em vez de manicure) prefere um flag/config por tenant a uma categoria geral de "tipo de salão"** — até que 2 ou mais features realmente exijam essa distinção. Criar a taxonomia geral antes disso é escopo maior que o necessário (ver "sem catedral"). Caso de origem: agendamento em grupo da Laryssa, resolvido com dois campos novos em `estabelecimentos` (`permite_agendamento_grupo`, `max_pessoas_grupo`) editáveis só no `/painel-global`, em vez de um sistema de segmentos.
 
 ---
 
@@ -109,12 +111,13 @@ Iorran só cola o bloco pronto — nunca marca `[x]` manualmente. Itens marcados
 - Desconectado por padrão — a definição da ferramenta consome ~38% do context window do Claude Code mesmo sem uso.
 - Reconectar apenas nas sessões em que for necessário teste ao vivo no navegador (Claude Code validando fluxo/staging por conta própria, como feito na Sessão 30).
 - Claude (chat) deve sinalizar quando uma demanda pedir esse tipo de validação, sugerindo reconectar antes do prompt pro Claude Code.
+- **O painel do navegador do Claude Code é um navegador separado do navegador pessoal do Iorran (Chrome/Edge).** Um login feito no Chrome do Iorran não vale nessa aba — qualquer tela protegida por senha (login do `/admin`, por exemplo) precisa ser preenchida por ele diretamente dentro do painel que aparece do lado da conversa. Fricção real, repetida mais de uma vez na sessão de 21/09 — sempre confirmar em qual navegador a ação precisa acontecer antes de pedir "faça login".
 
 ---
 
 ## Regra: checagem de base antes de nova branch
 
-Antes de todo `git checkout -b`, rodar `git branch` (sem argumento) pra confirmar em qual branch você está. Só criar a nova branch se estiver em `main` limpa — se estiver em outra branch de trabalho, decidir explicitamente: mergear ela primeiro, ou nomear a nova como dependente da atual (ramificação consciente, não acidental).
+Antes de todo `git checkout -b`, rodar `git branch` (sem argumento) **e `git status`** pra confirmar em qual branch você está e se não sobrou nada não commitado. Só criar a nova branch se estiver em `main` limpa — se estiver em outra branch de trabalho, ou se `git status` mostrar mudanças não commitadas (mesmo em `main`), decidir explicitamente: commitar/mergear primeiro, ou nomear a nova como dependente da atual (ramificação consciente, não acidental). Incidente real (Sessão 21/09): uma branch nova foi criada a partir de outra que tinha trabalho não commitado da Laysla, e esse trabalho quase entrou junto no commit da Laryssa — só não aconteceu porque o `git status` foi conferido antes do commit, não antes da criação da branch. A checagem de `git status` devia ter vindo primeiro.
 
 ## Regra: branches concorrentes no mesmo arquivo/bloco
 
@@ -170,4 +173,22 @@ configuração final pra entrada do tenant real → apagar a entrada `css` (ela 
 volta no `TEMA_PADRAO` — comportamento padrão de `buscarTema()`, sem precisar de código
 novo).
 
-*Última atualização: 19/09 (regra de limpeza de branch ao fechar sessão; regra do tenant-modelo de tema em staging, slug `css`; regra de decisão por exemplo concreto; princípios de arquitetura sobre profissional e cancelamento do salão; Recharts e lib/conclusao.js/lib/mes.js no item 8; ida pra main como decisão explícita no item 1).*
+**Atenção:** o tenant-modelo `css` só existe em staging. Tenants criados direto em produção
+sem espelho em staging (caso da Laryssa, Sessão 67) não têm como usar o `/laryssa/admin`
+real durante o desenvolvimento do tema — nesses casos, moldar em `css` mesmo (aceitando que
+o resultado visual ali usa a estrutura de outro tenant) e confirmar o resultado final em
+produção depois do merge, já que não há alternativa.
+
+## Regra: logo a partir de foto/JPEG com composição alta demais pro header
+
+Quando a logo do cliente vem de uma foto ou arte com fundo (não um PDF/SVG vetorial) e a
+composição inteira (ícone + nome + tagline, empilhados) é alta demais pro formato de header
+do app, **não distorcer via `scale()`/`achatarLogo`** — o resultado ovaliza pétalas, círculos
+e qualquer elemento redondo. Preferir separar o ícone do texto (dois recortes, cada um com
+fundo removido) e usar `layoutMarca: 'esquerda'`: o header só precisa caber a altura do
+ícone sozinho, não da pilha inteira. Caso de origem: logo da Laryssa (monograma + flores
+empilhado sobre o nome, proporção quase quadrada) — recorte em `laryssa-marca.png` (ícone) e
+`laryssa-marcaTexto.png` (nome+tagline), mesmo padrão que a Laysla já usava antes de virar
+lockup único.
+
+*Última atualização: 21/09 (tema do `/admin` divergente do público — `bgCardAdmin`/`botaoAdmin`/`bordaAdmin`; princípio de flag por tenant em vez de "tipo de salão"; regra de `git status` antes de nova branch; navegador separado do Claude Code; limite do tenant-modelo `css` pra tenants só de produção; técnica de recorte de logo alta a partir de foto).*

@@ -19,6 +19,11 @@ where table_name = '<tabela>';
 - [ ] Profissionais — horários e exceções (se mais de 1 profissional ativo)
 - [ ] Regras de negócio — sinal/Pix, manutenção, fidelidade, Mensagens de WhatsApp
 - [ ] Login — logout + login de novo
+- [ ] **Se o tenant tiver `bgHeader`/`botao` escuro:** conferir `bgCardAdmin` (cards e
+      drawer mobile legíveis), `botaoAdmin` (botões cheios com texto legível) e
+      `bordaAdmin` (toggle ligado/desligado distinguível) — regressão real encontrada na
+      Laysla e na Laryssa (Sessão 21/09), texto ficava escuro sobre escuro ou claro sobre
+      claro sem esses três campos.
 
 ## /agendar
 - [ ] Identificação por WhatsApp (número novo e já cadastrado)
