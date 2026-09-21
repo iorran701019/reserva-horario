@@ -52,6 +52,18 @@ Tudo controlado por 3 pontos isolados — nunca hardcodear cor em componente.
    ausentes. Útil quando o botão público é claro (dourado) e precisaria de troca de cor de
    texto pra funcionar no admin também.
 
+   Do mesmo jeito, o **admin pode ter fundo de card próprio**: `tema.bgCardAdmin`, com
+   fallback pra `tema.bgHeader` quando ausente. Vira o `--color-card` só no admin (cards,
+   acordeões, menu lateral). Útil quando o card público é escuro: o admin ignora
+   `tema.textoCard` e usa sempre `textoPrincipal` como texto, então um `bgHeader` escuro
+   dá texto escuro sobre fundo escuro lá (ex.: laryssa).
+
+   E também **borda própria**: `tema.bordaAdmin`, com fallback pra `tema.bordaHeader`
+   quando ausente. Vira o `--color-border` só no admin (bordas de card e campo, trilho do
+   toggle desligado). Útil quando a borda pública é escura: o toggle desligado usa
+   `bg-border` e o ligado `bg-primary`, então uma `bordaHeader` escura perto do botão do
+   admin deixa ligado e desligado quase da mesma cor (ex.: laysla).
+
    Com isso, qualquer componente que já usa os tokens herda a cor certa automaticamente —
    **não** criar `if (slug === 'x')` espalhado nos componentes. Se um componente ainda usa
    hex direto em vez do token, o bug está nele, não no motor de tema.

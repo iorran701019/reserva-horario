@@ -2402,11 +2402,19 @@ export default function AdminPage() {
         "--color-primary": temaAtivo.botaoAdmin ?? temaAtivo.botao,
         "--color-primary-hover": temaAtivo.botaoAdminHover ?? temaAtivo.botaoHover,
         "--color-heading": temaAtivo.textoPrincipal,
-        "--color-border": temaAtivo.bordaHeader,
+        // bordaAdmin (ex.: laysla) — borda própria do admin, mesmo molde do
+        // bgCardAdmin: o toggle desligado usa bg-border e o ligado bg-primary,
+        // então uma bordaHeader escura perto do botaoAdmin deixa os dois
+        // estados quase iguais. Sem o campo, cai no bordaHeader de sempre.
+        "--color-border": temaAtivo.bordaAdmin ?? temaAtivo.bordaHeader,
         "--color-body": temaAtivo.textoSecundario,
         "--color-muted": temaAtivo.textoSecundario,
         "--color-surface": temaAtivo.bgBody,
-        "--color-card": temaAtivo.bgHeader,
+        // bgCardAdmin (ex.: laryssa) — fundo de card próprio do admin, no
+        // mesmo molde do botaoAdmin: um card escuro de vitrine vira preto-
+        // sobre-preto aqui, já que o admin força on-card = textoPrincipal.
+        // Sem o campo, cai no bgHeader de sempre — nenhum outro tenant muda.
+        "--color-card": temaAtivo.bgCardAdmin ?? temaAtivo.bgHeader,
         // Mesma linha do fluxo público (app/[salon]/page.js): sem tema.bgCampo
         // cai no bgHeader, que é o que --color-card já recebe — nenhum tenant
         // sem o campo muda. Alcança os inputs (regra global do globals.css) e
