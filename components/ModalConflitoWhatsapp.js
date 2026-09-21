@@ -50,13 +50,13 @@ export default function ModalConflitoWhatsapp({
           >
             <h2
               id="titulo-conflito-whatsapp"
-              className="text-lg font-semibold text-heading"
+              className="text-lg font-semibold text-on-card"
             >
               Número já cadastrado
             </h2>
-            <p className="mt-2 text-sm text-body">
+            <p className="mt-2 text-sm text-on-card">
               Você é{" "}
-              <span className="font-medium text-heading">
+              <span className="font-medium text-on-card">
                 {clienteConflitante.nome}
               </span>
               ?
@@ -73,7 +73,7 @@ export default function ModalConflitoWhatsapp({
               <button
                 type="button"
                 onClick={onNegar}
-                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
               >
                 Não
               </button>
@@ -96,14 +96,14 @@ export default function ModalConflitoWhatsapp({
           >
             <h2
               id="titulo-contato-whatsapp"
-              className="text-lg font-semibold text-heading"
+              className="text-lg font-semibold text-on-card"
             >
               Fale com a gente
             </h2>
-            <p className="mt-2 text-sm text-body">
+            <p className="mt-2 text-sm text-on-card">
               Parece que esse número está associado a outro cadastro. Fale
               diretamente com{" "}
-              <span className="font-medium text-heading">{nomeContato}</span>.
+              <span className="font-medium text-on-card">{nomeContato}</span>.
             </p>
 
             <a

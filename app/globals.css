@@ -28,6 +28,12 @@
      anterior. Tenants que quiserem campo destacado sobrescrevem via
      tema.bgCampo (ver app/[salon]/page.js e lib/temas.js). */
   --color-field: var(--color-card);
+  /* Texto que senta direto em cima de bg-card. Default = --color-heading
+     (mesma cor de antes). Como var() resolve no :root, o override por tenant
+     precisa repetir a linha no wrapper do tema (app/[salon]/page.js e
+     app/[salon]/admin/page.js), senão herdaria o heading global, não o do
+     tenant. Tenants com card escuro definem tema.textoCard. */
+  --color-on-card: var(--color-heading);
   --font-sans: var(--font-hanken);
   --font-display: var(--font-fraunces);
   --font-cormorant: var(--font-cormorant-garamond);

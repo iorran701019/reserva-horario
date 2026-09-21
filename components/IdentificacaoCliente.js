@@ -414,14 +414,14 @@ export default function IdentificacaoCliente({
           {/* Só para quem acabou de dizer "Não é meu número" — explica o
               campo em branco. Na entrada normal do fluxo não aparece. */}
           {veioDeNaoEMeuNumero && (
-            <p className="text-sm text-body">
+            <p className="text-sm text-on-card">
               Certo, digite o WhatsApp correto abaixo.
             </p>
           )}
           <div>
             <label
               htmlFor="whatsapp-identificacao"
-              className="mb-1 block text-sm font-medium text-body"
+              className="mb-1 block text-sm font-medium text-on-card"
             >
               Seu WhatsApp
             </label>
@@ -466,9 +466,9 @@ export default function IdentificacaoCliente({
 
       {etapa === "confirmar" && clienteEncontrado && (
         <div className="space-y-4">
-          <p className="text-sm text-body">
+          <p className="text-sm text-on-card">
             Você é{" "}
-            <span className="font-medium text-heading">
+            <span className="font-medium text-on-card">
               {clienteEncontrado.nome}
             </span>
             ?
@@ -485,7 +485,7 @@ export default function IdentificacaoCliente({
             <button
               type="button"
               onClick={handleConfirmarNao}
-              className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
             >
               Não é meu número
             </button>
@@ -501,12 +501,12 @@ export default function IdentificacaoCliente({
 
       {etapa === "cadastroSimples" && (
         <form onSubmit={handleSubmitSimples} className="space-y-4">
-          <p className="text-sm text-body">
+          <p className="text-sm text-on-card">
             Não encontramos esse número. Informe seu nome para continuar.
           </p>
 
           <div>
-            <label htmlFor="cs-nome" className="mb-1 block text-sm font-medium text-body">
+            <label htmlFor="cs-nome" className="mb-1 block text-sm font-medium text-on-card">
               Nome completo
             </label>
             <input
@@ -521,7 +521,7 @@ export default function IdentificacaoCliente({
           </div>
 
           <div>
-            <label htmlFor="cs-whatsapp" className="mb-1 block text-sm font-medium text-body">
+            <label htmlFor="cs-whatsapp" className="mb-1 block text-sm font-medium text-on-card">
               WhatsApp
             </label>
             <input
@@ -548,7 +548,7 @@ export default function IdentificacaoCliente({
           </div>
 
           <div>
-            <label htmlFor="cs-whatsapp-confirmacao" className="mb-1 block text-sm font-medium text-body">
+            <label htmlFor="cs-whatsapp-confirmacao" className="mb-1 block text-sm font-medium text-on-card">
               Confirme seu WhatsApp
             </label>
             <input
