@@ -7,6 +7,7 @@ import { chaveMes } from "@/lib/mes";
 import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
 import NavegacaoMes from "@/components/NavegacaoMes";
 import { mensagemFalhaSalvar, mensagemFalhaDelete } from "@/lib/erroSalvar";
+import { gerarSlotsDaJanela, DURACAO_MINUTOS } from "@/lib/horarios";
 
 // Aba "Profissionais" do /admin: CRUD dos profissionais do salão (tabela
 // `profissionais`), sempre particionado por estabelecimento_id (o consumidor já
@@ -639,20 +640,37 @@ function faixaHora(inicio, fim) {
   return `${paraHHMM(inicio)} – ${paraHHMM(fim)}`;
 }
 
-// Selo pequeno "Bloqueio"/"Liberação" pra distinguir os dois tipos de
+// Natureza de uma linha de `ausencias`. Só "ausencia" (ou a coluna nula,
+// linhas antigas de antes dela existir) bloqueia horário; "liberacao" abre um
+// extra e "exclusividade_servico" só filtra (ver lib/disponibilidade.js) —
+// nenhum dos dois pode ser tratado como bloqueio na tela.
+function ehBloqueio(a) {
+  return (a.tipo_registro ?? "ausencia") === "ausencia";
+}
+
+function ehExclusividade(a) {
+  return a.tipo_registro === "exclusividade_servico";
+}
+
+// Selo pequeno "Bloqueio"/"Liberação"/"Exclusivo" pra distinguir os tipos de
 // registro na lista de ausências (tipo_registro ausente = ausencia, linhas
 // antigas de antes da coluna existir).
+const SELOS_TIPO_REGISTRO = {
+  ausencia: { rotulo: "Bloqueio", classe: "bg-red-50 text-red-700 ring-1 ring-red-100" },
+  liberacao: { rotulo: "Liberação", classe: "bg-green-50 text-green-700 ring-1 ring-green-100" },
+  exclusividade_servico: {
+    rotulo: "Exclusivo",
+    classe: "bg-blue-50 text-blue-700 ring-1 ring-blue-100",
+  },
+};
+
 function SeloTipoRegistro({ tipoRegistro }) {
-  const liberacao = tipoRegistro === "liberacao";
+  const selo = SELOS_TIPO_REGISTRO[tipoRegistro] ?? SELOS_TIPO_REGISTRO.ausencia;
   return (
     <span
-      className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-        liberacao
-          ? "bg-green-50 text-green-700 ring-1 ring-green-100"
-          : "bg-red-50 text-red-700 ring-1 ring-red-100"
-      }`}
+      className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${selo.classe}`}
     >
-      {liberacao ? "Liberação" : "Bloqueio"}
+      {selo.rotulo}
     </span>
   );
 }
@@ -840,6 +858,8 @@ function statusGradeDoDia(lista, diaData, diaSemana) {
   if (!diaData) return { bloqueados, liberados, diaTodoBloqueado };
 
   for (const a of lista) {
+    // Exclusividade não bloqueia nem libera nada — não pinta a grade.
+    if (ehExclusividade(a)) continue;
     const casaRecorrente = a.tipo === "recorrente" && a.dia_semana === diaSemana;
     const casaPeriodo =
       a.tipo === "periodo" && a.data_inicio <= diaData && diaData <= a.data_fim;
@@ -887,9 +907,9 @@ function agruparPeriodosPorDia(periodos) {
     .map(([data, itens]) => ({
       data,
       itens: [...itens].sort((x, y) => {
-        const xLiberacao = (x.tipo_registro ?? "ausencia") === "liberacao";
-        const yLiberacao = (y.tipo_registro ?? "ausencia") === "liberacao";
-        if (xLiberacao !== yLiberacao) return xLiberacao ? 1 : -1;
+        const xBloqueio = ehBloqueio(x);
+        const yBloqueio = ehBloqueio(y);
+        if (xBloqueio !== yBloqueio) return xBloqueio ? -1 : 1;
         return (x.hora_inicio ?? "").localeCompare(y.hora_inicio ?? "");
       }),
     }))
@@ -1048,12 +1068,500 @@ function MiniCalendarioMultiplo({ mes, min, selecionadas, onAlternar, onPrev, on
   );
 }
 
+// "HH:MM" + N minutos, sem estourar o dia (mesmo teto de somarUmaHora).
+function somarMinutos(hhmm, n) {
+  const total = Math.min(minutos(hhmm) + n, 23 * 60 + 59);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+// Horários REAIS da agenda do profissional num dia da semana — a mesma fonte
+// de candidatosDoDia (lib/disponibilidade.js), antes de qualquer exceção:
+//   modo 'fixo'   – a lista de horarios_fixos do dia, como está;
+//   modo 'janela' – gerarSlotsDaJanela sobre a janela do dia (com almoço),
+//                   na duração do serviço e na granularidade do salão.
+function horariosDaAgendaNoDia({ modoHorario, dia, horariosFixosPorDia, dias, duracaoMin, granularidadeMin }) {
+  if (modoHorario === "fixo") {
+    return [...(horariosFixosPorDia?.[dia] ?? [])].sort();
+  }
+  const bloco = dias?.[dia];
+  if (!bloco?.ativo || !bloco.hora_inicio || !bloco.hora_fim) return [];
+  return gerarSlotsDaJanela(
+    {
+      inicio: bloco.hora_inicio,
+      fim: bloco.hora_fim,
+      almocoInicio: bloco.almoco_inicio || null,
+      almocoFim: bloco.almoco_fim || null,
+    },
+    duracaoMin,
+    granularidadeMin
+  );
+}
+
+// "Nome (20–30 dias)" pra manutenção — duas manutenções do mesmo serviço
+// costumam ter o MESMO nome e só diferem na faixa de prazo.
+function rotuloServicoComPrazo(s) {
+  if (!s) return "Serviço removido";
+  const ini = s.prazo_inicio_dias;
+  const fim = s.prazo_fim_dias;
+  if (!s.eh_manutencao || (ini == null && fim == null)) return s.nome;
+  if (ini != null && fim != null) return `${s.nome} (${ini}–${fim} dias)`;
+  if (fim != null) return `${s.nome} (até ${fim} dias)`;
+  return `${s.nome} (a partir de ${ini} dias)`;
+}
+
+// Agrupa as exclusividades por grupo_id (um lote por salvamento, ver
+// SecaoExclusividade) — um card por grupo, com os horários de cada dia da
+// semana. Um grupo pode cobrir VÁRIOS serviços (o base + as manutenções
+// vinculadas, quando a dona marca o checkbox), todos com os mesmos dias/
+// horários — `servicoIds` lista os distintos, na ordem em que aparecem.
+// Linha sem grupo_id vira um grupo próprio (nunca deveria acontecer, mas não
+// pode sumir da lista). A exclusão é pelos ids do grupo.
+function agruparExclusividades(linhas) {
+  const mapa = new Map();
+  for (const a of linhas) {
+    const chave = a.grupo_id ?? `id-${a.id}`;
+    if (!mapa.has(chave)) mapa.set(chave, []);
+    mapa.get(chave).push(a);
+  }
+
+  return [...mapa.entries()].map(([chave, itens]) => {
+    const porDia = new Map();
+    for (const a of itens) {
+      const lista = porDia.get(a.dia_semana) ?? [];
+      lista.push(paraHHMM(a.hora_inicio));
+      porDia.set(a.dia_semana, lista);
+    }
+    return {
+      chave,
+      ids: itens.map((a) => a.id),
+      servicoIds: [...new Set(itens.map((a) => a.servico_id))],
+      permanente: itens[0].tipo === "recorrente",
+      dataInicio: itens[0].data_inicio,
+      dataFim: itens[0].data_fim,
+      dias: [...porDia.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([dia, horarios]) => ({ dia, horarios: [...new Set(horarios)].sort() })),
+    };
+  });
+}
+
+// Formulário "Exclusividade de serviço": RESTRINGE um serviço BASE (nunca uma
+// manutenção, eh_manutencao=true) a horário(s) da agenda JÁ EXISTENTE do
+// profissional. Enquanto a regra estiver ativa, esse
+// serviço só aparece (com este profissional) nos dias da semana e horários
+// marcados — em qualquer outro dia/horário ele some. Os OUTROS serviços não
+// mudam em nada, nem nos horários marcados (o filtro mora em
+// lib/disponibilidade.js: aplicarExclusividades). Não cria nem bloqueia
+// horário. Grava uma linha por (dia_semana × horário), todas com o mesmo
+// grupo_id novo, tipo_registro='exclusividade_servico' e:
+//   permanente → tipo='recorrente', sem datas (vale pra sempre);
+//   senão      → tipo='recorrente_periodo', com data_inicio..data_fim.
+// O motor casa pelo INÍCIO do horário; hora_fim (início + duração do serviço)
+// é só informativo.
+// Checkbox "manutenções": aplica a MESMA regra a cada manutenção vinculada ao
+// serviço (servico_origem_id — pode haver várias, uma por faixa de prazo) que
+// este profissional atende. Cada manutenção é um servico_id próprio no motor,
+// então vira linhas próprias (serviço × dia × horário), no MESMO grupo_id do
+// base pra excluir tudo junto.
+// Estado próprio; o pai só recebe as linhas gravadas (onAdicionadas).
+function SecaoExclusividade({
+  profissionalId,
+  estabelecimentoId,
+  servicos,
+  servicosSalao,
+  modoHorario,
+  horariosFixosPorDia,
+  dias,
+  granularidadeMin,
+  classeCampo,
+  onAdicionadas,
+}) {
+  const [servicoId, setServicoId] = useState("");
+  const [incluirManutencoes, setIncluirManutencoes] = useState(false);
+  const [diasSel, setDiasSel] = useState([]); // dia_semana 0..6
+  const [horariosPorDia, setHorariosPorDia] = useState({}); // dia -> ["HH:MM"]
+  const [permanente, setPermanente] = useState(false);
+  const [dataInicio, setDataInicio] = useState("");
+  const [dataFim, setDataFim] = useState("");
+  const [formErro, setFormErro] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const hoje = hojeISOLocal();
+  // Só serviços "base" no seletor — manutenção entra pelo checkbox.
+  const servicosBase = servicos.filter((s) => !s.eh_manutencao);
+  const servico = servicosBase.find((s) => String(s.id) === String(servicoId)) ?? null;
+
+  // Manutenções vinculadas ao serviço escolhido que ESTE profissional atende
+  // (as outras não teriam efeito: o motor só olha profissionais vinculados
+  // ao serviço consultado) e as que ele não atende, só pra avisar.
+  const manutencoesDoSalao = servico
+    ? (servicosSalao ?? []).filter(
+        (s) => s.eh_manutencao && String(s.servico_origem_id) === String(servico.id)
+      )
+    : [];
+  const idsDoProfissional = new Set(servicos.map((s) => String(s.id)));
+  const manutencoes = manutencoesDoSalao.filter((s) => idsDoProfissional.has(String(s.id)));
+  const manutencoesNaoAtendidas = manutencoesDoSalao.filter(
+    (s) => !idsDoProfissional.has(String(s.id))
+  );
+
+  // Mesmo fallback de carregarBaseDisponibilidade (lib/disponibilidade.js):
+  // no modo 'janela' a duração decide quais horários a agenda oferece.
+  function duracaoEfetiva(s) {
+    return Number(s?.duracao_min) > 0 ? Number(s.duracao_min) : DURACAO_MINUTOS;
+  }
+
+  function horariosNoDia(dia, s) {
+    return horariosDaAgendaNoDia({
+      modoHorario,
+      dia,
+      horariosFixosPorDia,
+      dias,
+      duracaoMin: duracaoEfetiva(s),
+      granularidadeMin,
+    });
+  }
+
+  function horariosDoDia(dia) {
+    if (!servico) return [];
+    return horariosNoDia(dia, servico);
+  }
+
+  // Modo 'janela': uma manutenção MAIS LONGA que o serviço base pode não ter
+  // na agenda um horário marcado (ex.: o último do dia). O motor faz
+  // interseção, então ela simplesmente fica sem esse horário — só avisa.
+  const avisosManutencao =
+    incluirManutencoes && modoHorario !== "fixo"
+      ? manutencoes.flatMap((m) => {
+          const faltando = [...diasSel]
+            .sort((a, b) => a - b)
+            .flatMap((dia) => {
+              const existentes = new Set(horariosNoDia(dia, m));
+              return (horariosPorDia[dia] ?? [])
+                .filter((h) => !existentes.has(h))
+                .sort()
+                .map((h) => `${DIAS.find((d) => d.n === dia)?.curto} ${h}`);
+            });
+          return faltando.length ? [`${rotuloServicoComPrazo(m)}: ${faltando.join(", ")}`] : [];
+        })
+      : [];
+
+  function escolherServico(id) {
+    setServicoId(id);
+    setIncluirManutencoes(false);
+    setFormErro("");
+    // No modo 'janela' os horários dependem da duração do serviço — a
+    // seleção anterior pode nem existir mais. Zera tudo pra não gravar
+    // horário que não é real.
+    setDiasSel([]);
+    setHorariosPorDia({});
+  }
+
+  function alternarDia(n) {
+    setDiasSel((atual) =>
+      atual.includes(n) ? atual.filter((d) => d !== n) : [...atual, n]
+    );
+    setHorariosPorDia((atual) => {
+      if (!(n in atual)) return atual;
+      const novo = { ...atual };
+      delete novo[n];
+      return novo;
+    });
+  }
+
+  function alternarHorario(dia, h) {
+    setHorariosPorDia((atual) => {
+      const lista = atual[dia] ?? [];
+      return {
+        ...atual,
+        [dia]: lista.includes(h) ? lista.filter((x) => x !== h) : [...lista, h],
+      };
+    });
+  }
+
+  function coletarLinhas() {
+    if (!servico) return { erro: "Escolha o serviço." };
+    if (diasSel.length === 0) return { erro: "Selecione ao menos um dia." };
+    const diasOrdenados = [...diasSel].sort((a, b) => a - b);
+    for (const dia of diasOrdenados) {
+      if ((horariosPorDia[dia] ?? []).length === 0) {
+        const rotulo = DIAS.find((d) => d.n === dia)?.rotulo;
+        return { erro: `Selecione ao menos um horário em ${rotulo}.` };
+      }
+    }
+    if (!permanente) {
+      if (!dataInicio || !dataFim) return { erro: "Informe as datas de início e fim." };
+      if (dataFim < dataInicio) {
+        return { erro: "A data de fim deve ser igual ou depois do início." };
+      }
+    }
+
+    const ini = permanente ? null : dataInicio;
+    const fim = permanente ? null : dataFim;
+    // Serviço base primeiro, depois as manutenções (se marcado) — mesmos
+    // dias/horários/período pra todos; hora_fim pela duração de cada um.
+    const alvos = [servico, ...(incluirManutencoes ? manutencoes : [])];
+    const linhasNovas = alvos.flatMap((alvo) =>
+      diasOrdenados.flatMap((dia) =>
+        [...horariosPorDia[dia]].sort().map((hora_inicio) => ({
+          servicoId: alvo.id,
+          dia,
+          hora_inicio,
+          hora_fim: somarMinutos(hora_inicio, duracaoEfetiva(alvo)),
+        }))
+      )
+    );
+
+    const grupoId = crypto.randomUUID();
+    return {
+      linhas: linhasNovas.map((n) => ({
+        profissional_id: profissionalId,
+        estabelecimento_id: estabelecimentoId,
+        tipo: permanente ? "recorrente" : "recorrente_periodo",
+        tipo_registro: "exclusividade_servico",
+        servico_id: n.servicoId,
+        dia_semana: n.dia,
+        data_inicio: ini,
+        data_fim: fim,
+        dia_inteiro: false,
+        hora_inicio: n.hora_inicio,
+        hora_fim: n.hora_fim,
+        motivo: null,
+        grupo_id: grupoId,
+      })),
+    };
+  }
+
+  async function salvar() {
+    setFormErro("");
+    const { erro, linhas } = coletarLinhas();
+    if (erro) {
+      setFormErro(erro);
+      return;
+    }
+
+    setSalvando(true);
+    const { data, error } = await supabase.from("ausencias").insert(linhas).select();
+    setSalvando(false);
+    if (error) {
+      setFormErro(mensagemFalhaSalvar(error));
+      return;
+    }
+
+    onAdicionadas(data ?? []);
+    setServicoId("");
+    setIncluirManutencoes(false);
+    setDiasSel([]);
+    setHorariosPorDia({});
+    setPermanente(false);
+    setDataInicio("");
+    setDataFim("");
+  }
+
+  if (servicosBase.length === 0) {
+    return (
+      <p className="mt-3 rounded-lg bg-card px-3 py-3 text-sm text-body ring-1 ring-border">
+        Este profissional não tem nenhum serviço vinculado.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <p className="mt-3 text-xs text-muted">
+        Restringe um serviço: enquanto a regra estiver ativa, ele só pode ser
+        agendado nos dias e horários marcados aqui e some de todos os outros.
+        Os demais serviços continuam normais.
+      </p>
+
+      <label className="mt-3 block text-xs font-medium text-body">
+        Serviço
+        <select
+          value={servicoId}
+          onChange={(e) => escolherServico(e.target.value)}
+          className={`mt-1 block w-full ${classeCampo}`}
+        >
+          <option value="">Escolha o serviço</option>
+          {servicosBase.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.nome}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {servico && (manutencoes.length > 0 || manutencoesNaoAtendidas.length > 0) && (
+        <div className="mt-2">
+          {manutencoes.length > 0 && (
+            <label className="flex cursor-pointer items-start gap-2 text-sm font-medium text-heading">
+              <input
+                type="checkbox"
+                checked={incluirManutencoes}
+                onChange={(e) => setIncluirManutencoes(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+              />
+              <span>
+                Aplicar também às manutenções deste serviço
+                <span className="block text-xs font-normal text-muted">
+                  {manutencoes.map(rotuloServicoComPrazo).join(" · ")}
+                </span>
+              </span>
+            </label>
+          )}
+          {manutencoesNaoAtendidas.length > 0 && (
+            <p className="mt-1 text-xs text-muted">
+              {manutencoes.length > 0 ? "Fora da regra" : "Manutenções deste serviço"} (este
+              profissional não atende):{" "}
+              {manutencoesNaoAtendidas.map(rotuloServicoComPrazo).join(" · ")}
+            </p>
+          )}
+        </div>
+      )}
+
+      {servico && (
+        <>
+          <span className="mt-3 block text-xs font-medium text-body">
+            Dias da semana
+          </span>
+          <div className="mt-1 flex flex-wrap gap-2">
+            {DIAS.map((info) => {
+              const ativo = diasSel.includes(info.n);
+              const semAgenda = horariosDoDia(info.n).length === 0;
+              return (
+                <button
+                  key={info.n}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={ativo}
+                  disabled={semAgenda}
+                  title={semAgenda ? "Sem horários na agenda neste dia" : undefined}
+                  onClick={() => alternarDia(info.n)}
+                  className={`rounded-lg px-2.5 py-1.5 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                    ativo
+                      ? "bg-blue-600 text-white ring-blue-600"
+                      : "bg-card text-body ring-border hover:bg-surface"
+                  }`}
+                >
+                  {info.curto}
+                </button>
+              );
+            })}
+          </div>
+
+          {[...diasSel]
+            .sort((a, b) => a - b)
+            .map((dia) => {
+              const selecionados = horariosPorDia[dia] ?? [];
+              return (
+                <div key={dia} className="mt-3">
+                  <span className="block text-xs font-medium text-body">
+                    Horários de {DIAS.find((d) => d.n === dia)?.rotulo}
+                  </span>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {horariosDoDia(dia).map((h) => {
+                      const selecionado = selecionados.includes(h);
+                      return (
+                        <button
+                          key={h}
+                          type="button"
+                          role="checkbox"
+                          aria-checked={selecionado}
+                          onClick={() => alternarHorario(dia, h)}
+                          className={`rounded-full px-2.5 py-1.5 text-xs font-medium ring-1 transition ${
+                            selecionado
+                              ? "bg-blue-600 text-white ring-blue-600"
+                              : "bg-card text-body ring-border hover:bg-surface"
+                          }`}
+                        >
+                          {h}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+
+          <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm font-medium text-heading">
+            <input
+              type="checkbox"
+              checked={permanente}
+              onChange={(e) => setPermanente(e.target.checked)}
+              className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+            />
+            Manter essa regra permanentemente
+          </label>
+
+          {avisosManutencao.length > 0 && (
+            <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-100">
+              Por ter duração maior, estas manutenções não têm na agenda alguns
+              dos horários marcados e ficarão sem eles enquanto a regra valer:
+              <ul className="mt-1 list-disc pl-4">
+                {avisosManutencao.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {!permanente && (
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="text-xs font-medium text-body">
+                De
+                <input
+                  type="date"
+                  aria-label="Início da exclusividade"
+                  min={hoje}
+                  value={dataInicio}
+                  onChange={(e) => setDataInicio(e.target.value)}
+                  className={`mt-1 block ${classeCampo}`}
+                />
+              </label>
+              <label className="text-xs font-medium text-body">
+                Até
+                <input
+                  type="date"
+                  aria-label="Fim da exclusividade"
+                  min={dataInicio || hoje}
+                  value={dataFim}
+                  onChange={(e) => setDataFim(e.target.value)}
+                  className={`mt-1 block ${classeCampo}`}
+                />
+              </label>
+            </div>
+          )}
+        </>
+      )}
+
+      {formErro && (
+        <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 ring-1 ring-red-100">
+          {formErro}
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={salvar}
+        disabled={salvando}
+        className="mt-3 inline-flex items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {salvando ? "Adicionando..." : "Adicionar exclusividade"}
+      </button>
+    </>
+  );
+}
+
 function SecaoAusencias({
   profissionalId,
   estabelecimentoId,
   modoHorario,
   horariosFixosPorDia,
   dias,
+  servicosProfissional,
+  servicosSalao,
+  granularidadeMin,
 }) {
   const [lista, setLista] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -1061,7 +1569,8 @@ function SecaoAusencias({
 
   // Natureza do registro: 'ausencia' bloqueia o horário, 'liberacao' abre um
   // horário extra (fora da janela/lista normal). Mesmo formulário pros dois —
-  // só muda o que é gravado em `tipo_registro`.
+  // só muda o que é gravado em `tipo_registro`. 'exclusividade_servico' troca
+  // o formulário inteiro pelo de SecaoExclusividade (estado próprio).
   const [tipoRegistro, setTipoRegistro] = useState("ausencia");
 
   // Formato de cadastro escolhido na lista suspensa.
@@ -1114,6 +1623,11 @@ function SecaoAusencias({
   // exclusão sempre apaga o grupo_id inteiro de uma vez.
   const [confirmarExclusaoGrupo, setConfirmarExclusaoGrupo] = useState(null);
 
+  // Exclusividade de serviço pendente de confirmação de exclusão (ver
+  // agruparExclusividades) — apaga todas as linhas do grupo pelos ids.
+  const [confirmarExclusaoExclusividade, setConfirmarExclusaoExclusividade] =
+    useState(null);
+
   // Carga inicial: todas as ausências do profissional.
   useEffect(() => {
     let vivo = true;
@@ -1123,7 +1637,7 @@ function SecaoAusencias({
       const { data, error } = await supabase
         .from("ausencias")
         .select(
-          "id, tipo, tipo_registro, dia_semana, data_inicio, data_fim, dia_inteiro, hora_inicio, hora_fim, motivo, grupo_id"
+          "id, tipo, tipo_registro, dia_semana, data_inicio, data_fim, dia_inteiro, hora_inicio, hora_fim, motivo, grupo_id, servico_id"
         )
         .eq("profissional_id", profissionalId);
 
@@ -1489,6 +2003,30 @@ function SecaoAusencias({
     setLista((atual) => atual.filter((a) => a.grupo_id !== grupoId));
   }
 
+  // Exclui todas as linhas de uma exclusividade de serviço (um grupo de
+  // agruparExclusividades) — chamado só depois da confirmação.
+  async function excluirExclusividade(grupo) {
+    setErro("");
+    const { data: linhas, error } = await supabase
+      .from("ausencias")
+      .delete()
+      .in("id", grupo.ids)
+      .select("id");
+    if (error || !linhas?.length) {
+      setErro(`Não foi possível excluir a exclusividade: ${mensagemFalhaSalvar(error)}`);
+      return;
+    }
+    const idsExcluidos = new Set(linhas.map((l) => l.id));
+    setLista((atual) => atual.filter((a) => !idsExcluidos.has(a.id)));
+  }
+
+  async function confirmarExclusaoExclusividadeConfirmada() {
+    if (!confirmarExclusaoExclusividade) return;
+    const grupo = confirmarExclusaoExclusividade;
+    setConfirmarExclusaoExclusividade(null);
+    await excluirExclusividade(grupo);
+  }
+
   async function confirmarExclusaoGrupoConfirmada() {
     if (!confirmarExclusaoGrupo) return;
     const grupoId = confirmarExclusaoGrupo.grupoId;
@@ -1519,10 +2057,17 @@ function SecaoAusencias({
   const statusGrade = statusGradeDoDia(lista, diaData, diaSemanaEscolhido);
   const hoje = hojeISOLocal();
 
+  // Exclusividades de serviço ficam FORA dos grupos de bloqueio/liberação
+  // (uma permanente também é tipo='recorrente') — card próprio abaixo.
+  const exclusividades = lista.filter(ehExclusividade);
+  const listaExcecoes = lista.filter((a) => !ehExclusividade(a));
+  const gruposExclusividade = agruparExclusividades(exclusividades);
+  const servicoPorId = new Map((servicosSalao ?? []).map((s) => [String(s.id), s]));
+
   const gruposRec = agruparRecorrentes(
-    lista.filter((a) => a.tipo === "recorrente")
+    listaExcecoes.filter((a) => a.tipo === "recorrente")
   );
-  const periodos = lista
+  const periodos = listaExcecoes
     .filter((a) => a.tipo === "periodo")
     .sort((a, b) =>
       a.data_inicio < b.data_inicio ? -1 : a.data_inicio > b.data_inicio ? 1 : 0
@@ -1533,7 +2078,8 @@ function SecaoAusencias({
   const periodosAvulsos = periodos.filter((a) => a.grupo_id);
   const { grupos: gruposPeriodo, multiDia } = agruparPeriodosPorDia(periodosIndividuais);
   const gruposAvulsos = agruparPorGrupoId(periodosAvulsos);
-  const vazio = gruposRec.length === 0 && periodos.length === 0;
+  const vazio =
+    gruposRec.length === 0 && periodos.length === 0 && gruposExclusividade.length === 0;
 
   // Navegação mensal da lista (ver lib/useNavegacaoMes) — cobre só períodos
   // com data (dia único, vários dias, datas avulsas); recorrentes ficam de
@@ -1574,6 +2120,7 @@ function SecaoAusencias({
           {[
             { valor: "ausencia", rotulo: "Bloquear horário" },
             { valor: "liberacao", rotulo: "Liberar horário" },
+            { valor: "exclusividade_servico", rotulo: "Exclusividade de serviço" },
           ].map((opcao) => {
             const selecionado = tipoRegistro === opcao.valor;
             return (
@@ -1592,7 +2139,9 @@ function SecaoAusencias({
                   selecionado
                     ? opcao.valor === "liberacao"
                       ? "bg-green-600 text-white ring-green-600"
-                      : "bg-primary text-white ring-primary"
+                      : opcao.valor === "exclusividade_servico"
+                        ? "bg-blue-600 text-white ring-blue-600"
+                        : "bg-primary text-white ring-primary"
                     : "bg-card text-body ring-border hover:bg-surface"
                 }`}
               >
@@ -1602,6 +2151,21 @@ function SecaoAusencias({
           })}
         </div>
 
+        {tipoRegistro === "exclusividade_servico" ? (
+          <SecaoExclusividade
+            profissionalId={profissionalId}
+            estabelecimentoId={estabelecimentoId}
+            servicos={servicosProfissional ?? []}
+            servicosSalao={servicosSalao}
+            modoHorario={modoHorario}
+            horariosFixosPorDia={horariosFixosPorDia}
+            dias={dias}
+            granularidadeMin={granularidadeMin}
+            classeCampo={classeCampo}
+            onAdicionadas={(linhas) => setLista((atual) => [...atual, ...linhas])}
+          />
+        ) : (
+          <>
         <label className="mt-3 block text-xs font-medium text-body">
           {tipoRegistro === "liberacao" ? "Tipo de liberação" : "Tipo de ausência"}
           <select
@@ -2004,6 +2568,8 @@ function SecaoAusencias({
               ? "Adicionar liberação"
               : "Adicionar bloqueio"}
         </button>
+          </>
+        )}
       </div>
 
       {/* LISTA das ausências já cadastradas. */}
@@ -2028,6 +2594,74 @@ function SecaoAusencias({
               da paginação por mês abaixo — são regra permanente (dia_semana),
               sem data_inicio/data_fim pra encaixar num mês. Título só aparece
               quando há pelo menos uma, pra não deixar um cabeçalho solto. */}
+          {/* Exclusividades de serviço, um card por grupo_id (ver
+              agruparExclusividades) — SEMPRE visíveis, fora da paginação por
+              mês, como as recorrentes (a permanente nem tem data). Não são
+              bloqueio: borda/selo azuis. */}
+          {gruposExclusividade.length > 0 && (
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Exclusividades de serviço
+            </p>
+          )}
+          {gruposExclusividade.map((grupo) => {
+            const encerrada = !grupo.permanente && grupo.dataFim && grupo.dataFim < hoje;
+            // Serviço base no título (o que não é manutenção); se nenhum for
+            // identificável (inativo/removido), o primeiro do grupo.
+            const principal =
+              grupo.servicoIds.find((id) => {
+                const s = servicoPorId.get(String(id));
+                return s && !s.eh_manutencao;
+              }) ?? grupo.servicoIds[0];
+            const demais = grupo.servicoIds.filter((id) => id !== principal);
+            return (
+              <div
+                key={grupo.chave}
+                className={`flex items-start justify-between gap-3 rounded-xl border-l-4 border-l-blue-500 bg-card p-3 ring-1 ring-border ${
+                  encerrada ? "opacity-60" : ""
+                }`}
+              >
+                <div className="min-w-0">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-heading">
+                    <SeloTipoRegistro tipoRegistro="exclusividade_servico" />
+                    {rotuloServicoComPrazo(servicoPorId.get(String(principal)))}
+                  </p>
+                  {/* Regra aplicada também às manutenções (checkbox do
+                      formulário): lista cada uma, com a faixa de prazo. */}
+                  {demais.length > 0 && (
+                    <p className="mt-0.5 text-xs text-body">
+                      + {demais.map((id) => rotuloServicoComPrazo(servicoPorId.get(String(id)))).join(" · ")}
+                    </p>
+                  )}
+                  <ul className="mt-1.5 space-y-0.5 text-xs text-body">
+                    {grupo.dias.map(({ dia, horarios }) => (
+                      <li key={dia}>
+                        <span className="font-medium text-heading">
+                          {DIAS.find((d) => d.n === dia)?.rotulo}
+                        </span>
+                        {" · "}
+                        {horarios.join(", ")}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-1 text-xs text-muted">
+                    Só nestes horários ·{" "}
+                    {grupo.permanente
+                      ? "Permanente"
+                      : `${formatarDataBR(grupo.dataInicio)} até ${formatarDataBR(grupo.dataFim)}`}
+                    {encerrada && " · encerrada"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setConfirmarExclusaoExclusividade(grupo)}
+                  className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                >
+                  Excluir
+                </button>
+              </div>
+            );
+          })}
+
           {gruposRec.length > 0 && (
             <p className="text-xs font-semibold uppercase tracking-wide text-muted">
               Recorrentes
@@ -2100,9 +2734,7 @@ function SecaoAusencias({
               Borda vermelha se o dia tem QUALQUER bloqueio (que sempre vence,
               ver lib/disponibilidade.js); verde só quando é liberação pura. */}
           {gruposPeriodoDoMes.map((grupo) => {
-            const temBloqueio = grupo.itens.some(
-              (a) => (a.tipo_registro ?? "ausencia") !== "liberacao"
-            );
+            const temBloqueio = grupo.itens.some(ehBloqueio);
             return (
               <div
                 key={grupo.data}
@@ -2247,6 +2879,51 @@ function SecaoAusencias({
               <button
                 type="button"
                 onClick={() => setConfirmarExclusaoGrupo(null)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmação: exclusão de uma exclusividade de serviço (todas as
+          linhas do grupo, ver excluirExclusividade). */}
+      {confirmarExclusaoExclusividade && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-excluir-exclusividade"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          onClick={() => setConfirmarExclusaoExclusividade(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-excluir-exclusividade"
+              className="text-lg font-semibold text-heading"
+            >
+              Excluir exclusividade
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              O serviço volta a aceitar qualquer horário da agenda. Deseja
+              continuar?
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarExclusaoExclusividadeConfirmada}
+                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700"
+              >
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmarExclusaoExclusividade(null)}
                 className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Cancelar
@@ -2414,7 +3091,9 @@ export default function GerenciarProfissionais({
     async function carregar() {
       const { data, error } = await supabase
         .from("servicos")
-        .select("id, nome, duracao_min, preco_centavos")
+        .select(
+          "id, nome, duracao_min, preco_centavos, eh_manutencao, servico_origem_id, prazo_inicio_dias, prazo_fim_dias"
+        )
         .eq("estabelecimento_id", estabelecimento.id)
         .eq("ativo", true)
         .order("nome", { ascending: true });
@@ -3562,6 +4241,11 @@ export default function GerenciarProfissionais({
                   modoHorario={form.modoHorario}
                   horariosFixosPorDia={form.horariosFixosPorDia}
                   dias={form.dias}
+                  servicosProfissional={servicosSalao.filter((s) =>
+                    form.servicos.includes(s.id)
+                  )}
+                  servicosSalao={servicosSalao}
+                  granularidadeMin={estabelecimento.granularidade_min}
                 />
               )}
             </>
