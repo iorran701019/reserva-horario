@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import RodapeSelos from "./RodapeSelos";
 import ContatoDono from "./ContatoDono";
+import { formatarWhatsappExibicao } from "@/lib/whatsapp";
 
 const GAP_PX = 16;
 
@@ -21,8 +22,13 @@ const GAP_PX = 16;
 // vez de cobri-lo. O respiro de cima é `mt-10` NA DIV (margem fica fora do
 // getBoundingClientRect; um padding-top entraria na conta e empurraria o
 // botão pra longe do texto). O respiro entre texto e selos é o pb do <p>.
+//
+// A linha com o WhatsApp da dona por extenso fica no topo da mesma div, pelo
+// mesmo motivo: vira ela o topo medido e o botão para acima dela. Some quando
+// o número não formata (vazio ou tamanho inesperado).
 export default function RodapePagina({ estabelecimento, nome }) {
   const rodapeRef = useRef(null);
+  const whatsappExibicao = formatarWhatsappExibicao(estabelecimento.whatsapp);
   const [pertoDoRodape, setPertoDoRodape] = useState(false);
   const [bottomExtra, setBottomExtra] = useState(0);
 
@@ -73,6 +79,11 @@ export default function RodapePagina({ estabelecimento, nome }) {
         style={bottomExtra ? { bottom: `${bottomExtra}px` } : undefined}
       />
       <div ref={rodapeRef} className="mt-10">
+        {whatsappExibicao && (
+          <p className="pb-2 text-center text-[10px] text-muted sm:text-xs">
+            WhatsApp {whatsappExibicao}
+          </p>
+        )}
         <p className="pb-10 text-center text-[10px] text-muted sm:pb-16 sm:text-xs">
           Desenvolvido por Acolhe
         </p>
