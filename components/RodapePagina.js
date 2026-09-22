@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import RodapeSelos from "./RodapeSelos";
 import ContatoDono from "./ContatoDono";
 import { formatarWhatsappExibicao } from "@/lib/whatsapp";
@@ -24,15 +25,16 @@ const GAP_PX = 16;
 // botão pra longe do texto). O respiro entre texto e selos é o pb do <p>.
 //
 // Abaixo dos selos, ainda dentro da div observada, fica a caixa de dados
-// institucionais (WhatsApp da dona por extenso e CNPJ; links de
-// Termos/Privacidade entram aqui depois). Por estar no fim, não muda o topo
+// institucionais (WhatsApp da dona por extenso, CNPJ e os links globais de
+// /termos e /privacidade). Por estar no fim, não muda o topo
 // medido — o botão continua parando acima do "Desenvolvido por Acolhe".
 // Fundo bg-card, não bg-surface: --color-surface é o próprio bgBody do tenant
 // (sem contraste nenhum). Texto em text-on-card porque Laysla/Laryssa têm
 // card escuro. pt-4 + pb-2 somados ao pb-2 de cada linha dão 16px nos dois
 // lados. Cada linha some sozinha: WhatsApp quando o número não formata (vazio
 // ou tamanho inesperado), CNPJ quando a coluna está vazia (já vem formatado
-// do banco, sem máscara aqui). Sem nenhuma das duas, a caixa some junto.
+// do banco, sem máscara aqui). Os links são da plataforma, não do salão:
+// aparecem sempre, então a caixa também.
 export default function RodapePagina({ estabelecimento, nome }) {
   const rodapeRef = useRef(null);
   const whatsappExibicao = formatarWhatsappExibicao(estabelecimento.whatsapp);
@@ -90,20 +92,27 @@ export default function RodapePagina({ estabelecimento, nome }) {
           Desenvolvido por Acolhe
         </p>
         <RodapeSelos estabelecimento={estabelecimento} />
-        {(whatsappExibicao || estabelecimento.cnpj) && (
-          <div className="bg-card px-4 pt-4 pb-2">
-            {whatsappExibicao && (
-              <p className="pb-2 text-center text-[10px] text-on-card sm:text-xs">
-                WhatsApp {whatsappExibicao}
-              </p>
-            )}
-            {estabelecimento.cnpj && (
-              <p className="pb-2 text-center text-[10px] text-on-card sm:text-xs">
-                CNPJ: {estabelecimento.cnpj}
-              </p>
-            )}
-          </div>
-        )}
+        <div className="bg-card px-4 pt-4 pb-2">
+          {whatsappExibicao && (
+            <p className="pb-2 text-center text-[10px] text-on-card sm:text-xs">
+              WhatsApp {whatsappExibicao}
+            </p>
+          )}
+          {estabelecimento.cnpj && (
+            <p className="pb-2 text-center text-[10px] text-on-card sm:text-xs">
+              CNPJ: {estabelecimento.cnpj}
+            </p>
+          )}
+          <p className="pb-2 text-center text-[10px] text-on-card sm:text-xs">
+            <Link href="/termos" className="underline underline-offset-2">
+              Termos de uso
+            </Link>
+            <span aria-hidden="true"> · </span>
+            <Link href="/privacidade" className="underline underline-offset-2">
+              Política de privacidade
+            </Link>
+          </p>
+        </div>
       </div>
     </>
   );
