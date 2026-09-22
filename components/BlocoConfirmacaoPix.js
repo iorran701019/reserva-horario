@@ -118,11 +118,12 @@ export default function BlocoConfirmacaoPix({
   // nada). Nunca desfaz o checkbox nem apaga o comprovante — a cliente segue
   // com o gesto dela registrado em tela e um "Tentar novamente" à mão.
   //
-  // `sinal_valor_centavos` vai no MESMO update, copiado do salão: é o valor
-  // que este bloco mostra em tela ("exige um sinal de R$X") e que a cliente
-  // acabou de declarar ter pago. Sai da prop, não de uma leitura nova, de
-  // propósito — é o número que ela viu; a config do salão pode mudar depois,
-  // e sem esta cópia o valor do sinal ficaria irrecuperável.
+  // `sinal_valor_centavos` NÃO viaja mais daqui. Quem grava é a própria
+  // `agendamento_declarar_sinal`, lendo o valor do estabelecimento dentro da
+  // função (ver sql/rpcs_agendamento_publico.sql): mandar o número do
+  // navegador deixava um anônimo escolher o valor gravado num campo que
+  // alimenta o card de Relatórios. A função também preserva o valor que a
+  // linha já tiver — o da cobrança AbacatePay ou o herdado numa remarcação.
   async function marcarPendente() {
     if (!agendamentoId) return false;
     if (marcadoPendenteParaRef.current === agendamentoId) return true;
@@ -130,24 +131,17 @@ export default function BlocoConfirmacaoPix({
     setErroStatus("");
     setMarcandoPendente(true);
 
-    // .select("id"): sem ele, um update barrado por RLS volta com error null
-    // e ZERO linhas afetadas — a tela seguiria pra confirmação com o
-    // protocolo de 24h que nunca começou a contar. Linha nenhuma de volta é
-    // falha, igual a um erro de rede.
-    const { data, error } = await supabase
-      .from("agendamentos")
-      .update({
-        status: "pendente",
-        sinal_declarado_pago: true,
-        sinal_valor_centavos: estabelecimento.sinal_valor_centavos ?? null,
-        pendente_desde: new Date().toISOString(),
-      })
-      .eq("id", agendamentoId)
-      .select("id");
+    // `false` da RPC no lugar do antigo `.select("id")` com zero linhas: sem
+    // essa checagem a tela seguiria pra confirmação com o protocolo de 24h
+    // que nunca começou a contar. Um false é falha, igual a um erro de rede.
+    const { data: declarado, error } = await supabase.rpc(
+      "agendamento_declarar_sinal",
+      { p_id: agendamentoId }
+    );
 
     setMarcandoPendente(false);
 
-    if (error || !data || data.length === 0) {
+    if (error || declarado !== true) {
       setErroStatus(
         "Não foi possível registrar o envio do comprovante. Verifique sua conexão e tente de novo."
       );
@@ -234,22 +228,25 @@ export default function BlocoConfirmacaoPix({
       return;
     }
 
-    const enviadoEm = new Date().toISOString();
-    // Mesmo motivo do .select("id") em marcarPendente: o arquivo até subiu no
+    // Mesmo motivo do `false` em marcarPendente: o arquivo até subiu no
     // bucket, mas se a linha não recebeu o caminho ninguém no /admin vai
     // achar o comprovante — não pode passar por enviado.
-    const { data: linhasComprovante, error: erroUpdate } = await supabase
-      .from("agendamentos")
-      .update({
-        comprovante_pix_url: caminho,
-        comprovante_pix_enviado_em: enviadoEm,
-      })
-      .eq("id", agendamentoId)
-      .select("id");
+    //
+    // A RPC valida que `caminho` segue o padrão de caminhoComprovante pro
+    // ESTE agendamento; qualquer outro valor volta false sem gravar. Quem
+    // carimba `comprovante_pix_enviado_em` agora é o now() do banco — o
+    // `enviadoEm` local abaixo serve só pro callback da tela, que é
+    // informativo.
+    const { data: anexado, error: erroUpdate } = await supabase.rpc(
+      "agendamento_anexar_comprovante",
+      { p_id: agendamentoId, p_caminho: caminho }
+    );
+
+    const enviadoEm = new Date().toISOString();
 
     setEnviandoComprovante(false);
 
-    if (erroUpdate || !linhasComprovante || linhasComprovante.length === 0) {
+    if (erroUpdate || anexado !== true) {
       setErroComprovante(
         "Não foi possível salvar o comprovante. Você pode enviá-lo pelo WhatsApp."
       );

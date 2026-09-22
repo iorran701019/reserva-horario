@@ -2053,24 +2053,27 @@ export default function FormularioAgendamento({
         return;
       }
       if (pendente.reservaId != null) {
-        // O `.select("id")` é o que torna a falha VISÍVEL: sem ele, um UPDATE
-        // que não casa nenhuma linha (RLS filtrando a reserva pelo USING)
-        // volta como `{ data: null, error: null }` — indistinguível de
-        // sucesso. Com ele, `data` vazio denuncia o 0-row. Antes o retorno era
-        // descartado num `.then(() => {})` e a reserva órfã seguia viva
-        // ocupando o horário, sem ninguém (cliente, dona ou log) saber.
+        // `agendamento_liberar_reserva` devolve false quando não liberou nada
+        // — é o que torna a falha VISÍVEL. Antes isso dependia do
+        // `.select("id")` com zero linhas: um UPDATE que não casava nenhuma
+        // linha voltava como `{ data: null, error: null }`, indistinguível de
+        // sucesso, e a reserva órfã seguia viva ocupando o horário sem
+        // ninguém (cliente, dona ou log) saber. O `false` ocupa o mesmo lugar.
+        //
+        // A RPC cancela SEM `cancelado_por_cliente`, igual ao UPDATE que ela
+        // substitui: isto aqui é a cliente trocando de ideia no meio do
+        // wizard, não um cancelamento que mereça card na aba Pendentes.
         //
         // O id é copiado ANTES do async: `pendenteRestaurarRef.current` é
         // zerado no fim deste efeito, síncronamente, antes da resposta chegar.
         const idReservaOrfa = pendente.reservaId;
         (async () => {
-          const { data, error } = await supabase
-            .from("agendamentos")
-            .update({ status: "cancelado" })
-            .eq("id", idReservaOrfa)
-            .select("id");
+          const { data: liberada, error } = await supabase.rpc(
+            "agendamento_liberar_reserva",
+            { p_id: idReservaOrfa }
+          );
 
-          if (error || !data || data.length === 0) {
+          if (error || liberada !== true) {
             setErro(
               "Não foi possível liberar a reserva que você tinha nesse horário. Escolha outro horário normalmente; se o aviso voltar, recarregue a página e informe seu WhatsApp de novo."
             );
@@ -2141,21 +2144,22 @@ export default function FormularioAgendamento({
     if (statusPixReserva?.id === reservaId) return;
 
     let ignorar = false;
+    // `agendamento_status_reserva` devolve LINHAS (status,
+    // abacatepay_pago_em), não um objeto: zero linhas = id inexistente ou
+    // salão inativo, mesmo desfecho do antigo `!data` do `.single()`.
     supabase
-      .from("agendamentos")
-      .select("status, abacatepay_pago_em")
-      .eq("id", reservaId)
-      .single()
+      .rpc("agendamento_status_reserva", { p_id: reservaId })
       .then(({ data, error }) => {
-        if (ignorar || error || !data) return;
+        const linha = data?.[0];
+        if (ignorar || error || !linha) return;
         setStatusPixReserva({
           id: reservaId,
-          aguardando: data.status === "aguardando_sinal",
+          aguardando: linha.status === "aguardando_sinal",
         });
         // Mesma consulta, uma coluna a mais: é aqui que o modo edição e a
         // restauração de sessão descobrem que a reserva já tem sinal pago,
         // antes de a cliente tocar em qualquer horário.
-        setReservaPago({ id: reservaId, pagoEm: data.abacatepay_pago_em ?? null });
+        setReservaPago({ id: reservaId, pagoEm: linha.abacatepay_pago_em ?? null });
       });
 
     return () => {
@@ -2873,12 +2877,13 @@ export default function FormularioAgendamento({
     // criada nesta mesma sessão — o valor já está anotado e nada é consultado.
     let sinalPagoEm = reservaPago?.id === reservaId ? reservaPago.pagoEm : undefined;
     if (reservaId != null && sinalPagoEm === undefined) {
-      const { data: linhaAtual } = await supabase
-        .from("agendamentos")
-        .select("abacatepay_pago_em")
-        .eq("id", reservaId)
-        .maybeSingle();
-      sinalPagoEm = linhaAtual?.abacatepay_pago_em ?? null;
+      // Zero linhas (id inexistente, salão inativo) cai no mesmo `?? null` do
+      // antigo `.maybeSingle()`: sem pagamento conhecido, segue pelo caminho
+      // comum de cancelar-e-recriar.
+      const { data: linhas } = await supabase.rpc("agendamento_status_reserva", {
+        p_id: reservaId,
+      });
+      sinalPagoEm = linhas?.[0]?.abacatepay_pago_em ?? null;
       setReservaPago({ id: reservaId, pagoEm: sinalPagoEm });
     }
 
@@ -2976,22 +2981,25 @@ export default function FormularioAgendamento({
     // Havia uma reserva de uma tentativa anterior (outro serviço/data/horário
     // escolhido depois de um "Voltar"): cancela ANTES de criar a nova.
     //
-    // `.select("id")` pelo mesmo motivo do efeito de restauração: sem ele um
-    // UPDATE filtrado por RLS volta `{ data: null, error: null }` e passa por
+    // O `false` da RPC ocupa o lugar do antigo `.select("id")` com zero
+    // linhas: sem essa checagem, um cancelamento que não gravou passa por
     // sucesso. Aqui o silêncio é pior — seguir pro insert com a reserva antiga
     // ainda viva deixa DUAS reservas da mesma cliente no ar, e a exclusion
     // constraint agendamentos_sem_sobreposicao recusa a nova por causa da
     // reserva fantasma dela mesma: o 23P01 tratado lá embaixo mostraria "esse
     // horário acabou de ser reservado" apontando pra própria cliente. Por isso
     // aborta aqui, antes do insert.
+    //
+    // No modo edição a linha é um agendamento de verdade, mas sempre em
+    // "pendente"/"aguardando_sinal" (o "Editar" não é oferecido pra
+    // confirmado) — os dois status que a RPC aceita.
     if (reservaId != null) {
-      const { data: canceladas, error: erroCancelamentoAnterior } = await supabase
-        .from("agendamentos")
-        .update({ status: "cancelado" })
-        .eq("id", reservaId)
-        .select("id");
+      const { data: liberada, error: erroCancelamentoAnterior } = await supabase.rpc(
+        "agendamento_liberar_reserva",
+        { p_id: reservaId }
+      );
 
-      if (erroCancelamentoAnterior || !canceladas || canceladas.length === 0) {
+      if (erroCancelamentoAnterior || liberada !== true) {
         setCriandoReserva(false);
         setErro(
           "Não foi possível trocar o horário da sua reserva agora. Toque no horário de novo em instantes."
@@ -3546,35 +3554,39 @@ export default function FormularioAgendamento({
     if (!status) {
       setEnviando(true);
 
-      // Rede de segurança: o BlocoConfirmacaoPix já grava isso no gesto
-      // (marcar a caixa / anexar o comprovante), então normalmente este
-      // update não muda nada. Ele sobra pro caso de a linha ainda estar em
-      // "aguardando_sinal" quando o submit chega — e por isso carimba
-      // pendente_desde igual, senão a janela de protocolo nasceria vazia. Pelo
-      // mesmo motivo grava sinal_valor_centavos junto (ver marcarPendente).
+      // Rede de segurança: o BlocoConfirmacaoPix já declara o sinal no gesto
+      // (marcar a caixa / anexar o comprovante), então normalmente esta
+      // chamada não muda nada — a RPC reconhece a linha já declarada e
+      // devolve true sem gravar. Ela sobra pro caso de a linha ainda estar em
+      // "aguardando_sinal" quando o submit chega; aí a função carimba
+      // pendente_desde (senão a janela de protocolo nasceria vazia) e o
+      // sinal_valor_centavos lido do estabelecimento, de uma vez só.
       if (precisaSinal && sinalDeclarado) {
-        // .select("id") pelo mesmo motivo do BlocoConfirmacaoPix: update
-        // barrado por RLS volta error null e zero linhas, e sem checar isso a
-        // tela de protocolo apareceria sobre um agendamento que continua em
-        // "aguardando_sinal". Falhou aqui, o wizard NÃO avança — a cliente
-        // segue na etapa "dados" e pode tentar de novo.
-        const { data: linhasSinal, error } = await supabase
-          .from("agendamentos")
-          .update({
-            sinal_declarado_pago: true,
-            sinal_valor_centavos: estabelecimento.sinal_valor_centavos ?? null,
-            status: "pendente",
-            pendente_desde: new Date().toISOString(),
-          })
-          .eq("id", reservaId)
-          .select("id");
+        // `false` da RPC no lugar do antigo `.select("id")` com zero linhas:
+        // sem checar isso, a tela de protocolo apareceria sobre um agendamento
+        // que continua em "aguardando_sinal". Falhou aqui, o wizard NÃO avança
+        // — a cliente segue na etapa "dados" e pode tentar de novo.
+        //
+        // No caminho normal esta chamada é a SEGUNDA (o BlocoConfirmacaoPix já
+        // declarou no gesto) e a linha já está em "pendente":
+        // `agendamento_declarar_sinal` é idempotente justamente por isso e
+        // devolve true sem gravar de novo. Sem essa idempotência a cliente
+        // travaria aqui com um erro sobre algo que já deu certo.
+        //
+        // `sinal_valor_centavos` não viaja mais do navegador: a função lê o
+        // valor do estabelecimento (e preserva o que a linha já tiver, vindo
+        // da cobrança AbacatePay ou da remarcação).
+        const { data: declarado, error } = await supabase.rpc(
+          "agendamento_declarar_sinal",
+          { p_id: reservaId }
+        );
 
         setEnviando(false);
         if (error) {
           setErro(error.message);
           return;
         }
-        if (!linhasSinal || linhasSinal.length === 0) {
+        if (declarado !== true) {
           setErro(
             "Não foi possível registrar o pagamento do sinal. Verifique sua conexão e tente de novo."
           );
@@ -5067,6 +5079,16 @@ export default function FormularioAgendamento({
         dataNova={form.data ? formatarData(form.data) : ""}
         horarioNovo={String(conflitoPrazo?.slot ?? horarioSelecionado ?? "").slice(0, 5)}
         prazoDias={Number(estabelecimento.prazo_minimo_entre_agendamentos_dias)}
+        // Conflito que já foi ATENDIDO não se cancela pelo fluxo público:
+        // agendamento_cancelar_cliente recusa 'concluido' como status de
+        // origem, então o botão de troca só levaria a cliente a um erro. O
+        // status cru é o critério (não classificarAgendamento): um
+        // "confirmado" cujo horário já passou continua cancelável, e a RPC o
+        // aceita. No /admin o cancelamento é autenticado e não passa pela
+        // RPC, então lá o botão segue disponível como sempre.
+        podeCancelarConflito={
+          Boolean(status) || conflitoPrazo?.conflito?.status !== "concluido"
+        }
         processando={processandoPrazo}
         onTrocar={confirmarTrocaPrazo}
         onDesistir={fecharConflitoPrazo}

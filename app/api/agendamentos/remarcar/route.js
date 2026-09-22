@@ -36,8 +36,15 @@ import { createClient } from "@supabase/supabase-js";
 // é o /agendar, ainda sem sessão. O escopo é o que a torna segura, e aqui ele
 // é estreito de propósito — a rota SÓ aceita uma linha que já esteja paga e
 // ainda ativa, e nada além de cancelar essa linha e recriá-la noutro horário.
-// Ela não amplia o que o anon já pode fazer: cancelar um agendamento por id já
-// é permitido pela policy de UPDATE anônimo em `agendamentos`.
+//
+// Esse escopo é a ÚNICA coisa que a segura. Até a Etapa 4 do fechamento da RLS
+// a justificativa era outra ("cancelar um agendamento por id já é permitido
+// pela policy de UPDATE anônimo em `agendamentos`"), mas o fluxo público não
+// faz mais UPDATE direto — ele passa pelas RPCs de
+// sql/rpcs_agendamento_publico.sql — e a policy de UPDATE anon cai na Etapa 5.
+// Daí em diante esta rota é mais permissiva que qualquer coisa que o anon
+// consiga fazer sozinho, e as duas guardas abaixo (`abacatepay_pago_em`
+// presente e status diferente de 'cancelado') são o que resta no lugar dela.
 function supabaseServiceRole() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 }

@@ -29,6 +29,17 @@
 // FormularioAgendamento, que é quem o renderiza; ver formatarData lá):
 //   conflito        – { dataFormatada, horario, servicoNome } do agendamento
 //                     que já existe, ou null (fechado).
+//   podeCancelarConflito – false esconde o botão "Cancelar <data antiga> e
+//                     confirmar <data nova>", mantendo o aviso e as outras
+//                     duas saídas. Só o fluxo público passa false, e só
+//                     quando o conflito é um atendimento já CONCLUÍDO: a RPC
+//                     agendamento_cancelar_cliente não aceita 'concluido'
+//                     como status de origem (cancelar algo já prestado
+//                     reescreveria histórico e criaria um card "cancelou o
+//                     agendamento" na aba Pendentes), então oferecer o botão
+//                     ali só levaria a cliente a um erro garantido. No /admin
+//                     o cancelamento é autenticado e não passa pela RPC —
+//                     lá o botão continua sempre disponível.
 //   dataNova        – data escolhida agora, já formatada.
 //   horarioNovo     – horário escolhido agora ("HH:MM").
 //   prazoDias       – prazo mínimo configurado pelo salão, só pro texto.
@@ -47,6 +58,7 @@ export default function ModalPrazoMinimo({
   dataNova,
   horarioNovo,
   prazoDias,
+  podeCancelarConflito = true,
   processando = false,
   onTrocar,
   onDesistir,
@@ -91,16 +103,18 @@ export default function ModalPrazoMinimo({
             ações e o texto de cada uma não cabe lado a lado. Ordem = da mais
             recomendada pra menos, mesmo critério do ModalClientePendente. */}
         <div className="mt-6 flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={onTrocar}
-            disabled={processando}
-            className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {processando
-              ? "Processando…"
-              : `Cancelar ${conflito.dataFormatada} e confirmar ${dataNova}`}
-          </button>
+          {podeCancelarConflito && (
+            <button
+              type="button"
+              onClick={onTrocar}
+              disabled={processando}
+              className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {processando
+                ? "Processando…"
+                : `Cancelar ${conflito.dataFormatada} e confirmar ${dataNova}`}
+            </button>
+          )}
           <button
             type="button"
             onClick={onDesistirPublico ?? onDesistir}
