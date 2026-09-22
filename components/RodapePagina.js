@@ -23,9 +23,15 @@ const GAP_PX = 16;
 // getBoundingClientRect; um padding-top entraria na conta e empurraria o
 // botão pra longe do texto). O respiro entre texto e selos é o pb do <p>.
 //
-// A linha com o WhatsApp da dona por extenso fica no topo da mesma div, pelo
-// mesmo motivo: vira ela o topo medido e o botão para acima dela. Some quando
-// o número não formata (vazio ou tamanho inesperado).
+// Abaixo dos selos, ainda dentro da div observada, fica a caixa de dados
+// institucionais (hoje só o WhatsApp da dona por extenso; CNPJ e links de
+// Termos/Privacidade entram aqui depois). Por estar no fim, não muda o topo
+// medido — o botão continua parando acima do "Desenvolvido por Acolhe".
+// Fundo bg-card, não bg-surface: --color-surface é o próprio bgBody do tenant
+// (sem contraste nenhum). Texto em text-on-card porque Laysla/Laryssa têm
+// card escuro. pt-4 + pb-2 somados ao pb-2 de cada linha dão 16px nos dois
+// lados. A linha some quando o número não formata (vazio ou tamanho
+// inesperado), e a caixa some junto enquanto for o único item.
 export default function RodapePagina({ estabelecimento, nome }) {
   const rodapeRef = useRef(null);
   const whatsappExibicao = formatarWhatsappExibicao(estabelecimento.whatsapp);
@@ -79,15 +85,17 @@ export default function RodapePagina({ estabelecimento, nome }) {
         style={bottomExtra ? { bottom: `${bottomExtra}px` } : undefined}
       />
       <div ref={rodapeRef} className="mt-10">
-        {whatsappExibicao && (
-          <p className="pb-2 text-center text-[10px] text-muted sm:text-xs">
-            WhatsApp {whatsappExibicao}
-          </p>
-        )}
         <p className="pb-10 text-center text-[10px] text-muted sm:pb-16 sm:text-xs">
           Desenvolvido por Acolhe
         </p>
         <RodapeSelos estabelecimento={estabelecimento} />
+        {whatsappExibicao && (
+          <div className="bg-card px-4 pt-4 pb-2">
+            <p className="pb-2 text-center text-[10px] text-on-card sm:text-xs">
+              WhatsApp {whatsappExibicao}
+            </p>
+          </div>
+        )}
       </div>
     </>
   );
