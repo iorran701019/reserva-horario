@@ -1,4 +1,4 @@
-import Link from "next/link";
+import BotaoVoltarHistorico from "@/components/BotaoVoltarHistorico";
 
 // Termos de uso da ACOLHE (a plataforma), não de um salão: estática, sem
 // Supabase, sem tema por tenant, Server Component puro, no mesmo modelo de
@@ -68,9 +68,9 @@ export default function TermosPage() {
   return (
     <main className="min-h-screen bg-surface px-4 py-10">
       <article className="mx-auto max-w-2xl">
-        <Link href="/" className="text-sm font-medium text-body underline-offset-4 hover:text-heading hover:underline">
+        <BotaoVoltarHistorico className="text-sm font-medium text-body underline-offset-4 hover:text-heading hover:underline">
           ← Voltar ao início
-        </Link>
+        </BotaoVoltarHistorico>
 
         <h1 className="mt-8 text-2xl font-bold text-heading">Termos de uso</h1>
         <p className="mt-1 text-sm text-muted">Última atualização: 22/09/2026</p>
