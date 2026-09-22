@@ -38,6 +38,15 @@ Demanda nova, motivada pela Laryssa: uma cliente pode agendar pra um grupo (2 a 
 - **v1 assume:** todas as pessoas do grupo fazem o mesmo serviço (decisão explícita, "pode virar mais complexo no futuro").
 - Fatiado em 5 demandas pequenas (schema → RPC → wizard público → exibição no admin → tela no painel-global). Congelado a pedido do Iorran até ele alinhar mais decisões com a Laryssa — não é bloqueante pra ela usar o básico do app.
 
+### Horário reservado pra múltiplos serviços (ex: "dia só dos pés")
+Sugestão da Flávia, ainda informal — não é pedido recorrente. Seria uma 4ª aba em Exceções de Horário: um horário/dia reserva-se pra uma lista cumulativa de serviços (ex: Pedicure + manutenção), bloqueando todos os outros nesse horário — o oposto da "Exclusividade de serviço" já em produção pra Laysla (que restringe UM serviço a horários específicos, sem afetar os demais).
+
+Investigação já feita (duas rodadas de raio-x, sem código escrito): viável, sem SQL novo (mesmo modelo de `ausencias`, um `tipo_registro` novo). Achado que simplifica bastante se isso for retomado: as grades de horário no modo janela são aninhadas (`gerarSlotsDaJanela` produz uma cadeia, nunca sobreposição parcial — serviço mais longo sempre tem um subconjunto dos horários do mais curto), então a interseção de N serviços é só o `max` das durações, sem precisar de lógica de conjunto genérica.
+
+Decisões de UI ainda em aberto, caso retome: componente de chip cumulativo pra serviços (não existe hoje, precisa generalizar `TagHorario`), o que fazer quando um dia fica sem horário depois de adicionar um serviço mais longo (recomendado: manter o dia e barrar o salvamento com aviso, não remover sozinho), e como o card da listagem mostra vários serviços "iguais" em vez de um principal + manutenções.
+
+Custo/benefício não fechou desta vez: complexidade de mais uma aba pra um caso pontual, ainda sem pedido real recorrente.
+
 ### Processo — tenant com header escuro precisa de token próprio no /admin
 Achado na Laryssa (Sessão 21/09), repetido de propósito na Laysla: o `/admin` herda `bgHeader` pro `--color-card` e ignora `textoCard` por decisão de projeto (usa sempre `textoPrincipal`). Se `bgHeader` for escuro, o card, o drawer mobile e (se o botão do tema também for claro) os botões do admin ficam ilegíveis. Mecanismo de correção já existe (`bgCardAdmin`, `botaoAdmin`/`botaoAdminHover`, `bordaAdmin`, todos com fallback pros campos públicos — ver Protocolo de Desenvolvimento). **Vira item de checklist permanente:** todo tenant com `bgHeader` escuro precisa definir esses três campos antes de considerar o tema "pronto" — adicionado ao `NOVO_TENANT_CHECKLIST.md`.
 
