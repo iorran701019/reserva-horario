@@ -117,6 +117,7 @@ function aguardarPopstate(ms) {
 // grade do modo livre (ver gradeAdmin/ROTULOS_MOTIVO_BLOQUEIO no JSX).
 const ROTULOS_MOTIVO_BLOQUEIO = {
   excecao_ausencia: "ausência cadastrada",
+  exclusividade_servico: "serviço restrito a outros horários (exclusividade)",
   fora_do_modo: "fora do expediente/modo configurado",
   antecedencia: "fora da antecedência mínima do salão",
 };
