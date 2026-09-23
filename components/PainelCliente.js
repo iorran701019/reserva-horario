@@ -192,13 +192,21 @@ export default function PainelCliente({
 
   useEffect(() => {
     let ativo = true;
-    buscarProgressoFidelidade(clienteAtual.id, estabelecimento).then((resultado) => {
+    // O terceiro argumento é o que manda a contagem pelo caminho PÚBLICO (RPC
+    // fidelidade_base_cliente) em vez da leitura direta do /admin — ver
+    // buscarProgressoFidelidade em lib/fidelidade.js. Sem ele, o selo some
+    // assim que a Etapa 8 derrubar as policies anon.
+    buscarProgressoFidelidade(
+      clienteAtual.id,
+      estabelecimento,
+      clienteAtual.telefone.replace(/\D/g, "")
+    ).then((resultado) => {
       if (ativo) setProgressoFidelidade(resultado);
     });
     return () => {
       ativo = false;
     };
-  }, [clienteAtual.id, estabelecimento]);
+  }, [clienteAtual.id, clienteAtual.telefone, estabelecimento]);
 
   // Botão físico "voltar" (Android/iOS) nas duas sub-telas do painel: chama
   // o MESMO callback que já fecha cada uma via botão em tela (onCancelar/
