@@ -13,17 +13,19 @@ import { comprimirImagem } from "@/lib/comprimirImagem";
 // url na hora (ver createSignedUrl em app/[salon]/admin/page.js).
 export const BUCKET_COMPROVANTES = "comprovantes-pix";
 
-// Caminho determinístico por agendamento: reenviar substitui (upsert) em vez
-// de acumular lixo — mesmo padrão de handleFotoPerfilChange
-// (app/[salon]/admin/ConfiguracoesSalao.js), só que a chave aqui é o
-// agendamento, não o tenant.
-function caminhoComprovante(agendamentoId, arquivo) {
-  const extensao =
-    arquivo.type === "application/pdf"
-      ? "pdf"
-      : arquivo.name.split(".").pop()?.toLowerCase() || "jpg";
-  return `${agendamentoId}/comprovante.${extensao}`;
-}
+// O caminho do arquivo NÃO é mais montado aqui. Quem decide
+// '<id>/comprovante.<extensao>' — e a extensão, de uma lista fechada — é a
+// rota app/api/agendamentos/comprovante-upload, que assina o upload com o
+// service role. O navegador não escolhe mais nem o caminho nem o tipo: é o que
+// permitiu tirar do bucket privado as policies anon de INSERT/UPDATE/SELECT,
+// que na prática deixavam qualquer anônimo gravar em qualquer caminho e ler o
+// comprovante de todas as clientes.
+const ROTA_ASSINAR_UPLOAD = "/api/agendamentos/comprovante-upload";
+
+// Mensagem padrão de falha de anexo: o comprovante é opcional, então todo erro
+// que não tem uma explicação melhor cai nela — e em nenhum caso trava o fluxo.
+const ERRO_ANEXO_GENERICO =
+  "Não foi possível enviar o comprovante. Você pode enviá-lo pelo WhatsApp.";
 
 // Bloco âmbar do sinal de reserva: valor, chave Pix copiável, upload do
 // comprovante e o checkbox "enviei o comprovante". Fonte ÚNICA desse bloco —
@@ -214,17 +216,70 @@ export default function BlocoConfirmacaoPix({
     // Imagem passa pelo canvas (foto de celular costuma ter vários MB); PDF
     // sobe como veio. Falha de compressão devolve o original, nunca lança.
     const arquivo = await comprimirImagem(file);
-    const caminho = caminhoComprovante(agendamentoId, arquivo);
 
+    // Passo NOVO antes do upload: pedir pro servidor o caminho e o token
+    // assinado. Vai o type e o name do arquivo COMPRIMIDO (não do original):
+    // comprimirImagem devolve JPEG quando comprime, e é a extensão do retorno
+    // que tem que bater com o que sobe. O `name` é o fallback do Android que
+    // manda `type` vazio (arquivo escolhido num gerenciador de arquivos).
+    let autorizacao;
+    try {
+      const resposta = await fetch(ROTA_ASSINAR_UPLOAD, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agendamentoId,
+          contentType: arquivo.type,
+          nomeArquivo: arquivo.name,
+        }),
+      });
+
+      if (!resposta.ok) {
+        setEnviandoComprovante(false);
+        // Os dois únicos erros com explicação própria. 409 é o estado da
+        // reserva (já confirmada, cancelada, salão inativo): insistir em
+        // anexar não resolve, falar com o salão sim. 400 é o arquivo: a
+        // cliente escolheu algo que não é foto nem PDF e pode tentar de novo
+        // com outro. Qualquer outro status cai no genérico de sempre.
+        setErroComprovante(
+          resposta.status === 409
+            ? "Esta reserva não aceita mais o envio de comprovante. Fale com o salão pelo WhatsApp."
+            : resposta.status === 400
+              ? "Envie uma foto (JPG, PNG) ou um PDF do comprovante."
+              : ERRO_ANEXO_GENERICO
+        );
+        return;
+      }
+
+      autorizacao = await resposta.json();
+    } catch {
+      setEnviandoComprovante(false);
+      setErroComprovante(ERRO_ANEXO_GENERICO);
+      return;
+    }
+
+    const { caminho, token, contentType } = autorizacao ?? {};
+
+    if (!caminho || !token) {
+      setEnviandoComprovante(false);
+      setErroComprovante(ERRO_ANEXO_GENERICO);
+      return;
+    }
+
+    // `upsert` NÃO entra aqui: no uploadToSignedUrl a opção é ignorada — quem
+    // carrega a permissão de sobrescrever é o token (ver a rota). O
+    // contentType cai no canônico devolvido pela rota quando o navegador não
+    // soube dizer o tipo, que é o caso do Android acima — e é também o que o
+    // allowed_mime_types do bucket vai conferir.
     const { error: erroUpload } = await supabase.storage
       .from(BUCKET_COMPROVANTES)
-      .upload(caminho, arquivo, { upsert: true, contentType: arquivo.type });
+      .uploadToSignedUrl(caminho, token, arquivo, {
+        contentType: arquivo.type || contentType,
+      });
 
     if (erroUpload) {
       setEnviandoComprovante(false);
-      setErroComprovante(
-        "Não foi possível enviar o comprovante. Você pode enviá-lo pelo WhatsApp."
-      );
+      setErroComprovante(ERRO_ANEXO_GENERICO);
       return;
     }
 
@@ -232,8 +287,10 @@ export default function BlocoConfirmacaoPix({
     // bucket, mas se a linha não recebeu o caminho ninguém no /admin vai
     // achar o comprovante — não pode passar por enviado.
     //
-    // A RPC valida que `caminho` segue o padrão de caminhoComprovante pro
-    // ESTE agendamento; qualquer outro valor volta false sem gravar. Quem
+    // A RPC valida que `caminho` segue o padrão '<id>/comprovante.<ext>' pro
+    // ESTE agendamento; qualquer outro valor volta false sem gravar. Virou
+    // segunda trava em vez de única: o caminho que chega aqui já foi montado
+    // pela rota que assinou o upload, e não mais pelo navegador. Quem
     // carimba `comprovante_pix_enviado_em` agora é o now() do banco — o
     // `enviadoEm` local abaixo serve só pro callback da tela, que é
     // informativo.
