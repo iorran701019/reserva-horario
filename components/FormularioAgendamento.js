@@ -278,6 +278,35 @@ async function validarAntecedenciaNoServidor({ estabelecimentoId, data, horario 
   }
 }
 
+// Erros próprios da RPC de criação (AG001..AG009, ver o cabeçalho de
+// sql/rpc_criacao_agendamento.sql) traduzidos pra tela. O código NUNCA
+// aparece pra cliente: ele serve pra distinguir aqui dentro, e o que ela lê
+// é o que dá pra fazer a respeito.
+//
+// Nenhum destes é alcançável pelo wizard funcionando normalmente — a grade
+// só oferece serviço/profissional válidos, e o status sai de precisaSinal.
+// Eles aparecem quando a tela está velha (o salão mexeu no cadastro com a
+// cliente com a página aberta) ou quando alguém chama a RPC por fora. Por
+// isso quase todas as mensagens pedem recarregar: é a ação que resolve.
+//
+// Código desconhecido (inclusive falha de rede) cai na mensagem crua de
+// sempre, que é o comportamento de hoje.
+const MENSAGENS_ERRO_CRIACAO = {
+  AG001: "Este salão não está aceitando agendamentos no momento.",
+  AG002: "Este serviço não está mais disponível. Atualize a página e escolha de novo.",
+  AG003: "Esta profissional não está mais disponível. Atualize a página e escolha de novo.",
+  AG004: "Esta profissional não atende esse serviço. Atualize a página e escolha de novo.",
+  AG005: "Não foi possível registrar sua reserva. Atualize a página e tente de novo.",
+  AG006: "A duração deste serviço está fora do previsto. Fale com o salão.",
+  AG007: "Suas respostas não combinam com o serviço escolhido. Atualize a página e responda de novo.",
+  AG008: "Confira seu nome e o WhatsApp antes de continuar.",
+  AG009: "A data escolhida não é válida. Escolha outra.",
+};
+
+function mensagemErroCriacao(error) {
+  return MENSAGENS_ERRO_CRIACAO[error?.code] ?? error?.message;
+}
+
 // Perguntas vinculadas a um serviço (servico_perguntas + suas opções) — usada
 // por confirmarSelecaoServico (toque no serviço) E pela restauração de sessão
 // (ver pendenteRestaurarRef mais abaixo), que precisa recarregar as perguntas
@@ -2463,11 +2492,27 @@ export default function FormularioAgendamento({
       .filter(Boolean);
   }
 
+  // Mesmas linhas, no formato que a RPC agendamento_criar e a rota de
+  // remarcação recebem: sem `agendamento_id`, porque nos dois casos a linha
+  // ainda não existe quando o payload é montado — quem preenche o vínculo é o
+  // servidor, depois de criar a reserva. `null` no lugar do id, aqui, seria o
+  // caminho pra pendurar resposta em agendamento nenhum.
+  function respostasParaRpc() {
+    return linhasRespostasPerguntas(null).map(
+      ({ agendamento_id: _ignorado, ...resto }) => resto
+    );
+  }
+
   // Grava as respostas do popup junto com o agendamento recém-criado.
-  // Melhor esforço: agendamento_respostas é uma tabela nova (ver SQL sugerido
-  // na conversa) — se a gravação falhar (tabela ainda não existe, RLS etc.),
-  // não bloqueia nem desfaz o agendamento já confirmado, só perde esse
-  // detalhe complementar.
+  //
+  // SÓ O /admin usa isto agora. Os dois caminhos públicos gravam as respostas
+  // no servidor, junto da criação da linha (agendamento_criar e a rota de
+  // remarcação) — o navegador anônimo não escreve mais em
+  // agendamento_respostas. Aqui quem chama é a dona, autenticada, no insert do
+  // modo livre.
+  //
+  // Melhor esforço: se a gravação falhar (RLS etc.), não bloqueia nem desfaz o
+  // agendamento já confirmado, só perde esse detalhe complementar.
   //
   // "Melhor esforço" NÃO quer dizer silencioso: as respostas mexem em preço e
   // duração (ver calcularAjustePerguntas/calcularAjusteDuracao), então uma
@@ -2475,8 +2520,7 @@ export default function FormularioAgendamento({
   // não registrado — quem está na tela precisa saber disso. Vai pelo `erro`
   // comum (renderizado nas etapas "data" e "dados"), que ninguém usa como
   // trava: handleSubmit limpa no começo e nada checa antes de avançar.
-  // Devolve a mesma mensagem (null = sem falha) pra quem sai do wizard antes
-  // de o `erro` chegar a aparecer — ver concluirFluxoPublico.
+  // Devolve a mesma mensagem (null = sem falha).
   async function salvarRespostasPerguntas(agendamentoId) {
     const linhas = linhasRespostasPerguntas(agendamentoId);
     if (linhas.length === 0) return null;
@@ -2716,14 +2760,12 @@ export default function FormularioAgendamento({
   // chama (selecionarHorario) acabou de setar horarioSelecionado e ainda
   // está na closure do render anterior.
   //
-  // `aviso` é a falha de salvarRespostasPerguntas. Ela também vai pro `erro`
-  // comum, só que ele só aparece dentro do wizard — e o wizard desmonta assim
-  // que onSucesso troca a tela. O alert bloqueia ANTES da troca, pra cliente
-  // não chegar ao protocolo sem saber que o ajuste escolhido pode não ter
-  // sido registrado. alert, e não toast: o projeto não tem sistema de toast,
-  // e um montado aqui morreria junto com o componente.
-  function concluirFluxoPublico({ agendamentoId, horario, aviso = null }) {
-    if (aviso) window.alert(aviso);
+  // Já teve um parâmetro `aviso`, pra alertar sobre a falha de
+  // salvarRespostasPerguntas antes de a tela trocar. Não existe mais porque
+  // não existe mais a falha: no fluxo público as respostas nascem na mesma
+  // transação da reserva (ver agendamento_criar e a rota de remarcação), então
+  // ou as duas coisas entram, ou nenhuma entra e a cliente nem sai da etapa.
+  function concluirFluxoPublico({ agendamentoId, horario }) {
     limparFatia(estabelecimento.slug, "agendamento");
     onSucesso?.({
       form,
@@ -2921,6 +2963,13 @@ export default function FormularioAgendamento({
             servicoId: servicoSelecionado.id,
             duracaoMin: duracaoEfetivaServico(),
             profissionalId: profissionalRemarcado,
+            // Respostas do estado ATUAL do wizard, não as da linha antiga: a
+            // cliente pode ter trocado o serviço junto com o horário, e aí as
+            // respostas dela são outras. Gravadas pela rota, com service role,
+            // logo depois de criar a linha nova — pelo mesmo motivo da
+            // agendamento_criar, o navegador não escreve mais em
+            // agendamento_respostas.
+            respostas: respostasParaRpc(),
           }),
         });
         respostaOk = resposta.ok;
@@ -2963,8 +3012,6 @@ export default function FormularioAgendamento({
         );
         return;
       }
-
-      await salvarRespostasPerguntas(json.id);
 
       setReservaId(json.id);
       setReservaChave(chaveAtual);
@@ -3030,30 +3077,29 @@ export default function FormularioAgendamento({
       profissionalId = await escolherMenosOcupado(estabelecimento.id, form.data, livres);
     }
 
-    const payload = {
-      nome_cliente: form.nome,
-      telefone: normalizarWhatsapp(form.telefone),
-      data: form.data,
-      horario: slot,
-      servico_id: servicoSelecionado.id,
-      duracao_min: duracaoEfetivaServico(),
-      estabelecimento_id: estabelecimento.id,
-      profissional_id: profissionalId,
-      status: precisaSinal ? "aguardando_sinal" : "pendente",
-      // Marca a ENTRADA em "pendente" — é dela que a régua de telas de
-      // app/[salon]/page.js tira a janela em que a cliente ainda vê a tela de
-      // protocolo em vez do painel. Exigindo sinal, a reserva nasce em
-      // "aguardando_sinal" e ainda não entrou em pendente: quem carimba é o
-      // BlocoConfirmacaoPix, no gesto de declarar o pagamento.
-      pendente_desde: precisaSinal ? null : new Date().toISOString(),
-      sinal_declarado_pago: false,
-      finalizado: true,
-    };
-    const { data, error } = await supabase
-      .from("agendamentos")
-      .insert(payload)
-      .select("id")
-      .single();
+    // Criação pela RPC agendamento_criar (sql/rpc_criacao_agendamento.sql), no
+    // lugar do INSERT anon direto. Some do payload tudo que o banco decide
+    // sozinho: `pendente_desde` (carimbado com o relógio do SERVIDOR quando a
+    // linha nasce "pendente", e nulo quando nasce "aguardando_sinal" — quem o
+    // carimba depois é o BlocoConfirmacaoPix, no gesto de declarar o
+    // pagamento), `sinal_declarado_pago` e `finalizado`.
+    //
+    // As respostas do popup viajam JUNTO (p_respostas): nascem na mesma
+    // transação da reserva, então não existe mais o estado "reserva de pé com
+    // o ajuste de preço/duração não registrado" que a gravação em separado
+    // permitia.
+    const { data: novoId, error } = await supabase.rpc("agendamento_criar", {
+      p_estabelecimento_id: estabelecimento.id,
+      p_servico_id: servicoSelecionado.id,
+      p_profissional_id: profissionalId,
+      p_data: form.data,
+      p_horario: slot,
+      p_duracao_min: duracaoEfetivaServico(),
+      p_nome: form.nome,
+      p_telefone: normalizarWhatsapp(form.telefone),
+      p_status: precisaSinal ? "aguardando_sinal" : "pendente",
+      p_respostas: respostasParaRpc(),
+    });
 
     if (error) {
       setCriandoReserva(false);
@@ -3087,22 +3133,20 @@ export default function FormularioAgendamento({
         return;
       }
 
-      setErro(error.message);
+      setErro(mensagemErroCriacao(error));
       setHorarioSelecionado("");
       return;
     }
 
-    const avisoRespostas = await salvarRespostasPerguntas(data.id);
-
-    setReservaId(data.id);
+    setReservaId(novoId);
     setReservaChave(chaveAtual);
-    // Acabou de nascer com o status do payload acima — anotar aqui poupa a
+    // Acabou de nascer com o status que a RPC recebeu — anotar aqui poupa a
     // consulta do efeito de statusPixReserva no caminho comum.
-    setStatusPixReserva({ id: data.id, aguardando: precisaSinal });
+    setStatusPixReserva({ id: novoId, aguardando: precisaSinal });
     // Linha recém-inserida: nunca tem sinal pago. Anotado pelo mesmo motivo
     // da linha acima — sem isto, o próximo toque num horário gastaria uma
     // consulta só pra redescobrir o que já sabemos aqui.
-    setReservaPago({ id: data.id, pagoEm: null });
+    setReservaPago({ id: novoId, pagoEm: null });
     setCriandoReserva(false);
 
     // Sem sinal a cobrar: a linha já nasceu em "pendente" com pendente_desde,
@@ -3110,7 +3154,7 @@ export default function FormularioAgendamento({
     // público de finalizarAgendamento não grava nada nesse caso). Vai direto
     // pro protocolo.
     if (confirmaSemRevisao) {
-      concluirFluxoPublico({ agendamentoId: data.id, horario: slot, aviso: avisoRespostas });
+      concluirFluxoPublico({ agendamentoId: novoId, horario: slot });
       return;
     }
 

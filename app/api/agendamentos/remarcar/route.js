@@ -59,9 +59,79 @@ function ehHorarioOcupado(erro) {
   );
 }
 
+// Respostas do popup de perguntas da linha NOVA, gravadas aqui com service
+// role. Antes quem gravava era o navegador, logo depois desta rota responder —
+// o que deixará de funcionar quando a policy de SELECT anon em `agendamentos`
+// cair: o EXISTS da policy `agendamento_respostas_public_insert` não enxergaria
+// mais a linha recém-criada e o insert falharia com 42501, em silêncio. Mesmo
+// motivo pelo qual as respostas passaram a viajar dentro de agendamento_criar.
+//
+// As respostas vêm do estado ATUAL do wizard, não da linha antiga: a cliente
+// pode ter trocado o serviço junto com o horário.
+//
+// Validação de pertencimento igual à da RPC — a pergunta tem que ser do
+// serviço, e a opção tem que ser da pergunta. Service role passa por cima da
+// RLS, então sem isto o corpo do POST escreveria o que quisesse nessa tabela.
+//
+// Linha inválida é DESCARTADA (com log), não derruba a remarcação: diferente
+// da criação, aqui a reserva nova já existe e já carrega o sinal pago — não há
+// transação pra desfazer, e recusar agora deixaria a cliente sem horário e com
+// o dinheiro preso. Nada do que o wizard monta cai nesse caso.
+async function gravarRespostas(supabaseAdmin, agendamentoId, servicoId, respostas) {
+  if (!Array.isArray(respostas) || respostas.length === 0) return;
+
+  const { data: perguntas, error: erroPerguntas } = await supabaseAdmin
+    .from("servico_perguntas")
+    .select("id, servico_pergunta_opcoes!servico_pergunta_opcoes_pergunta_id_fkey(id)")
+    .eq("servico_id", servicoId);
+
+  if (erroPerguntas) {
+    console.error("Falha ao validar respostas da remarcação", agendamentoId, erroPerguntas);
+    return;
+  }
+
+  const opcoesPorPergunta = new Map(
+    (perguntas ?? []).map((p) => [p.id, new Set((p.servico_pergunta_opcoes ?? []).map((o) => o.id))])
+  );
+
+  const linhas = [];
+  for (const resposta of respostas) {
+    const perguntaId = resposta?.pergunta_id;
+    const opcaoId = resposta?.opcao_id ?? null;
+    const textoLivre = resposta?.texto_livre?.trim() || null;
+
+    const opcoes = opcoesPorPergunta.get(perguntaId);
+    const valida =
+      opcoes !== undefined &&
+      (opcaoId == null) !== (textoLivre == null) &&
+      (opcaoId == null || opcoes.has(opcaoId)) &&
+      !linhas.some((l) => l.pergunta_id === perguntaId);
+
+    if (!valida) {
+      console.error("Resposta descartada na remarcação", agendamentoId, perguntaId);
+      continue;
+    }
+
+    linhas.push({
+      agendamento_id: agendamentoId,
+      pergunta_id: perguntaId,
+      opcao_id: opcaoId,
+      texto_livre: textoLivre,
+    });
+  }
+
+  if (linhas.length === 0) return;
+
+  const { error } = await supabaseAdmin.from("agendamento_respostas").insert(linhas);
+  if (error) {
+    console.error("Falha ao gravar respostas da remarcação", agendamentoId, error);
+  }
+}
+
 export async function POST(request) {
   const corpo = await request.json().catch(() => null);
-  const { agendamentoId, data, horario, servicoId, duracaoMin, profissionalId } = corpo ?? {};
+  const { agendamentoId, data, horario, servicoId, duracaoMin, profissionalId, respostas } =
+    corpo ?? {};
 
   if (!agendamentoId || !data || !horario || !servicoId) {
     return new Response("Dados da remarcação incompletos.", { status: 400 });
@@ -210,6 +280,8 @@ export async function POST(request) {
     console.error("Falha ao criar agendamento remarcado", agendamentoId, erroInsert);
     return Response.json({ erro: "Não foi possível trocar o horário agora." }, { status: 500 });
   }
+
+  await gravarRespostas(supabaseAdmin, nova.id, servicoId, respostas);
 
   return Response.json({
     id: nova.id,
