@@ -223,6 +223,55 @@ function BotaoServico({ servico, selecionado, onSelect }) {
   );
 }
 
+// Popup de aviso da dona (o "Atenção" com o triângulo amarelo). Extraído
+// porque hoje é usado em DOIS lugares com o mesmo visual: o alerta do serviço
+// tocado (servicos.alerta_mensagem, dois botões) e o alerta da categoria
+// aberta (categorias_servico.alerta_mensagem, um botão só). Os botões vêm por
+// `children` — é a única coisa que muda entre os dois. `onFechar` é o clique
+// no overlay.
+function ModalAlerta({ tituloId, mensagem, onFechar, children }) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={tituloId}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+      onClick={onFechar}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="mt-0.5 h-6 w-6 shrink-0 text-amber-600"
+          >
+            <path d="M12 9v4M12 17h.01" />
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+          </svg>
+          <div>
+            <h2 id={tituloId} className="text-lg font-semibold text-on-card">
+              Atenção
+            </h2>
+            <p className="mt-2 text-sm text-on-card">{mensagem}</p>
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Iniciais do nome para o avatar do card de profissional (ex.: "João Silva" ->
 // "JS"). Usa só a primeira e a última palavra, em maiúsculas.
 function iniciais(nome) {
@@ -804,6 +853,13 @@ export default function FormularioAgendamento({
   const [erroModalPerguntas, setErroModalPerguntas] = useState("");
   const [categorias, setCategorias] = useState([]);
   const [categoriaAberta, setCategoriaAberta] = useState(null);
+  // Categoria com alerta_mensagem que o cliente acabou de tocar, aguardando o
+  // "Ciente" no modal (ver alternarCategoria/confirmarAlertaCategoria). A
+  // categoria só expande depois de fechado.
+  const [alertaCategoriaPendente, setAlertaCategoriaPendente] = useState(null);
+  // Ids das categorias cujo alerta já foi mostrado nesta visita — fechar e
+  // abrir de novo não repete o popup.
+  const [categoriasAvisadas, setCategoriasAvisadas] = useState(() => new Set());
 
   // Mapa horário -> [profissional_id livres], vindo de calcularVagasPorHorario.
   const [vagas, setVagas] = useState({});
@@ -1345,7 +1401,9 @@ export default function FormularioAgendamento({
           .single(),
         supabase
           .from("categorias_servico")
-          .select("id, nome, ordem, foto_url, foto_posicao, foto_zoom")
+          .select(
+            "id, nome, ordem, foto_url, foto_posicao, foto_zoom, alerta_mensagem"
+          )
           .eq("estabelecimento_id", estabelecimento.id)
           .order("ordem", { ascending: true })
           .order("nome", { ascending: true }),
@@ -1507,8 +1565,39 @@ export default function FormularioAgendamento({
     .filter((c) => c.servicos.length > 0);
 
   // Abre/fecha uma categoria no acordeão — só uma aberta por vez.
+  //
+  // Categoria com alerta_mensagem: ao ABRIR (fechar nunca), trava no popup
+  // antes de mostrar os serviços, uma vez só por categoria na mesma visita
+  // (`categoriasAvisadas`). O /admin com pular_perguntas_adicionais_admin
+  // pula esse popup pelo mesmo gate do alerta do serviço (ver
+  // selecionarServico); `modoLivre` garante que o /agendar público nunca pula.
   function alternarCategoria(id) {
-    setCategoriaAberta((atual) => (atual === id ? null : id));
+    if (categoriaAberta === id) {
+      setCategoriaAberta(null);
+      return;
+    }
+    const pularPopups =
+      modoLivre && estabelecimento.pular_perguntas_adicionais_admin;
+    const categoria = categorias.find((c) => c.id === id);
+    if (
+      categoria?.alerta_mensagem &&
+      !pularPopups &&
+      !categoriasAvisadas.has(id)
+    ) {
+      setAlertaCategoriaPendente(categoria);
+      return;
+    }
+    setCategoriaAberta(id);
+  }
+
+  // Modal do alerta da categoria — "Ciente" (e o clique no overlay, que é a
+  // mesma saída): marca como já avisada e expande a categoria, deixando o
+  // cliente na lista de serviços dela.
+  function confirmarAlertaCategoria() {
+    const id = alertaCategoriaPendente.id;
+    setCategoriasAvisadas((atuais) => new Set(atuais).add(id));
+    setCategoriaAberta(id);
+    setAlertaCategoriaPendente(null);
   }
 
   // Botão de serviço reaproveitado tanto pelos soltos (sem categoria) quanto
@@ -4816,62 +4905,46 @@ export default function FormularioAgendamento({
           antes de avançar pra profissional/data. Continuar confirma a
           seleção; Voltar fecha sem selecionar nada. */}
       {alertaPendente && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="titulo-alerta-servico"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
-          onClick={cancelarAlerta}
+        <ModalAlerta
+          tituloId="titulo-alerta-servico"
+          mensagem={alertaPendente.alerta_mensagem}
+          onFechar={cancelarAlerta}
         >
-          <div
-            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
-            onClick={(e) => e.stopPropagation()}
+          <button
+            type="button"
+            onClick={confirmarAlerta}
+            className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
           >
-            <div className="flex items-start gap-3">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-                className="mt-0.5 h-6 w-6 shrink-0 text-amber-600"
-              >
-                <path d="M12 9v4M12 17h.01" />
-                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
-              </svg>
-              <div>
-                <h2
-                  id="titulo-alerta-servico"
-                  className="text-lg font-semibold text-on-card"
-                >
-                  Atenção
-                </h2>
-                <p className="mt-2 text-sm text-on-card">
-                  {alertaPendente.alerta_mensagem}
-                </p>
-              </div>
-            </div>
+            Continuar
+          </button>
+          <button
+            type="button"
+            onClick={cancelarAlerta}
+            className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
+          >
+            Voltar
+          </button>
+        </ModalAlerta>
+      )}
 
-            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
-              <button
-                type="button"
-                onClick={confirmarAlerta}
-                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
-              >
-                Continuar
-              </button>
-              <button
-                type="button"
-                onClick={cancelarAlerta}
-                className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
-              >
-                Voltar
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Alerta da categoria tocada (ver GerenciarServicos): aparece ANTES da
+          lista de serviços dela. Só um botão — não há o que recusar aqui, a
+          categoria abre de qualquer jeito depois do "Ciente" (ver
+          confirmarAlertaCategoria). */}
+      {alertaCategoriaPendente && (
+        <ModalAlerta
+          tituloId="titulo-alerta-categoria"
+          mensagem={alertaCategoriaPendente.alerta_mensagem}
+          onFechar={confirmarAlertaCategoria}
+        >
+          <button
+            type="button"
+            onClick={confirmarAlertaCategoria}
+            className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+          >
+            Ciente
+          </button>
+        </ModalAlerta>
       )}
 
       {/* Popup de perguntas do serviço (servico_perguntas), aberto logo após

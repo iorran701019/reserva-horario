@@ -331,6 +331,16 @@ export default function GerenciarServicos({
   const [categoriaEditandoId, setCategoriaEditandoId] = useState(null);
   const [nomeEdicaoCategoria, setNomeEdicaoCategoria] = useState("");
 
+  // Aviso da categoria (categorias_servico.alerta_mensagem) — rascunho da
+  // caixa de texto dentro do grupo expandido, gravado só no "Salvar aviso".
+  // Só uma categoria fica aberta por vez, então basta guardar de QUAL é o
+  // rascunho: nas demais a caixa lê direto a linha já carregada.
+  const [avisoEdicaoCategoriaId, setAvisoEdicaoCategoriaId] = useState(null);
+  const [avisoEdicaoTexto, setAvisoEdicaoTexto] = useState("");
+  const [salvandoAvisoCategoria, setSalvandoAvisoCategoria] = useState(false);
+  const [statusAvisoCategoria, setStatusAvisoCategoria] = useState("");
+  const [erroAvisoCategoria, setErroAvisoCategoria] = useState("");
+
   // Categoria "armada" para exclusão (modal de confirmação) — mesmo padrão do
   // servicoParaDesativar.
   const [categoriaParaExcluir, setCategoriaParaExcluir] = useState(null);
@@ -448,7 +458,9 @@ export default function GerenciarServicos({
     async function carregar() {
       const { data, error } = await supabase
         .from("categorias_servico")
-        .select("id, nome, ordem, foto_url, foto_posicao, foto_zoom")
+        .select(
+          "id, nome, ordem, foto_url, foto_posicao, foto_zoom, alerta_mensagem"
+        )
         .eq("estabelecimento_id", estabelecimento.id)
         .order("ordem", { ascending: true })
         .order("nome", { ascending: true });
@@ -1093,7 +1105,9 @@ export default function GerenciarServicos({
       // Mesmas colunas do carregamento inicial: sem os campos de foto aqui, a
       // categoria recém-criada entraria na lista sem eles e o bloco de foto
       // renderizaria com `undefined` até o próximo refetch.
-      .select("id, nome, ordem, foto_url, foto_posicao, foto_zoom")
+      .select(
+        "id, nome, ordem, foto_url, foto_posicao, foto_zoom, alerta_mensagem"
+      )
       .single();
 
     setSalvandoCategoria(false);
@@ -1257,6 +1271,38 @@ export default function GerenciarServicos({
     });
 
     setStatusFotoCategoria("salvo");
+  }
+
+  // Grava o aviso que a cliente vê ao abrir a categoria no /agendar (ver o
+  // popup em FormularioAgendamento). Mesmo desenho do resto desta tela:
+  // update + .select("id") pra detectar recusa do RLS/zero linhas, patch
+  // local da lista e feedback "Salvando…/Salvo ✓". Caixa vazia grava null —
+  // é o que o /agendar lê como "categoria sem aviso".
+  async function salvarAvisoCategoria(categoria) {
+    const valor = avisoEdicaoTexto.trim() || null;
+
+    setSalvandoAvisoCategoria(true);
+    setStatusAvisoCategoria("salvando");
+    setErroAvisoCategoria("");
+
+    const { data: linhas, error } = await supabase
+      .from("categorias_servico")
+      .update({ alerta_mensagem: valor })
+      .eq("id", categoria.id)
+      .select("id");
+
+    setSalvandoAvisoCategoria(false);
+    if (error || !linhas?.length) {
+      setStatusAvisoCategoria("");
+      setErroAvisoCategoria(
+        `Não foi possível salvar: ${mensagemFalhaSalvar(error)}`
+      );
+      return;
+    }
+
+    patchCategoria(categoria.id, { alerta_mensagem: valor });
+    setAvisoEdicaoCategoriaId(null);
+    setStatusAvisoCategoria("salvo");
   }
 
   // Move a categoria uma posição pra cima (-1) ou baixo (+1) e recompacta a
@@ -3150,6 +3196,66 @@ export default function GerenciarServicos({
                           )}
                           {erroFotoCategoria && (
                             <p className="mt-2 text-xs text-red-600">{erroFotoCategoria}</p>
+                          )}
+                        </div>
+
+                        {/* Aviso opcional mostrado à cliente no /agendar
+                            quando ela abre esta categoria (ver
+                            FormularioAgendamento). Rascunho local + botão de
+                            salvar, como o "Renomear" acima — diferente dos
+                            sliders de foto, que gravam sozinhos: aqui o texto
+                            só fica pronto quando a dona termina de digitar. */}
+                        <div className="mb-4 border-b border-border pb-4">
+                          <label
+                            htmlFor={`aviso-categoria-${categoria.id}`}
+                            className="mb-1 block text-sm font-medium text-body"
+                          >
+                            Aviso ao abrir esta categoria (opcional)
+                          </label>
+                          <textarea
+                            id={`aviso-categoria-${categoria.id}`}
+                            rows={2}
+                            value={
+                              avisoEdicaoCategoriaId === categoria.id
+                                ? avisoEdicaoTexto
+                                : categoria.alerta_mensagem ?? ""
+                            }
+                            onChange={(e) => {
+                              setAvisoEdicaoCategoriaId(categoria.id);
+                              setAvisoEdicaoTexto(e.target.value);
+                              setStatusAvisoCategoria("");
+                              setErroAvisoCategoria("");
+                            }}
+                            className="w-full rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                          />
+                          <p className="mt-1 text-xs text-muted">
+                            Aparece para a cliente antes de escolher o serviço.
+                            Ex.: venha com o cabelo lavado.
+                          </p>
+
+                          {avisoEdicaoCategoriaId === categoria.id && (
+                            <button
+                              type="button"
+                              onClick={() => salvarAvisoCategoria(categoria)}
+                              disabled={salvandoAvisoCategoria}
+                              className="mt-2 rounded-lg bg-green-50 px-2.5 py-1.5 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Salvar aviso
+                            </button>
+                          )}
+
+                          {statusAvisoCategoria === "salvando" && (
+                            <p className="mt-2 text-xs text-muted">Salvando…</p>
+                          )}
+                          {statusAvisoCategoria === "salvo" && !erroAvisoCategoria && (
+                            <p className="mt-2 text-xs font-medium text-green-600">
+                              Salvo ✓
+                            </p>
+                          )}
+                          {erroAvisoCategoria && (
+                            <p className="mt-2 text-xs text-red-600">
+                              {erroAvisoCategoria}
+                            </p>
                           )}
                         </div>
 
