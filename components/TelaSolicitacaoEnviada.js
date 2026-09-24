@@ -27,7 +27,18 @@ import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento"
 //                      protocolo durasse.
 //   onEditar          – opcional; havendo, mostra "Editar agendamento" (quem
 //                      monta reabre o wizard, ver agendamentoEmEdicao em
+//                      FormularioAgendamento). Num agendamento com duas datas
+//                      vinculadas quem monta NÃO passa: o par não tem
+//                      remarcação pelo app (ver o guard de reservaGrupoId em
 //                      FormularioAgendamento).
+//   etapaAnterior     – opcional; { nome, data, horario } da etapa que vem
+//                      ANTES do atendimento principal nos serviços de duas
+//                      datas (o "teste" da noiva, ver
+//                      sql/segunda_data_reserva_grupo.sql). Havendo, o card
+//                      ganha uma linha a mais com ela — `data`/`horario`
+//                      continuam sendo os do atendimento principal, que é "o
+//                      agendamento" em toda tela. null (o normal) = card
+//                      idêntico ao de sempre.
 //   onCancelado       – opcional; havendo, mostra "Cancelar agendamento" e é
 //                      chamado depois do cancelamento dar certo. O clique
 //                      passa antes pela confirmação (ver
@@ -42,6 +53,7 @@ export default function TelaSolicitacaoEnviada({
   onVerAgendamentos = null,
   onEditar = null,
   onCancelado = null,
+  etapaAnterior = null,
 }) {
   const [cancelando, setCancelando] = useState(false);
   const [erro, setErro] = useState("");
@@ -128,6 +140,17 @@ export default function TelaSolicitacaoEnviada({
           <dt className="text-body">Horário</dt>
           <dd className="font-medium text-heading">{horario}</dd>
         </div>
+        {/* Serviço de duas datas: a etapa anterior entra como uma linha a
+            mais, nomeada pelo salão ("Teste", "Prova"), logo abaixo da data
+            do atendimento principal. */}
+        {etapaAnterior && (
+          <div className="flex items-center justify-between gap-4">
+            <dt className="text-body">{etapaAnterior.nome}</dt>
+            <dd className="font-medium text-heading">
+              {formatarData(etapaAnterior.data)} às {etapaAnterior.horario}
+            </dd>
+          </div>
+        )}
         <div className="flex items-center justify-between gap-4">
           <dt className="text-body">Nome</dt>
           <dd className="font-medium text-heading">{nomeCliente}</dd>

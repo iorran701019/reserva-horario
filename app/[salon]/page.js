@@ -540,6 +540,11 @@ export default function AgendarPage() {
   // incluindo o id da linha, que é o que habilita Editar/Cancelar aqui.
   if (resumo) {
     const { form, servico, horario, agendamentoId } = resumo;
+    // Serviço de duas datas: o wizard entrega o EVENTO em form.data/horario e
+    // a etapa anterior à parte, mais o `reserva_grupo_id` do par. O vínculo é
+    // o que tira o "Editar agendamento" da tela: remarcar um par pelo app
+    // deixaria meio par no ar (ver o guard em FormularioAgendamento).
+    const parVinculado = resumo.reservaGrupoId != null;
     return (
       <main
         className="flex min-h-screen flex-col bg-surface"
@@ -555,15 +560,19 @@ export default function AgendarPage() {
             data={form.data}
             horario={horario}
             nomeCliente={form.nome}
+            etapaAnterior={resumo.etapaAnterior ?? null}
             onVerAgendamentos={() => recomecarFluxo({ paraOWizard: false })}
-            onEditar={() =>
-              editarAgendamento({
-                id: agendamentoId,
-                servicoId: servico?.id ?? null,
-                data: form.data,
-                horario,
-                profissionalId: resumo.profissional?.id ?? null,
-              })
+            onEditar={
+              parVinculado
+                ? null
+                : () =>
+                    editarAgendamento({
+                      id: agendamentoId,
+                      servicoId: servico?.id ?? null,
+                      data: form.data,
+                      horario,
+                      profissionalId: resumo.profissional?.id ?? null,
+                    })
             }
             onCancelado={aposCancelamento}
           />
@@ -682,14 +691,21 @@ export default function AgendarPage() {
                     )
                   );
                 }}
-                onEditar={() =>
-                  editarAgendamento({
-                    id: agendamentoSinal.id,
-                    servicoId: agendamentoSinal.servico_id,
-                    data: agendamentoSinal.data,
-                    horario: String(agendamentoSinal.horario).slice(0, 5),
-                    profissionalId: agendamentoSinal.profissional_id ?? null,
-                  })
+                // `reserva_grupo_id` só chega aqui quando a RPC de leitura
+                // passar a devolvê-lo (ver agendamentos_cliente_ativos); até
+                // lá é undefined e o botão continua aparecendo como hoje.
+                onEditar={
+                  agendamentoSinal.reserva_grupo_id != null
+                    ? null
+                    : () =>
+                        editarAgendamento({
+                          id: agendamentoSinal.id,
+                          servicoId: agendamentoSinal.servico_id,
+                          data: agendamentoSinal.data,
+                          horario: String(agendamentoSinal.horario).slice(0, 5),
+                          profissionalId: agendamentoSinal.profissional_id ?? null,
+                          reservaGrupoId: agendamentoSinal.reserva_grupo_id ?? null,
+                        })
                 }
                 onCancelado={aposCancelamento}
               />
@@ -707,14 +723,22 @@ export default function AgendarPage() {
               horario={String(agendamentoProtocolo.horario).slice(0, 5)}
               nomeCliente={clienteIdentificado.nome}
               onVerAgendamentos={() => setProtocoloPulado(true)}
-              onEditar={() =>
-                editarAgendamento({
-                  id: agendamentoProtocolo.id,
-                  servicoId: agendamentoProtocolo.servico_id,
-                  data: agendamentoProtocolo.data,
-                  horario: String(agendamentoProtocolo.horario).slice(0, 5),
-                  profissionalId: agendamentoProtocolo.profissional_id ?? null,
-                })
+              // Mesma regra da tela de sinal acima: com vínculo, sem
+              // "Editar". A segunda data NÃO aparece neste caminho (a leitura
+              // vem do banco, que ainda não devolve a irmã) — ver o relatório
+              // da etapa 3.
+              onEditar={
+                agendamentoProtocolo.reserva_grupo_id != null
+                  ? null
+                  : () =>
+                      editarAgendamento({
+                        id: agendamentoProtocolo.id,
+                        servicoId: agendamentoProtocolo.servico_id,
+                        data: agendamentoProtocolo.data,
+                        horario: String(agendamentoProtocolo.horario).slice(0, 5),
+                        profissionalId: agendamentoProtocolo.profissional_id ?? null,
+                        reservaGrupoId: agendamentoProtocolo.reserva_grupo_id ?? null,
+                      })
               }
               onCancelado={aposCancelamento}
             />

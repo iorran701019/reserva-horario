@@ -273,8 +273,18 @@ export default function PainelCliente({
             fecharConfirmandoSinal();
           }}
           onVoltar={fecharConfirmandoSinal}
+          // Agendamento com duas datas vinculadas (serviço de segunda data,
+          // ver sql/segunda_data_reserva_grupo.sql) não tem remarcação pelo
+          // app: o "Editar" sai da tela e a alteração passa pelo salão (ver o
+          // guard de reservaGrupoId em FormularioAgendamento). Este é o ÚNICO
+          // ponto do PainelCliente que oferece remarcação — a lista em si só
+          // tem "Confirmar pagamento" e "Cancelar".
+          //
+          // `reserva_grupo_id` ainda não vem da RPC de leitura
+          // (agendamentos_cliente_ativos): até ela devolvê-lo, a comparação é
+          // sempre falsa e o botão aparece como hoje.
           onEditar={
-            onEditarAgendamento && itemSinal
+            onEditarAgendamento && itemSinal && itemSinal.reserva_grupo_id == null
               ? () =>
                   onEditarAgendamento({
                     id: itemSinal.id,
@@ -282,6 +292,7 @@ export default function PainelCliente({
                     data: itemSinal.data,
                     horario: String(itemSinal.horario).slice(0, 5),
                     profissionalId: itemSinal.profissional_id ?? null,
+                    reservaGrupoId: itemSinal.reserva_grupo_id ?? null,
                   })
               : null
           }

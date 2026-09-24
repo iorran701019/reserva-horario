@@ -4219,11 +4219,22 @@ export default function AdminPage() {
                   // atende — a contagem já está em memória (mesmo estado que
                   // esconde "Trocar profissional"), então não custa uma query.
                   qtdProfissionaisAtivos={qtdProfissionaisAtivos}
-                  onSucesso={async ({ form, horario }) => {
+                  onSucesso={async ({ form, horario, etapaAnterior }) => {
+                    // `form.data`/`horario` são sempre os do atendimento
+                    // principal — nos serviços de duas datas o wizard já
+                    // entrega assim, com a etapa anterior à parte (ver
+                    // resumoSucessoDoPar em FormularioAgendamento). O aviso
+                    // cita as DUAS, senão a dona confirmaria um par vendo só
+                    // metade dele.
+                    const trechoEtapaAnterior = etapaAnterior
+                      ? ` ${etapaAnterior.nome}: ${formatarData(
+                          etapaAnterior.data
+                        )} às ${etapaAnterior.horario}.`
+                      : "";
                     setAvisoAgendar(
                       `Agendamento de ${form.nome} criado para ${formatarData(
                         form.data
-                      )} às ${horario}.`
+                      )} às ${horario}.${trechoEtapaAnterior}`
                     );
                     // Remonta a identificação + o formulário limpos pro
                     // próximo cadastro.
