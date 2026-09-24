@@ -19,7 +19,8 @@ import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 import BlocoQrCodeAbacatePay from "@/components/BlocoQrCodeAbacatePay";
 import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 import { formatarPreco } from "@/lib/preco";
-import { metodoEfetivoSinalPix, metodoDisponivelSinalPix } from "@/lib/sinalPix";
+import { metodoDisponivelSinalPix } from "@/lib/sinalPix";
+import { resolverSinal } from "@/lib/sinalRegra";
 import { formatarData, montarResumoAgendamento } from "@/lib/data";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import {
@@ -1006,15 +1007,36 @@ export default function FormularioAgendamento({
     estabelecimento.etiqueta_bloqueio_sinal_id != null &&
     etiquetaClienteId === estabelecimento.etiqueta_bloqueio_sinal_id;
 
-  // Na Lista de Bloqueio o sinal é cobrado mesmo com sinal_regra = 'desligado',
-  // então o método vem de metodoDisponivelSinalPix, que ignora o corte da
-  // regra. Fora dela, nada muda. Com a regra ligada as duas funções devolvem
-  // o mesmo método, então só o caso "regra desligada" é que diverge. E se o
-  // salão não tem meio nenhum configurado, sai 'desligado' do mesmo jeito e a
-  // regra não força nada.
-  const metodoSinal = clienteNaListaBloqueio
+  // A REGRA (cobra? quanto?) sai inteira de resolverSinal (lib/sinalRegra.js),
+  // que compõe, nesta ordem: regra especial vencedora pro par (serviço, data)
+  // -> padrão do salão (`sinal_regra`) -> Lista de Bloqueio por cima de tudo.
+  // Com `sinal_regras_especiais` vazia o resolver devolve exatamente o que os
+  // ternários que moravam aqui devolviam — o ramo do padrão é transcrição
+  // literal deles.
+  //
+  // `form.data` pode estar vazia (o wizard avalia isto a cada render, inclusive
+  // antes da etapa de data): nesse estado só as regras SEM período entram, e o
+  // resolver trata disso sozinho.
+  const sinalResolvido = resolverSinal({
+    estabelecimento,
+    servico: servicoSelecionado,
+    data: form.data,
+    ehNovo: clienteEhNovo,
+    naListaBloqueio: clienteNaListaBloqueio,
+  });
+
+  // Cobrança ligada -> método DISPONÍVEL (metodoDisponivelSinalPix), que ignora
+  // o corte de `sinal_regra` na cascata. Antes isso valia só pra Lista de
+  // Bloqueio; agora vale pra qualquer origem da cobrança, porque uma regra
+  // especial também liga o sinal num salão de `sinal_regra = 'desligado'` (o
+  // caso "dezembro todo mundo paga"). Com o padrão ligado as duas funções da
+  // cascata devolvem o mesmo método, então nada muda no caminho de hoje.
+  //
+  // Cobrança desligada -> 'desligado', que é o que metodoEfetivoSinalPix já
+  // devolvia em todo caso que chegava aqui com `precisaSinal` falso.
+  const metodoSinal = sinalResolvido.cobra
     ? metodoDisponivelSinalPix(estabelecimento)
-    : metodoEfetivoSinalPix(estabelecimento);
+    : "desligado";
 
   const precisaSinal =
     !status &&
@@ -1022,17 +1044,16 @@ export default function FormularioAgendamento({
     // exige sinal. Sem isto, a cascata seria só cosmética — `precisaSinal`
     // seguiria gravando a linha em "aguardando_sinal" (ver o insert abaixo)
     // por uma cobrança que nenhuma tela consegue apresentar, prendendo a
-    // reserva até o pg_cron expirá-la.
+    // reserva até o pg_cron expirá-la. Vale igual pra regra especial: regra de
+    // dezembro num salão sem chave Pix e sem credencial não cobra nada.
     metodoSinal !== "desligado" &&
-    // Lista de Bloqueio cobra sempre, inclusive manutenção: é a regra que
-    // existe justamente pra passar por cima das isenções da regra normal.
-    (clienteNaListaBloqueio ||
-      estabelecimento.sinal_regra === "todos" ||
-      (estabelecimento.sinal_regra === "exceto_manutencao" &&
-        !servicoSelecionado?.eh_manutencao) ||
-      (estabelecimento.sinal_regra === "novos" &&
-        clienteEhNovo &&
-        !servicoSelecionado?.eh_manutencao));
+    sinalResolvido.cobra;
+
+  // Valor a EXIBIR e a gravar. Resolvido mesmo quando não se cobra (o número
+  // não depende de `eh_manutencao`, só a cobrança depende), e é ele que os
+  // blocos de Pix mostram no lugar do `estabelecimento.sinal_valor_centavos`
+  // cru — senão a tela anunciaria R$ 50 e a RPC gravaria os R$ 100 da regra.
+  const sinalValorCentavos = sinalResolvido.valor_centavos;
 
   // Público sem sinal a cobrar: a etapa "dados" não teria nada a fazer além
   // de reler o resumo, então é pulada — o clique no horário grava a reserva
@@ -3788,9 +3809,13 @@ export default function FormularioAgendamento({
       // senão o sinal fica registrado como pago sem número nenhum e some do
       // card de Relatórios. Só quando de fato houve declaração — sem ela não há
       // valor a guardar, e um número aqui viraria sinal fantasma.
-      sinal_valor_centavos: sinalDeclarado
-        ? estabelecimento.sinal_valor_centavos ?? null
-        : null,
+      //
+      // `sinalValorCentavos` (resolverSinal) e não o valor cru do
+      // estabelecimento: aqui o serviço e a data JÁ estão escolhidos, então a
+      // regra especial que valer pra esse par é a que a dona cobrou por fora.
+      // Com a tabela de regras vazia o resolver devolve o mesmo
+      // `estabelecimento.sinal_valor_centavos` de antes.
+      sinal_valor_centavos: sinalDeclarado ? sinalValorCentavos ?? null : null,
       finalizado: true,
     };
     const { data, error } = await supabase
@@ -4589,6 +4614,7 @@ export default function FormularioAgendamento({
                 {metodoSinal === "abacatepay" ? (
                   <BlocoQrCodeAbacatePay
                     estabelecimento={estabelecimento}
+                    valorCentavos={sinalValorCentavos}
                     agendamentoId={reservaId}
                     nomeCliente={form.nome}
                     servicoNome={servicoSelecionado?.nome}
@@ -4600,6 +4626,7 @@ export default function FormularioAgendamento({
                 ) : (
                   <BlocoConfirmacaoPix
                     estabelecimento={estabelecimento}
+                    valorCentavos={sinalValorCentavos}
                     agendamentoId={reservaId}
                     nomeCliente={form.nome}
                     servicoNome={servicoSelecionado?.nome}

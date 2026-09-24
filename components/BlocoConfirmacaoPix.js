@@ -41,6 +41,12 @@ const ERRO_ANEXO_GENERICO =
 //
 // Props:
 //   estabelecimento – { sinal_valor_centavos, sinal_chave_pix } do salão.
+//   valorCentavos   – valor do sinal DESTE agendamento, já resolvido pelo pai
+//                     (resolverSinal, lib/sinalRegra.js): uma regra especial de
+//                     serviço ou de período pode cobrar um número diferente do
+//                     `sinal_valor_centavos` do salão. Omitido, cai no valor do
+//                     salão — que é o mesmo número sempre que não há regra
+//                     especial valendo, ou seja, o comportamento de antes.
 //   agendamentoId   – linha em `agendamentos` a marcar como pendente e a que
 //                     o comprovante pertence. No wizard é a reserva já
 //                     gravada ao entrar em "dados"; null desabilita o upload
@@ -72,12 +78,17 @@ export default function BlocoConfirmacaoPix({
   data = "",
   horario = "",
   nomeProfissionalContato = "a equipe",
+  valorCentavos = undefined,
   sinalDeclarado,
   onSinalDeclaradoChange,
   jaPendente = false,
   onStatusMudou,
   onComprovanteEnviado,
 }) {
+  // `??` e não `||`: um sinal de R$ 0,00 configurado é um número válido, e
+  // `||` o trocaria em silêncio pelo valor do salão.
+  const valorExibido = valorCentavos ?? estabelecimento.sinal_valor_centavos;
+
   const [chavePixCopiada, setChavePixCopiada] = useState(false);
   const [enviandoComprovante, setEnviandoComprovante] = useState(false);
   const [nomeComprovante, setNomeComprovante] = useState("");
@@ -334,7 +345,7 @@ export default function BlocoConfirmacaoPix({
       <div className="space-y-3 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
         <div>
           <p className="text-base font-medium text-amber-800">
-            {`Este agendamento exige um sinal de ${formatarPreco(estabelecimento.sinal_valor_centavos)} via Pix para confirmar a reserva.`}
+            {`Este agendamento exige um sinal de ${formatarPreco(valorExibido)} via Pix para confirmar a reserva.`}
           </p>
           <p className="mt-1 text-base font-medium text-amber-800">
             {`Anexe o comprovante abaixo ou aperte o botão verde do WhatsApp${nomeProfissionalContato === "a equipe" ? "" : ` com o nome ${nomeProfissionalContato}`} e envie o comprovante do Pix.`}

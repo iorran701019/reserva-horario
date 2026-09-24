@@ -49,6 +49,12 @@ function ehPagamentoConfirmado(status) {
 //
 // Props (as que fazem sentido, com o mesmo contrato do BlocoConfirmacaoPix):
 //   estabelecimento – { sinal_valor_centavos } do salão.
+//   valorCentavos   – valor do sinal DESTE agendamento, já resolvido pelo pai
+//                     (resolverSinal, lib/sinalRegra.js). Mesmo contrato do
+//                     bloco manual: omitido, cai no valor do salão. Aqui ele é
+//                     só EXIBIÇÃO — quem manda o `amount` pra AbacatePay é a
+//                     rota de gerar-cobranca, que resolve o valor de novo no
+//                     servidor.
 //   agendamentoId   – linha em `agendamentos` a cobrar. É por ele que a
 //                     cobrança é gerada e o status consultado; sem ele não há
 //                     o que exibir.
@@ -75,8 +81,12 @@ export default function BlocoQrCodeAbacatePay({
   data = "",
   horario = "",
   nomeProfissionalContato = "a equipe",
+  valorCentavos = undefined,
   onStatusMudou,
 }) {
+  // Mesmo `??` do bloco manual, pelo mesmo motivo.
+  const valorExibido = valorCentavos ?? estabelecimento.sinal_valor_centavos;
+
   const [cobranca, setCobranca] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [erroCobranca, setErroCobranca] = useState("");
@@ -307,7 +317,7 @@ export default function BlocoQrCodeAbacatePay({
       <div className="space-y-3 rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
         <div>
           <p className="text-base font-medium text-amber-800">
-            {`Este agendamento exige um sinal de ${formatarPreco(estabelecimento.sinal_valor_centavos)} via Pix para confirmar a reserva.`}
+            {`Este agendamento exige um sinal de ${formatarPreco(valorExibido)} via Pix para confirmar a reserva.`}
           </p>
           <p className="mt-1 text-base font-medium text-amber-800">
             Escaneie o QR Code abaixo ou copie o código Pix e pague pelo app do

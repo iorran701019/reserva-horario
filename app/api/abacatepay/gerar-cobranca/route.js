@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { valorSinalCentavos } from "@/lib/sinalRegra";
 
 // Gera (ou recupera) a cobrança Pix da AbacatePay pro sinal de reserva de um
 // agendamento. Rota PÚBLICA: quem chama é o /agendar, ainda sem sessão — não
@@ -35,7 +36,11 @@ export async function POST(request) {
   const { data: agendamento, error: erroAgendamento } = await supabaseAdmin
     .from("agendamentos")
     .select(
-      "id, estabelecimento_id, abacatepay_cobranca_id, abacatepay_expira_em, abacatepay_br_code, abacatepay_br_code_base64, status, abacatepay_pago_em"
+      // `servico_id`, `data` e `servicos(eh_manutencao)` entraram com as regras
+      // especiais de sinal: o valor cobrado depende do par (serviço, data do
+      // atendimento), não só do salão (ver lib/sinalRegra.js). O join é
+      // embutido e roda com service role, então não depende de policy.
+      "id, estabelecimento_id, servico_id, data, abacatepay_cobranca_id, abacatepay_expira_em, abacatepay_br_code, abacatepay_br_code_base64, status, abacatepay_pago_em, servicos(eh_manutencao)"
     )
     .eq("id", agendamentoId)
     .maybeSingle();
@@ -138,6 +143,44 @@ export async function POST(request) {
     });
   }
 
+  // Regras especiais de sinal do salão (valor por serviço e/ou por período).
+  // Query própria, e não embed no select acima, pelo mesmo motivo dos loaders:
+  // aquele select é a lista de colunas do estabelecimento.
+  //
+  // FALHA DE LEITURA VIRA LISTA VAZIA, que é o valor padrão do salão — o mesmo
+  // número que esta rota mandava antes das regras existirem. Abortar a cobrança
+  // porque uma tabela de exceções não respondeu seria trocar um valor
+  // possivelmente errado por nenhuma reserva.
+  const { data: regrasSinal, error: erroRegrasSinal } = await supabaseAdmin
+    .from("sinal_regras_especiais")
+    .select("servico_id, data_inicio, data_fim, cobranca, valor_centavos, criado_em")
+    .eq("estabelecimento_id", agendamento.estabelecimento_id);
+
+  if (erroRegrasSinal) {
+    console.error(
+      "Falha ao buscar regras especiais de sinal pra cobrança Pix",
+      agendamentoId,
+      erroRegrasSinal
+    );
+  }
+
+  // O número que vai pra AbacatePay E pro banco. Um só, resolvido uma vez:
+  // `amount` e `sinal_valor_centavos` precisam ser o MESMO valor (ver o
+  // comentário do update lá embaixo), e resolver duas vezes abriria a fresta
+  // de eles divergirem.
+  const valorCentavos = valorSinalCentavos({
+    estabelecimento,
+    servico:
+      agendamento.servico_id == null
+        ? null
+        : {
+            id: agendamento.servico_id,
+            eh_manutencao: agendamento.servicos?.eh_manutencao,
+          },
+    data: agendamento.data,
+    regras: regrasSinal ?? [],
+  });
+
   const expiresIn = EXPIRACAO_PIX_HORAS * 3600;
 
   let dados;
@@ -148,7 +191,7 @@ export async function POST(request) {
       body: JSON.stringify({
         method: "PIX",
         data: {
-          amount: estabelecimento.sinal_valor_centavos,
+          amount: valorCentavos,
           description: "Sinal de reserva",
           expiresIn,
         },
@@ -172,7 +215,8 @@ export async function POST(request) {
   // de não ter gravado é só a reutilização da linha 5 (a próxima visita cria
   // outra cobrança), não vale segurar o pagamento por isso.
   //
-  // `sinal_valor_centavos` é o MESMO valor mandado como `amount` acima,
+  // `sinal_valor_centavos` é o MESMO valor mandado como `amount` acima
+  // (`valorCentavos`, resolvido uma vez em cima),
   // gravado já na criação e não na confirmação: o valor da cobrança não muda
   // depois de criada, e a config do salão pode mudar (ou ser apagada) antes do
   // atendimento — sem esta cópia o valor do sinal ficaria irrecuperável.
@@ -183,7 +227,7 @@ export async function POST(request) {
       abacatepay_expira_em: dados.expiresAt,
       abacatepay_br_code: dados.brCode,
       abacatepay_br_code_base64: dados.brCodeBase64,
-      sinal_valor_centavos: estabelecimento.sinal_valor_centavos,
+      sinal_valor_centavos: valorCentavos,
     })
     .eq("id", agendamento.id)
     .select("id");

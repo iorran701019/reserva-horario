@@ -5,6 +5,7 @@ import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 import BlocoQrCodeAbacatePay from "@/components/BlocoQrCodeAbacatePay";
 import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
 import { metodoDisponivelSinalPix } from "@/lib/sinalPix";
+import { valorSinalCentavos } from "@/lib/sinalRegra";
 import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento";
 import { formatarData } from "@/components/FormularioAgendamento";
 
@@ -27,6 +28,9 @@ import { formatarData } from "@/components/FormularioAgendamento";
 // Props:
 //   agendamentoId       – id da linha em `agendamentos` a confirmar.
 //   estabelecimento     – { sinal_valor_centavos, sinal_chave_pix } do salão.
+//                         Traz junto `sinal_regras_especiais` (hidratado pelos
+//                         loaders), que é o que permite resolver o valor desta
+//                         reserva em particular — ver valorCentavos abaixo.
 //   nomeProfissionalContato – mesmo texto usado no bloco do wizard.
 //   onConfirmado        – chamado (sem args) quando o agendamento passa a
 //                         "pendente" (checkbox ou comprovante).
@@ -61,6 +65,21 @@ export default function ConfirmacaoSinal({
   agendamento = null,
   nomeCliente = "",
 }) {
+  // Valor do sinal DESTA reserva: uma regra especial pode cobrar por serviço
+  // ou por período (lib/sinalRegra.js), então o número não sai mais do
+  // `sinal_valor_centavos` do salão direto.
+  //
+  // `eh_manutencao` não viaja até aqui (a RPC de leitura devolve só
+  // `servico_id` e o nome), e não faz falta: ele decide se COBRA, nunca
+  // quanto — e esta tela só existe pra uma linha que já está em
+  // "aguardando_sinal", ou seja, a cobrança já foi decidida lá atrás, no
+  // wizard. O que se resolve aqui é exclusivamente o número a exibir.
+  const valorCentavos = valorSinalCentavos({
+    estabelecimento,
+    servico: agendamento?.servico_id == null ? null : { id: agendamento.servico_id },
+    data: agendamento?.data ?? null,
+  });
+
   const [sinalDeclarado, setSinalDeclarado] = useState(false);
   const [cancelando, setCancelando] = useState(false);
   const [erro, setErro] = useState("");
@@ -112,6 +131,7 @@ export default function ConfirmacaoSinal({
       {metodoDisponivelSinalPix(estabelecimento) === "abacatepay" ? (
         <BlocoQrCodeAbacatePay
           estabelecimento={estabelecimento}
+          valorCentavos={valorCentavos}
           agendamentoId={agendamentoId}
           nomeCliente={nomeCliente}
           servicoNome={
@@ -125,6 +145,7 @@ export default function ConfirmacaoSinal({
       ) : (
         <BlocoConfirmacaoPix
           estabelecimento={estabelecimento}
+          valorCentavos={valorCentavos}
           agendamentoId={agendamentoId}
           nomeCliente={nomeCliente}
           servicoNome={
