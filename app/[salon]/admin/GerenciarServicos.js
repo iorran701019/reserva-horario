@@ -80,6 +80,8 @@ const FORM_INICIAL = {
   prazoFimDias: "",
   ehManutencao: false,
   manutencaoExterna: false,
+  exigeSegundaData: false,
+  nomeEtapaAnterior: "",
 };
 
 // Reais digitado (aceita "35", "35,50" ou "35.50") -> centavos inteiros.
@@ -397,7 +399,7 @@ export default function GerenciarServicos({
       const { data, error } = await supabase
         .from("servicos")
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias, manutencao_externa"
+          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias, manutencao_externa, exige_segunda_data, nome_etapa_anterior"
         )
         .eq("estabelecimento_id", estabelecimento.id)
         .order("categoria_id", { ascending: true, nullsFirst: true })
@@ -490,6 +492,20 @@ export default function GerenciarServicos({
   function handleToggleManutencaoExterna(e) {
     const checked = e.target.checked;
     setForm((anterior) => ({ ...anterior, manutencaoExterna: checked }));
+  }
+
+  // Desmarcar "Este serviço precisa de uma segunda data" também limpa o nome
+  // da etapa — mesmo padrão de handleToggleAlerta logo abaixo: uma caixa
+  // desmarcada sempre grava nome_etapa_anterior null (ver validarForm), e
+  // deixar o texto no state faria a caixa remarcada ressuscitar um nome que a
+  // dona já tinha descartado.
+  function handleToggleSegundaData(e) {
+    const checked = e.target.checked;
+    setForm((anterior) => ({
+      ...anterior,
+      exigeSegundaData: checked,
+      nomeEtapaAnterior: checked ? anterior.nomeEtapaAnterior : "",
+    }));
   }
 
   // Desmarcar "Adicionar alerta" também limpa a mensagem digitada — ao salvar,
@@ -595,6 +611,10 @@ export default function GerenciarServicos({
         servico.prazo_fim_dias != null ? String(servico.prazo_fim_dias) : "",
       ehManutencao: Boolean(servico.eh_manutencao),
       manutencaoExterna: Boolean(servico.manutencao_externa),
+      exigeSegundaData: Boolean(servico.exige_segunda_data),
+      // null no banco = "usa o padrão" (a UI mostrará "Teste"); no input isso
+      // é string vazia, e o placeholder faz o papel de mostrar o padrão.
+      nomeEtapaAnterior: servico.nome_etapa_anterior ?? "",
     });
     setErroForm("");
     setEditando(servico);
@@ -724,6 +744,15 @@ export default function GerenciarServicos({
         prazo_fim_dias: prazoFimDias,
         eh_manutencao: form.ehManutencao,
         manutencao_externa: form.manutencaoExterna,
+        exige_segunda_data: form.exigeSegundaData,
+        // Caixa desmarcada ou texto em branco -> null, mesmo critério de
+        // alerta_mensagem acima. null significa "usa o padrão": quem lê a
+        // coluna exibe "Teste" (a UI é a dona do default, não o banco — assim
+        // dá pra mudar o texto padrão sem migration nem UPDATE em massa).
+        nome_etapa_anterior:
+          form.exigeSegundaData && form.nomeEtapaAnterior.trim()
+            ? form.nomeEtapaAnterior.trim()
+            : null,
       },
     };
   }
@@ -882,7 +911,7 @@ export default function GerenciarServicos({
           ordem: proximaOrdemNoGrupo(payload.categoria_id),
         })
         .select(
-          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias, manutencao_externa"
+          "id, nome, duracao_min, preco_centavos, ativo, oculto, categoria_id, ordem, alerta_mensagem, servico_origem_id, prazo_manutencao_dias, eh_manutencao, prazo_inicio_dias, prazo_fim_dias, manutencao_externa, exige_segunda_data, nome_etapa_anterior"
         )
         .single();
 
@@ -1940,9 +1969,20 @@ export default function GerenciarServicos({
                 )}
               </div>
 
-              <span className="shrink-0 rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700 ring-1 ring-green-100">
-                Ativo
-              </span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {/* Serviço de duas datas (exige_segunda_data). Violeta de
+                    propósito: verde já é "Ativo" logo ao lado, e azul é a cor
+                    de ação/link em todo o /admin — o selo aqui é um TRAÇO do
+                    serviço, não um estado nem um botão. */}
+                {servico.exige_segunda_data && (
+                  <span className="rounded-full bg-violet-50 px-2.5 py-0.5 text-xs font-medium text-violet-700 ring-1 ring-violet-100">
+                    2 datas
+                  </span>
+                )}
+                <span className="rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700 ring-1 ring-green-100">
+                  Ativo
+                </span>
+              </div>
             </div>
 
             <div className="mt-4 flex flex-col gap-2 sm:flex-row">
@@ -2796,6 +2836,48 @@ export default function GerenciarServicos({
                 placeholder="Ex.: Traga uma foto de referência do corte desejado."
                 className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
               />
+            )}
+          </div>
+
+          {/* Serviço de duas datas (grava servicos.exige_segunda_data): a
+              cliente marca a etapa anterior E o atendimento principal numa
+              passagem só pelo /agendar. Mesmo padrão de "Adicionar alerta"
+              acima — desmarcar some com o campo E limpa o nome (grava null ao
+              salvar). Nada além do cadastro muda nesta etapa; o wizard só
+              passa a ler a coluna mais adiante. */}
+          <div>
+            <label className="flex items-center gap-2 text-sm text-body">
+              <input
+                type="checkbox"
+                name="exigeSegundaData"
+                checked={form.exigeSegundaData}
+                onChange={handleToggleSegundaData}
+                className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+              />
+              Este serviço precisa de uma segunda data
+            </label>
+            <p className="mt-1 text-xs text-muted">
+              A cliente escolhe duas datas: a etapa anterior (ex.: teste) e o dia
+              do atendimento principal.
+            </p>
+            {form.exigeSegundaData && (
+              <div className="mt-2">
+                <label
+                  htmlFor="nomeEtapaAnterior"
+                  className="mb-1 block text-sm font-medium text-body"
+                >
+                  Nome da etapa anterior
+                </label>
+                <input
+                  id="nomeEtapaAnterior"
+                  type="text"
+                  name="nomeEtapaAnterior"
+                  value={form.nomeEtapaAnterior}
+                  onChange={handleChange}
+                  placeholder="Teste"
+                  className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                />
+              </div>
             )}
           </div>
 
