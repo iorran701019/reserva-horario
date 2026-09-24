@@ -2196,6 +2196,14 @@ export default function ConfiguracoesSalao({
       return;
     }
 
+    // O `min` dos inputs não basta: o Safari do iOS não o respeita no seletor
+    // de data, e a data também pode ser digitada. Recalculado aqui em vez de
+    // usar o `hojeIso` do render — a aba pode ter ficado aberta e virado o dia.
+    if (periodo && reDe < dataMaisDias(0)) {
+      setReErro("A data de início não pode ser no passado.");
+      return;
+    }
+
     if (periodo && reAte < reDe) {
       setReErro("A data final não pode ser antes da inicial.");
       return;
@@ -2367,11 +2375,20 @@ export default function ConfiguracoesSalao({
   // sendo editados ao vivo, e é justamente enquanto a dona mexe neles que o
   // aviso precisa reagir — apagar a chave Pix pinta a seção de vermelho no
   // mesmo instante, sem esperar reload.
+  //
+  // `cobraAlguem` pelo mesmo motivo, e também do state local: a Regra pode
+  // estar desligada e mesmo assim existir uma regra especial cobrando (ver
+  // temRegraEspecialQueCobra, que já ignora as encerradas). Sem isto, o anel
+  // vermelho não apareceria justamente no salão que vai cobrar em dezembro sem
+  // ter por onde receber. Vem daqui, e não de salaoPodeCobrarSinal sobre a
+  // prop, pra reagir no mesmo instante em que a dona adiciona ou exclui uma
+  // regra — a lista no state é recarregada logo depois de cada gesto.
   const statusEfetivoSinal = calcularStatusSinalPix({
     sinal_regra: sinalRegra,
     metodo_cobranca_pix: metodoCobrancaPix,
     sinal_chave_pix: sinalChavePix,
     abacatepayConectado: abacatepayConectado,
+    cobraAlguem: !sinalDesligado || temRegraEspecialQueCobra,
   });
 
   // Só depois das DUAS cargas (a linha do salão e o booleano da credencial).
@@ -3729,15 +3746,21 @@ export default function ConfiguracoesSalao({
                       <input
                         type="date"
                         value={reDe}
+                        min={hojeIso}
                         onChange={(e) => setReDe(e.target.value)}
                         className={`mt-1 block w-full ${classeCampoRegra}`}
                       />
                     </label>
                     <label className="min-w-0 flex-1 text-xs font-medium text-body">
                       Até
+                      {/* Piso é a data de início quando ela já existe: o fim
+                          nunca pode ser antes dela, e deixar o seletor abrir
+                          em datas que a validação vai recusar é convidar pro
+                          erro. Sem o início preenchido, o piso é hoje. */}
                       <input
                         type="date"
                         value={reAte}
+                        min={reDe || hojeIso}
                         onChange={(e) => setReAte(e.target.value)}
                         className={`mt-1 block w-full ${classeCampoRegra}`}
                       />
