@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import { buscarPerfil } from "@/lib/perfil";
 import { sinalPixRebaixado } from "@/lib/sinalPix";
+import { salaoPodeCobrarSinal } from "@/lib/sinalRegra";
 import { buscarTema } from "@/lib/temas";
 import {
   linkWhatsApp,
@@ -413,8 +414,15 @@ export default function AdminPage() {
   // em lib/sinalPix.js). Único dado do bloco de Pix dos cards que fala da
   // configuração ATUAL, e não do que aconteceu na época daquele agendamento —
   // ver a explicação dos ramos 5 e 6 mais abaixo. Reavaliado a cada render, de
-  // graça: é função pura sobre o estabelecimento já resolvido.
-  const sinalPixRebaixadoAgora = sinalPixRebaixado(estabelecimento);
+  // graça: são duas funções puras sobre o estabelecimento já resolvido.
+  //
+  // `salaoCobraSinal` substituiu o corte por `sinal_regra !== 'desligado'` que
+  // vivia dentro de calcularStatusSinalPix: com as regras especiais, um salão
+  // de padrão desligado pode cobrar de todo mundo em dezembro, e o corte
+  // antigo silenciava o alerta exatamente nele. `sinal_regras_especiais` vem
+  // hidratado no estabelecimento pelo loader (ver lib/perfil.js).
+  const salaoCobraSinal = salaoPodeCobrarSinal(estabelecimento);
+  const sinalPixRebaixadoAgora = sinalPixRebaixado(estabelecimento, salaoCobraSinal);
 
   // Autenticado, mas sem linha em perfis (conta órfã): não há salão a resolver.
   // Troca todo o conteúdo pela tela "Conta sem salão vinculado".
@@ -3004,11 +3012,12 @@ export default function AdminPage() {
                          estava mostrando.
 
                          Junto com o ramo 5, o único que olha a configuração
-                         ATUAL do salão (estabelecimento.sinal_regra): com o
-                         sinal desligado não existe cobrança nenhuma pra
-                         explicar, e o aviso viraria ruído em todo card
-                         pendente. Os 4 primeiros ramos seguem cegos à config
-                         de propósito — eles
+                         ATUAL do salão — via `salaoCobraSinal`, que é o padrão
+                         (`sinal_regra`) MAIS as regras especiais vigentes ou
+                         futuras: com o sinal desligado e nenhuma exceção não
+                         existe cobrança nenhuma pra explicar, e o aviso
+                         viraria ruído em todo card pendente. Os 4 primeiros
+                         ramos seguem cegos à config de propósito — eles
                          relatam o que aconteceu na época DAQUELE agendamento
                          (o gateway confirmou / a cliente anexou / declarou /
                          ficou devendo), e isso não deixa de ser verdade
@@ -3016,12 +3025,13 @@ export default function AdminPage() {
 
                          O valor vem do `estabelecimento` resolvido no mount
                          (ver o efeito de buscarPerfil/buscarEstabelecimento
-                         acima), e ConfiguracoesSalao grava sinal_regra na
-                         própria cópia sem avisar este componente. Desligar o
-                         sinal em Regras e voltar pra cá sem recarregar deixa
-                         o aviso no ar até o próximo reload — aceito de
-                         propósito, pra não abrir mais um callback de patch
-                         por um badge informativo.
+                         acima), e ConfiguracoesSalao grava sinal_regra e as
+                         regras especiais na própria cópia sem avisar este
+                         componente. Desligar o sinal (ou mexer nas regras) em
+                         Regras e voltar pra cá sem recarregar deixa o aviso no
+                         ar até o próximo reload — aceito de propósito, pra não
+                         abrir mais um callback de patch por um badge
+                         informativo.
 
                       A cadeia de ternários é o que garante o "um ou outro":
                       antes, 2 e 3 já eram mutuamente exclusivos por acaso (um
@@ -3059,7 +3069,7 @@ export default function AdminPage() {
                   ) : item.status === "pendente" &&
                     !item.sinal_declarado_pago &&
                     !item.comprovante_pix_url &&
-                    estabelecimento?.sinal_regra !== "desligado" ? (
+                    salaoCobraSinal ? (
                     <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 ring-1 ring-gray-300">
                       <Info className="h-3.5 w-3.5" aria-hidden="true" />
                       Nenhum sinal de Pix foi cobrado
