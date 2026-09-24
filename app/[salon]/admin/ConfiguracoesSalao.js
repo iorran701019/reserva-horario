@@ -8,6 +8,7 @@ import ModalImportarGoogleCalendar from "@/components/ModalImportarGoogleCalenda
 import { MENSAGENS_WHATSAPP_CONFIG, substituirVariaveis } from "@/lib/whatsapp";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import { calcularStatusSinalPix } from "@/lib/sinalPix";
+import { formatarPreco } from "@/lib/preco";
 import { buscarEtiquetasAtivas } from "@/lib/clientesAdmin";
 import { rotuloEtiqueta } from "@/components/SeletorEtiquetaRapido";
 import { buscarMesesJanela } from "@/lib/disponibilidade";
@@ -60,6 +61,116 @@ function dataMaisDias(dias) {
   const mes = String(d.getMonth() + 1).padStart(2, "0");
   const dia = String(d.getDate()).padStart(2, "0");
   return `${ano}-${mes}-${dia}`;
+}
+
+// ---------------------------------------------------------------------------
+// Regras especiais de sinal (bloco "Sinal de reserva")
+// ---------------------------------------------------------------------------
+// Só apresentação e validação de formulário: a REGRA em si (quem vence, quanto
+// custa) mora em lib/sinalRegra.js e não é reimplementada aqui.
+
+// "YYYY-MM-DD" -> "01/12", ou "01/12/2027" quando a data cai fora do ano
+// corrente. Em dd/mm o cartão fica curto, que é o caso comum (uma regra de
+// dezembro deste ano); o ano só aparece quando a falta dele seria ambígua.
+// Fatia a string e NUNCA constrói `new Date("YYYY-MM-DD")`, que é interpretado
+// como UTC e, em GMT-3, volta um dia (mesmo cuidado de formatarDataBR em
+// GerenciarProfissionais.js).
+function formatarDiaMes(iso) {
+  if (!iso) return "";
+  const [ano, mes, dia] = String(iso).slice(0, 10).split("-");
+  const anoAtual = String(new Date().getFullYear());
+  return ano === anoAtual ? `${dia}/${mes}` : `${dia}/${mes}/${ano}`;
+}
+
+// 'vigente' | 'futura' | 'encerrada'. Regra sem período é sempre 'vigente' —
+// ela não tem quando começar nem quando acabar.
+function vigenciaRegra(regra, hoje) {
+  if (!regra.data_inicio || !regra.data_fim) return "vigente";
+  if (regra.data_fim < hoje) return "encerrada";
+  if (regra.data_inicio > hoje) return "futura";
+  return "vigente";
+}
+
+// Dois períodos se cruzam? `null` nas duas pontas significa "sempre", e o
+// cruzamento entre "sempre" e um período NÃO conta: são especificidades
+// diferentes (serviço vs. serviço+data), o resolver sabe qual vence e as duas
+// convivem de propósito. Só "sempre x sempre" e "período x período que se
+// intersecta" são conflito de verdade.
+function vigenciasConflitam(a, b) {
+  const aSempre = !a.data_inicio;
+  const bSempre = !b.data_inicio;
+  if (aSempre !== bSempre) return false;
+  if (aSempre) return true;
+  return a.data_inicio <= b.data_fim && b.data_inicio <= a.data_fim;
+}
+
+// As N linhas de uma regra (uma por serviço, ver grupo_id) viram UM cartão.
+// Mesmo padrão de agruparPorGrupoId em GerenciarProfissionais.js.
+//
+// Ordem: vigentes e "sempre" primeiro, depois as futuras por data de início,
+// e as encerradas no fim — é a ordem em que a dona precisa delas, da que está
+// valendo agora pra que já passou.
+function agruparRegrasEspeciais(regras, hoje) {
+  const porGrupo = new Map();
+
+  for (const regra of regras ?? []) {
+    const atual = porGrupo.get(regra.grupo_id);
+    if (atual) {
+      atual.servicoIds.push(regra.servico_id);
+      continue;
+    }
+    porGrupo.set(regra.grupo_id, {
+      grupoId: regra.grupo_id,
+      data_inicio: regra.data_inicio,
+      data_fim: regra.data_fim,
+      cobranca: regra.cobranca,
+      valor_centavos: regra.valor_centavos,
+      criado_em: regra.criado_em,
+      servicoIds: [regra.servico_id],
+      vigencia: vigenciaRegra(regra, hoje),
+    });
+  }
+
+  const peso = { vigente: 0, futura: 1, encerrada: 2 };
+
+  return [...porGrupo.values()].sort((a, b) => {
+    if (peso[a.vigencia] !== peso[b.vigencia]) return peso[a.vigencia] - peso[b.vigencia];
+    return String(a.data_inicio ?? "").localeCompare(String(b.data_inicio ?? ""));
+  });
+}
+
+// "Todas pagam R$ 100,00" / "Todas pagam o valor padrão, exceto manutenção" /
+// "Sem sinal". Valor próprio ausente é dito com todas as letras — "o valor
+// padrão" —, e não omitido: o cartão precisa responder quanto se cobra sem
+// mandar a dona conferir o campo Valor lá em cima.
+function textoQuemPagaRegra(grupo) {
+  if (grupo.cobranca === "nao_cobrar") return "Sem sinal";
+
+  const valor =
+    grupo.valor_centavos == null
+      ? "o valor padrão"
+      : formatarPreco(grupo.valor_centavos);
+
+  return grupo.cobranca === "exceto_manutencao"
+    ? `Todas pagam ${valor}, exceto manutenção`
+    : `Todas pagam ${valor}`;
+}
+
+// Todas as regras especiais do salão, cruas (uma linha por serviço). Erro de
+// leitura vira lista vazia com log: a tela toda não deve cair por causa da
+// seção de exceções, e "nenhuma regra" é o estado de 100% dos salões hoje.
+async function buscarRegrasEspeciais(estabelecimentoId) {
+  const { data, error } = await supabase
+    .from("sinal_regras_especiais")
+    .select("id, grupo_id, servico_id, data_inicio, data_fim, cobranca, valor_centavos, criado_em")
+    .eq("estabelecimento_id", estabelecimentoId);
+
+  if (error) {
+    console.error("Falha ao carregar as regras especiais de sinal", error);
+    return [];
+  }
+
+  return data ?? [];
 }
 
 // Nome da etiqueta usada como padrao quando a dona poe um mes em "restrito"
@@ -178,6 +289,27 @@ export default function ConfiguracoesSalao({
   const [metodoCobrancaPix, setMetodoCobrancaPix] = useState("manual");
   const [erroSinal, setErroSinal] = useState("");
   const [statusSinal, setStatusSinal] = useState("");
+
+  // Regras especiais de sinal (tabela `sinal_regras_especiais`): exceções por
+  // período e/ou por serviço, por cima da Regra acima. undefined = carregando,
+  // pra não anunciar "nenhuma regra" antes de saber.
+  const [regrasEspeciais, setRegrasEspeciais] = useState(undefined);
+  // Formulário de nova regra. 'sempre' | 'periodo'.
+  const [reQuando, setReQuando] = useState("sempre");
+  const [reDe, setReDe] = useState("");
+  const [reAte, setReAte] = useState("");
+  // 'todos' | 'escolher'.
+  const [reAlvo, setReAlvo] = useState("todos");
+  const [reServicos, setReServicos] = useState([]);
+  // 'todas' | 'exceto_manutencao' | 'nao_cobrar' — os mesmos três valores da
+  // coluna `cobranca`, sem tradução no meio do caminho.
+  const [reQuemPaga, setReQuemPaga] = useState("todas");
+  const [reValor, setReValor] = useState("");
+  const [reErro, setReErro] = useState("");
+  const [reSalvando, setReSalvando] = useState(false);
+  // Grupo pendente de confirmação de exclusão (o modal abaixo da lista) —
+  // mesma ideia do confirmarExclusaoGrupo de SecaoAusencias.
+  const [confirmarExclusaoRegra, setConfirmarExclusaoRegra] = useState(null);
 
   // Credencial da AbacatePay do salão (só existe quando a forma de cobrança
   // é 'abacatepay'). Mesmo padrão do Google Calendar: a api_key NUNCA volta
@@ -657,6 +789,23 @@ export default function ConfiguracoesSalao({
     }
 
     carregarServicos();
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento.id]);
+
+  // Regras especiais de sinal do salão. Recarregada na mão depois de adicionar
+  // ou excluir (ver recarregarRegrasEspeciais), pra lista e frase-resumo
+  // andarem juntas sem reload da página.
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregar() {
+      const dados = await buscarRegrasEspeciais(estabelecimento.id);
+      if (ativo) setRegrasEspeciais(dados);
+    }
+
+    carregar();
     return () => {
       ativo = false;
     };
@@ -2003,6 +2152,138 @@ export default function ConfiguracoesSalao({
     }, 2500);
   }
 
+  async function recarregarRegrasEspeciais() {
+    setRegrasEspeciais(await buscarRegrasEspeciais(estabelecimento.id));
+  }
+
+  function limparCamposRegra() {
+    setReQuando("sempre");
+    setReDe("");
+    setReAte("");
+    setReAlvo("todos");
+    setReServicos([]);
+    setReQuemPaga("todas");
+    setReValor("");
+  }
+
+  function alternarServicoRegra(id) {
+    setReServicos((atual) =>
+      atual.includes(id) ? atual.filter((x) => x !== id) : [...atual, id]
+    );
+  }
+
+  // Nome do serviço pro texto do cartão e da mensagem de conflito. `null` é
+  // "todos os serviços"; um id que não está mais na lista de ativos é um
+  // serviço desativado depois da regra ter sido criada — a regra continua
+  // valendo no banco, então some-la do cartão seria esconder o que está de pé.
+  function rotuloServicoRegra(id) {
+    if (id == null) return "todos os serviços";
+    const servico = servicosAtivos.find((s) => String(s.id) === String(id));
+    return servico ? servico.nome : "serviço removido";
+  }
+
+  // Adiciona a regra: valida, monta UMA linha por serviço escolhido (ou uma
+  // linha com servico_id null) e grava as N de uma vez, todas com o MESMO
+  // grupo_id — é ele que faz as N voltarem como um cartão só e serem excluídas
+  // juntas (mesmo padrão de ausencias.grupo_id).
+  async function salvarRegraEspecial() {
+    setReErro("");
+
+    const periodo = reQuando === "periodo";
+
+    if (periodo && (!reDe || !reAte)) {
+      setReErro("Preencha as duas datas do período.");
+      return;
+    }
+
+    if (periodo && reAte < reDe) {
+      setReErro("A data final não pode ser antes da inicial.");
+      return;
+    }
+
+    if (reAlvo === "escolher" && reServicos.length === 0) {
+      setReErro("Escolha pelo menos um serviço.");
+      return;
+    }
+
+    const dataInicio = periodo ? reDe : null;
+    const dataFim = periodo ? reAte : null;
+    const alvos = reAlvo === "escolher" ? reServicos : [null];
+
+    // SOBREPOSIÇÃO. O motor até resolveria o empate sozinho (a mais recente
+    // vence, ver regraEspecialVencedora), mas "qual das duas está valendo?" não
+    // é pergunta que a dona deva ter que fazer olhando pra tela: duas regras
+    // do mesmo serviço na mesma data são ambiguidade, não configuração.
+    // Especificidades diferentes (uma "sempre" e uma de período) continuam
+    // convivendo — lá o vencedor é explicável.
+    const existentes = regrasEspeciais ?? [];
+    for (const servicoId of alvos) {
+      const conflito = existentes.find(
+        (r) =>
+          String(r.servico_id ?? "") === String(servicoId ?? "") &&
+          vigenciasConflitam({ data_inicio: dataInicio, data_fim: dataFim }, r)
+      );
+
+      if (conflito) {
+        const onde = conflito.data_inicio
+          ? `entre ${formatarDiaMes(conflito.data_inicio)} e ${formatarDiaMes(conflito.data_fim)}`
+          : "válida sempre";
+        setReErro(
+          `Já existe uma regra para ${rotuloServicoRegra(conflito.servico_id)} ${onde}. Exclua ela antes de criar outra.`
+        );
+        return;
+      }
+    }
+
+    // UM grupo_id pro lote inteiro. Gerado uma vez, FORA do map: um por linha
+    // desfaria o grupo e a regra viraria N cartões independentes.
+    const grupoId = crypto.randomUUID();
+    const semCobranca = reQuemPaga === "nao_cobrar";
+    const valorDigitado = reValor.trim() === "" ? null : reaisParaCentavos(reValor);
+
+    const linhas = alvos.map((servicoId) => ({
+      estabelecimento_id: estabelecimento.id,
+      grupo_id: grupoId,
+      servico_id: servicoId,
+      data_inicio: dataInicio,
+      data_fim: dataFim,
+      cobranca: reQuemPaga,
+      // "Ninguém paga" não tem valor: um número aqui seria um preço pra uma
+      // cobrança que não acontece, e reapareceria na tela se a dona trocasse a
+      // regra depois.
+      valor_centavos: semCobranca ? null : valorDigitado,
+    }));
+
+    setReSalvando(true);
+    const { error } = await supabase.from("sinal_regras_especiais").insert(linhas);
+    setReSalvando(false);
+
+    if (error) {
+      setReErro(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
+      return;
+    }
+
+    limparCamposRegra();
+    await recarregarRegrasEspeciais();
+  }
+
+  // Apaga o grupo inteiro de uma vez — as N linhas são uma regra só pra dona.
+  async function excluirRegraEspecial(grupoId) {
+    setReErro("");
+    const { error } = await supabase
+      .from("sinal_regras_especiais")
+      .delete()
+      .eq("estabelecimento_id", estabelecimento.id)
+      .eq("grupo_id", grupoId);
+
+    if (error) {
+      setReErro(`Não foi possível excluir: ${mensagemFalhaSalvar(error)}`);
+      return;
+    }
+
+    await recarregarRegrasEspeciais();
+  }
+
   const carregandoValor = escolhaProfissional === undefined;
   const carregandoSinal = sinalRegra === undefined;
   const carregandoRegrasAgendamento = avisoRegrasAgendamento === undefined;
@@ -2020,10 +2301,54 @@ export default function ConfiguracoesSalao({
   const carregandoAntecedenciaMinima = antecedenciaMinimaHoras === undefined;
   const carregandoAbacatepay = abacatepayConectado === undefined;
   const sinalDesligado = sinalRegra === "desligado";
+
+  // Mesma classe de campo compacto da aba Exceções de Horário
+  // (classeCampo em GerenciarProfissionais.js): o formulário de exceção é
+  // menor e mais denso que os campos de configuração do bloco.
+  const classeCampoRegra =
+    "rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10";
+
+  const hojeIso = dataMaisDias(0);
+  const gruposRegrasEspeciais = agruparRegrasEspeciais(regrasEspeciais, hojeIso);
+  // Encerradas não contam em lugar nenhum: nem na frase-resumo, nem pra
+  // destravar os campos de cobrança. Elas ficam na lista só como histórico.
+  const gruposRegrasAtivas = gruposRegrasEspeciais.filter(
+    (g) => g.vigencia !== "encerrada"
+  );
+  const temRegraEspecialQueCobra = gruposRegrasAtivas.some(
+    (g) => g.cobranca !== "nao_cobrar"
+  );
+
   // Nenhum sinal é cobrado de ninguém: regra desligada E a Lista de Bloqueio
-  // desmarcada. Com a Lista marcada, a regra desligada ainda cobra dessas
-  // clientes, então forma de cobrança, valor e chave Pix continuam editáveis.
-  const sinalSemCobranca = sinalDesligado && !cobrarSinalListaBloqueio;
+  // desmarcada E nenhuma regra especial cobrando. Com qualquer um dos três, a
+  // cobrança existe pra alguém — e forma de cobrança, valor e chave Pix
+  // precisam continuar editáveis, senão a dona cadastra a regra de dezembro e
+  // fica sem como configurar por onde receber.
+  const sinalSemCobranca =
+    sinalDesligado && !cobrarSinalListaBloqueio && !temRegraEspecialQueCobra;
+
+  // Frase-resumo do topo do bloco, em português de gente: o que está valendo
+  // AGORA, sem a dona ter que ler quatro campos e cruzar na cabeça. Sai do
+  // padrão do salão; as exceções entram só como contagem, porque cada uma já
+  // tem o cartão dela logo abaixo.
+  const resumoSinalPadrao = (() => {
+    if (carregandoSinal) return "";
+    if (sinalDesligado) return "Hoje: sinal desligado.";
+
+    const valor = formatarPreco(reaisParaCentavos(sinalValor));
+    if (sinalRegra === "todos") return `Hoje: sinal de ${valor} para todas as clientes.`;
+    if (sinalRegra === "exceto_manutencao") {
+      return `Hoje: sinal de ${valor} para todas, exceto manutenção.`;
+    }
+    return `Hoje: sinal de ${valor} para clientes novas.`;
+  })();
+
+  const resumoSinalExcecoes =
+    gruposRegrasAtivas.length === 0
+      ? ""
+      : gruposRegrasAtivas.length === 1
+        ? " + 1 regra especial."
+        : ` + ${gruposRegrasAtivas.length} regras especiais.`;
   // A credencial da AbacatePay só faz sentido com o sinal cobrado de alguém E
   // pela API — no modo manual não existe nada pra autenticar.
   const mostrarAbacatepay = !sinalSemCobranca && metodoCobrancaPix === "abacatepay";
@@ -3090,7 +3415,19 @@ export default function ConfiguracoesSalao({
 
         {blocoAberto === "sinal" && (
           <div className="border-t border-border p-4">
-            <p className="text-xs text-muted">
+            {/* Frase-resumo: o que está valendo agora, em uma linha. A dona
+                não deveria precisar ler quatro campos e cruzar na cabeça pra
+                responder "quanto eu cobro de sinal hoje?". */}
+            {resumoSinalPadrao && (
+              <p className="text-sm font-medium text-heading">
+                {resumoSinalPadrao}
+                {resumoSinalExcecoes && (
+                  <span className="text-primary">{resumoSinalExcecoes}</span>
+                )}
+              </p>
+            )}
+
+            <p className="mt-1 text-xs text-muted">
               Exige que o cliente declare o pagamento de um sinal via Pix
               antes de confirmar o agendamento.
             </p>
@@ -3352,6 +3689,272 @@ export default function ConfiguracoesSalao({
             {erroSinal && (
               <p className="mt-2 text-xs text-red-600">{erroSinal}</p>
             )}
+
+            {/* ---------------------------------------------------------------
+                Subseção: Regras especiais
+                ---------------------------------------------------------------
+                Exceções por período e/ou por serviço, por cima da Regra do
+                topo. O visual (cartão de formulário, erro inline, botão
+                "Adicionar…", lista de cartões com borda esquerda colorida e
+                botão Excluir à direita) é o mesmo da aba Exceções de Horário —
+                ver SecaoAusencias em GerenciarProfissionais.js. São as duas
+                telas de "exceção à regra normal" do /admin e não têm por que
+                parecer dois produtos diferentes. */}
+            <div className="mt-6 border-t border-border pt-4">
+              <p className="text-sm font-semibold text-heading">
+                Regras especiais
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                Mude o sinal em um período ou para serviços específicos. Vale
+                sempre a regra mais específica.
+              </p>
+
+              <div className="mt-3 rounded-xl bg-surface p-3 ring-1 ring-border">
+                <label className="block text-xs font-medium text-body">
+                  Quando
+                  <select
+                    value={reQuando}
+                    onChange={(e) => setReQuando(e.target.value)}
+                    className={`mt-1 block w-full ${classeCampoRegra}`}
+                  >
+                    <option value="sempre">Sempre</option>
+                    <option value="periodo">Período</option>
+                  </select>
+                </label>
+
+                {reQuando === "periodo" && (
+                  <div className="mt-2 flex gap-2">
+                    <label className="min-w-0 flex-1 text-xs font-medium text-body">
+                      De
+                      <input
+                        type="date"
+                        value={reDe}
+                        onChange={(e) => setReDe(e.target.value)}
+                        className={`mt-1 block w-full ${classeCampoRegra}`}
+                      />
+                    </label>
+                    <label className="min-w-0 flex-1 text-xs font-medium text-body">
+                      Até
+                      <input
+                        type="date"
+                        value={reAte}
+                        onChange={(e) => setReAte(e.target.value)}
+                        className={`mt-1 block w-full ${classeCampoRegra}`}
+                      />
+                    </label>
+                  </div>
+                )}
+
+                <label className="mt-2 block text-xs font-medium text-body">
+                  Serviços
+                  <select
+                    value={reAlvo}
+                    onChange={(e) => {
+                      const novo = e.target.value;
+                      setReAlvo(novo);
+                      // "Exceto manutenção" só existe com TODOS os serviços:
+                      // escolhendo serviço a serviço, a dona já separou o que
+                      // é manutenção do que não é — a opção viraria um filtro
+                      // dentro de uma lista que ela mesma montou.
+                      if (novo === "escolher" && reQuemPaga === "exceto_manutencao") {
+                        setReQuemPaga("todas");
+                      }
+                    }}
+                    className={`mt-1 block w-full ${classeCampoRegra}`}
+                  >
+                    <option value="todos">Todos os serviços</option>
+                    <option value="escolher">Escolher serviços</option>
+                  </select>
+                </label>
+
+                {reAlvo === "escolher" && (
+                  <div className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-lg bg-card p-2 ring-1 ring-border">
+                    {servicosAtivos.length === 0 ? (
+                      <p className="px-1 py-2 text-xs text-muted">
+                        Nenhum serviço ativo cadastrado.
+                      </p>
+                    ) : (
+                      servicosAtivos.map((servico) => (
+                        <label
+                          key={servico.id}
+                          className="flex items-center gap-2 px-1 py-1 text-sm text-body"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={reServicos.includes(servico.id)}
+                            onChange={() => alternarServicoRegra(servico.id)}
+                            className="h-4 w-4 shrink-0 rounded border-border text-primary focus:ring-primary/30"
+                          />
+                          <span className="min-w-0 truncate">{servico.nome}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                <label className="mt-2 block text-xs font-medium text-body">
+                  Quem paga
+                  <select
+                    value={reQuemPaga}
+                    onChange={(e) => setReQuemPaga(e.target.value)}
+                    className={`mt-1 block w-full ${classeCampoRegra}`}
+                  >
+                    <option value="todas">Todas as clientes</option>
+                    {reAlvo === "todos" && (
+                      <option value="exceto_manutencao">
+                        Todas, exceto manutenção
+                      </option>
+                    )}
+                    <option value="nao_cobrar">Ninguém (sem sinal)</option>
+                  </select>
+                </label>
+
+                {/* Some com "Ninguém paga": não há valor a definir pra uma
+                    cobrança que não acontece. */}
+                {reQuemPaga !== "nao_cobrar" && (
+                  <label className="mt-2 block text-xs font-medium text-body">
+                    Valor (R$)
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={reValor}
+                      onChange={(e) => setReValor(e.target.value)}
+                      placeholder={`Padrão: ${formatarPreco(reaisParaCentavos(sinalValor))}`}
+                      className={`mt-1 block w-full ${classeCampoRegra}`}
+                    />
+                  </label>
+                )}
+
+                {reErro && (
+                  <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 ring-1 ring-red-100">
+                    {reErro}
+                  </p>
+                )}
+
+                <button
+                  type="button"
+                  onClick={salvarRegraEspecial}
+                  disabled={reSalvando}
+                  className="mt-3 inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {reSalvando ? "Adicionando..." : "Adicionar regra"}
+                </button>
+              </div>
+
+              {/* LISTA das regras já cadastradas, um cartão por grupo_id. */}
+              <div className="mt-3 space-y-2">
+                {regrasEspeciais === undefined ? (
+                  <p className="rounded-lg bg-surface px-3 py-3 text-sm text-body ring-1 ring-border">
+                    Carregando regras...
+                  </p>
+                ) : gruposRegrasEspeciais.length === 0 ? (
+                  <p className="rounded-lg bg-surface px-3 py-4 text-center text-sm text-body ring-1 ring-border">
+                    Nenhuma regra especial cadastrada.
+                  </p>
+                ) : (
+                  gruposRegrasEspeciais.map((grupo) => {
+                    const encerrada = grupo.vigencia === "encerrada";
+                    const cobra = grupo.cobranca !== "nao_cobrar";
+
+                    return (
+                      <div
+                        key={grupo.grupoId}
+                        className={`flex items-start justify-between gap-3 rounded-xl border-l-4 bg-card p-3 ring-1 ring-border ${
+                          cobra ? "border-l-green-500" : "border-l-gray-400"
+                        } ${encerrada ? "opacity-60" : ""}`}
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm text-heading">
+                            {grupo.data_inicio
+                              ? `${formatarDiaMes(grupo.data_inicio)} a ${formatarDiaMes(grupo.data_fim)}`
+                              : "Sempre"}
+                            {" · "}
+                            {grupo.servicoIds
+                              .map((id) => rotuloServicoRegra(id))
+                              .join(", ")}
+                            {" · "}
+                            {textoQuemPagaRegra(grupo)}
+                          </p>
+                          {(encerrada || grupo.vigencia === "futura") && (
+                            <p className="mt-0.5 text-xs text-muted">
+                              {encerrada ? "Encerrada" : "Ainda não começou"}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmarExclusaoRegra(grupo)}
+                          className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                        >
+                          Excluir
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Confirmação da exclusão. Apaga o grupo_id inteiro — as N
+                  linhas por serviço são uma regra só pra dona (mesmo modal da
+                  exclusão de "Datas avulsas" em SecaoAusencias). */}
+              {confirmarExclusaoRegra && (
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="titulo-excluir-regra-sinal"
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+                  onClick={() => setConfirmarExclusaoRegra(null)}
+                >
+                  <div
+                    className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <h2
+                      id="titulo-excluir-regra-sinal"
+                      className="text-lg font-semibold text-heading"
+                    >
+                      Excluir regra especial
+                    </h2>
+                    <p className="mt-2 text-sm text-body">
+                      Depois disso, o sinal desses agendamentos volta a seguir a
+                      regra normal do salão.
+                    </p>
+                    <p className="mt-2 text-sm font-medium text-heading">
+                      {confirmarExclusaoRegra.data_inicio
+                        ? `${formatarDiaMes(confirmarExclusaoRegra.data_inicio)} a ${formatarDiaMes(confirmarExclusaoRegra.data_fim)}`
+                        : "Sempre"}
+                      {" · "}
+                      {confirmarExclusaoRegra.servicoIds
+                        .map((id) => rotuloServicoRegra(id))
+                        .join(", ")}
+                    </p>
+
+                    <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const grupoId = confirmarExclusaoRegra.grupoId;
+                          setConfirmarExclusaoRegra(null);
+                          await excluirRegraEspecial(grupoId);
+                        }}
+                        className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700"
+                      >
+                        Excluir
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmarExclusaoRegra(null)}
+                        className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
