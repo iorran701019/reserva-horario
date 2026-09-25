@@ -940,12 +940,15 @@ export default function FormularioAgendamento({
   // aqui (antes dos blocos de decisão de etapa abaixo, que já usam rolarPara).
   const profissionalRef = useRef(null);
   const dataRef = useRef(null);
+  // Quadro de fase do serviço de duas datas (etapa "data"): a troca de fase
+  // rola até ele, pra a cliente ver a mudança no celular.
+  const quadroFaseRef = useRef(null);
 
   // scrollIntoView só depois do render que monta o bloco alvo: rAF garante que
   // o elemento (e a ref) já existem no DOM.
-  function rolarPara(ref) {
+  function rolarPara(ref, bloco = "center") {
     requestAnimationFrame(() => {
-      ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      ref.current?.scrollIntoView({ behavior: "smooth", block: bloco });
     });
   }
 
@@ -3112,7 +3115,7 @@ export default function FormularioAgendamento({
     setErro("");
     setForm((anterior) => ({ ...anterior, data: restaura ? guardado.data : "" }));
     setMesVisivel(new Date(ano, mesNum - 1, 1));
-    rolarPara(dataRef);
+    rolarPara(quadroFaseRef, "start");
   }
 
   // Volta da segunda passagem para a escolha do teste, com o dia e o horário
@@ -3134,6 +3137,7 @@ export default function FormularioAgendamento({
     setTesteEscolhido(null);
     setAvisoHorarioIndisponivel(false);
     setErro("");
+    rolarPara(quadroFaseRef, "start");
   }
 
   // Prazo mínimo entre agendamentos do cliente, rodado em CADA data do par
@@ -4956,39 +4960,60 @@ export default function FormularioAgendamento({
           <>
             <div ref={dataRef}>
               {/* Serviço de duas datas: a mesma etapa é percorrida duas
-                  vezes, em ordem cronológica (ver faseData), e o título é a
-                  única coisa que diz em qual das duas a cliente está.
-                  Serviço normal: o "Data" de sempre. */}
-              <span className="mb-1 block text-sm font-medium text-on-card">
-                {!servicoExigeSegundaData
-                  ? "Data"
-                  : faseData === "anterior"
-                  ? `Escolha o dia do ${nomeEtapaAnterior}`
-                  : "Agora escolha o dia do atendimento principal"}
-              </span>
-
-              {/* Resumo fixo do que já foi escolhido na primeira passagem —
-                  sem ele a segunda escolha aconteceria às cegas, e a regra
-                  "depois do teste" (dias cinzas no calendário) não teria
-                  explicação em tela. O "alterar" sai pelo voltarFisicoData
-                  (nunca por voltarParaFaseTeste direto) pra consumir a
-                  entrada de histórico desta fase — ver lib/voltarFisico.js. */}
-              {faseData === "evento" && testeEscolhido && (
-                <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-surface px-3 py-2 text-sm text-body">
-                  <span>
-                    <span className="font-medium text-heading">
-                      {nomeEtapaAnterior}:
-                    </span>{" "}
-                    {formatarData(testeEscolhido.data)} às{" "}
-                    {formatarHorario(testeEscolhido.horario)}
+                  vezes, em ordem cronológica (ver faseData), e este quadro é
+                  a única coisa que diz em qual das duas a cliente está — por
+                  isso é destacado (borda de 2px e fundo claro na cor de
+                  destaque do TEMA: as mesmas variáveis do wrapper raiz,
+                  --color-primary, e o mesmo color-mix do serviço
+                  selecionado; sem cor fixa). O texto usa --color-heading
+                  (escuro) e não on-card, que em tema de card escuro é claro e
+                  sumiria neste fundo. Serviço normal: o "Data" de sempre. */}
+              {!servicoExigeSegundaData ? (
+                <span className="mb-1 block text-sm font-medium text-on-card">
+                  Data
+                </span>
+              ) : (
+                <div
+                  ref={quadroFaseRef}
+                  className="mb-3 rounded-xl border-2 p-3"
+                  style={{
+                    borderColor: "var(--color-primary)",
+                    backgroundColor:
+                      "color-mix(in srgb, var(--color-primary) 12%, white)",
+                    color: "var(--color-heading)",
+                  }}
+                >
+                  <span className="inline-flex rounded-full bg-primary px-2.5 py-0.5 text-xs font-semibold text-on-primary">
+                    {faseData === "anterior" ? "Passo 1 de 2" : "Passo 2 de 2"}
                   </span>
-                  <button
-                    type="button"
-                    onClick={voltarFisicoData}
-                    className="font-medium text-primary underline underline-offset-2"
-                  >
-                    alterar
-                  </button>
+                  <p className="mt-1.5 text-base font-semibold leading-snug">
+                    {faseData === "anterior"
+                      ? `Escolha o dia do ${nomeEtapaAnterior}`
+                      : "Agora escolha o dia do atendimento principal"}
+                  </p>
+
+                  {/* Resumo do que já foi escolhido na primeira passagem —
+                      sem ele a segunda escolha aconteceria às cegas, e a regra
+                      "depois do teste" (dias cinzas no calendário) não teria
+                      explicação em tela. O "alterar" sai pelo voltarFisicoData
+                      (nunca por voltarParaFaseTeste direto) pra consumir a
+                      entrada de histórico desta fase — ver lib/voltarFisico.js. */}
+                  {faseData === "evento" && testeEscolhido && (
+                    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-primary/30 pt-2 text-sm">
+                      <span>
+                        <span className="font-semibold">{nomeEtapaAnterior}:</span>{" "}
+                        {formatarData(testeEscolhido.data)} às{" "}
+                        {formatarHorario(testeEscolhido.horario)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={voltarFisicoData}
+                        className="font-semibold underline underline-offset-2"
+                      >
+                        alterar
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
