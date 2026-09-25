@@ -3070,6 +3070,11 @@ export default function AdminPage() {
                           quebrar dentro do card em vez de estourar a borda. */}
                       <span className="min-w-0 basis-full break-words text-sm text-body sm:basis-auto">
                         {item.servicos?.nome ?? "—"}
+                        {item.papel_reserva === "anterior" && (
+                          <span className="ml-2 rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700">
+                            {nomeEtapaAnterior(item)}
+                          </span>
+                        )}
                       </span>
                     </div>
                   </div>
@@ -3610,6 +3615,11 @@ export default function AdminPage() {
                           <span className="text-body">Serviço</span>
                           <span className="min-w-0 break-words font-medium">
                             {item.servicos?.nome ?? "—"}
+                            {item.papel_reserva === "anterior" && (
+                              <span className="ml-2 rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700">
+                                {nomeEtapaAnterior(item)}
+                              </span>
+                            )}
                           </span>
                         </span>
                         {Boolean(item.profissional_nome) &&
@@ -3858,6 +3868,11 @@ export default function AdminPage() {
                           servico_id. */}
                       <span className="min-w-0 basis-full break-words text-sm text-body sm:basis-auto">
                         {item.servicos?.nome ?? item.servico_livre ?? "—"}
+                        {item.papel_reserva === "anterior" && (
+                          <span className="ml-2 rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700">
+                            {nomeEtapaAnterior(item)}
+                          </span>
+                        )}
                       </span>
                     </div>
                     {mostrarProfissional && (
@@ -4085,6 +4100,11 @@ export default function AdminPage() {
                           <span className="text-body">Serviço</span>
                           <span className="min-w-0 break-words font-medium">
                             {item.servicos?.nome ?? "—"}
+                            {item.papel_reserva === "anterior" && (
+                              <span className="ml-2 rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700">
+                                {nomeEtapaAnterior(item)}
+                              </span>
+                            )}
                           </span>
                         </span>
                         {Boolean(item.profissional_nome) &&

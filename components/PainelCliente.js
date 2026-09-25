@@ -6,6 +6,7 @@ import { linkWhatsApp, MENSAGEM_AJUDA_PRAZO_EXPIRADO } from "@/lib/whatsapp";
 import {
   agruparPares,
   buscarAgendamentosAtivos,
+  nomeEtapaAnterior,
   buscarHistoricoRecente,
   cancelarAgendamentoCliente,
 } from "@/lib/agendamentosCliente";
@@ -455,7 +456,7 @@ export default function PainelCliente({
                   )}
                 </span>
                 <span className="block text-sm text-body">
-                  {item.servicos?.nome ?? "Serviço"}
+                  {item.papel_reserva === "anterior" ? `${nomeEtapaAnterior(item)} · ` : ""}{item.servicos?.nome ?? "Serviço"}
                 </span>
                 {/* Serviço de duas datas: a etapa anterior é uma LINHA a mais
                     dentro do card do atendimento principal, nunca um card
@@ -568,7 +569,7 @@ export default function PainelCliente({
                     {formatarData(item.data)} · {String(item.horario).slice(0, 5)}
                   </span>
                   <span className="block text-xs">
-                    {item.servicos?.nome ?? "Serviço"}
+                    {item.papel_reserva === "anterior" ? `${nomeEtapaAnterior(item)} · ` : ""}{item.servicos?.nome ?? "Serviço"}
                   </span>
                   {item.etapaAnterior && (
                     <span className="block text-xs">
