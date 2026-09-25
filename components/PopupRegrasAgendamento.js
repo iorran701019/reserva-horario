@@ -50,7 +50,7 @@ export default function PopupRegrasAgendamento({ texto, onConfirmar }) {
           <button
             type="button"
             onClick={onConfirmar}
-            className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+            className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
           >
             Entendi, continuar
           </button>

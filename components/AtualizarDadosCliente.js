@@ -548,7 +548,7 @@ export default function AtualizarDadosCliente({
       <button
         type="submit"
         disabled={enviando}
-        className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+        className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
       >
         {enviando ? "Salvando..." : "Salvar alterações"}
       </button>
@@ -556,7 +556,7 @@ export default function AtualizarDadosCliente({
       <button
         type="button"
         onClick={onCancelar}
-        className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-body ring-1 ring-border transition hover:bg-surface"
+        className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
       >
         Voltar
       </button>

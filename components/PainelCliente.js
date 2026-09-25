@@ -381,7 +381,7 @@ export default function PainelCliente({
           <button
             type="button"
             onClick={() => onNovoAgendamento(manutencaoSugerida.servico)}
-            className="mt-3 w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+            className="mt-3 w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
           >
             Agendar manutenção
           </button>
@@ -412,7 +412,7 @@ export default function PainelCliente({
       <button
         type="button"
         onClick={() => onNovoAgendamento()}
-        className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+        className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
       >
         Novo agendamento
       </button>
@@ -477,7 +477,7 @@ export default function PainelCliente({
                   <button
                     type="button"
                     onClick={() => setConfirmandoSinalId(item.id)}
-                    className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+                    className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover"
                   >
                     Confirmar pagamento
                   </button>

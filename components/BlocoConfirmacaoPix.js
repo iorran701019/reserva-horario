@@ -362,7 +362,7 @@ export default function BlocoConfirmacaoPix({
           <button
             type="button"
             onClick={copiarChavePix}
-            className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover"
+            className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary transition hover:bg-primary-hover"
           >
             {chavePixCopiada ? "Copiado!" : "Copiar chave"}
           </button>
@@ -397,7 +397,7 @@ export default function BlocoConfirmacaoPix({
               type="button"
               onClick={() => inputImagemRef.current?.click()}
               disabled={enviandoComprovante}
-              className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+              className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {enviandoComprovante ? "Enviando..." : "Enviar print/foto"}
             </button>
@@ -405,7 +405,7 @@ export default function BlocoConfirmacaoPix({
               type="button"
               onClick={() => inputPdfRef.current?.click()}
               disabled={enviandoComprovante}
-              className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+              className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               Enviar PDF
             </button>
@@ -447,7 +447,7 @@ export default function BlocoConfirmacaoPix({
               type="button"
               onClick={marcarPendente}
               disabled={marcandoPendente}
-              className="mt-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {marcandoPendente ? "Enviando..." : "Tentar novamente"}
             </button>

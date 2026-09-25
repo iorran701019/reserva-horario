@@ -212,7 +212,7 @@ function BotaoServico({ servico, selecionado, onSelect }) {
       className={[
         "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 transition",
         selecionado
-          ? "bg-primary text-white ring-primary"
+          ? "bg-primary text-on-primary ring-primary"
           : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
       ].join(" ")}
     >
@@ -633,7 +633,7 @@ export function CalendarioDias({
                 desabilitado
                   ? "cursor-not-allowed text-muted/40"
                   : sel
-                  ? "bg-primary font-semibold text-white ring-1 ring-primary"
+                  ? "bg-primary font-semibold text-on-primary ring-1 ring-primary"
                   : dentroDoPrazo
                   ? "bg-green-50 text-body ring-1 ring-green-200 hover:border-primary hover:ring-primary"
                   : foraDoPrazo
@@ -1713,7 +1713,7 @@ export default function FormularioAgendamento({
           selecionado
             ? tema
               ? ""
-              : "bg-primary text-white ring-primary"
+              : "bg-primary text-on-primary ring-primary"
             : "bg-card text-on-card ring-border hover:border-primary hover:ring-primary",
         ].join(" ")}
         style={
@@ -4683,7 +4683,7 @@ export default function FormularioAgendamento({
                 className={[
                   "flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold ring-1 transition",
                   atual
-                    ? "bg-primary text-white ring-primary"
+                    ? "bg-primary text-on-primary ring-primary"
                     : concluida
                     ? "bg-green-100 text-green-700 ring-green-200"
                     : "bg-card text-on-card ring-border",
@@ -4885,7 +4885,7 @@ export default function FormularioAgendamento({
                           className={[
                             "flex items-center gap-3 rounded-xl px-4 py-3 text-left ring-1 transition",
                             selecionado
-                              ? "bg-primary text-white ring-primary shadow-sm"
+                              ? "bg-primary text-on-primary ring-primary shadow-sm"
                               : "bg-card text-on-card ring-border hover:border-primary hover:ring-primary hover:shadow-sm",
                           ].join(" ")}
                         >
@@ -4893,7 +4893,7 @@ export default function FormularioAgendamento({
                             className={[
                               "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
                               selecionado
-                                ? "bg-white/20 text-white"
+                                ? "bg-white/20 text-on-primary"
                                 : "bg-surface text-heading ring-1 ring-border",
                             ].join(" ")}
                             aria-hidden="true"
@@ -5149,7 +5149,7 @@ export default function FormularioAgendamento({
                               className={[
                                 "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
                                 selecionado
-                                  ? "bg-primary text-white ring-primary"
+                                  ? "bg-primary text-on-primary ring-primary"
                                   : "bg-field text-body ring-border hover:border-primary hover:ring-primary",
                               ].join(" ")}
                             >
@@ -5199,7 +5199,7 @@ export default function FormularioAgendamento({
                               className={[
                                 "relative rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
                                 selecionado
-                                  ? "bg-primary text-white ring-primary"
+                                  ? "bg-primary text-on-primary ring-primary"
                                   : bloqueado
                                   ? "border-2 border-dashed border-violet-300 bg-card text-on-card ring-border hover:border-violet-400"
                                   : "bg-card text-on-card ring-border hover:border-primary hover:ring-primary",
@@ -5549,7 +5549,7 @@ export default function FormularioAgendamento({
               <button
                 type="submit"
                 disabled={enviando}
-                className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {enviando ? "Enviando..." : rotuloSubmit}
               </button>
@@ -5610,7 +5610,7 @@ export default function FormularioAgendamento({
               <button
                 type="button"
                 onClick={confirmarManutencao}
-                className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+                className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
               >
                 Sim, fiz aqui
               </button>

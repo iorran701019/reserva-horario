@@ -66,7 +66,7 @@ export default function ModalConflitoWhatsapp({
               <button
                 type="button"
                 onClick={onConfirmar}
-                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
               >
                 Sim, sou eu
               </button>

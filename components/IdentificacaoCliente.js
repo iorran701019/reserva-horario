@@ -478,7 +478,7 @@ export default function IdentificacaoCliente({
             <button
               type="button"
               onClick={handleConfirmarSim}
-              className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               Sim, sou eu
             </button>

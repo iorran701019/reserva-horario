@@ -339,7 +339,7 @@ export default function BlocoQrCodeAbacatePay({
               type="button"
               onClick={gerarCobranca}
               disabled={carregando}
-              className="mt-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {carregando ? "Gerando..." : "Tentar novamente"}
             </button>
@@ -372,7 +372,7 @@ export default function BlocoQrCodeAbacatePay({
               <button
                 type="button"
                 onClick={copiarCodigo}
-                className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-hover"
+                className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary transition hover:bg-primary-hover"
               >
                 {codigoCopiado ? "Copiado!" : "Copiar código"}
               </button>
