@@ -5645,7 +5645,7 @@ export default function FormularioAgendamento({
           <button
             type="button"
             onClick={confirmarAlerta}
-            className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+            className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
           >
             Continuar
           </button>
@@ -5672,7 +5672,7 @@ export default function FormularioAgendamento({
           <button
             type="button"
             onClick={confirmarAlertaCategoria}
-            className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+            className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
           >
             Ciente
           </button>
@@ -5731,7 +5731,7 @@ export default function FormularioAgendamento({
                             className={[
                               "rounded-lg px-3 py-2 text-sm font-medium ring-1 transition",
                               selecionada
-                                ? "bg-primary text-white ring-primary"
+                                ? "bg-primary text-on-primary ring-primary"
                                 : "bg-card text-on-card ring-border hover:border-primary hover:ring-primary",
                             ].join(" ")}
                           >
@@ -5766,7 +5766,7 @@ export default function FormularioAgendamento({
               <button
                 type="button"
                 onClick={confirmarModalPerguntas}
-                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
               >
                 Continuar
               </button>
