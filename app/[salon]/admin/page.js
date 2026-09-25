@@ -1136,12 +1136,24 @@ export default function AdminPage() {
   // a gravação do status. Chamado direto por handleConfirmar quando dentro da
   // janela, ou pelo popup de confirmacaoForaDaJanela quando a dona confirma
   // mesmo assim.
+  //
+  // Par (serviço de duas datas): clicar na PRINCIPAL confirma também a etapa
+  // anterior, se ela ainda estiver pendente/aguardando_sinal, no MESMO UPDATE
+  // (`.in("id", ids)`, atômico). Clicar na ANTERIOR confirma só ela. O WhatsApp
+  // é um só, o da linha clicada. Sem reserva_grupo_id, o caminho é o de sempre.
   async function executarConfirmacao(agendamento, notificar) {
-    const { data, error } = await supabase
-      .from("agendamentos")
-      .update({ status: "confirmado" })
-      .eq("id", agendamento.id)
-      .select("id");
+    const irma =
+      agendamento.papel_reserva === "principal" ? irmaDoPar(agendamento) : null;
+    const levarIrma =
+      irma != null &&
+      irma.papel_reserva === "anterior" &&
+      (irma.status === "pendente" || irma.status === "aguardando_sinal");
+    const ids = levarIrma ? [agendamento.id, irma.id] : [agendamento.id];
+
+    const consulta = supabase.from("agendamentos").update({ status: "confirmado" });
+    const { data, error } = await (
+      ids.length === 1 ? consulta.eq("id", ids[0]) : consulta.in("id", ids)
+    ).select("id");
 
     if (error) {
       setErro(`Não foi possível confirmar o agendamento: ${error.message}`);
@@ -1158,8 +1170,22 @@ export default function AdminPage() {
       return;
     }
 
+    // Par com gravação parcial: reflete só o que gravou, avisa e não abre o
+    // WhatsApp (mesmo tratamento do cancelamento).
+    if (data.length !== ids.length) {
+      for (const linha of data) {
+        atualizarStatusLocal(linha.id, "confirmado");
+      }
+      setErro(
+        "Só uma das duas linhas do par foi confirmada. Recarregue a página e confira antes de tentar de novo."
+      );
+      return;
+    }
+
     setErro("");
-    atualizarStatusLocal(agendamento.id, "confirmado");
+    for (const id of ids) {
+      atualizarStatusLocal(id, "confirmado");
+    }
 
     if (notificar) {
       abrirWhatsApp(

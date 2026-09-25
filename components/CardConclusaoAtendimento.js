@@ -100,8 +100,12 @@ function centavosParaTexto(centavos) {
 //   onFechar    – opcional; mostra um "Cancelar" que fecha o card sem gravar
 //                 (usado pelo "Editar" do Histórico).
 export default function CardConclusaoAtendimento({ agendamento, onSalvo, onFechar }) {
+  // Etapa anterior de um par (serviço de duas datas) não cobra: o valor é do
+  // atendimento principal. "Substituir valor" continua valendo.
   const valorPadrao =
-    agendamento.valor_cobrado_centavos ?? agendamento.servicos?.preco_centavos ?? null;
+    agendamento.papel_reserva === "anterior"
+      ? 0
+      : agendamento.valor_cobrado_centavos ?? agendamento.servicos?.preco_centavos ?? null;
 
   // Total escolhido pelo "Salvar valor" (centavos, já com o sinal somado no
   // estado 2). null = a dona não substituiu, vale o valor padrão.

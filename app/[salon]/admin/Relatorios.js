@@ -129,7 +129,11 @@ function montarResumo(linhas, agora, estabelecimento) {
       continue;
     }
     desfecho[categoria] += 1;
-    if (categoria === "concluido") tipo[classificarTipoServico(item)] += 1;
+    // A etapa anterior de um par conta no desfecho, mas não no tipo de serviço:
+    // o serviço é o mesmo do atendimento principal e contaria em dobro.
+    if (categoria === "concluido" && item.papel_reserva !== "anterior") {
+      tipo[classificarTipoServico(item)] += 1;
+    }
   }
 
   return { desfecho, tipo, estimados };
@@ -234,6 +238,9 @@ function montarFinanceiro(linhas) {
     }
 
     if (item.status !== "concluido") continue;
+    // Etapa anterior de um par: valor ZERO no faturamento (não dobra a receita)
+    // e fora de comValor/porForma, pra não puxar o ticket médio pra baixo.
+    if (item.papel_reserva === "anterior") continue;
     if (item.valor_cobrado_centavos != null) {
       receita += item.valor_cobrado_centavos;
       comValor += 1;
@@ -260,7 +267,10 @@ function montarFinanceiro(linhas) {
     porForma,
     comValor,
     semValor: linhas.filter(
-      (i) => i.status === "concluido" && i.valor_cobrado_centavos == null
+      (i) =>
+        i.status === "concluido" &&
+        i.papel_reserva !== "anterior" &&
+        i.valor_cobrado_centavos == null
     ).length,
     ticket: comValor > 0 ? Math.round(receita / comValor) : null,
   };
@@ -273,6 +283,7 @@ function montarSerieReceita(linhas, baldes, chaveDe) {
 
   for (const item of linhas) {
     if (item.status !== "concluido" || item.valor_cobrado_centavos == null) continue;
+    if (item.papel_reserva === "anterior") continue;
     const chave = chaveDe(item);
     if (soma.has(chave)) soma.set(chave, soma.get(chave) + item.valor_cobrado_centavos);
   }
@@ -328,7 +339,7 @@ async function buscarFechados(estabelecimentoId, inicio, fim) {
   const { data, error } = await supabase
     .from("agendamentos")
     .select(
-      "id, data, horario, telefone, duracao_min, status, cancelado_por_cliente, cancelado_pelo_salao, nao_compareceu, expirado_automaticamente, valor_cobrado_centavos, forma_pagamento_servico, sinal_declarado_pago, sinal_valor_centavos, servico_id, servicos(duracao_min, eh_manutencao, manutencao_externa)"
+      "id, data, horario, telefone, duracao_min, status, cancelado_por_cliente, cancelado_pelo_salao, nao_compareceu, expirado_automaticamente, valor_cobrado_centavos, forma_pagamento_servico, sinal_declarado_pago, sinal_valor_centavos, servico_id, papel_reserva, servicos(duracao_min, eh_manutencao, manutencao_externa)"
     )
     .eq("estabelecimento_id", estabelecimentoId)
     .eq("finalizado", true)
