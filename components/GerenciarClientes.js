@@ -20,7 +20,7 @@ import {
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import { supabase } from "@/lib/supabaseClient";
 import { existeModeloAtivo } from "@/lib/anamnese";
-import { buscarConfirmadosPorTelefones } from "@/lib/agendamentosCliente";
+import { buscarConfirmadosPorTelefones, nomeEtapaAnterior } from "@/lib/agendamentosCliente";
 import { classificarAgendamento, rotuloHistorico, ordenarHistoricoPorStatus } from "@/lib/particao";
 import { buscarProgressoFidelidade } from "@/lib/fidelidade";
 import { formatarDataBR, formatarHorario } from "@/lib/data";
@@ -710,6 +710,13 @@ function DetalheCliente({
                               {formatarDataBR(item.data)} · {formatarHorario(item.horario)}
                             </span>
                             <span>{item.servicos?.nome ?? "Serviço"}</span>
+                            {item.papel_reserva === "anterior" && (
+                              <span
+                                className="rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700"
+                              >
+                                {nomeEtapaAnterior(item)}
+                              </span>
+                            )}
                             <span
                               className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${meta.classe}`}
                             >

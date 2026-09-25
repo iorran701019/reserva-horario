@@ -34,7 +34,7 @@ async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
     .select(
-      "id, nome_cliente, telefone, data, horario, status, finalizado, observacao, servico_id, servico_livre, duracao_min, profissional_id, origem, servicos(nome, duracao_min), profissionais(nome)"
+      "id, nome_cliente, telefone, data, horario, status, finalizado, observacao, servico_id, servico_livre, duracao_min, profissional_id, origem, reserva_grupo_id, papel_reserva, servicos(nome, duracao_min, nome_etapa_anterior), profissionais(nome)"
     )
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })

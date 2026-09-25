@@ -41,7 +41,7 @@ import {
 } from "@/lib/janelaAgendamento";
 import { rotuloMesLongo } from "@/lib/mes";
 import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
-import { buscarConflitoPrazoMinimo } from "@/lib/agendamentosCliente";
+import { buscarConflitoPrazoMinimo, nomeEtapaAnterior } from "@/lib/agendamentosCliente";
 import { verificarFidelidadeClientes, buscarProgressoFidelidade } from "@/lib/fidelidade";
 import LinkComprovantePix from "@/components/LinkComprovantePix";
 import {
@@ -349,7 +349,7 @@ function estaAguardandoConclusao(item, agora) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, editado_manualmente_em, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, reserva_grupo_id, papel_reserva, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, editado_manualmente_em, servicos(nome, duracao_min, preco_centavos, nome_etapa_anterior), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -2354,6 +2354,36 @@ export default function AdminPage() {
     idParaVincular != null
       ? agendamentos.find((item) => item.id === idParaVincular) ?? null
       : null;
+
+  // Linha irmã de um par (reserva_grupo_id), sempre lida VIVA de
+  // `agendamentos` — nunca de um snapshot. null pra agendamento normal.
+  const irmaDoPar = (item) =>
+    item?.reserva_grupo_id
+      ? agendamentos.find(
+          (outro) =>
+            outro.id !== item.id && outro.reserva_grupo_id === item.reserva_grupo_id
+        ) ?? null
+      : null;
+  const irmaDoSelecionado = irmaDoPar(selecionado);
+
+  // Aviso (não bloqueia) de que a nova data do "Alterar data" inverte a ordem
+  // do par: a anterior tem que acontecer ANTES da principal. Vale nos dois
+  // sentidos. Compara "YYYY-MM-DD HH:MM" como texto (ordem lexicográfica).
+  const irmaAlterarData = irmaDoPar(agendamentoParaAlterarData);
+  let avisoParAlterarData = null;
+  if (irmaAlterarData && dataAlterarData && horarioAlterarData) {
+    const nova = `${dataAlterarData} ${String(horarioAlterarData).slice(0, 5)}`;
+    const daIrma = `${irmaAlterarData.data} ${String(irmaAlterarData.horario).slice(0, 5)}`;
+    const nomeEtapa = nomeEtapaAnterior(agendamentoParaAlterarData);
+    if (agendamentoParaAlterarData.papel_reserva === "anterior" && nova >= daIrma) {
+      avisoParAlterarData = `Com essa data, a etapa "${nomeEtapa}" ficaria no mesmo horário ou depois do atendimento principal.`;
+    } else if (
+      agendamentoParaAlterarData.papel_reserva === "principal" &&
+      nova <= daIrma
+    ) {
+      avisoParAlterarData = `Com essa data, o atendimento principal ficaria no mesmo horário ou antes da etapa "${nomeEtapa}".`;
+    }
+  }
 
   // Aba ativa (ABAS_PAI) pro título do header. Fallback pra primeira aba se o
   // id sair de sincronia por algum motivo.
@@ -4555,6 +4585,50 @@ export default function AdminPage() {
                   )}
                 </dd>
               </div>
+              {/* Vínculo do par (só com reserva_grupo_id): cita a linha irmã.
+                  Confirmada abre o detalhe dela; pendente/aguardando sinal
+                  leva pra aba Pendentes; cancelada/concluída só informa. */}
+              {irmaDoSelecionado && (
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-body">Vínculo</dt>
+                  <dd className="flex items-center justify-end gap-2 text-right text-heading">
+                    <span>
+                      {irmaDoSelecionado.papel_reserva === "anterior"
+                        ? nomeEtapaAnterior(irmaDoSelecionado)
+                        : "Atendimento principal"}
+                      {" · "}
+                      {formatarData(irmaDoSelecionado.data)} às{" "}
+                      {formatarHorario(irmaDoSelecionado.horario)}
+                      {" · "}
+                      {rotuloStatus(irmaDoSelecionado.status)}
+                    </span>
+                    {irmaDoSelecionado.status === "confirmado" && (
+                      <button
+                        type="button"
+                        onClick={() => setIdSelecionado(irmaDoSelecionado.id)}
+                        className="shrink-0 rounded-lg bg-card px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                      >
+                        Ver
+                      </button>
+                    )}
+                    {(irmaDoSelecionado.status === "pendente" ||
+                      irmaDoSelecionado.status === "aguardando_sinal") && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIdSelecionado(null);
+                          setViewPai("pendentes");
+                          setPendenteEmDestaqueId(irmaDoSelecionado.id);
+                          setDrawerAberto(false);
+                        }}
+                        className="shrink-0 rounded-lg bg-card px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                      >
+                        Ver
+                      </button>
+                    )}
+                  </dd>
+                </div>
+              )}
               {/* Respostas do popup de perguntas do serviço (ver
                   lib/agendamentoRespostas), quando houver. */}
               {(respostasPorAgendamento.get(selecionado.id) ?? []).length > 0 && (
@@ -4707,6 +4781,40 @@ export default function AdminPage() {
                   Trocar profissional
                 </button>
               )}
+              {/* Alterar data: MESMO modal/handler da seção "Fora da janela"
+                  (handleAlterarData), mesmo botão dividido. Fecha este modal
+                  antes, como o Cancelar. Não vale pra cancelado/concluído. */}
+              {selecionado.status !== "cancelado" &&
+                selecionado.status !== "concluido" && (
+                  <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-border">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAgendamentoParaAlterarData(selecionado);
+                        setNotificarAoAlterarData(true);
+                        setIdSelecionado(null);
+                      }}
+                      className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-heading transition hover:bg-surface"
+                    >
+                      <Calendar className="h-4 w-4" />
+                      Alterar data
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAgendamentoParaAlterarData(selecionado);
+                        setNotificarAoAlterarData(false);
+                        setIdSelecionado(null);
+                      }}
+                      aria-label="Alterar data sem notificar cliente"
+                      title="Alterar data sem notificar cliente"
+                      className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-border text-heading transition hover:bg-surface"
+                    >
+                      <Calendar className="h-4 w-4" aria-hidden="true" />
+                      <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  </div>
+                )}
               <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
                 <button
                   type="button"
@@ -5230,6 +5338,12 @@ export default function AdminPage() {
                   </div>
                 )}
               </div>
+            )}
+
+            {avisoParAlterarData && (
+              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200">
+                {avisoParAlterarData}
+              </p>
             )}
 
             {erroAlterarData && (

@@ -11,6 +11,7 @@ import { ChevronLeft, ChevronRight, ArrowUp } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { HORA_ABERTURA, HORA_FECHAMENTO } from "@/lib/horarios";
 import { classificarAgendamento } from "@/lib/particao";
+import { nomeEtapaAnterior } from "@/lib/agendamentosCliente";
 
 // Abas próprias do Painel (substituem a toolbar nativa do FullCalendar).
 const ABAS_CALENDARIO = [
@@ -53,7 +54,15 @@ const CORES_EVENTO = {
   confirmado: { fundo: "#dcfce7", borda: "#86efac", texto: "#166534" },
   naoVinculado: { fundo: "#fef3c7", borda: "#fbbf24", texto: "#92400e" },
   ausencia: { fundo: "#e5e7eb", borda: "#6b7280", texto: "#374151" },
+  // Etapa anterior de um par (papel_reserva 'anterior') JÁ confirmada. Violeta
+  // e não azul: azul é das etiquetas de cliente, dos links do admin e dos
+  // eventos do Google Calendar. Anterior pendente continua no cinza acima.
+  etapaAnterior: { fundo: "#ede9fe", borda: "#a78bfa", texto: "#5b21b6" },
 };
+
+// Selo com o nome da etapa anterior nas views Dia e Lista (no Mês só a cor).
+const CLASSE_SELO_ETAPA =
+  "ml-1 rounded-full bg-white px-1.5 text-[0.75em] font-medium text-violet-700 ring-1 ring-violet-400";
 
 // Formato 24h compartilhado por eventTimeFormat e slotLabelFormat.
 const FORMATO_24H = { hour: "2-digit", minute: "2-digit", hour12: false };
@@ -381,6 +390,9 @@ export default function PainelCalendario({
           const inbox = classificarAgendamento(a) === "inbox";
           const pendente = inbox && !crm;
           const naoVinculado = !inbox && !crm && !a.telefone;
+          // Só a etapa anterior CONFIRMADA vira violeta; pendente segue cinza.
+          const anterior =
+            a.papel_reserva === "anterior" && !inbox && !crm && !naoVinculado;
           const servico = crm
             ? tipoAtendimentoCrm(a.servico_livre)
             : a.servicos?.nome ?? a.servico_livre ?? "serviço";
@@ -390,6 +402,8 @@ export default function PainelCalendario({
             ? CORES_EVENTO.pendente
             : naoVinculado
             ? CORES_EVENTO.naoVinculado
+            : anterior
+            ? CORES_EVENTO.etapaAnterior
             : CORES_EVENTO.confirmado;
           const inicioMin = horaParaMin(a.horario);
           const duracao = a.duracao_min ?? a.servicos?.duracao_min;
@@ -419,6 +433,8 @@ export default function PainelCalendario({
               // Atendimento do CRM comercial (ver acima) — o eventClick usa pra
               // não deixar o clique inerte quando o status é pendente.
               crm,
+              // Nome da etapa quando é a anterior confirmada (null nos demais).
+              etapaAnterior: anterior ? nomeEtapaAnterior(a) : null,
               // Valores crus do mesmo par usado no `title`, p/ abreviar no rótulo.
               nome_cliente: a.nome_cliente,
               servico,
@@ -816,6 +832,16 @@ export default function PainelCalendario({
                   </span>
                 );
               }
+              if (arg.event.extendedProps.etapaAnterior) {
+                return (
+                  <span>
+                    {arg.event.extendedProps.nome_cliente} - {arg.event.extendedProps.servico}
+                    <span className={CLASSE_SELO_ETAPA}>
+                      {arg.event.extendedProps.etapaAnterior}
+                    </span>
+                  </span>
+                );
+              }
               return `${arg.event.extendedProps.nome_cliente} - ${arg.event.extendedProps.servico}`;
             }
             // Dia (timeGrid), única view restante: mantém o rótulo abreviado de sempre.
@@ -834,6 +860,11 @@ export default function PainelCalendario({
               <div className="ag-evento">
                 <span className="ag-evento-titulo">{titulo}</span>{" "}
                 <span className="ag-evento-hora">- {hora}</span>
+                {arg.event.extendedProps.etapaAnterior && (
+                  <span className={CLASSE_SELO_ETAPA}>
+                    {arg.event.extendedProps.etapaAnterior}
+                  </span>
+                )}
               </div>
             );
           }}

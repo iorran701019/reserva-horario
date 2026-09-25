@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { formatarDataBR, formatarHorario } from "@/lib/data";
+import { nomeEtapaAnterior } from "@/lib/agendamentosCliente";
 
 // Selo de status dos agendamentos ATIVOS. Mesma paleta do PainelCliente
 // (SELO_STATUS) — mantém a linguagem visual do status já usada no público.
@@ -132,6 +133,17 @@ export default function CarrosselAgendamentos({
               {formatarDataBR(atual.data)} · {formatarHorario(atual.horario)}
             </span>
             <span>{atual.servicos?.nome ?? "Serviço"}</span>
+            {/* Etapa anterior de um par (papel_reserva 'anterior'): selo em
+                contorno violeta, pra não ser lido como etiqueta de cliente
+                (essas são preenchidas). As duas linhas do par aparecem
+                separadas aqui de propósito. */}
+            {atual.papel_reserva === "anterior" && (
+              <span
+                className="rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700"
+              >
+                {nomeEtapaAnterior(atual)}
+              </span>
+            )}
             {SELO_STATUS[atual.status] && (
               <span
                 className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${SELO_STATUS[atual.status].classe}`}
