@@ -23,6 +23,11 @@ const ABAS = [
   { id: "alertas", rotulo: "Alertas" },
 ];
 
+// `pular_perguntas_adicionais_admin` cobre só o popup de manutenção e as
+// perguntas do serviço no /admin (mudam preço, duração e serviço). Os alertas
+// de serviço e de categoria (alerta_mensagem) NÃO dependem dela: são texto pra
+// cliente e nunca aparecem no /admin.
+//
 // Colunas booleanas de `estabelecimentos` editáveis na tabela da sub-aba
 // "Alertas" — uma por switch, na ordem em que aparecem. São as MESMAS colunas
 // que o /admin do próprio salão lê (as duas primeiras em GerenciarServicos,

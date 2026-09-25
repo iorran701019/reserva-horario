@@ -1659,20 +1659,18 @@ export default function FormularioAgendamento({
   //
   // Categoria com alerta_mensagem: ao ABRIR (fechar nunca), trava no popup
   // antes de mostrar os serviços, uma vez só por categoria na mesma visita
-  // (`categoriasAvisadas`). O /admin com pular_perguntas_adicionais_admin
-  // pula esse popup pelo mesmo gate do alerta do serviço (ver
-  // selecionarServico); `modoLivre` garante que o /agendar público nunca pula.
+  // (`categoriasAvisadas`). O texto é da dona pra CLIENTE: no /admin
+  // (`modoLivre`) nunca dispara, sem depender de flag — mesmo gate do alerta do
+  // serviço (ver selecionarServico); o /agendar público sempre mostra.
   function alternarCategoria(id) {
     if (categoriaAberta === id) {
       setCategoriaAberta(null);
       return;
     }
-    const pularPopups =
-      modoLivre && estabelecimento.pular_perguntas_adicionais_admin;
     const categoria = categorias.find((c) => c.id === id);
     if (
       categoria?.alerta_mensagem &&
-      !pularPopups &&
+      !modoLivre &&
       !categoriasAvisadas.has(id)
     ) {
       setAlertaCategoriaPendente(categoria);
@@ -2442,13 +2440,15 @@ export default function FormularioAgendamento({
   // checagem de alerta_mensagem e, sem alerta, direto pra seleção de fato
   // (mesmo comportamento de sempre).
   //
-  // /admin com pular_perguntas_adicionais_admin ligado: os DOIS popups são
-  // pulados e o serviço é confirmado direto — mesma intenção do gate que já
+  // /admin com pular_perguntas_adicionais_admin ligado: o popup de manutenção
+  // é pulado e o serviço é confirmado direto — mesma intenção do gate que já
   // pula as perguntas do serviço em confirmarSelecaoServico. Pular o popup de
   // manutenção equivale a "Sim, fiz aqui" (mantém eh_manutencao, e com ele a
   // isenção de sinal — ver precisaSinal); a dona que quiser o serviço de
   // origem ou o de manutenção externa escolhe o serviço certo na lista.
-  // `modoLivre` garante que o /agendar público nunca pula nada.
+  // O alerta_mensagem do serviço NÃO depende da flag: é texto pra CLIENTE, e no
+  // /admin (`modoLivre`) nunca dispara. `modoLivre` garante que o /agendar
+  // público nunca pula nada.
   function selecionarServico(servico) {
     const pularPopups =
       modoLivre && estabelecimento.pular_perguntas_adicionais_admin;
@@ -2456,7 +2456,7 @@ export default function FormularioAgendamento({
       setManutencaoPendente(servico);
       return;
     }
-    if (servico.alerta_mensagem && !pularPopups) {
+    if (servico.alerta_mensagem && !modoLivre) {
       setAlertaPendente(servico);
       return;
     }
