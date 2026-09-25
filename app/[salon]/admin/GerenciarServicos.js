@@ -54,13 +54,10 @@ const TOGGLES_OCULTACAO = [
     descricao:
       "Esconde quanto tempo cada serviço dura na tela de agendamento (a do cliente e a aba Agendar).",
   },
-  {
-    coluna: "pular_perguntas_adicionais_admin",
-    rotulo: "Desativar perguntas de serviços (somente em /admin)",
-    descricao:
-      "Agendamentos criados em /admin não exibem perguntas como \"Formato da unha\". O preço e a duração do serviço serão os originais. Para o cliente, as perguntas continuam aparecendo normalmente.",
-  },
 ];
+// `pular_perguntas_adicionais_admin` saiu daqui: hoje é editada em Regras de
+// negócio, no bloco "Alertas e avisos" (ConfiguracoesSalao.js), com a tela
+// invertida (ligado = mostra as perguntas).
 
 // Estado inicial do formulário. `preco` fica em REAIS (string do input); só é
 // convertido pra centavos na hora de gravar. `profissionais` é a lista de ids
@@ -292,7 +289,6 @@ export default function GerenciarServicos({
   const [ocultacao, setOcultacao] = useState(() => ({
     ocultar_preco_servicos: Boolean(estabelecimento.ocultar_preco_servicos),
     ocultar_duracao_servicos: Boolean(estabelecimento.ocultar_duracao_servicos),
-    pular_perguntas_adicionais_admin: Boolean(estabelecimento.pular_perguntas_adicionais_admin),
   }));
   // Bloco retrátil "Configuração" que envolve os toggles acima — fechado por
   // padrão (mesmo padrão de "Serviços desativados").

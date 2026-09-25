@@ -30,12 +30,21 @@ const ABAS = [
 //
 // Colunas booleanas de `estabelecimentos` editáveis na tabela da sub-aba
 // "Alertas" — uma por switch, na ordem em que aparecem. São as MESMAS colunas
-// que o /admin do próprio salão lê (as duas primeiras em GerenciarServicos,
-// via TOGGLES_OCULTACAO), então o que muda aqui já aparece lá.
+// que o /admin do próprio salão lê: as duas de ocultar em GerenciarServicos
+// (via TOGGLES_OCULTACAO), as de lembrete de etiqueta e de perguntas no bloco
+// "Alertas e avisos" de Regras de negócio (ConfiguracoesSalao). Lá o switch de
+// perguntas é INVERTIDO (ligado = mostra); aqui vale a coluna crua (ligado =
+// pula). Então o que muda aqui já aparece lá.
 const FLAGS_ALERTAS = [
   {
     coluna: "pular_perguntas_adicionais_admin",
     rotulo: "Pular perguntas adicionais (admin)",
+  },
+  {
+    // Default true no banco: ligado = os gates de etiqueta em Pendentes
+    // aparecem (ver comGateDeEtiqueta em page.js).
+    coluna: "lembrete_etiqueta_ativo",
+    rotulo: "Lembrete de etiqueta (Pendentes)",
   },
   { coluna: "ocultar_preco_servicos", rotulo: "Ocultar preço" },
   { coluna: "ocultar_duracao_servicos", rotulo: "Ocultar duração" },
@@ -315,7 +324,7 @@ export default function AbaAuditoria() {
         supabase
           .from("estabelecimentos")
           .select(
-            "id, nome, slug, pular_perguntas_adicionais_admin, ocultar_preco_servicos, ocultar_duracao_servicos, aviso_regras_agendamento"
+            "id, nome, slug, pular_perguntas_adicionais_admin, lembrete_etiqueta_ativo, ocultar_preco_servicos, ocultar_duracao_servicos, aviso_regras_agendamento"
           )
           .eq("ativo", true)
           .order("nome"),
@@ -348,6 +357,8 @@ export default function AbaAuditoria() {
           nome: salao.nome,
           slug: salao.slug,
           pular_perguntas_adicionais_admin: Boolean(salao.pular_perguntas_adicionais_admin),
+          // Só `false` desliga (default true no banco).
+          lembrete_etiqueta_ativo: salao.lembrete_etiqueta_ativo !== false,
           ocultar_preco_servicos: Boolean(salao.ocultar_preco_servicos),
           ocultar_duracao_servicos: Boolean(salao.ocultar_duracao_servicos),
           // Só o preenchido/vazio interessa na tabela — o texto em si é
@@ -1559,7 +1570,7 @@ export default function AbaAuditoria() {
                     ~46rem a tabela rola na horizontal e cada coluna fica
                     legível. */}
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[46rem] text-left text-sm">
+                  <table className="w-full min-w-[54rem] text-left text-sm">
                     <thead>
                       <tr className="border-b border-border bg-surface">
                         <th scope="col" className="px-4 py-2 font-medium text-body">

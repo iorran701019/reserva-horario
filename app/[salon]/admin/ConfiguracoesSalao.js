@@ -251,6 +251,12 @@ export default function ConfiguracoesSalao({
   // decide se a sub-aba "Conclusão" de Pendentes e o "Editar" do Histórico
   // aparecem. Opcional (no-op por padrão).
   onConclusaoManualAtivaAtualizada = () => {},
+  // Mesmo padrão acima, para os interruptores do bloco "Alertas e avisos" (ver
+  // alternarAviso abaixo): chamado com (coluna, valor) DEPOIS de gravado, pra
+  // AdminPage patchar sua cópia de `estabelecimento` — é ela que
+  // comGateDeEtiqueta (lembrete_etiqueta_ativo) e o wizard da aba Agendar
+  // (pular_perguntas_adicionais_admin) leem. Opcional (no-op por padrão).
+  onAvisoAtualizado = () => {},
   // true quando a navegação veio do banner "Agenda aberta até" (ver page.js) —
   // abre o bloco "Janela de agendamento" (accordion) já expandido e rola até
   // ele. Consumido uma vez (ver useEffect abaixo) via
@@ -541,6 +547,17 @@ export default function ConfiguracoesSalao({
   const [erroConclusaoManual, setErroConclusaoManual] = useState("");
   const [statusConclusaoManual, setStatusConclusaoManual] = useState("");
 
+  // Bloco "Alertas e avisos": guarda o valor CRU das colunas, undefined =
+  // ainda carregando. `lembrete_etiqueta_ativo` liga os gates de etiqueta em
+  // Pendentes (ligado = mostra). `pular_perguntas_adicionais_admin` é o
+  // contrário do que a tela diz: o interruptor "Perguntas do serviço…" fica
+  // LIGADO quando a coluna é false (mostra as perguntas) — a inversão vive só
+  // em alternarAviso/no JSX, o valor gravado é sempre o da coluna.
+  const [lembreteEtiquetaAtivo, setLembreteEtiquetaAtivo] = useState(undefined);
+  const [pularPerguntasAdmin, setPularPerguntasAdmin] = useState(undefined);
+  const [erroAvisos, setErroAvisos] = useState("");
+  const [statusAvisos, setStatusAvisos] = useState("");
+
   // Foto de perfil (bucket 'fotos-perfil' do Supabase Storage, caminho fixo
   // `${estabelecimento.id}/perfil.<extensao>` — sempre sobrescreve, nunca
   // acumula lixo). foto_perfil_posicao vira x/y (0-100) pros sliders; string
@@ -606,7 +623,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data, conclusao_manual_ativa, confirmado_expira_horas"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data, conclusao_manual_ativa, confirmado_expira_horas, lembrete_etiqueta_ativo, pular_perguntas_adicionais_admin"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -686,6 +703,11 @@ export default function ConfiguracoesSalao({
       setConfirmadoExpiraHoras(
         data?.confirmado_expira_horas == null ? "" : String(data.confirmado_expira_horas)
       );
+
+      setErroAvisos("");
+      // Só `false` desliga o lembrete (coluna ausente conta como ligada).
+      setLembreteEtiquetaAtivo(data?.lembrete_etiqueta_ativo !== false);
+      setPularPerguntasAdmin(Boolean(data?.pular_perguntas_adicionais_admin));
 
       setErroFoto("");
       setFotoPerfilUrl(data?.foto_perfil_url ?? null);
@@ -1409,6 +1431,36 @@ export default function ConfiguracoesSalao({
       return;
     }
     onConclusaoManualAtivaAtualizada(novo);
+  }
+
+  // Interruptores do bloco "Alertas e avisos". Mesmo molde de
+  // salvarConclusaoManual/alternarConclusaoManualAtiva: otimista, .select("id")
+  // pra pegar o 0-linhas silencioso da RLS, reverte em falha e só avisa o pai
+  // DEPOIS de gravado. `coluna` é a coluna real; `valorColuna` é o que vai pro
+  // banco (a inversão do interruptor de perguntas já vem resolvida por quem
+  // chama).
+  async function alternarAviso(coluna, valorColuna, setEstado) {
+    const anterior =
+      coluna === "lembrete_etiqueta_ativo" ? lembreteEtiquetaAtivo : pularPerguntasAdmin;
+    setEstado(valorColuna);
+    setStatusAvisos("salvando");
+    setErroAvisos("");
+
+    const { data: linhas, error } = await supabase
+      .from("estabelecimentos")
+      .update({ [coluna]: valorColuna })
+      .eq("id", estabelecimento.id)
+      .select("id");
+
+    if (error || !linhas?.length) {
+      setEstado(anterior);
+      setStatusAvisos("");
+      setErroAvisos(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
+      return;
+    }
+
+    setStatusAvisos("salvo");
+    onAvisoAtualizado(coluna, valorColuna);
   }
 
   // Grava o prazo da conclusão automática ao trocar o <select> (48/72/96 —
@@ -2303,6 +2355,8 @@ export default function ConfiguracoesSalao({
   const carregandoLinkLocalizacao = linkLocalizacao === undefined;
   const carregandoFidelidade = fidelidadeAtiva === undefined;
   const carregandoConclusaoManual = conclusaoManualAtiva === undefined;
+  const carregandoAvisos =
+    lembreteEtiquetaAtivo === undefined || pularPerguntasAdmin === undefined;
   const carregandoFoto = fotoPerfilUrl === undefined;
   const carregandoGoogleCalendar = googleCalendarAtivo === undefined;
   const carregandoJanela = janelaAgendamentoFim === undefined;
@@ -3270,6 +3324,121 @@ export default function ConfiguracoesSalao({
             {erroConclusaoManual && (
               <p className="text-xs text-red-600">{erroConclusaoManual}</p>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* Bloco: Alertas e avisos. Só avisos de PREFERÊNCIA (informam ou
+          lembram); os que protegem a agenda ficam fixos, fora daqui. */}
+      <div className="rounded-2xl bg-card shadow-sm ring-1 ring-border">
+        <button
+          type="button"
+          onClick={() => alternarBloco("alertasAvisos")}
+          aria-expanded={blocoAberto === "alertasAvisos"}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        >
+          <span className="font-semibold text-heading">Alertas e avisos</span>
+          <span aria-hidden="true" className="shrink-0 text-xs text-body">
+            {blocoAberto === "alertasAvisos" ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {blocoAberto === "alertasAvisos" && (
+          <div className="border-t border-border p-4 space-y-4">
+            <p className="text-xs text-muted">
+              Escolha quais avisos aparecem para você no painel. Os avisos que
+              protegem sua agenda (conflito de horário, fora da janela, prazo
+              mínimo) continuam sempre ativos.
+            </p>
+
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <label
+                  htmlFor="toggle-lembrete-etiqueta"
+                  className="block text-sm font-medium text-heading"
+                >
+                  Lembrete de etiqueta ao confirmar ou cancelar pendentes
+                </label>
+                <p className="mt-1 text-xs text-muted">
+                  Ligado: ao confirmar ou cancelar um pendente, avisa quando a
+                  cliente está sem etiqueta ou marcada como Cliente Nova já no
+                  2º atendimento.
+                </p>
+              </div>
+              <button
+                id="toggle-lembrete-etiqueta"
+                type="button"
+                role="switch"
+                aria-checked={Boolean(lembreteEtiquetaAtivo)}
+                onClick={() =>
+                  alternarAviso(
+                    "lembrete_etiqueta_ativo",
+                    !lembreteEtiquetaAtivo,
+                    setLembreteEtiquetaAtivo
+                  )
+                }
+                disabled={carregandoAvisos}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                  lembreteEtiquetaAtivo ? "bg-primary" : "bg-border"
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                    lembreteEtiquetaAtivo ? "translate-x-5" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Tela invertida: ligado = pular_perguntas_adicionais_admin
+                false (mostra as perguntas). O valor gravado é o da coluna. */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <label
+                  htmlFor="toggle-perguntas-admin"
+                  className="block text-sm font-medium text-heading"
+                >
+                  Perguntas do serviço e confirmação de manutenção ao agendar
+                  pelo admin
+                </label>
+                <p className="mt-1 text-xs text-muted">
+                  Ligado: ao agendar pelo painel, aparecem as perguntas de
+                  adicional e a confirmação de manutenção, como para a cliente.
+                  Desligado: o agendamento usa o preço e a duração base.
+                </p>
+              </div>
+              <button
+                id="toggle-perguntas-admin"
+                type="button"
+                role="switch"
+                aria-checked={pularPerguntasAdmin === false}
+                onClick={() =>
+                  alternarAviso(
+                    "pular_perguntas_adicionais_admin",
+                    !pularPerguntasAdmin,
+                    setPularPerguntasAdmin
+                  )
+                }
+                disabled={carregandoAvisos}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                  pularPerguntasAdmin === false ? "bg-primary" : "bg-border"
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                    pularPerguntasAdmin === false ? "translate-x-5" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {statusAvisos === "salvando" && (
+              <p className="text-xs text-muted">Salvando…</p>
+            )}
+            {statusAvisos === "salvo" && !erroAvisos && (
+              <p className="text-xs font-medium text-green-600">Salvo ✓</p>
+            )}
+            {erroAvisos && <p className="text-xs text-red-600">{erroAvisos}</p>}
           </div>
         )}
       </div>

@@ -2280,7 +2280,15 @@ export default function AdminPage() {
   // Falha de rede não trava a tela pra sempre: buscarEtiquetasPorTelefones
   // resolve com Map vazio em erro, então a chave é marcada como carregada e os
   // botões liberam (sem gate, que é o comportamento anterior à feature).
-  const etiquetasProntas = chaveEtiquetasCarregada === chaveTelefonesPendentes;
+  //
+  // Lembrete de etiqueta desligado (estabelecimento.lembrete_etiqueta_ativo ===
+  // false; undefined conta como ligado): não há gate a esperar, então os
+  // botões nunca ficam presos em "Carregando etiquetas...". A busca acima
+  // continua rodando de propósito: os badges/SeletorEtiquetaRapido dos cards
+  // dependem do mesmo Map.
+  const lembreteEtiquetaAtivo = estabelecimento?.lembrete_etiqueta_ativo !== false;
+  const etiquetasProntas =
+    !lembreteEtiquetaAtivo || chaveEtiquetasCarregada === chaveTelefonesPendentes;
 
   // Patch do Map depois que o popover grava, pra não refazer a busca inteira
   // só pra refletir um badge. Mantém o clienteId da entrada (o alvo do
@@ -2516,6 +2524,13 @@ export default function AdminPage() {
   // que os dois valham ao mesmo tempo — "Cliente Nova" pressupõe etiqueta
   // definida, e o código reflete isso na ordem dos ramos.
   async function comGateDeEtiqueta(item, acao, executar) {
+    // Lembrete de etiqueta desligado em Regras de negócio: nenhum dos dois
+    // avisos (sem etiqueta / Cliente Nova) aparece, e a ação segue direto.
+    if (!lembreteEtiquetaAtivo) {
+      executar();
+      return;
+    }
+
     const chave = String(item.telefone ?? "").replace(/\D/g, "");
     const entrada = etiquetasPorTelefone.get(chave);
 
@@ -4744,6 +4759,14 @@ export default function AdminPage() {
               setEstabelecimento((atual) =>
                 atual ? { ...atual, conclusao_manual_ativa: ativa } : atual
               )
+            }
+            // Mesmo patch dos anteriores, para o bloco "Alertas e avisos"
+            // (colunas booleanas lembrete_etiqueta_ativo e
+            // pular_perguntas_adicionais_admin): comGateDeEtiqueta e o wizard
+            // da aba Agendar leem estes valores DESTE state. Sem o patch, o
+            // interruptor só valeria depois de um reload.
+            onAvisoAtualizado={(coluna, valor) =>
+              setEstabelecimento((atual) => (atual ? { ...atual, [coluna]: valor } : atual))
             }
             focarBlocoJanela={focarJanelaAgendamento}
             onFocarBlocoJanelaConsumido={() => setFocarJanelaAgendamento(false)}
