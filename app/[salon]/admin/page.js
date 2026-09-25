@@ -319,6 +319,12 @@ const FILTROS_HISTORICO = [
   { id: "expirado", rotulo: "Expirado" },
 ];
 
+// Carimbo de "agora" em ms, pros handlers (fora do render; o lint de pureza não
+// enxerga através de uma função de módulo).
+function carimboAgora() {
+  return Date.now();
+}
+
 // Abre a conversa do WhatsApp do cliente em nova aba, com a mensagem pronta.
 // noopener,noreferrer replicam o rel="noopener noreferrer" de um <a target=_blank>.
 function abrirWhatsApp(telefone, mensagem) {
@@ -682,6 +688,11 @@ export default function AdminPage() {
   // pra refletir na hora o patch do lembrete. null = modal fechado.
   const [idSelecionado, setIdSelecionado] = useState(null);
 
+  // Escolha "Só este" no modal de cancelamento de um par: guarda o id do
+  // agendamento pra o qual ela vale (null = padrão, cancelar os dois). Guardar
+  // o id, e não um boolean, faz a escolha não vazar pro próximo modal que abrir.
+  const [apenasEsteCancelarId, setApenasEsteCancelarId] = useState(null);
+
   // Abre o modal de detalhe a partir de ?agendamento=<id> na URL — hoje só o
   // botão "Ver" do bloco "Agendamentos confirmados" da aba Pendentes empurra
   // esse parâmetro (junto de ?aba=painel&data=, que a aba e o
@@ -1018,7 +1029,7 @@ export default function AdminPage() {
       agendamento.telefone,
       agendamento.data,
       estabelecimento.prazo_minimo_entre_agendamentos_dias,
-      [agendamento.id, ...prazoIgnorados]
+      [agendamento.id, ...idsDoGrupo(agendamento), ...prazoIgnorados]
     );
 
     if (conflito) {
@@ -1175,16 +1186,24 @@ export default function AdminPage() {
   // (zona pequena do botão dividido, ver notificarAoCancelar) pula só o
   // redirecionamento pro WhatsApp — o modal de confirmação continua rodando
   // normalmente antes de chegar aqui.
-  async function handleCancelar(agendamento, notificar = true) {
-    const { data, error } = await supabase
+  //
+  // `incluirIrma` (só num par, ver irmaCancelavel): leva a linha irmã no MESMO
+  // UPDATE (`.in("id", ids)`), que é uma instrução só e portanto atômica. O
+  // WhatsApp continua sendo um só, o da linha clicada.
+  async function handleCancelar(agendamento, notificar = true, incluirIrma = false) {
+    const irma = incluirIrma ? irmaCancelavel(agendamento) : null;
+    const ids = irma ? [agendamento.id, irma.id] : [agendamento.id];
+
+    const consulta = supabase
       .from("agendamentos")
-      .update({ status: "cancelado", cancelado_pelo_salao: true })
-      .eq("id", agendamento.id)
-      .select("id");
+      .update({ status: "cancelado", cancelado_pelo_salao: true });
+    const { data, error } = await (
+      ids.length === 1 ? consulta.eq("id", ids[0]) : consulta.in("id", ids)
+    ).select("id");
 
     if (error) {
       setErro(`Não foi possível cancelar o agendamento: ${error.message}`);
-      setAgendamentoParaCancelar(null);
+      fecharCancelamento();
       return;
     }
 
@@ -1194,13 +1213,32 @@ export default function AdminPage() {
       setErro(
         "Não foi possível cancelar o agendamento: nenhuma linha foi alterada no banco. Recarregue a página e tente de novo."
       );
-      setAgendamentoParaCancelar(null);
+      fecharCancelamento();
+      return;
+    }
+
+    // Par com gravação parcial (só uma das duas linhas foi alterada): reflete
+    // no estado o que de fato gravou, avisa, e não abre o WhatsApp.
+    if (data.length !== ids.length) {
+      for (const linha of data) {
+        atualizarStatusLocal(linha.id, "cancelado");
+      }
+      setErro(
+        "Só uma das duas linhas do par foi cancelada. Recarregue a página e confira antes de tentar de novo."
+      );
+      fecharCancelamento();
       return;
     }
 
     setErro("");
-    atualizarStatusLocal(agendamento.id, "cancelado");
-    setUltimoCancelamento({ id: agendamento.id, em: Date.now() });
+    // A irmã primeiro e a clicada por último: setUltimoCancelamento guarda só o
+    // último id (a ficha do cliente recarrega o resumo por ele), e a clicada é
+    // a que a ficha está mostrando.
+    const em = carimboAgora();
+    for (const id of [...ids].reverse()) {
+      atualizarStatusLocal(id, "cancelado");
+      setUltimoCancelamento({ id, em });
+    }
 
     if (notificar) {
       // Base da URL: a env pública (inlinada no build) quando definida; senão a
@@ -1219,7 +1257,13 @@ export default function AdminPage() {
         )
       );
     }
+    fecharCancelamento();
+  }
+
+  // Fecha o modal de cancelamento e zera a escolha "Só este".
+  function fecharCancelamento() {
     setAgendamentoParaCancelar(null);
+    setApenasEsteCancelarId(null);
   }
 
   // Botão Lembrete/Reenviar do modal de detalhe. PRIMEIRO abre o WhatsApp de
@@ -2365,6 +2409,39 @@ export default function AdminPage() {
         ) ?? null
       : null;
   const irmaDoSelecionado = irmaDoPar(selecionado);
+
+  // Ids de TODAS as linhas do mesmo reserva_grupo_id (a própria inclusive).
+  // [] pra agendamento normal. Usado pelo gate de prazo mínimo: o par não pode
+  // disparar o alerta contra si mesmo.
+  const idsDoGrupo = (item) =>
+    item?.reserva_grupo_id
+      ? agendamentos
+          .filter((outro) => outro.reserva_grupo_id === item.reserva_grupo_id)
+          .map((outro) => outro.id)
+      : [];
+
+  // Irmã que o cancelamento pode levar junto: só se ainda estiver ativa (nem
+  // cancelada nem concluída). null pra agendamento normal.
+  const irmaCancelavel = (item) => {
+    const irma = irmaDoPar(item);
+    return irma &&
+      (irma.status === "pendente" ||
+        irma.status === "aguardando_sinal" ||
+        irma.status === "confirmado")
+      ? irma
+      : null;
+  };
+  const irmaParaCancelar = irmaCancelavel(agendamentoParaCancelar);
+  const cancelarOsDois =
+    irmaParaCancelar != null && apenasEsteCancelarId !== agendamentoParaCancelar.id;
+
+  // A vizinha do popup de prazo mínimo é metade de um par? Aí cancelá-la deixaria
+  // meio par no ar, e o botão de cancelar some (as outras saídas ficam).
+  const conflitoPrazoConfirmacaoEDePar = Boolean(
+    conflitoPrazoConfirmacao &&
+      agendamentos.find((a) => a.id === conflitoPrazoConfirmacao.conflito.id)
+        ?.reserva_grupo_id
+  );
 
   // Aviso (não bloqueia) de que a nova data do "Alterar data" inverte a ordem
   // do par: a anterior tem que acontecer ANTES da principal. Vale nos dois
@@ -4947,7 +5024,7 @@ export default function AdminPage() {
           aria-modal="true"
           aria-labelledby="titulo-cancelar"
           className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
-          onClick={() => setAgendamentoParaCancelar(null)}
+          onClick={fecharCancelamento}
         >
           <div
             className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
@@ -4967,11 +5044,49 @@ export default function AdminPage() {
               ?
             </p>
 
+            {/* Par (serviço de duas datas) com a irmã ainda ativa: a dona
+                escolhe se leva a outra linha junto. Padrão: os dois. */}
+            {irmaParaCancelar && (
+              <fieldset className="mt-4 space-y-2 text-sm text-body">
+                <legend className="sr-only">O que cancelar</legend>
+                <label className="flex cursor-pointer items-start gap-2">
+                  <input
+                    type="radio"
+                    name="cancelar-par"
+                    checked={cancelarOsDois}
+                    onChange={() => setApenasEsteCancelarId(null)}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="font-medium text-heading">Cancelar os dois</span>
+                    <span className="block text-xs">
+                      Também cancela{" "}
+                      {irmaParaCancelar.papel_reserva === "anterior"
+                        ? nomeEtapaAnterior(irmaParaCancelar)
+                        : "o atendimento principal"}{" "}
+                      de {formatarData(irmaParaCancelar.data)} às{" "}
+                      {formatarHorario(irmaParaCancelar.horario)}.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2">
+                  <input
+                    type="radio"
+                    name="cancelar-par"
+                    checked={!cancelarOsDois}
+                    onChange={() => setApenasEsteCancelarId(agendamentoParaCancelar.id)}
+                    className="mt-1"
+                  />
+                  <span className="font-medium text-heading">Só este</span>
+                </label>
+              </fieldset>
+            )}
+
             <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
               <button
                 type="button"
                 onClick={() =>
-                  handleCancelar(agendamentoParaCancelar, notificarAoCancelar)
+                  handleCancelar(agendamentoParaCancelar, notificarAoCancelar, cancelarOsDois)
                 }
                 className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700"
               >
@@ -4980,7 +5095,7 @@ export default function AdminPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setAgendamentoParaCancelar(null)}
+                onClick={fecharCancelamento}
                 className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Voltar
@@ -5144,6 +5259,7 @@ export default function AdminPage() {
           conflitoPrazoConfirmacao?.agendamento?.horario ?? ""
         ).slice(0, 5)}
         prazoDias={Number(estabelecimento.prazo_minimo_entre_agendamentos_dias)}
+        podeCancelarConflito={!conflitoPrazoConfirmacaoEDePar}
         processando={processandoPrazoConfirmacao}
         onTrocar={confirmarTrocaPrazoConfirmacao}
         onDesistir={fecharConflitoPrazoConfirmacao}

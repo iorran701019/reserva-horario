@@ -99,6 +99,7 @@ export default function ConfirmacaoSinal({
       nomeCliente,
       dataFormatada: formatarData(agendamento.data),
       horario: agendamento.horario,
+      comPar: Boolean(agendamento.reserva_grupo_id),
     });
 
     setCancelando(false);

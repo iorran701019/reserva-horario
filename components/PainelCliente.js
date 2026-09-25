@@ -340,6 +340,7 @@ export default function PainelCliente({
       nomeCliente: clienteAtual.nome,
       dataFormatada: formatarData(item.data),
       horario: item.horario,
+      comPar: Boolean(item.reserva_grupo_id),
     });
 
     setCancelandoId(null);
