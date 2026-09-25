@@ -36,6 +36,7 @@ import { ehStatusSucesso } from "@/lib/particao";
 import {
   cancelarAgendamentoCliente,
   buscarConflitoPrazoMinimo,
+  NOME_ETAPA_ANTERIOR_PADRAO,
 } from "@/lib/agendamentosCliente";
 import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento";
 import ModalPrazoMinimo from "@/components/ModalPrazoMinimo";
@@ -1133,7 +1134,7 @@ export default function FormularioAgendamento({
   // Nome da etapa anterior é do SALÃO ("Teste", "Prova", "Ensaio"); o padrão
   // vive aqui, na UI, e não no banco — ver sql/segunda_data_reserva_grupo.sql.
   const nomeEtapaAnterior =
-    servicoSelecionado?.nome_etapa_anterior?.trim() || "Teste";
+    servicoSelecionado?.nome_etapa_anterior?.trim() || NOME_ETAPA_ANTERIOR_PADRAO;
 
   // Data/horário do EVENTO, para tudo que precisa falar do atendimento
   // principal: a regra do sinal, o resumo da etapa "dados", os blocos de Pix
@@ -4343,7 +4344,11 @@ export default function FormularioAgendamento({
 
     // Sinal SÓ no evento, nos dois consumidores e pelo mesmo motivo
     // (sql/rpc_criacao_par.sql): o sinal é um só e fica preso ao atendimento
-    // principal. Na etapa anterior estes campos ficam no default do banco.
+    // principal. Na etapa anterior estes campos vêm explicitamente falso/nulo
+    // abaixo — num insert em array o supabase-js normaliza os objetos pela
+    // união das chaves e completa as que faltam com NULL explícito (não com o
+    // DEFAULT da coluna), e sinal_declarado_pago é NOT NULL: sem a chave aqui
+    // o insert inteiro falha.
     const sinalDoEvento = {
       sinal_declarado_pago: sinalDeclarado,
       // Mesma cópia que marcarPendente (components/BlocoConfirmacaoPix.js) faz
@@ -4385,6 +4390,8 @@ export default function FormularioAgendamento({
             horario: horarioSelecionado,
             reserva_grupo_id: grupoIdDoPar,
             papel_reserva: "anterior",
+            sinal_declarado_pago: false,
+            sinal_valor_centavos: null,
           },
         ]
       : [
