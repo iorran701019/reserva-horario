@@ -397,6 +397,41 @@ async function buscarPendenciasAdmin(estabelecimentoId) {
   return { dados: data ?? [], error };
 }
 
+// Um par (serviço de duas datas) vira UM card em Pendentes: a etapa anterior
+// some da lista quando a principal está na MESMA lista, e a principal ganha
+// `etapaAnteriorLinha` (a irmã lida de `todos`, só se ainda ativa) pra o card
+// mostrar a linha do teste. Anterior sem a principal na lista (principal já
+// confirmada ou cancelada) segue como card avulso; linha sem par passa
+// intacta, na mesma posição.
+function agruparParesPendentes(lista, todos) {
+  return lista
+    .filter(
+      (item) =>
+        !(
+          item.papel_reserva === "anterior" &&
+          item.reserva_grupo_id &&
+          lista.some(
+            (outro) =>
+              outro.papel_reserva === "principal" &&
+              outro.reserva_grupo_id === item.reserva_grupo_id
+          )
+        )
+    )
+    .map((item) => {
+      if (item.papel_reserva !== "principal" || !item.reserva_grupo_id) return item;
+      const irma = todos.find(
+        (outro) =>
+          outro.id !== item.id &&
+          outro.reserva_grupo_id === item.reserva_grupo_id &&
+          outro.papel_reserva === "anterior" &&
+          (outro.status === "pendente" ||
+            outro.status === "aguardando_sinal" ||
+            outro.status === "confirmado")
+      );
+      return irma ? { ...item, etapaAnteriorLinha: irma } : item;
+    });
+}
+
 export default function AdminPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -692,6 +727,12 @@ export default function AdminPage() {
   // agendamento pra o qual ela vale (null = padrão, cancelar os dois). Guardar
   // o id, e não um boolean, faz a escolha não vazar pro próximo modal que abrir.
   const [apenasEsteCancelarId, setApenasEsteCancelarId] = useState(null);
+
+  // Id do card AGREGADO de Pendentes (par: principal + linha da etapa) que armou
+  // o modal de cancelamento. Ali o card é o pedido inteiro: cancela as duas
+  // linhas ativas, sem a pergunta "os dois / só este" (que continua só no
+  // detalhe dos confirmados). null = modal armado por outro lugar.
+  const [cancelamentoDoCardId, setCancelamentoDoCardId] = useState(null);
 
   // Abre o modal de detalhe a partir de ?agendamento=<id> na URL — hoje só o
   // botão "Ver" do bloco "Agendamentos confirmados" da aba Pendentes empurra
@@ -1016,30 +1057,42 @@ export default function AdminPage() {
     notificar = true,
     { ignorarJanela = false, prazoIgnorados = [] } = {}
   ) {
+    // Par: confirmar a principal confirma também a etapa anterior pendente, então
+    // os dois gates valem nas DUAS datas (o teste primeiro, que vem antes).
+    // Sem par a lista tem um elemento e nada muda.
+    const irmaAnterior = irmaParaConfirmar(agendamento);
+    const alvos = irmaAnterior ? [irmaAnterior, agendamento] : [agendamento];
+
     if (
       !ignorarJanela &&
-      !dataAgendavelComMes(agendamento.data, estabelecimento, mesesJanela)
+      alvos.some((alvo) => !dataAgendavelComMes(alvo.data, estabelecimento, mesesJanela))
     ) {
       setConfirmacaoForaDaJanela({ agendamento, notificar });
       return;
     }
 
-    const conflito = await buscarConflitoPrazoMinimo(
-      estabelecimento.id,
-      agendamento.telefone,
-      agendamento.data,
-      estabelecimento.prazo_minimo_entre_agendamentos_dias,
-      [agendamento.id, ...idsDoGrupo(agendamento), ...prazoIgnorados]
-    );
+    for (const alvo of alvos) {
+      const conflito = await buscarConflitoPrazoMinimo(
+        estabelecimento.id,
+        agendamento.telefone,
+        alvo.data,
+        estabelecimento.prazo_minimo_entre_agendamentos_dias,
+        [agendamento.id, ...idsDoGrupo(agendamento), ...prazoIgnorados]
+      );
 
-    if (conflito) {
-      setConflitoPrazoConfirmacao({
-        agendamento,
-        notificar,
-        conflito,
-        prazoIgnorados,
-      });
-      return;
+      if (conflito) {
+        // `dataAlvo`/`horarioAlvo`: a data que de fato conflitou (a do teste, se
+        // foi ele), pro popup não citar sempre a da principal.
+        setConflitoPrazoConfirmacao({
+          agendamento,
+          notificar,
+          conflito,
+          prazoIgnorados,
+          dataAlvo: alvo.data,
+          horarioAlvo: alvo.horario,
+        });
+        return;
+      }
     }
 
     await executarConfirmacao(agendamento, notificar);
@@ -1290,6 +1343,7 @@ export default function AdminPage() {
   function fecharCancelamento() {
     setAgendamentoParaCancelar(null);
     setApenasEsteCancelarId(null);
+    setCancelamentoDoCardId(null);
   }
 
   // Botão Lembrete/Reenviar do modal de detalhe. PRIMEIRO abre o WhatsApp de
@@ -2261,10 +2315,12 @@ export default function AdminPage() {
   // — sem ficha real, não faz sentido aparecer como pendência/histórico de
   // cliente; ele já ocupa o horário e aparece no Painel (que NÃO filtra),
   // com o botão "Vincular cliente" pra sair desse estado.
-  const inbox = agendamentos
-    .filter(
+  const inbox = agruparParesPendentes(
+    agendamentos.filter(
       (item) => classificarAgendamento(item, agora) === "inbox" && item.finalizado && item.telefone
-    );
+    ),
+    agendamentos
+  );
 
   // Mesmo `inbox` acima, agrupado por cliente pra render (a aba mostra os
   // cards de uma mesma pessoa juntos, numa moldura só). NÃO reordena nada:
@@ -2330,19 +2386,22 @@ export default function AdminPage() {
   // de finalizado/telefone do inbox, pra não misturar reserva abandonada ou
   // evento importado sem cliente. Ordenado por data+horário asc (mais
   // próximo primeiro).
-  const foraDaJanela = agendamentos
-    .filter(
-      (item) =>
-        item.finalizado &&
-        item.telefone &&
-        (item.status === "pendente" || item.status === "aguardando_sinal") &&
-        !dataAgendavelComMes(item.data, estabelecimento, mesesJanela)
-    )
-    .sort((a, b) => {
-      const chaveA = `${a.data ?? ""} ${a.horario ?? ""}`;
-      const chaveB = `${b.data ?? ""} ${b.horario ?? ""}`;
-      return chaveA.localeCompare(chaveB);
-    });
+  const foraDaJanela = agruparParesPendentes(
+    agendamentos
+      .filter(
+        (item) =>
+          item.finalizado &&
+          item.telefone &&
+          (item.status === "pendente" || item.status === "aguardando_sinal") &&
+          !dataAgendavelComMes(item.data, estabelecimento, mesesJanela)
+      )
+      .sort((a, b) => {
+        const chaveA = `${a.data ?? ""} ${a.horario ?? ""}`;
+        const chaveB = `${b.data ?? ""} ${b.horario ?? ""}`;
+        return chaveA.localeCompare(chaveB);
+      }),
+    agendamentos
+  );
 
   // "Aguardando Conclusão" (sub-toggle de Pendentes): DERIVADA, mesmo padrão
   // de inbox/foraDaJanela — nenhuma query extra. São os confirmados cujo atendimento já terminou
@@ -2446,6 +2505,19 @@ export default function AdminPage() {
           .map((outro) => outro.id)
       : [];
 
+  // Anterior que a CONFIRMAÇÃO da principal leva junto (só pendente ou
+  // aguardando sinal), a mesma regra de executarConfirmacao. null pra qualquer
+  // outra linha. Usada pelos gates de handleConfirmar, que avaliam o par.
+  const irmaParaConfirmar = (item) => {
+    if (item?.papel_reserva !== "principal") return null;
+    const irma = irmaDoPar(item);
+    return irma &&
+      irma.papel_reserva === "anterior" &&
+      (irma.status === "pendente" || irma.status === "aguardando_sinal")
+      ? irma
+      : null;
+  };
+
   // Irmã que o cancelamento pode levar junto: só se ainda estiver ativa (nem
   // cancelada nem concluída). null pra agendamento normal.
   const irmaCancelavel = (item) => {
@@ -2458,8 +2530,13 @@ export default function AdminPage() {
       : null;
   };
   const irmaParaCancelar = irmaCancelavel(agendamentoParaCancelar);
+  // Pelo card agregado de Pendentes, "os dois" é o único desfecho e a pergunta
+  // nem aparece (irmaParaCancelar já só existe se a irmã estiver ativa).
+  const doCardAgregado =
+    irmaParaCancelar != null && cancelamentoDoCardId === agendamentoParaCancelar.id;
   const cancelarOsDois =
-    irmaParaCancelar != null && apenasEsteCancelarId !== agendamentoParaCancelar.id;
+    irmaParaCancelar != null &&
+    (doCardAgregado || apenasEsteCancelarId !== agendamentoParaCancelar.id);
 
   // A vizinha do popup de prazo mínimo é metade de um par? Aí cancelá-la deixaria
   // meio par no ar, e o botão de cancelar some (as outras saídas ficam).
@@ -2954,15 +3031,25 @@ export default function AdminPage() {
                   key={item.id}
                   id={`pendente-${item.id}`}
                   ref={(el) => {
-                    if (el) refsPendentes.current.set(item.id, el);
-                    else refsPendentes.current.delete(item.id);
+                    // Card agregado: o clique numa anterior pendente (calendário,
+                    // botão Ver) destaca ESTE card, então os dois ids apontam pra ele.
+                    const idIrma = item.etapaAnteriorLinha?.id;
+                    if (el) {
+                      refsPendentes.current.set(item.id, el);
+                      if (idIrma != null) refsPendentes.current.set(idIrma, el);
+                    } else {
+                      refsPendentes.current.delete(item.id);
+                      if (idIrma != null) refsPendentes.current.delete(idIrma);
+                    }
                   }}
                   // Todo item do inbox precisa de ação: destaque âmbar fixo.
                   // Destaque temporário azul por cima (ver
                   // pendenteEmDestaqueId + PainelCalendario/onSelecionarPendente):
                   // chegada vinda do clique no bloco "Pendente" da view Dia.
                   className={`rounded-2xl bg-amber-50/60 p-4 shadow-sm ring-1 ring-amber-300 transition ${
-                    pendenteEmDestaqueId === item.id
+                    pendenteEmDestaqueId === item.id ||
+                    (item.etapaAnteriorLinha &&
+                      pendenteEmDestaqueId === item.etapaAnteriorLinha.id)
                       ? "ring-4 ring-blue-500"
                       : ""
                   }`}
@@ -3077,6 +3164,16 @@ export default function AdminPage() {
                         )}
                       </span>
                     </div>
+                      {item.etapaAnteriorLinha && (
+                        <p className="mt-1.5 text-sm text-body">
+                          <span className="rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700">
+                            {nomeEtapaAnterior(item.etapaAnteriorLinha)}
+                          </span>{" "}
+                          {formatarData(item.etapaAnteriorLinha.data)} às{" "}
+                          {formatarHorario(item.etapaAnteriorLinha.horario)}
+                          {item.etapaAnteriorLinha.status === "confirmado" && " · Agendado"}
+                        </p>
+                      )}
                   </div>
 
                   {/* Status do pagamento do sinal: UM bloco só, nunca dois.
@@ -3433,6 +3530,7 @@ export default function AdminPage() {
                         onClick={() =>
                           comGateDeEtiqueta(item, "cancelar", () => {
                             setAgendamentoParaCancelar(item);
+                            setCancelamentoDoCardId(item.etapaAnteriorLinha ? item.id : null);
                             setNotificarAoCancelar(true);
                           })
                         }
@@ -3448,6 +3546,7 @@ export default function AdminPage() {
                         onClick={() =>
                           comGateDeEtiqueta(item, "cancelar", () => {
                             setAgendamentoParaCancelar(item);
+                            setCancelamentoDoCardId(item.etapaAnteriorLinha ? item.id : null);
                             setNotificarAoCancelar(false);
                           })
                         }
@@ -3634,6 +3733,17 @@ export default function AdminPage() {
                         )}
                       </div>
 
+                        {item.etapaAnteriorLinha && (
+                          <p className="mt-1.5 text-sm text-body">
+                            <span className="rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700">
+                              {nomeEtapaAnterior(item.etapaAnteriorLinha)}
+                            </span>{" "}
+                            {formatarData(item.etapaAnteriorLinha.data)} às{" "}
+                            {formatarHorario(item.etapaAnteriorLinha.horario)}
+                            {item.etapaAnteriorLinha.status === "confirmado" && " · Agendado"}
+                          </p>
+                        )}
+
                       <div className="mt-4 flex flex-wrap gap-2">
                         {/* Confirmar, dividido no mesmo padrão do inbox
                             normal (ver acima): a zona maior chama
@@ -3697,6 +3807,7 @@ export default function AdminPage() {
                             onClick={() =>
                               comGateDeEtiqueta(item, "cancelar", () => {
                                 setAgendamentoParaCancelar(item);
+                                setCancelamentoDoCardId(item.etapaAnteriorLinha ? item.id : null);
                                 setNotificarAoCancelar(true);
                               })
                             }
@@ -3712,6 +3823,7 @@ export default function AdminPage() {
                             onClick={() =>
                               comGateDeEtiqueta(item, "cancelar", () => {
                                 setAgendamentoParaCancelar(item);
+                                setCancelamentoDoCardId(item.etapaAnteriorLinha ? item.id : null);
                                 setNotificarAoCancelar(false);
                               })
                             }
@@ -3737,6 +3849,9 @@ export default function AdminPage() {
                             abaixo) é o mesmo pros dois — sem popup extra de
                             confirmação, já que escolher a nova data e clicar
                             em "Confirmar nova data" já é o gesto deliberado. */}
+                        {/* Par (serviço de duas datas): sem Alterar data aqui — a
+                            data do par se altera no detalhe, depois de confirmado. */}
+                        {!item.reserva_grupo_id && (
                         <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-border">
                           <button
                             type="button"
@@ -3763,6 +3878,7 @@ export default function AdminPage() {
                             <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
                           </button>
                         </div>
+                        )}
                         <button
                           type="button"
                           onClick={() =>
@@ -5092,7 +5208,7 @@ export default function AdminPage() {
 
             {/* Par (serviço de duas datas) com a irmã ainda ativa: a dona
                 escolhe se leva a outra linha junto. Padrão: os dois. */}
-            {irmaParaCancelar && (
+            {irmaParaCancelar && !doCardAgregado && (
               <fieldset className="mt-4 space-y-2 text-sm text-body">
                 <legend className="sr-only">O que cancelar</legend>
                 <label className="flex cursor-pointer items-start gap-2">
@@ -5298,11 +5414,16 @@ export default function AdminPage() {
         }
         dataNova={
           conflitoPrazoConfirmacao
-            ? formatarData(conflitoPrazoConfirmacao.agendamento.data)
+            ? formatarData(
+                conflitoPrazoConfirmacao.dataAlvo ??
+                  conflitoPrazoConfirmacao.agendamento.data
+              )
             : ""
         }
         horarioNovo={String(
-          conflitoPrazoConfirmacao?.agendamento?.horario ?? ""
+          conflitoPrazoConfirmacao?.horarioAlvo ??
+            conflitoPrazoConfirmacao?.agendamento?.horario ??
+            ""
         ).slice(0, 5)}
         prazoDias={Number(estabelecimento.prazo_minimo_entre_agendamentos_dias)}
         podeCancelarConflito={!conflitoPrazoConfirmacaoEDePar}
