@@ -98,12 +98,12 @@ const ETAPAS = [
 
 // Chaves que o wizard grava em history.state.voltarFisico (ver
 // useVoltarFisico) — as entradas que desistirDoNovoAgendamento consome.
-// "dataAnterior" não é uma etapa a mais: é a SEGUNDA passagem pela etapa
-// "data" do serviço de duas datas (ver faseData). Ela empurra a própria
-// entrada de histórico pra que o voltar físico dali volte para a escolha do
-// evento em vez de sair da etapa — e por isso precisa ser consumida junto
-// das outras por desistirDoNovoAgendamento.
-const CHAVES_HISTORICO_WIZARD = [...ETAPAS.map((e) => e.id), "dataAnterior"];
+// "dataSegunda" não é uma etapa a mais: é a SEGUNDA passagem pela etapa
+// "data" do serviço de duas datas (ver faseData): a escolha do evento, depois
+// do teste. Ela empurra a própria entrada de histórico pra que o voltar físico
+// dali volte para a escolha do teste em vez de sair da etapa — e por isso
+// precisa ser consumida junto das outras por desistirDoNovoAgendamento.
+const CHAVES_HISTORICO_WIZARD = [...ETAPAS.map((e) => e.id), "dataSegunda"];
 
 // Quanto desistirDoNovoAgendamento espera o popstate de cada history.back()
 // antes de desistir da cadeia e destravar o modal.
@@ -368,8 +368,8 @@ const MENSAGENS_ERRO_CRIACAO = {
   // AG010/AG011 são próprios de agendamento_criar_par (sql/rpc_criacao_par.sql)
   // e valem a mesma observação dos de cima: o wizard funcionando normalmente
   // não chega neles — o par só é montado com um serviço marcado como de duas
-  // datas, e o calendário da segunda passagem já não oferece dia >= o do
-  // evento (ver maxExclusivo em CalendarioDias).
+  // datas, e o calendário da segunda passagem (o evento) já não oferece dia
+  // <= o do teste (ver minExclusivo em CalendarioDias).
   AG010: "Este serviço não precisa mais de uma segunda data. Atualize a página e escolha de novo.",
   AG011: "A primeira data precisa ser em um dia anterior ao do atendimento principal. Escolha outro dia.",
 };
@@ -470,17 +470,16 @@ function perguntaDeveAparecer(pergunta, respostas) {
 //                   marcação visual distinta (borda tracejada + selo) —
 //                   nunca a mesma paleta verde/laranja do vencimento de
 //                   manutenção, pra não misturar as duas informações.
-//   maxExclusivo     – "YYYY-MM-DD" que serve de teto EXCLUSIVO: esse dia e
-//                   todos os posteriores ficam cinza. Hoje só a segunda
-//                   passagem do serviço de duas datas usa — a etapa anterior
-//                   precisa cair num dia ESTRITAMENTE antes do evento (ver
-//                   AG011 em sql/rpc_criacao_par.sql), e a regra entra como
-//                   filtro de GRADE, não como erro no submit. Bloqueia nos
-//                   dois modos, igual a `passado`: o modo livre do /admin
-//                   deixa furar regra do salão, não a ordem das duas linhas
-//                   do par, que é o que dá sentido ao papel de cada uma.
-//                   null (o normal) = nenhum teto, comportamento idêntico ao
-//                   de antes.
+//   minExclusivo     – "YYYY-MM-DD" que serve de piso EXCLUSIVO: esse dia e
+//                   todos os anteriores ficam cinza. Hoje só a segunda
+//                   passagem do serviço de duas datas usa — o evento precisa
+//                   cair num dia ESTRITAMENTE depois do teste (ver AG011 em
+//                   sql/rpc_criacao_par.sql), e a regra entra como filtro de
+//                   GRADE, não como erro no submit. Bloqueia nos dois modos,
+//                   igual a `passado`: o modo livre do /admin deixa furar
+//                   regra do salão, não a ordem das duas linhas do par, que é
+//                   o que dá sentido ao papel de cada uma. null (o normal) =
+//                   nenhum piso, comportamento idêntico ao de antes.
 // Exportado pra ser reaproveitado fora do wizard (ver modal "Alterar data"
 // da seção "Fora da janela de agendamento" em app/[salon]/admin/page.js) —
 // componente puro, tudo vem por props, nenhuma dependência do resto do
@@ -500,7 +499,7 @@ export function CalendarioDias({
   restricoes = NENHUMA_RESTRICAO,
   etiquetaClienteId = null,
   vencimentoManutencao,
-  maxExclusivo = null,
+  minExclusivo = null,
   modoLivre = false,
 }) {
   const ano = mes.getFullYear();
@@ -582,9 +581,9 @@ export function CalendarioDias({
           const date = new Date(ano, mesIdx, d);
           const iso = formatarISO(date);
           const passado = iso < min;
-          // Teto do serviço de duas datas — ver a prop maxExclusivo. Nunca
+          // Piso do serviço de duas datas — ver a prop minExclusivo. Nunca
           // dispensado pelo modo livre, igual a `passado`.
-          const depoisDoTeto = maxExclusivo != null && iso >= maxExclusivo;
+          const antesDoPiso = minExclusivo != null && iso <= minExclusivo;
           const fechado = !diasSemanaAtivos.has(date.getDay());
           const foraDaJanela = !dataAgendavelComMes(
             iso,
@@ -607,7 +606,7 @@ export function CalendarioDias({
           // `passado` nunca é dispensado, nos dois modos.
           const desabilitado =
             passado ||
-            depoisDoTeto ||
+            antesDoPiso ||
             semVaga ||
             (!modoLivre && (fechado || foraDaJanela || restrito));
           // Dia que só está clicável PORQUE está em modo livre (normalmente
@@ -1103,20 +1102,23 @@ export default function FormularioAgendamento({
   // -------------------------------------------------------------------------
   // SERVIÇO DE DUAS DATAS (servicos.exige_segunda_data)
   // -------------------------------------------------------------------------
-  // A etapa "data" passa a ter DUAS fases pra esses serviços — "evento" (o
-  // atendimento principal, escolhido primeiro) e "anterior" (o "teste", que
-  // precisa cair num dia antes dele). Fase, e não uma etapa nova em ETAPAS:
-  // o indicador de progresso continua com três passos, as duas escolhas são
-  // a mesma pergunta ("quando?") feita duas vezes, e nenhum dos consumidores
-  // precisa saber que isto existe.
+  // A etapa "data" passa a ter DUAS fases pra esses serviços, em ORDEM
+  // CRONOLÓGICA: "anterior" (o "teste", escolhido primeiro) e "evento" (o
+  // atendimento principal, que precisa cair num dia DEPOIS do teste). Fase, e
+  // não uma etapa nova em ETAPAS: o indicador de progresso continua com três
+  // passos, as duas escolhas são a mesma pergunta ("quando?") feita duas
+  // vezes, e nenhum dos consumidores precisa saber que isto existe.
   //
-  // `eventoEscolhido` é o que separa um serviço normal de um par em
-  // montagem: null (o caso de sempre) faz TODO o resto deste componente se
-  // comportar exatamente como antes — `dataEvento`/`horarioEvento` caem em
-  // form.data/horarioSelecionado, `ehPar` é falso em selecionarHorario e em
-  // finalizarAgendamento, e nenhum ramo novo é alcançado.
-  const [faseData, setFaseData] = useState("evento");
-  const [eventoEscolhido, setEventoEscolhido] = useState(null);
+  // `form.data`/`horarioSelecionado` são sempre a escolha da fase em curso.
+  // `testeEscolhido` guarda o teste depois que a fase muda para "evento" — e é
+  // o que separa um serviço normal de um par em montagem: null (o caso de
+  // sempre) faz TODO o resto deste componente se comportar exatamente como
+  // antes. Na fase "evento" (e em "dados"), o evento é form.data/horario.
+  // `eventoGuardado` só existe enquanto a cliente refaz o teste: o evento já
+  // escolhido espera ali e volta se ainda cair depois do novo teste.
+  const [faseData, setFaseData] = useState("anterior");
+  const [testeEscolhido, setTesteEscolhido] = useState(null);
+  const [eventoGuardado, setEventoGuardado] = useState(null);
 
   // Id da linha da ETAPA ANTERIOR do par já gravado nesta sessão (público).
   // O irmão dela é `reservaId`, que continua sendo SEMPRE o evento — é nele
@@ -1139,8 +1141,11 @@ export default function FormularioAgendamento({
   // Data/horário do EVENTO, para tudo que precisa falar do atendimento
   // principal: a regra do sinal, o resumo da etapa "dados", os blocos de Pix
   // e o protocolo. Fora do par são literalmente form.data/horarioSelecionado.
-  const dataEvento = eventoEscolhido?.data ?? form.data;
-  const horarioEvento = eventoEscolhido?.horario ?? horarioSelecionado;
+  // Com o teste ainda em escolha (fase 1), form.data é a data do TESTE: nada
+  // que fale do evento pode lê-la como se fosse dele (sinal, regra especial).
+  const emFaseTeste = servicoExigeSegundaData && faseData === "anterior";
+  const dataEvento = emFaseTeste ? "" : form.data;
+  const horarioEvento = emFaseTeste ? "" : horarioSelecionado;
 
   // A REGRA (cobra? quanto?) sai inteira de resolverSinal (lib/sinalRegra.js),
   // que compõe, nesta ordem: regra especial vencedora pro par (serviço, data)
@@ -2196,13 +2201,12 @@ export default function FormularioAgendamento({
     }
 
     // Segunda passagem de um serviço de duas datas em andamento: restaura o
-    // evento e a fase ANTES da data, que aqui é a da etapa anterior. Sem
-    // isto, `pendente.data` voltaria como se fosse a data do atendimento
-    // principal. Um rascunho de serviço normal não traz nada disto e cai no
-    // caminho de sempre.
-    if (pendente.faseData === "anterior" && pendente.eventoEscolhido) {
-      setEventoEscolhido(pendente.eventoEscolhido);
-      setFaseData("anterior");
+    // teste e a fase ANTES da data, que aqui é a do evento. Rascunhos de antes
+    // da ordem cronológica não trazem `testeEscolhido` e caem no caminho
+    // normal, sem misturar as duas semânticas.
+    if (pendente.faseData === "evento" && pendente.testeEscolhido) {
+      setTesteEscolhido(pendente.testeEscolhido);
+      setFaseData("evento");
       setAnteriorId(pendente.anteriorId ?? null);
       setReservaGrupoId(pendente.reservaGrupoId ?? null);
     }
@@ -2349,12 +2353,11 @@ export default function FormularioAgendamento({
       // de restauração acima).
       reservaId,
       // Serviço de duas datas. `data`/`horario` acima são sempre os da fase
-      // em curso (na segunda passagem, os da ETAPA ANTERIOR); o evento e a
-      // fase viajam aqui, senão um reload no meio da segunda escolha voltaria
-      // como se fosse uma escolha única — com a data do "teste" ocupando o
-      // lugar do atendimento principal.
+      // em curso (na segunda passagem, os do EVENTO); o teste e a fase viajam
+      // aqui, senão um reload no meio da segunda escolha voltaria como se
+      // fosse uma escolha única.
       faseData,
-      eventoEscolhido,
+      testeEscolhido,
       anteriorId,
       reservaGrupoId,
     });
@@ -2369,7 +2372,7 @@ export default function FormularioAgendamento({
     respostasPerguntas,
     reservaId,
     faseData,
-    eventoEscolhido,
+    testeEscolhido,
     anteriorId,
     reservaGrupoId,
   ]);
@@ -2511,15 +2514,16 @@ export default function FormularioAgendamento({
     setServicoSelecionado(servico);
     setHorarioSelecionado("");
     setProfissionalSelecionado(null);
-    // Trocar de serviço zera a escolha do atendimento principal e volta a
-    // etapa "data" pra primeira passagem. Sem isto, sair de um serviço de
-    // duas datas no meio da segunda escolha deixaria o evento antigo preso:
-    // o calendário do serviço NOVO continuaria com o teto daquela data (ver
-    // maxExclusivo) e os gates do /admin olhariam um dia que já não pertence
+    // Trocar de serviço zera a escolha do teste (e o evento guardado) e volta
+    // a etapa "data" pra primeira passagem. Sem isto, sair de um serviço de
+    // duas datas no meio da segunda escolha deixaria o teste antigo preso: o
+    // calendário do serviço NOVO continuaria com o piso daquela data (ver
+    // minExclusivo) e os gates do /admin olhariam um dia que já não pertence
     // a agendamento nenhum. Uma reserva já gravada não é tocada aqui — quem
     // libera é o próximo clique num horário (ver liberarReservasDaTentativa).
-    setFaseData("evento");
-    setEventoEscolhido(null);
+    setFaseData("anterior");
+    setTesteEscolhido(null);
+    setEventoGuardado(null);
     // Preço e vencimento da manutenção anterior (se houver) não valem mais
     // pro novo serviço — os efeitos acima recalculam do zero quando o novo
     // for manutenção.
@@ -2800,11 +2804,12 @@ export default function FormularioAgendamento({
   // não limpa serviço, data nem horário.
   function voltarEtapa() {
     if (desistirEmAndamentoRef.current) return;
-    // Segunda passagem do serviço de duas datas: o passo atrás é DENTRO da
-    // etapa "data" — volta pra escolha do evento, não pra etapa "servico".
-    // Vale pro botão em tela e pro voltar físico, que chamam os dois isto.
-    if (etapa === "data" && faseData === "anterior") {
-      voltarParaFaseEvento();
+    // Segunda passagem do serviço de duas datas (o evento): o passo atrás é
+    // DENTRO da etapa "data" — volta pra escolha do teste, não pra etapa
+    // "servico". Vale pro botão em tela e pro voltar físico, que chamam os
+    // dois isto.
+    if (etapa === "data" && faseData === "evento") {
+      voltarParaFaseTeste();
       return;
     }
     const indice = ETAPAS.findIndex((e) => e.id === etapa);
@@ -2905,15 +2910,15 @@ export default function FormularioAgendamento({
       !carregandoProfissionais,
     "servico"
   );
-  // A chave muda com a FASE ("data" -> "dataAnterior") de propósito: é a
+  // A chave muda com a FASE ("data" -> "dataSegunda") de propósito: é a
   // troca de chave que faz o hook empurrar uma entrada de histórico nova pra
-  // segunda passagem. Com uma chave só, o popstate que leva da etapa anterior
-  // de volta ao evento consumiria a única entrada e o toque físico seguinte
+  // segunda passagem. Com uma chave só, o popstate que leva do evento de
+  // volta ao teste consumiria a única entrada e o toque físico seguinte
   // sairia do wizard (ver lib/voltarFisico.js).
   const voltarFisicoData = useVoltarFisico(
     voltarEtapa,
     etapa === "data" && !restaurandoParaDados,
-    faseData === "anterior" ? "dataAnterior" : "data"
+    faseData === "evento" ? "dataSegunda" : "data"
   );
   const voltarFisicoDados = useVoltarFisico(fecharDados, etapa === "dados", "dados");
 
@@ -3074,41 +3079,59 @@ export default function FormularioAgendamento({
     ];
   }
 
-  // Primeira passagem concluída: o evento fica guardado e a etapa "data"
-  // recomeça, agora pedindo o dia da etapa anterior. NADA é gravado aqui,
-  // nos dois consumidores — no público a escrita passou a ser a do par
-  // inteiro, no clique seguinte (agendamento_criar_par); no /admin ela
-  // continua no submit final.
+  // Primeira passagem concluída: o teste fica guardado e a etapa "data"
+  // recomeça, agora pedindo o dia do evento (que só aceita dias DEPOIS do
+  // teste). NADA é gravado aqui, nos dois consumidores — no público a escrita
+  // é a do par inteiro, no clique seguinte (agendamento_criar_par); no /admin
+  // ela continua no submit final.
   //
   // `livres` viaja junto porque o mapa de vagas vai ser substituído pelo do
   // outro dia: sem essa lista, o encaixe automático escolheria alguém livre
-  // na etapa anterior e sem agenda no dia do evento, e o par só falharia na
+  // no evento e sem agenda no dia do teste, e o par só falharia na
   // constraint, já no insert.
-  function irParaFaseAnterior(slot) {
-    setEventoEscolhido({
+  //
+  // Se a cliente voltou pra refazer o teste, o evento que ela já tinha
+  // escolhido (eventoGuardado) é restaurado só se continuar em dia
+  // ESTRITAMENTE depois do novo teste; senão é limpo e ela escolhe de novo.
+  function irParaFaseEvento(slot) {
+    const teste = {
       data: form.data,
       horario: slot,
       livres: idsLivresNoSlot(slot),
-    });
-    setFaseData("anterior");
-    setHorarioSelecionado("");
+    };
+    const guardado = eventoGuardado;
+    const restaura = guardado != null && guardado.data > teste.data;
+    const dataMes = restaura ? guardado.data : teste.data;
+    const [ano, mesNum] = dataMes.split("-").map(Number);
+
+    setTesteEscolhido(teste);
+    setEventoGuardado(null);
+    setFaseData("evento");
+    setHorarioSelecionado(restaura ? guardado.horario : "");
     setAvisoHorarioIndisponivel(false);
     setErro("");
-    setForm((anterior) => ({ ...anterior, data: "" }));
+    setForm((anterior) => ({ ...anterior, data: restaura ? guardado.data : "" }));
+    setMesVisivel(new Date(ano, mesNum - 1, 1));
     rolarPara(dataRef);
   }
 
-  // Volta da segunda passagem para a escolha do evento, com o dia e o horário
+  // Volta da segunda passagem para a escolha do teste, com o dia e o horário
   // dele restaurados na grade (é o que o link "alterar" do resumo e o
-  // "Voltar" — em tela ou físico — fazem na fase "anterior"). Não toca em
+  // "Voltar" — em tela ou físico — fazem na fase "evento"). Não toca em
   // reserva nenhuma: um par já gravado só é liberado quando a cliente de fato
-  // escolhe outra coisa, exatamente como a reserva única de sempre.
-  function voltarParaFaseEvento() {
-    if (!eventoEscolhido) return;
-    setForm((anterior) => ({ ...anterior, data: eventoEscolhido.data }));
-    setHorarioSelecionado(eventoEscolhido.horario);
-    setFaseData("evento");
-    setEventoEscolhido(null);
+  // escolhe outra coisa, exatamente como a reserva única de sempre. O evento
+  // já escolhido (data e horário) espera em eventoGuardado.
+  function voltarParaFaseTeste() {
+    if (!testeEscolhido) return;
+    setEventoGuardado(
+      form.data && horarioSelecionado
+        ? { data: form.data, horario: horarioSelecionado }
+        : null
+    );
+    setForm((anterior) => ({ ...anterior, data: testeEscolhido.data }));
+    setHorarioSelecionado(testeEscolhido.horario);
+    setFaseData("anterior");
+    setTesteEscolhido(null);
     setAvisoHorarioIndisponivel(false);
     setErro("");
   }
@@ -3185,11 +3208,11 @@ export default function FormularioAgendamento({
     setAvisoHorarioIndisponivel(false);
 
     if (status) {
-      // Serviço de duas datas, primeira passagem: fixa o evento e reabre a
-      // etapa "data" pedindo o dia da etapa anterior. O /admin continua sem
+      // Serviço de duas datas, primeira passagem: fixa o teste e reabre a
+      // etapa "data" pedindo o dia do evento. O /admin continua sem
       // gravar nada aqui — o insert do par inteiro é no submit final.
-      if (servicoExigeSegundaData && faseData === "evento") {
-        irParaFaseAnterior(slot);
+      if (servicoExigeSegundaData && faseData === "anterior") {
+        irParaFaseEvento(slot);
         return;
       }
       setHorarioSelecionado(slot);
@@ -3198,6 +3221,28 @@ export default function FormularioAgendamento({
     }
 
     if (criandoReserva) return;
+
+    // Serviço de duas datas, primeira passagem (o teste): NADA é gravado nem
+    // perguntado aqui — as regras do salão e o sinal falam do EVENTO e são
+    // lidos no clique seguinte. A antecedência do teste é revalidada no
+    // servidor JÁ AQUI pra a cliente não escolher o evento em cima de um
+    // horário que o servidor vai recusar depois.
+    if (servicoExigeSegundaData && faseData === "anterior") {
+      setCriandoReserva(true);
+      const testeOk = await validarAntecedenciaNoServidor({
+        estabelecimentoId: estabelecimento.id,
+        data: form.data,
+        horario: slot,
+      });
+      setCriandoReserva(false);
+      if (!testeOk) {
+        setErro("Esse horário não respeita mais a antecedência mínima do salão. Escolha outro.");
+        setHorarioSelecionado("");
+        return;
+      }
+      irParaFaseEvento(slot);
+      return;
+    }
 
     // Sem sinal, este clique É a confirmação (ver confirmaSemRevisao) — então
     // as regras do salão precisam ser lidas AQUI, antes de qualquer escrita,
@@ -3219,43 +3264,22 @@ export default function FormularioAgendamento({
       return;
     }
 
-    // Serviço de duas datas, primeira passagem: NADA é gravado aqui. O
-    // clique só fixa o evento e abre a segunda escolha — o par inteiro nasce
-    // no clique da etapa anterior, numa transação só (agendamento_criar_par).
-    // A antecedência do evento é revalidada no servidor JÁ AQUI pra a cliente
-    // não escolher a segunda data em cima de um horário que o servidor vai
-    // recusar depois, quando desfazer sairia bem mais caro.
-    if (servicoExigeSegundaData && faseData === "evento") {
-      setCriandoReserva(true);
-      const eventoOk = await validarAntecedenciaNoServidor({
-        estabelecimentoId: estabelecimento.id,
-        data: form.data,
-        horario: slot,
-      });
-      setCriandoReserva(false);
-      if (!eventoOk) {
-        setErro("Esse horário não respeita mais a antecedência mínima do salão. Escolha outro.");
-        setHorarioSelecionado("");
-        return;
-      }
-      irParaFaseAnterior(slot);
-      return;
-    }
-
     setHorarioSelecionado(slot);
     setErro("");
 
-    // Daqui pra baixo, num par, `slot` é o horário da ETAPA ANTERIOR e o
-    // evento inteiro está em `eventoEscolhido`.
-    const ehPar = servicoExigeSegundaData && eventoEscolhido != null;
+    // Daqui pra baixo, num par, `slot` é o horário do EVENTO e o teste inteiro
+    // está em `testeEscolhido`.
+    const ehPar = servicoExigeSegundaData && testeEscolhido != null;
 
     const chaveAtual = {
       servicoId: servicoSelecionado.id,
-      data: ehPar ? eventoEscolhido.data : form.data,
-      horario: ehPar ? eventoEscolhido.horario : slot,
+      data: form.data,
+      horario: slot,
       profissionalId: escolherProfissional ? profissionalSelecionado?.id ?? null : null,
       // Só existem no par: num serviço normal a chave é a de sempre.
-      ...(ehPar ? { dataAnterior: form.data, horarioAnterior: slot } : null),
+      ...(ehPar
+        ? { dataAnterior: testeEscolhido.data, horarioAnterior: testeEscolhido.horario }
+        : null),
     };
 
     // Mesma seleção de uma reserva já gravada: reaproveita sem gravar de novo.
@@ -3305,7 +3329,7 @@ export default function FormularioAgendamento({
       // volta e troca de horário conflitaria com a própria etapa anterior já
       // reservada.
       const conflito = await primeiroConflitoPrazoMinimo(
-        ehPar ? [form.data, eventoEscolhido.data] : [form.data],
+        ehPar ? [testeEscolhido.data, form.data] : [form.data],
         [reservaId, anteriorId, agendamentoEmEdicao?.id, ...prazoIgnorados]
       );
 
@@ -3497,13 +3521,13 @@ export default function FormularioAgendamento({
     let profissionalId = chaveAtual.profissionalId;
     if (!escolherProfissional) {
       // Num par, quem assume precisa estar livre nos DOIS horários: a RPC
-      // grava as duas linhas com o mesmo profissional. A lista do evento foi
-      // capturada na primeira passagem (irParaFaseAnterior), porque `vagas`
+      // grava as duas linhas com o mesmo profissional. A lista do teste foi
+      // capturada na primeira passagem (irParaFaseEvento), porque `vagas`
       // já é do outro dia aqui.
-      const livresAnterior = idsLivresNoSlot(slot);
+      const livresDoEvento = idsLivresNoSlot(slot);
       const livres = ehPar
-        ? livresAnterior.filter((id) => eventoEscolhido.livres.includes(id))
-        : livresAnterior;
+        ? livresDoEvento.filter((id) => testeEscolhido.livres.includes(id))
+        : livresDoEvento;
       if (livres.length === 0) {
         setCriandoReserva(false);
         setErro(
@@ -3522,7 +3546,7 @@ export default function FormularioAgendamento({
       // sempre): é o atendimento principal que pesa na distribuição.
       profissionalId = await escolherMenosOcupado(
         estabelecimento.id,
-        ehPar ? eventoEscolhido.data : form.data,
+        form.data,
         livres
       );
     }
@@ -3557,10 +3581,10 @@ export default function FormularioAgendamento({
     const { data: retornoCriacao, error } = ehPar
       ? await supabase.rpc("agendamento_criar_par", {
           ...payloadComum,
-          p_data: eventoEscolhido.data,
-          p_horario: eventoEscolhido.horario,
-          p_data_anterior: form.data,
-          p_horario_anterior: slot,
+          p_data: form.data,
+          p_horario: slot,
+          p_data_anterior: testeEscolhido.data,
+          p_horario_anterior: testeEscolhido.horario,
         })
       : await supabase.rpc("agendamento_criar", {
           ...payloadComum,
@@ -3593,9 +3617,9 @@ export default function FormularioAgendamento({
       if (ehHorarioOcupado) {
         // Num par o 23P01 pode ter vindo de QUALQUER uma das duas linhas, e a
         // transação desfez as duas — então a mensagem não aponta um horário
-        // só. A cliente segue na segunda passagem: trocar o dia da etapa
-        // anterior resolve o caso comum, e o link "alterar" do resumo leva de
-        // volta ao evento quando foi ele que caiu.
+        // só. A cliente segue na segunda passagem: trocar o dia do evento
+        // resolve o caso comum, e o link "alterar" do resumo leva de volta ao
+        // teste quando foi ele que caiu.
         setErro(
           ehPar
             ? "Um dos horários acabou de ser ocupado. Escolha novamente."
@@ -3649,10 +3673,10 @@ export default function FormularioAgendamento({
         // aqui, por isso tudo viaja por parâmetro.
         anteriorDoPar: ehPar
           ? {
-              dataEvento: eventoEscolhido.data,
-              horarioEvento: eventoEscolhido.horario,
-              data: form.data,
-              horario: slot,
+              dataEvento: form.data,
+              horarioEvento: slot,
+              data: testeEscolhido.data,
+              horario: testeEscolhido.horario,
               reservaGrupoId: retornoCriacao?.reserva_grupo_id ?? null,
             }
           : null,
@@ -4158,12 +4182,12 @@ export default function FormularioAgendamento({
         ...resumoSucessoDoPar({
           horario: horarioSelecionado,
           anteriorDoPar:
-            anteriorId != null && eventoEscolhido
+            anteriorId != null && testeEscolhido
               ? {
-                  dataEvento: eventoEscolhido.data,
-                  horarioEvento: eventoEscolhido.horario,
-                  data: form.data,
-                  horario: horarioSelecionado,
+                  dataEvento: form.data,
+                  horarioEvento: horarioSelecionado,
+                  data: testeEscolhido.data,
+                  horario: testeEscolhido.horario,
                   reservaGrupoId,
                 }
               : null,
@@ -4190,8 +4214,8 @@ export default function FormularioAgendamento({
     // decisão consciente da dona precisa cobrir as duas. Fora do par a lista
     // tem um elemento e nada muda.
     const datasDoAgendamento =
-      servicoExigeSegundaData && eventoEscolhido
-        ? [eventoEscolhido.data, form.data]
+      servicoExigeSegundaData && testeEscolhido
+        ? [testeEscolhido.data, form.data]
         : [form.data];
 
     if (
@@ -4280,14 +4304,14 @@ export default function FormularioAgendamento({
 
     // Quem fica com a reserva: o escolhido pelo cliente, ou — no encaixe
     // automático — o menos ocupado entre os livres neste horário.
-    const ehPar = servicoExigeSegundaData && eventoEscolhido != null;
+    const ehPar = servicoExigeSegundaData && testeEscolhido != null;
 
     // Mesma regra do banco (AG011, ver sql/rpc_criacao_par.sql), conferida
     // aqui porque o insert do /admin não passa pela RPC do par: a etapa
     // anterior tem que cair num dia ESTRITAMENTE antes do evento. O
     // calendário da segunda passagem já não oferece outra coisa (ver
-    // maxExclusivo) — isto é a rede embaixo dela.
-    if (ehPar && !(form.data < eventoEscolhido.data)) {
+    // minExclusivo) — isto é a rede embaixo dela.
+    if (ehPar && !(testeEscolhido.data < form.data)) {
       setErro(
         `A data do ${nomeEtapaAnterior.toLowerCase()} precisa ser anterior à do atendimento principal.`
       );
@@ -4304,11 +4328,11 @@ export default function FormularioAgendamento({
       // horário bloqueado por regra; só sobreposição real já removeu o
       // profissional do mapa inteiro, nos dois formatos). Num par, só quem
       // estiver livre nos DOIS horários serve: as duas linhas nascem com o
-      // mesmo profissional (ver irParaFaseAnterior, que captura a lista do
-      // evento antes de `vagas` virar a do outro dia).
+      // mesmo profissional (ver irParaFaseEvento, que captura a lista do
+      // teste antes de `vagas` virar a do outro dia).
       const livresDoSlot = idsLivresNoSlot(horarioSelecionado);
       const livres = ehPar
-        ? livresDoSlot.filter((id) => eventoEscolhido.livres.includes(id))
+        ? livresDoSlot.filter((id) => testeEscolhido.livres.includes(id))
         : livresDoSlot;
       if (livres.length === 0) {
         setEnviando(false);
@@ -4323,7 +4347,7 @@ export default function FormularioAgendamento({
       }
       profissionalId = await escolherMenosOcupado(
         estabelecimento.id,
-        ehPar ? eventoEscolhido.data : form.data,
+        form.data,
         livres
       );
     }
@@ -4379,15 +4403,15 @@ export default function FormularioAgendamento({
           {
             ...payloadComum,
             ...sinalDoEvento,
-            data: eventoEscolhido.data,
-            horario: eventoEscolhido.horario,
+            data: form.data,
+            horario: horarioSelecionado,
             reserva_grupo_id: grupoIdDoPar,
             papel_reserva: "principal",
           },
           {
             ...payloadComum,
-            data: form.data,
-            horario: horarioSelecionado,
+            data: testeEscolhido.data,
+            horario: testeEscolhido.horario,
             reserva_grupo_id: grupoIdDoPar,
             papel_reserva: "anterior",
             sinal_declarado_pago: false,
@@ -4475,8 +4499,8 @@ export default function FormularioAgendamento({
               // muda (ele tem um {data} só): mencionar as DUAS datas numa
               // mensagem exige uma variável nova em lib/whatsapp.js, que está
               // FORA desta etapa — ver o relatório.
-              data: ehPar ? eventoEscolhido.data : form.data,
-              horario: ehPar ? eventoEscolhido.horario : horarioSelecionado,
+              data: form.data,
+              horario: horarioSelecionado,
               servicos: { nome: servicoSelecionado.nome },
             },
             estabelecimento.msg_confirmacao
@@ -4494,10 +4518,10 @@ export default function FormularioAgendamento({
         horario: horarioSelecionado,
         anteriorDoPar: ehPar
           ? {
-              dataEvento: eventoEscolhido.data,
-              horarioEvento: eventoEscolhido.horario,
-              data: form.data,
-              horario: horarioSelecionado,
+              dataEvento: form.data,
+              horarioEvento: horarioSelecionado,
+              data: testeEscolhido.data,
+              horario: testeEscolhido.horario,
               reservaGrupoId: grupoIdDoPar,
             }
           : null,
@@ -4558,13 +4582,35 @@ export default function FormularioAgendamento({
   // sexta-feira às 10:00". Só existe com o par montado; null em todo o resto
   // do app, e nenhuma tela renderiza a linha nesse caso.
   const resumoDuasDatas =
-    eventoEscolhido && form.data && horarioSelecionado
-      ? `${nomeEtapaAnterior}: ${formatarData(form.data)} às ${formatarHorario(
-          horarioSelecionado
+    testeEscolhido && form.data && horarioSelecionado
+      ? `${nomeEtapaAnterior}: ${formatarData(testeEscolhido.data)} às ${formatarHorario(
+          testeEscolhido.horario
         )} · Atendimento principal: ${formatarData(
-          eventoEscolhido.data
-        )} às ${formatarHorario(eventoEscolhido.horario)}`
+          form.data
+        )} às ${formatarHorario(horarioSelecionado)}`
       : null;
+
+  // Fase do evento sem NENHUM dia selecionável depois do teste (janela de
+  // agendamento, dias de atendimento ou restrição por etiqueta) — o aviso da
+  // etapa "data" explica o calendário cinza. Só fora do modo livre: no /admin
+  // a janela não bloqueia. Procura ~1 ano à frente do teste.
+  const semDiaDepoisDoTeste = (() => {
+    if (modoLivre || faseData !== "evento" || !testeEscolhido) return false;
+    if (carregandoProfissionais || diasSemanaAtivos.size === 0) return false;
+    const [a, m, d] = testeEscolhido.data.split("-").map(Number);
+    for (let i = 1; i <= 400; i++) {
+      const dia = new Date(a, m - 1, d + i);
+      const iso = formatarISO(dia);
+      if (
+        diasSemanaAtivos.has(dia.getDay()) &&
+        dataAgendavelComMes(iso, estabelecimento, mesesJanela, etiquetaClienteId) &&
+        diaLiberadoPorEtiqueta(iso, restricoesAgenda, etiquetaClienteId)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  })();
 
   // REMARCAÇÃO DE UM PAR: não existe.
   //
@@ -4910,31 +4956,51 @@ export default function FormularioAgendamento({
           <>
             <div ref={dataRef}>
               {/* Serviço de duas datas: a mesma etapa é percorrida duas
-                  vezes (ver faseData), e o título é a única coisa que diz em
-                  qual das duas a cliente está. Serviço normal: o "Data" de
-                  sempre. */}
+                  vezes, em ordem cronológica (ver faseData), e o título é a
+                  única coisa que diz em qual das duas a cliente está.
+                  Serviço normal: o "Data" de sempre. */}
               <span className="mb-1 block text-sm font-medium text-on-card">
                 {!servicoExigeSegundaData
                   ? "Data"
-                  : faseData === "evento"
-                  ? "Escolha o dia do atendimento principal"
-                  : `Agora escolha o dia do ${nomeEtapaAnterior}`}
+                  : faseData === "anterior"
+                  ? `Escolha o dia do ${nomeEtapaAnterior}`
+                  : "Agora escolha o dia do atendimento principal"}
               </span>
 
               {/* Resumo fixo do que já foi escolhido na primeira passagem —
                   sem ele a segunda escolha aconteceria às cegas, e a regra
-                  "antes do evento" (dias cinzas no calendário) não teria
+                  "depois do teste" (dias cinzas no calendário) não teria
                   explicação em tela. O "alterar" sai pelo voltarFisicoData
-                  (nunca por voltarParaFaseEvento direto) pra consumir a
+                  (nunca por voltarParaFaseTeste direto) pra consumir a
                   entrada de histórico desta fase — ver lib/voltarFisico.js. */}
-              {faseData === "anterior" && eventoEscolhido && (
+              {faseData === "evento" && testeEscolhido && (
                 <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-surface px-3 py-2 text-sm text-body">
                   <span>
                     <span className="font-medium text-heading">
-                      Atendimento principal:
+                      {nomeEtapaAnterior}:
                     </span>{" "}
-                    {formatarData(eventoEscolhido.data)} às{" "}
-                    {formatarHorario(eventoEscolhido.horario)}
+                    {formatarData(testeEscolhido.data)} às{" "}
+                    {formatarHorario(testeEscolhido.horario)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={voltarFisicoData}
+                    className="font-medium text-primary underline underline-offset-2"
+                  >
+                    alterar
+                  </button>
+                </div>
+              )}
+
+              {/* Sem nenhum dia aberto depois do teste (janela de agendamento,
+                  dias de atendimento, restrição): avisa em vez de deixar o
+                  calendário todo cinza sem explicação. O modo livre do /admin
+                  não passa por aqui — lá a janela não bloqueia. */}
+              {semDiaDepoisDoTeste && (
+                <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-200">
+                  <span>
+                    Não há datas disponíveis depois do {nomeEtapaAnterior}. Escolha
+                    uma data mais cedo para o {nomeEtapaAnterior}.
                   </span>
                   <button
                     type="button"
@@ -4972,10 +5038,10 @@ export default function FormularioAgendamento({
                   restricoes={restricoesAgenda}
                   etiquetaClienteId={etiquetaClienteId}
                   vencimentoManutencao={vencimentoManutencao}
-                  // Segunda passagem: só dias ESTRITAMENTE antes do evento.
-                  // Filtro de grade, não erro no submit (ver maxExclusivo).
-                  maxExclusivo={
-                    faseData === "anterior" ? eventoEscolhido?.data ?? null : null
+                  // Segunda passagem (o evento): só dias ESTRITAMENTE depois do
+                  // teste. Filtro de grade, não erro no submit (ver minExclusivo).
+                  minExclusivo={
+                    faseData === "evento" ? testeEscolhido?.data ?? null : null
                   }
                   modoLivre={modoLivre}
                 />

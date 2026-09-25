@@ -134,17 +134,9 @@ export default function TelaSolicitacaoEnviada({
           <dt className="text-body">Serviço</dt>
           <dd className="font-medium text-heading">{servicoNome}</dd>
         </div>
-        <div className="flex items-center justify-between gap-4">
-          <dt className="text-body">Data</dt>
-          <dd className="font-medium text-heading">{dataFormatada}</dd>
-        </div>
-        <div className="flex items-center justify-between gap-4">
-          <dt className="text-body">Horário</dt>
-          <dd className="font-medium text-heading">{horario}</dd>
-        </div>
-        {/* Serviço de duas datas: a etapa anterior entra como uma linha a
-            mais, nomeada pelo salão ("Teste", "Prova"), logo abaixo da data
-            do atendimento principal. */}
+        {/* Serviço de duas datas: em ordem cronológica, a etapa anterior (o
+            teste, nomeada pelo salão) vem ANTES da data do atendimento
+            principal. */}
         {etapaAnterior && (
           <div className="flex items-center justify-between gap-4">
             <dt className="text-body">{etapaAnterior.nome}</dt>
@@ -153,6 +145,14 @@ export default function TelaSolicitacaoEnviada({
             </dd>
           </div>
         )}
+        <div className="flex items-center justify-between gap-4">
+          <dt className="text-body">Data</dt>
+          <dd className="font-medium text-heading">{dataFormatada}</dd>
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <dt className="text-body">Horário</dt>
+          <dd className="font-medium text-heading">{horario}</dd>
+        </div>
         <div className="flex items-center justify-between gap-4">
           <dt className="text-body">Nome</dt>
           <dd className="font-medium text-heading">{nomeCliente}</dd>
