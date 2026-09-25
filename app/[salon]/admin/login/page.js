@@ -70,7 +70,7 @@ export default function LoginPage() {
 
   if (semPerfil) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+      <main className="escopo-admin flex min-h-screen items-center justify-center bg-surface px-4">
         <div className="mx-auto w-full max-w-md rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
           <h1 className="text-2xl font-bold text-heading">
             Conta sem salão vinculado
@@ -82,7 +82,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-surface px-4 py-10">
+    <main className="escopo-admin flex min-h-screen flex-col items-center justify-center bg-surface px-4 py-10">
       <div className="mx-auto w-full max-w-sm">
         <header className="mb-6 text-center">
           <h1 className="text-2xl font-bold text-heading">Entrar</h1>

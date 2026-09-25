@@ -340,3 +340,14 @@ a:focus-visible, button:focus-visible {
   padding: 0.125rem 0.25rem;
   font-size: var(--crm-card-fonte-detalhe);
 }
+
+/* Header do admin fora do modo noturno: devolve ao Hero as cores do tenant
+   (cópias --tenant-* expostas em app/[salon]/admin/page.js). Os fallbacks são
+   os valores do :root, pro caso de o admin não ter tema. Hoje o resultado é
+   idêntico ao das variáveis já herdadas. */
+.escopo-header {
+  --color-card: var(--tenant-card, #fdfcfa);
+  --color-heading: var(--tenant-heading, #4a342a);
+  --color-border: var(--tenant-border, #d7c9b8);
+  --color-body: var(--tenant-body, #5a4636);
+}

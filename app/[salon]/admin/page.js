@@ -2263,7 +2263,7 @@ export default function AdminPage() {
   // undefined, então checar aqui evita ficar preso no "Carregando...".
   if (semPerfil) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+      <main className="escopo-admin flex min-h-screen items-center justify-center bg-surface px-4">
         <div className="mx-auto w-full max-w-md rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
           <h1 className="text-2xl font-bold text-heading">
             Conta sem salão vinculado
@@ -2280,7 +2280,7 @@ export default function AdminPage() {
   // render principal abaixo lê estabelecimento.nome, então precisa do objeto.)
   if (autenticado !== true || estabelecimento === undefined) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+      <main className="escopo-admin flex min-h-screen items-center justify-center bg-surface px-4">
         <p className="text-sm text-body">Carregando...</p>
       </main>
     );
@@ -2291,7 +2291,7 @@ export default function AdminPage() {
   // com o "Carregando agendamentos..." enquanto o fetch espera.)
   if (estabelecimento === null) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+      <main className="escopo-admin flex min-h-screen items-center justify-center bg-surface px-4">
         <div className="mx-auto w-full max-w-md rounded-2xl bg-card p-8 text-center shadow-sm ring-1 ring-border">
           <h1 className="text-2xl font-bold text-heading">Salão não encontrado</h1>
           <p className="mt-2 text-sm text-body">
@@ -2651,17 +2651,33 @@ export default function AdminPage() {
         // --color-on-card resolveria no :root e cairia no heading GLOBAL
         // (#4a342a), não no do tenant, em todo tenant.
         "--color-on-card": temaAtivo.textoPrincipal,
+        // Cópias das cores que o Hero lê (card/border/heading/body), com os
+        // MESMOS valores do admin acima. .escopo-header (globals.css) as
+        // devolve a --color-*, pra o header seguir o tenant mesmo quando
+        // .escopo-admin redefinir --color-* (modo noturno).
+        "--tenant-card": temaAtivo.bgCardAdmin ?? temaAtivo.bgHeader,
+        "--tenant-heading": temaAtivo.textoPrincipal,
+        "--tenant-border": temaAtivo.bordaAdmin ?? temaAtivo.bordaHeader,
+        "--tenant-body": temaAtivo.textoSecundario,
       }
     : undefined;
 
   return (
-    <main className="min-h-screen bg-surface" style={estiloTemaRaiz}>
+    <main style={estiloTemaRaiz}>
+      {/* .escopo-admin: alvo do modo noturno (html[data-modo=noturno]
+          .escopo-admin redefine --color-*). Fica DENTRO do <main> porque as
+          variáveis do tenant são style inline do <main> e venceriam uma regra
+          de classe no mesmo elemento. Pinta o fundo da página (antes no
+          <main>), senão ele não escureceria. */}
+      <div className="escopo-admin min-h-screen bg-surface">
       {/* Hero banner no topo do admin, maior por absorver a navegação. Nome do
           salão centralizado; a foto de fundo é condicional por slug
           (valeria/junior usam foto; barbearia mantém o degradê) — ver Hero.js.
           O hambúrguer NÃO fica no Hero: é um botão fixo (abaixo), pra descolar
           do banner e seguir visível durante o scroll. */}
-      <Hero nome={estabelecimento.nome} slug={estabelecimento.slug} />
+      <div className="escopo-header">
+        <Hero nome={estabelecimento.nome} slug={estabelecimento.slug} />
+      </div>
 
       {/* Hambúrguer FIXO no canto superior direito. Em scroll=0 cai sobre o
           canto do Hero (mesma posição visual de antes); ao rolar, "descola" do
@@ -5749,6 +5765,7 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+      </div>
     </main>
   );
 }
