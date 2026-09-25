@@ -139,7 +139,7 @@ export default function CarrosselAgendamentos({
                 separadas aqui de propósito. */}
             {atual.papel_reserva === "anterior" && (
               <span
-                className="rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700"
+                className="rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700"
               >
                 {nomeEtapaAnterior(atual)}
               </span>

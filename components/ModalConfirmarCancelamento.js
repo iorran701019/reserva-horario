@@ -44,7 +44,7 @@ export default function ModalConfirmarCancelamento({
       role="dialog"
       aria-modal="true"
       aria-labelledby="titulo-confirmar-cancelamento"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
       {...cliqueFora}
     >
       <div className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border">

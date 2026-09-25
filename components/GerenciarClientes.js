@@ -712,7 +712,7 @@ function DetalheCliente({
                             <span>{item.servicos?.nome ?? "Serviço"}</span>
                             {item.papel_reserva === "anterior" && (
                               <span
-                                className="rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700"
+                                className="rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700"
                               >
                                 {nomeEtapaAnterior(item)}
                               </span>
@@ -1823,7 +1823,7 @@ export default function GerenciarClientes({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-desativar-etiqueta"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setEtiquetaParaDesativar(null)}
         >
           <div

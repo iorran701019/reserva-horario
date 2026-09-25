@@ -73,7 +73,7 @@ export default function ModalPrazoMinimo({
       role="dialog"
       aria-modal="true"
       aria-labelledby="titulo-prazo-minimo"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
       onClick={processando ? undefined : onCancelar}
     >
       <div

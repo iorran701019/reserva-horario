@@ -300,7 +300,7 @@ function formDeFallback({ nome, modoHorario, horarios, horariosFixos, servicos, 
 
 // Interruptor visual (liga/desliga) reutilizado nos toggles de dia. Só o
 // desenho; o <button> que o envolve trata o clique/aria.
-function Interruptor({ ativo }) {
+export function Interruptor({ ativo }) {
   return (
     <span
       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${
@@ -2845,7 +2845,7 @@ function SecaoAusencias({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-excluir-grupo-avulsas"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setConfirmarExclusaoGrupo(null)}
         >
           <div
@@ -2895,7 +2895,7 @@ function SecaoAusencias({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-excluir-exclusividade"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setConfirmarExclusaoExclusividade(null)}
         >
           <div
@@ -2940,7 +2940,7 @@ function SecaoAusencias({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-confirmar-bloqueio"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setConfirmarBloqueio(null)}
         >
           <div
@@ -4348,7 +4348,7 @@ export default function GerenciarProfissionais({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-excluir-profissional"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setProfissionalParaExcluir(null)}
         >
           <div

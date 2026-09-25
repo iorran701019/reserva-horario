@@ -41,7 +41,7 @@ export default function ModalConflitoWhatsapp({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-conflito-whatsapp"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           {...cliqueForaConflito}
         >
           <div
@@ -87,7 +87,7 @@ export default function ModalConflitoWhatsapp({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-contato-whatsapp"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           {...cliqueForaContato}
         >
           <div

@@ -3427,7 +3427,7 @@ export default function GerenciarServicos({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-conflito-manutencao"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setConflitoManutencao(null)}
         >
           <div
@@ -3469,7 +3469,7 @@ export default function GerenciarServicos({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-desativar-servico"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setServicoParaDesativar(null)}
         >
           <div
@@ -3520,7 +3520,7 @@ export default function GerenciarServicos({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-excluir-permanente-servico"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setServicoParaExcluirPermanente(null)}
         >
           <div
@@ -3572,7 +3572,7 @@ export default function GerenciarServicos({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-excluir-categoria"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setCategoriaParaExcluir(null)}
         >
           <div
@@ -3620,7 +3620,7 @@ export default function GerenciarServicos({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-confirmar-vinculo"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setManutencaoPendenteConfirmacao(null)}
         >
           <div
@@ -3664,7 +3664,7 @@ export default function GerenciarServicos({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-excluir-pergunta"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setPerguntaParaExcluir(null)}
         >
           <div

@@ -249,7 +249,7 @@ function ModalAlerta({ tituloId, mensagem, onFechar, children }) {
       role="dialog"
       aria-modal="true"
       aria-labelledby={tituloId}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
       onClick={onFechar}
     >
       <div
@@ -1719,7 +1719,7 @@ export default function FormularioAgendamento({
         style={
           temaSelecionado
             ? {
-                backgroundColor: "color-mix(in srgb, var(--color-primary) 12%, white)",
+                backgroundColor: "var(--destaque-suave, color-mix(in srgb, var(--color-primary) 12%, white))",
                 color: "var(--color-heading)",
                 "--tw-ring-color": "var(--color-primary)",
               }
@@ -4813,7 +4813,7 @@ export default function FormularioAgendamento({
                             tema && aberta
                               ? {
                                   backgroundColor:
-                                    "color-mix(in srgb, var(--color-primary) 12%, white)",
+                                    "var(--destaque-suave, color-mix(in srgb, var(--color-primary) 12%, white))",
                                   color: "var(--color-heading)",
                                 }
                               : undefined
@@ -4979,7 +4979,7 @@ export default function FormularioAgendamento({
                   style={{
                     borderColor: "var(--color-primary)",
                     backgroundColor:
-                      "color-mix(in srgb, var(--color-primary) 12%, white)",
+                      "var(--destaque-suave, color-mix(in srgb, var(--color-primary) 12%, white))",
                     color: "var(--color-heading)",
                   }}
                 >
@@ -5589,7 +5589,7 @@ export default function FormularioAgendamento({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-manutencao-pendente"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={cancelarManutencao}
         >
           <div
@@ -5689,7 +5689,7 @@ export default function FormularioAgendamento({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-modal-perguntas"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={cancelarModalPerguntas}
         >
           <div
@@ -5803,7 +5803,7 @@ export default function FormularioAgendamento({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-confirmar-sem-notificar"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setPopupConfirmarSemNotificarAberto(false)}
         >
           <div
@@ -5849,7 +5849,7 @@ export default function FormularioAgendamento({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-fora-da-janela"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setMostrarPopupForaDaJanela(false)}
         >
           <div
@@ -5899,7 +5899,7 @@ export default function FormularioAgendamento({
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-restricao-etiqueta"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setMostrarPopupRestricao(false)}
         >
           <div

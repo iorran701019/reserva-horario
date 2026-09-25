@@ -351,3 +351,222 @@ a:focus-visible, button:focus-visible {
   --color-border: var(--tenant-border, #d7c9b8);
   --color-body: var(--tenant-body, #5a4636);
 }
+
+/* ---------------------------------------------------------------------------
+   Modo noturno do /admin. Só vale com html[data-modo="noturno"] (posto pelo
+   admin em page.js) e só DENTRO de .escopo-admin; o Hero fica de fora porque
+   .escopo-header reaplica as cores do tenant (--tenant-*). No claro nada aqui
+   entra em ação. Pares de contraste (WCAG) conferidos: borda >= 3:1 contra
+   card/field; heading/body/muted >= 4,5:1 contra surface/card/field. */
+
+/* Véu dos modais (bg-overlay/NN). "inline": a utilidade resolve
+   var(--color-primary) NO ELEMENTO — sem isso o valor congelaria no :root e
+   perderia a cor do tenant. --overlay-cor só existe no noturno (preto). */
+@theme inline {
+  --color-overlay: var(--overlay-cor, var(--color-primary));
+}
+
+html[data-modo="noturno"] .escopo-admin {
+  color-scheme: dark;
+  --overlay-cor: #000;
+  --color-surface: #121212;
+  --color-card: #1c1c1e;
+  --color-field: #2a2a2d;
+  --color-border: #76767c;
+  --color-heading: #f5f5f5;
+  --color-body: #b4b4ba;
+  --color-muted: #9c9ca2;
+  --color-on-card: #f5f5f5;
+  --color-primary: #ededed;
+  --color-primary-hover: #d6d6d6;
+  --color-on-primary: #121212;
+  /* Fundo "destaque suave" (categoria aberta, serviço selecionado, quadro de
+     fase): no claro é o color-mix do primary com branco (fallback no próprio
+     FormularioAgendamento); com primary claro esse mix vira branco e apaga o
+     texto, então aqui vira grafite um degrau acima do field. */
+  --destaque-suave: #333337;
+
+  /* Escalas semânticas, só os tons de FUNDO/anel (50/100/200): tinta escura
+     da mesma cor. Os tons 600/700/800 também são fundo de botão sólido com
+     texto branco (bg-red-600, bg-green-700...), então NÃO podem virar claros
+     por variável; o texto claro vem das regras .text-* mais abaixo. */
+  --color-red-50: #352123;
+  --color-red-100: #422325;
+  --color-red-200: #532628;
+  --color-green-50: #1d3026;
+  --color-green-100: #1d3a2a;
+  --color-green-200: #1e482f;
+  --color-amber-50: #362c1c;
+  --color-amber-100: #43331b;
+  --color-amber-200: #543e19;
+  --color-blue-50: #202838;
+  --color-blue-100: #222e45;
+  --color-blue-200: #243756;
+  --color-violet-50: #292438;
+  --color-violet-100: #302845;
+  --color-violet-200: #392d56;
+  --color-purple-50: #2d2338;
+  --color-purple-100: #352645;
+  --color-purple-200: #402b56;
+  --color-gray-50: #25262a;
+  --color-gray-100: #2a2b30;
+  --color-gray-200: #313237;
+  --color-stone-50: #272627;
+  --color-stone-100: #2d2b2c;
+  --color-stone-200: #343232;
+  --color-teal-50: #1b2f2e;
+  --color-teal-100: #1b3836;
+  --color-teal-200: #1a4541;
+  --color-indigo-50: #252537;
+  --color-indigo-100: #292944;
+  --color-indigo-200: #2e2f55;
+  --color-emerald-50: #1b2f2a;
+  --color-emerald-100: #1a3830;
+  --color-emerald-200: #194538;
+  --color-yellow-50: #352e1b;
+  --color-yellow-100: #41371a;
+  --color-yellow-200: #524318;
+  --color-sky-50: #1a2c36;
+  --color-sky-100: #193543;
+  --color-sky-200: #184053;
+  --color-rose-50: #362026;
+  --color-rose-100: #43222a;
+  --color-rose-200: #54252f;
+  --color-pink-50: #35212d;
+  --color-pink-100: #412434;
+  --color-pink-200: #52273e;
+}
+
+/* Texto colorido: tom claro da mesma cor (>= 4,5:1 contra card e contra o
+   fundo 50/100/200 correspondente). Botões sólidos (bg-red-600 text-white)
+   não são afetados: usam text-white. */
+html[data-modo="noturno"] .escopo-admin .text-red-500,
+html[data-modo="noturno"] .escopo-admin .text-red-600,
+html[data-modo="noturno"] .escopo-admin .text-red-700,
+html[data-modo="noturno"] .escopo-admin .text-red-800,
+html[data-modo="noturno"] .escopo-admin .text-red-900 {
+  color: #fca5a5;
+}
+html[data-modo="noturno"] .escopo-admin .text-green-500,
+html[data-modo="noturno"] .escopo-admin .text-green-600,
+html[data-modo="noturno"] .escopo-admin .text-green-700,
+html[data-modo="noturno"] .escopo-admin .text-green-800,
+html[data-modo="noturno"] .escopo-admin .text-green-900 {
+  color: #86efac;
+}
+html[data-modo="noturno"] .escopo-admin .text-amber-500,
+html[data-modo="noturno"] .escopo-admin .text-amber-600,
+html[data-modo="noturno"] .escopo-admin .text-amber-700,
+html[data-modo="noturno"] .escopo-admin .text-amber-800,
+html[data-modo="noturno"] .escopo-admin .text-amber-900 {
+  color: #fcd34d;
+}
+html[data-modo="noturno"] .escopo-admin .text-blue-500,
+html[data-modo="noturno"] .escopo-admin .text-blue-600,
+html[data-modo="noturno"] .escopo-admin .text-blue-700,
+html[data-modo="noturno"] .escopo-admin .text-blue-800,
+html[data-modo="noturno"] .escopo-admin .text-blue-900 {
+  color: #93c5fd;
+}
+html[data-modo="noturno"] .escopo-admin .text-violet-500,
+html[data-modo="noturno"] .escopo-admin .text-violet-600,
+html[data-modo="noturno"] .escopo-admin .text-violet-700,
+html[data-modo="noturno"] .escopo-admin .text-violet-800,
+html[data-modo="noturno"] .escopo-admin .text-violet-900 {
+  color: #c4b5fd;
+}
+html[data-modo="noturno"] .escopo-admin .text-purple-500,
+html[data-modo="noturno"] .escopo-admin .text-purple-600,
+html[data-modo="noturno"] .escopo-admin .text-purple-700,
+html[data-modo="noturno"] .escopo-admin .text-purple-800,
+html[data-modo="noturno"] .escopo-admin .text-purple-900 {
+  color: #d8b4fe;
+}
+html[data-modo="noturno"] .escopo-admin .text-gray-500,
+html[data-modo="noturno"] .escopo-admin .text-gray-600,
+html[data-modo="noturno"] .escopo-admin .text-gray-700,
+html[data-modo="noturno"] .escopo-admin .text-gray-800,
+html[data-modo="noturno"] .escopo-admin .text-gray-900 {
+  color: #d1d5db;
+}
+html[data-modo="noturno"] .escopo-admin .text-stone-500,
+html[data-modo="noturno"] .escopo-admin .text-stone-600,
+html[data-modo="noturno"] .escopo-admin .text-stone-700,
+html[data-modo="noturno"] .escopo-admin .text-stone-800,
+html[data-modo="noturno"] .escopo-admin .text-stone-900 {
+  color: #d6d3d1;
+}
+html[data-modo="noturno"] .escopo-admin .text-teal-500,
+html[data-modo="noturno"] .escopo-admin .text-teal-600,
+html[data-modo="noturno"] .escopo-admin .text-teal-700,
+html[data-modo="noturno"] .escopo-admin .text-teal-800,
+html[data-modo="noturno"] .escopo-admin .text-teal-900 {
+  color: #5eead4;
+}
+html[data-modo="noturno"] .escopo-admin .text-indigo-500,
+html[data-modo="noturno"] .escopo-admin .text-indigo-600,
+html[data-modo="noturno"] .escopo-admin .text-indigo-700,
+html[data-modo="noturno"] .escopo-admin .text-indigo-800,
+html[data-modo="noturno"] .escopo-admin .text-indigo-900 {
+  color: #a5b4fc;
+}
+html[data-modo="noturno"] .escopo-admin .text-emerald-500,
+html[data-modo="noturno"] .escopo-admin .text-emerald-600,
+html[data-modo="noturno"] .escopo-admin .text-emerald-700,
+html[data-modo="noturno"] .escopo-admin .text-emerald-800,
+html[data-modo="noturno"] .escopo-admin .text-emerald-900 {
+  color: #6ee7b7;
+}
+html[data-modo="noturno"] .escopo-admin .text-yellow-500,
+html[data-modo="noturno"] .escopo-admin .text-yellow-600,
+html[data-modo="noturno"] .escopo-admin .text-yellow-700,
+html[data-modo="noturno"] .escopo-admin .text-yellow-800,
+html[data-modo="noturno"] .escopo-admin .text-yellow-900 {
+  color: #fde047;
+}
+html[data-modo="noturno"] .escopo-admin .text-sky-500,
+html[data-modo="noturno"] .escopo-admin .text-sky-600,
+html[data-modo="noturno"] .escopo-admin .text-sky-700,
+html[data-modo="noturno"] .escopo-admin .text-sky-800,
+html[data-modo="noturno"] .escopo-admin .text-sky-900 {
+  color: #7dd3fc;
+}
+html[data-modo="noturno"] .escopo-admin .text-rose-500,
+html[data-modo="noturno"] .escopo-admin .text-rose-600,
+html[data-modo="noturno"] .escopo-admin .text-rose-700,
+html[data-modo="noturno"] .escopo-admin .text-rose-800,
+html[data-modo="noturno"] .escopo-admin .text-rose-900 {
+  color: #fda4af;
+}
+html[data-modo="noturno"] .escopo-admin .text-pink-500,
+html[data-modo="noturno"] .escopo-admin .text-pink-600,
+html[data-modo="noturno"] .escopo-admin .text-pink-700,
+html[data-modo="noturno"] .escopo-admin .text-pink-800,
+html[data-modo="noturno"] .escopo-admin .text-pink-900 {
+  color: #f9a8d4;
+}
+
+/* Interruptor: o thumb branco some sobre o trilho ligado (agora claro). No
+   noturno o thumb usa o fundo da página nos dois estados. */
+html[data-modo="noturno"] .escopo-admin .h-5.w-5.rounded-full.bg-white.shadow {
+  background-color: var(--color-surface);
+}
+
+/* FullCalendar sobre ~#121212: borda e listras de ausência mais claras. */
+html[data-modo="noturno"] .escopo-admin .fc {
+  --fc-border-color: rgba(255, 255, 255, 0.18);
+  --fc-today-bg-color: rgba(16, 185, 129, 0.14);
+}
+html[data-modo="noturno"] .escopo-admin .ag-evento-ausencia-bloco,
+html[data-modo="noturno"] .escopo-admin .ag-evento-mes-ausencia {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(209, 213, 219, 0.35) 0px,
+    rgba(209, 213, 219, 0.35) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+html[data-modo="noturno"] .escopo-admin .ag-evento-mes-ausencia {
+  border-color: rgba(209, 213, 219, 0.6);
+}

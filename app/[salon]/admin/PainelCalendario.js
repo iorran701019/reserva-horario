@@ -62,7 +62,7 @@ const CORES_EVENTO = {
 
 // Selo com o nome da etapa anterior nas views Dia e Lista (no Mês só a cor).
 const CLASSE_SELO_ETAPA =
-  "ml-1 rounded-full bg-white px-1.5 text-[0.75em] font-medium text-violet-700 ring-1 ring-violet-400";
+  "ml-1 rounded-full bg-violet-50 px-1.5 text-[0.75em] font-medium text-violet-700 ring-1 ring-violet-400";
 
 // Formato 24h compartilhado por eventTimeFormat e slotLabelFormat.
 const FORMATO_24H = { hour: "2-digit", minute: "2-digit", hour12: false };

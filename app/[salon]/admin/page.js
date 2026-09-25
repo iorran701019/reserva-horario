@@ -72,6 +72,7 @@ import {
   ClipboardCheck,
   Pencil,
   PieChart,
+  Moon,
 } from "lucide-react";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
@@ -81,7 +82,7 @@ import ModalPrazoMinimo from "@/components/ModalPrazoMinimo";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
-import GerenciarProfissionais from "./GerenciarProfissionais";
+import GerenciarProfissionais, { Interruptor } from "./GerenciarProfissionais";
 import GerenciarClientes from "@/components/GerenciarClientes";
 import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 import {
@@ -523,6 +524,34 @@ export default function AdminPage() {
   // Drawer lateral de navegação (mobile-first): substitui a antiga barra de abas
   // fixa. `true` = aberto. Selecionar uma aba troca `viewPai` e fecha o drawer.
   const [drawerAberto, setDrawerAberto] = useState(false);
+
+  // Modo noturno (só /admin). Preferência em localStorage; o atributo
+  // data-modo no <html> liga as regras html[data-modo="noturno"] .escopo-admin
+  // (globals.css) e é REMOVIDO ao sair do admin, pra nunca vazar pro fluxo
+  // público. Começa falso e lê o storage após montar (mesmo HTML do servidor).
+  const [modoNoturno, setModoNoturno] = useState(false);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("adminModoNoturno") === "1") setModoNoturno(true);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    const el = document.documentElement;
+    if (modoNoturno) el.dataset.modo = "noturno";
+    else delete el.dataset.modo;
+  }, [modoNoturno]);
+  useEffect(() => {
+    return () => {
+      delete document.documentElement.dataset.modo;
+    };
+  }, []);
+  function alternarModoNoturno() {
+    const novo = !modoNoturno;
+    setModoNoturno(novo);
+    try {
+      localStorage.setItem("adminModoNoturno", novo ? "1" : "0");
+    } catch {}
+  }
 
   // Popup diário de VIRADA DE MÊS: o mês corrente e/ou o seguinte não têm
   // registro em janela_agendamento_meses, ou seja, a agenda está (ou vai
@@ -3180,7 +3209,7 @@ export default function AdminPage() {
                       <span className="min-w-0 basis-full break-words text-sm text-body sm:basis-auto">
                         {item.servicos?.nome ?? "—"}
                         {item.papel_reserva === "anterior" && (
-                          <span className="ml-2 rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700">
+                          <span className="ml-2 rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
                             {nomeEtapaAnterior(item)}
                           </span>
                         )}
@@ -3188,7 +3217,7 @@ export default function AdminPage() {
                     </div>
                       {item.etapaAnteriorLinha && (
                         <p className="mt-1.5 text-sm text-body">
-                          <span className="rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700">
+                          <span className="rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
                             {nomeEtapaAnterior(item.etapaAnteriorLinha)}
                           </span>{" "}
                           {formatarData(item.etapaAnteriorLinha.data)} às{" "}
@@ -3737,7 +3766,7 @@ export default function AdminPage() {
                           <span className="min-w-0 break-words font-medium">
                             {item.servicos?.nome ?? "—"}
                             {item.papel_reserva === "anterior" && (
-                              <span className="ml-2 rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700">
+                              <span className="ml-2 rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
                                 {nomeEtapaAnterior(item)}
                               </span>
                             )}
@@ -3757,7 +3786,7 @@ export default function AdminPage() {
 
                         {item.etapaAnteriorLinha && (
                           <p className="mt-1.5 text-sm text-body">
-                            <span className="rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700">
+                            <span className="rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
                               {nomeEtapaAnterior(item.etapaAnteriorLinha)}
                             </span>{" "}
                             {formatarData(item.etapaAnteriorLinha.data)} às{" "}
@@ -4007,7 +4036,7 @@ export default function AdminPage() {
                       <span className="min-w-0 basis-full break-words text-sm text-body sm:basis-auto">
                         {item.servicos?.nome ?? item.servico_livre ?? "—"}
                         {item.papel_reserva === "anterior" && (
-                          <span className="ml-2 rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700">
+                          <span className="ml-2 rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
                             {nomeEtapaAnterior(item)}
                           </span>
                         )}
@@ -4239,7 +4268,7 @@ export default function AdminPage() {
                           <span className="min-w-0 break-words font-medium">
                             {item.servicos?.nome ?? "—"}
                             {item.papel_reserva === "anterior" && (
-                              <span className="ml-2 rounded-full border border-violet-400 bg-white px-2 py-0.5 text-xs font-medium text-violet-700">
+                              <span className="ml-2 rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
                                 {nomeEtapaAnterior(item)}
                               </span>
                             )}
@@ -4670,7 +4699,7 @@ export default function AdminPage() {
         aria-hidden={!drawerAberto}
       >
         <div
-          className="absolute inset-0 bg-primary/30 backdrop-blur-sm"
+          className="absolute inset-0 bg-overlay/30 backdrop-blur-sm"
           onClick={() => setDrawerAberto(false)}
         />
 
@@ -4731,6 +4760,20 @@ export default function AdminPage() {
           {/* Item fixo, visível em qualquer aba (ver componente). */}
           <AtivarNotificacoes estabelecimento={estabelecimento} />
 
+          <div className="border-t border-border p-2">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={modoNoturno}
+              onClick={alternarModoNoturno}
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold text-body transition hover:bg-surface hover:text-heading"
+            >
+              <Moon className="h-5 w-5 shrink-0" />
+              <span className="flex-1 text-left">Modo noturno</span>
+              <Interruptor ativo={modoNoturno} />
+            </button>
+          </div>
+
           {/* Suporte da ACOLHE (o produto), não do salão: quem clica é a
               dona falando com quem mantém o sistema. Por isso o número vem de
               lib/acolhe.js, fixo, e NÃO de estabelecimento.whatsapp (que é o
@@ -4778,7 +4821,7 @@ export default function AdminPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-detalhe"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setIdSelecionado(null)}
         >
           <div
@@ -5127,7 +5170,7 @@ export default function AdminPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-gate-etiqueta"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
         >
           <div className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border">
             <h2 id="titulo-gate-etiqueta" className="text-lg font-semibold text-heading">
@@ -5207,7 +5250,7 @@ export default function AdminPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-cancelar"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={fecharCancelamento}
         >
           <div
@@ -5298,7 +5341,7 @@ export default function AdminPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-confirmar"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setAgendamentoParaConfirmar(null)}
         >
           <div
@@ -5372,7 +5415,7 @@ export default function AdminPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-fora-da-janela"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setConfirmacaoForaDaJanela(null)}
         >
           <div
@@ -5465,7 +5508,7 @@ export default function AdminPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-trocar"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setAgendamentoParaTrocar(null)}
         >
           <div
@@ -5542,7 +5585,7 @@ export default function AdminPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-alterar-data"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setAgendamentoParaAlterarData(null)}
         >
           <div
@@ -5706,7 +5749,7 @@ export default function AdminPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="titulo-popup-virada-mes"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => setPopupViradaMesAberto(false)}
         >
           <div

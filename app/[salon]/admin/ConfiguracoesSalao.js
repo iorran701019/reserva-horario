@@ -3927,7 +3927,7 @@ export default function ConfiguracoesSalao({
                   role="dialog"
                   aria-modal="true"
                   aria-labelledby="titulo-excluir-regra-sinal"
-                  className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
                   onClick={() => setConfirmarExclusaoRegra(null)}
                 >
                   <div
@@ -4564,7 +4564,7 @@ export default function ConfiguracoesSalao({
         role="dialog"
         aria-modal="true"
         aria-labelledby="titulo-reduzir-janela"
-        className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
         onClick={() => setConfirmandoReducaoJanela(null)}
       >
         <div
