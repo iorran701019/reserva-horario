@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { MapPin } from "lucide-react";
 import { linkWhatsApp, MENSAGEM_AJUDA_PRAZO_EXPIRADO } from "@/lib/whatsapp";
 import {
+  agruparPares,
   buscarAgendamentosAtivos,
   buscarHistoricoRecente,
   cancelarAgendamentoCliente,
@@ -135,17 +136,25 @@ export default function PainelCliente({
         // (cancelamento sempre liberado).
         const agora = new Date();
         const prazoHoras = Number(estabelecimento.cancelamento_prazo_horas) || 0;
+        // agruparPares por ÚLTIMO, depois do filtro e do map: o recorte de
+        // "historico" e o cálculo de `podeCancelar` são por LINHA (a etapa
+        // anterior tem data própria e pode já ter passado), e agrupar antes
+        // faria os dois rodarem sobre um item que não existe no banco. O card
+        // do par carrega o `podeCancelar` da linha PRINCIPAL, que é sobre
+        // quem o botão "Cancelar" age hoje.
         setAgendamentos(
-          lista
-            .filter((item) => classificarAgendamento(item) !== "historico")
-            .map((item) => ({
-              ...item,
-              podeCancelar:
-                prazoHoras <= 0 ||
-                (inicioDoAtendimento(item).getTime() - agora.getTime()) /
-                  (1000 * 60 * 60) >=
-                  prazoHoras,
-            }))
+          agruparPares(
+            lista
+              .filter((item) => classificarAgendamento(item) !== "historico")
+              .map((item) => ({
+                ...item,
+                podeCancelar:
+                  prazoHoras <= 0 ||
+                  (inicioDoAtendimento(item).getTime() - agora.getTime()) /
+                    (1000 * 60 * 60) >=
+                    prazoHoras,
+              }))
+          )
         );
       }
     });
@@ -169,7 +178,13 @@ export default function PainelCliente({
       clienteAtual.telefone.replace(/\D/g, "")
     ).then((lista) => {
       if (ativo) {
-        setHistorico(lista.filter((item) => classificarAgendamento(item) === "historico"));
+        // Mesmo agrupamento da lista de ativos: um par cancelado (ou
+        // concluído) são duas linhas no banco e UM item no histórico.
+        setHistorico(
+          agruparPares(
+            lista.filter((item) => classificarAgendamento(item) === "historico")
+          )
+        );
       }
     });
     return () => {
@@ -441,6 +456,18 @@ export default function PainelCliente({
                 <span className="block text-sm text-body">
                   {item.servicos?.nome ?? "Serviço"}
                 </span>
+                {/* Serviço de duas datas: a etapa anterior é uma LINHA a mais
+                    dentro do card do atendimento principal, nunca um card
+                    próprio (ver agruparPares). Sem botões: cancelar o par
+                    inteiro é um gesto só, e ele age sobre a linha principal —
+                    dois "Cancelar" no mesmo card seriam duas promessas
+                    diferentes sobre o mesmo compromisso. */}
+                {item.etapaAnterior && (
+                  <span className="block text-sm text-body">
+                    {item.etapaAnterior.nome}: {formatarData(item.etapaAnterior.data)}{" "}
+                    às {item.etapaAnterior.horario}
+                  </span>
+                )}
               </span>
 
               <span className="flex shrink-0 items-center gap-2">
@@ -542,6 +569,12 @@ export default function PainelCliente({
                   <span className="block text-xs">
                     {item.servicos?.nome ?? "Serviço"}
                   </span>
+                  {item.etapaAnterior && (
+                    <span className="block text-xs">
+                      {item.etapaAnterior.nome}: {formatarData(item.etapaAnterior.data)}{" "}
+                      às {item.etapaAnterior.horario}
+                    </span>
+                  )}
                 </span>
 
                 <span className="flex shrink-0 flex-col items-end gap-1.5">

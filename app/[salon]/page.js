@@ -6,7 +6,10 @@ import { supabase } from "@/lib/supabaseClient";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
 import { buscarTema } from "@/lib/temas";
 import { precisaAnamnese } from "@/lib/anamnese";
-import { buscarAgendamentosAtivos } from "@/lib/agendamentosCliente";
+import {
+  buscarAgendamentosAtivos,
+  etapaAnteriorDoPar,
+} from "@/lib/agendamentosCliente";
 import { classificarAgendamento } from "@/lib/particao";
 import Hero from "@/components/Hero";
 import AvisoTopo from "@/components/AvisoTopo";
@@ -46,7 +49,14 @@ function reservaAguardandoSinal(lista) {
   const emSinal = lista.filter(
     (item) =>
       classificarAgendamento(item, agora) !== "historico" &&
-      item.status === "aguardando_sinal"
+      item.status === "aguardando_sinal" &&
+      // Serviço de duas datas: a etapa anterior nunca é a tela. Ela nasce em
+      // "pendente" justamente pra não entrar na fila de Pix (o sinal é um só
+      // e fica preso ao evento, ver sql/rpc_criacao_par.sql), então este
+      // filtro não muda nada hoje — está aqui pelo mesmo motivo do irmão em
+      // reservaEmProtocolo: a regra é "estas telas falam do atendimento
+      // principal", e ela não deve depender de que status a outra linha tem.
+      item.papel_reserva !== "anterior"
   );
   if (emSinal.length === 0) return null;
 
@@ -92,7 +102,15 @@ function reservaEmProtocolo(lista) {
     (item) =>
       classificarAgendamento(item, agora) !== "historico" &&
       item.status === "pendente" &&
-      dentroDaJanelaProtocolo(item, agora)
+      dentroDaJanelaProtocolo(item, agora) &&
+      // Serviço de duas datas: o protocolo é SEMPRE do atendimento principal.
+      // Sem este filtro a etapa anterior ganharia a escolha do "mais próximo
+      // por data" (ela é, por definição, a mais antiga do par) e a cliente
+      // que acabou de marcar veria o card do teste no lugar do casamento —
+      // com a data do teste, e com Editar/Cancelar agindo sobre a linha
+      // errada. As duas nascem "pendente" na mesma transação, então as duas
+      // estão dentro da janela de protocolo ao mesmo tempo.
+      item.papel_reserva !== "anterior"
   );
   if (emProtocolo.length === 0) return null;
 
@@ -393,9 +411,29 @@ export default function AgendarPage() {
   // protocolo pós-submit ou protocolo reaberto). Zera `resumo` junto: ele tem
   // precedência sobre a régua de telas lá embaixo, então sem isso a tela de
   // protocolo continuaria por cima do wizard que acabamos de pedir.
-  function editarAgendamento({ id, servicoId, data, horario, profissionalId }) {
+  // `reservaGrupoId` vem junto desde os quatro pontos que oferecem "Editar"
+  // e precisa CHEGAR ao wizard: é ele que dispara lá o aviso "este
+  // agendamento tem duas datas vinculadas" em vez do fluxo de remarcação (ver
+  // o guard de agendamentoEmEdicao em FormularioAgendamento). Esta função
+  // destrutura campo a campo de propósito — nada além do que o wizard espera
+  // entra no state —, então um campo novo só existe se for nomeado aqui.
+  function editarAgendamento({
+    id,
+    servicoId,
+    data,
+    horario,
+    profissionalId,
+    reservaGrupoId = null,
+  }) {
     setResumo(null);
-    setAgendamentoEditando({ id, servicoId, data, horario, profissionalId });
+    setAgendamentoEditando({
+      id,
+      servicoId,
+      data,
+      horario,
+      profissionalId,
+      reservaGrupoId,
+    });
   }
 
   // Depois de um cancelamento bem-sucedido (telas de Pix e de protocolo): não
@@ -722,11 +760,18 @@ export default function AgendarPage() {
               data={agendamentoProtocolo.data}
               horario={String(agendamentoProtocolo.horario).slice(0, 5)}
               nomeCliente={clienteIdentificado.nome}
+              // Serviço de duas datas: a linha irmã é procurada na MESMA
+              // lista que já está em memória (agendamentosAtivos), sem
+              // consulta nova — as duas linhas do par vêm juntas de
+              // agendamentos_cliente_ativos. null quando não há par, e aí o
+              // card é o de sempre.
+              etapaAnterior={etapaAnteriorDoPar(
+                agendamentoProtocolo,
+                agendamentosAtivos
+              )}
               onVerAgendamentos={() => setProtocoloPulado(true)}
               // Mesma regra da tela de sinal acima: com vínculo, sem
-              // "Editar". A segunda data NÃO aparece neste caminho (a leitura
-              // vem do banco, que ainda não devolve a irmã) — ver o relatório
-              // da etapa 3.
+              // "Editar" — quem tem duas datas fala com o salão.
               onEditar={
                 agendamentoProtocolo.reserva_grupo_id != null
                   ? null
