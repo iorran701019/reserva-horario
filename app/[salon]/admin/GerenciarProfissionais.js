@@ -1055,7 +1055,7 @@ function MiniCalendarioMultiplo({ mes, min, selecionadas, onAlternar, onPrev, on
                 passado
                   ? "cursor-not-allowed text-muted/40"
                   : sel
-                  ? "bg-primary font-semibold text-white ring-1 ring-primary"
+                  ? "bg-primary font-semibold text-on-primary ring-1 ring-primary"
                   : "text-body ring-1 ring-border hover:border-primary hover:ring-primary",
               ].join(" ")}
             >
@@ -2141,7 +2141,7 @@ function SecaoAusencias({
                       ? "bg-green-600 text-white ring-green-600"
                       : opcao.valor === "exclusividade_servico"
                         ? "bg-blue-600 text-white ring-blue-600"
-                        : "bg-primary text-white ring-primary"
+                        : "bg-primary text-on-primary ring-primary"
                     : "bg-card text-body ring-border hover:bg-surface"
                 }`}
               >
@@ -2199,7 +2199,7 @@ function SecaoAusencias({
                     onClick={() => alternarRecDia(info.n)}
                     className={`rounded-lg px-2.5 py-1.5 text-sm font-medium ring-1 transition ${
                       ativo
-                        ? "bg-primary text-white ring-primary"
+                        ? "bg-primary text-on-primary ring-primary"
                         : "bg-card text-body ring-border hover:bg-surface"
                     }`}
                   >
@@ -2521,7 +2521,7 @@ function SecaoAusencias({
                         onClick={() => alternarAvulsasHorario(h)}
                         className={`flex h-10 w-10 items-center justify-center rounded-full text-xs font-medium ring-1 transition ${
                           selecionado
-                            ? "bg-primary text-white ring-primary"
+                            ? "bg-primary text-on-primary ring-primary"
                             : "bg-card text-body ring-border hover:bg-surface"
                         }`}
                       >
@@ -2556,10 +2556,10 @@ function SecaoAusencias({
           type="button"
           onClick={salvar}
           disabled={salvando}
-          className={`mt-3 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
+          className={`mt-3 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
             tipoRegistro === "liberacao"
-              ? "bg-green-600 hover:bg-green-700"
-              : "bg-primary hover:bg-primary-hover"
+              ? "bg-green-600 text-white hover:bg-green-700"
+              : "bg-primary text-on-primary hover:bg-primary-hover"
           }`}
         >
           {salvando
@@ -2969,7 +2969,7 @@ function SecaoAusencias({
               <button
                 type="button"
                 onClick={confirmarBloqueioComExclusao}
-                className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+                className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover"
               >
                 Confirmar
               </button>
@@ -3877,7 +3877,7 @@ export default function GerenciarProfissionais({
                         onClick={() => alternarDia(info.n)}
                         className={`rounded-lg px-3 py-2 text-sm font-medium ring-1 transition ${
                           ativo
-                            ? "bg-primary text-white ring-primary"
+                            ? "bg-primary text-on-primary ring-primary"
                             : "bg-card text-body ring-border hover:bg-surface"
                         }`}
                       >
@@ -3906,7 +3906,7 @@ export default function GerenciarProfissionais({
                         onClick={() => setModoHorario(opcao.valor)}
                         className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-medium ring-1 transition ${
                           selecionado
-                            ? "bg-primary text-white ring-primary"
+                            ? "bg-primary text-on-primary ring-primary"
                             : "bg-card text-body ring-border hover:bg-surface"
                         }`}
                       >
@@ -3936,7 +3936,7 @@ export default function GerenciarProfissionais({
                           onClick={() => setMesmoHorario(opcao.valor)}
                           className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-medium ring-1 transition ${
                             selecionado
-                              ? "bg-primary text-white ring-primary"
+                              ? "bg-primary text-on-primary ring-primary"
                               : "bg-card text-body ring-border hover:bg-surface"
                           }`}
                         >
@@ -4043,7 +4043,7 @@ export default function GerenciarProfissionais({
                 type="button"
                 onClick={handleSalvar}
                 disabled={salvando || diaFixoSemHorario}
-                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {salvando ? "Salvando..." : "Salvar"}
               </button>
@@ -4051,7 +4051,7 @@ export default function GerenciarProfissionais({
               <button
                 type="button"
                 onClick={avancar}
-                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
               >
                 Avançar
               </button>
@@ -4147,7 +4147,7 @@ export default function GerenciarProfissionais({
                               onClick={() => setModoHorario(opcao.valor)}
                               className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-medium ring-1 transition ${
                                 selecionado
-                                  ? "bg-primary text-white ring-primary"
+                                  ? "bg-primary text-on-primary ring-primary"
                                   : "bg-card text-body ring-border hover:bg-surface"
                               }`}
                             >

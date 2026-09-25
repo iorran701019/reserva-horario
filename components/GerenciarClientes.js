@@ -965,7 +965,7 @@ function DetalheCliente({
                       onClick={() => setFiltroObs(opcao.valor)}
                       className={`rounded-full px-3 py-1 text-xs font-medium ring-1 transition ${
                         filtroObs === opcao.valor
-                          ? "bg-primary text-white ring-primary"
+                          ? "bg-primary text-on-primary ring-primary"
                           : "bg-card text-body ring-border hover:bg-surface"
                       }`}
                     >
@@ -1511,7 +1511,7 @@ export default function GerenciarClientes({
                                 type="button"
                                 onClick={() => salvarRenomeEtiqueta(etiqueta)}
                                 disabled={ocupadoEtiqueta || !nomeEdicaoEtiqueta.trim()}
-                                className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                                className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                               >
                                 Salvar
                               </button>
@@ -1635,7 +1635,7 @@ export default function GerenciarClientes({
                       <button
                         type="submit"
                         disabled={salvandoEtiqueta || !novoNomeEtiqueta.trim()}
-                        className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Criar
                       </button>
@@ -1708,7 +1708,7 @@ export default function GerenciarClientes({
               onClick={() => setFiltroStatus(opcao.id)}
               className={`rounded-full px-3 py-1 text-xs font-medium ring-1 transition ${
                 filtroStatus === opcao.id
-                  ? "bg-primary text-white ring-primary"
+                  ? "bg-primary text-on-primary ring-primary"
                   : "bg-card text-body ring-border hover:bg-surface"
               }`}
             >

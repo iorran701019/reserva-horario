@@ -2415,7 +2415,7 @@ export default function GerenciarServicos({
           <button
             type="submit"
             disabled={salvandoPergunta}
-            className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {salvandoPergunta ? "Salvando..." : "Salvar"}
           </button>
@@ -2512,7 +2512,7 @@ export default function GerenciarServicos({
             <button
               type="button"
               onClick={abrirNovo}
-              className="inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+              className="inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover"
             >
               Novo serviço
             </button>
@@ -2533,7 +2533,7 @@ export default function GerenciarServicos({
               <button
                 type="submit"
                 disabled={salvandoCategoria || !novoNomeCategoria.trim()}
-                className="shrink-0 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+                className="shrink-0 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {salvandoCategoria ? "..." : "Adicionar"}
               </button>
@@ -2943,7 +2943,7 @@ export default function GerenciarServicos({
             <button
               type="submit"
               disabled={salvando || carregandoForm}
-              className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {salvando ? "Salvando..." : "Salvar"}
             </button>
@@ -3161,7 +3161,7 @@ export default function GerenciarServicos({
                                 accept="image/*"
                                 onChange={(e) => handleFotoCategoriaChange(e, categoria)}
                                 disabled={enviandoFoto}
-                                className="block w-full text-sm text-body file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                className="block w-full text-sm text-body file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-on-primary disabled:cursor-not-allowed disabled:opacity-60"
                               />
                               {enviandoFoto && (
                                 <p className="mt-2 text-xs text-muted">Enviando…</p>

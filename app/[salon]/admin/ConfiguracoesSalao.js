@@ -3592,7 +3592,7 @@ export default function ConfiguracoesSalao({
                           type="button"
                           onClick={configurarWebhookAbacatepay}
                           disabled={salvandoAbacatepay}
-                          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {salvandoAbacatepay ? "Configurando…" : "Configurar agora"}
                         </button>
@@ -3628,7 +3628,7 @@ export default function ConfiguracoesSalao({
                           type="button"
                           onClick={conectarAbacatepay}
                           disabled={salvandoAbacatepay}
-                          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-on-primary transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {salvandoAbacatepay ? "Conectando…" : "Conectar"}
                         </button>
@@ -3860,7 +3860,7 @@ export default function ConfiguracoesSalao({
                   type="button"
                   onClick={salvarRegraEspecial}
                   disabled={reSalvando}
-                  className="mt-3 inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+                  className="mt-3 inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {reSalvando ? "Adicionando..." : "Adicionar regra"}
                 </button>
@@ -4266,7 +4266,7 @@ export default function ConfiguracoesSalao({
             <button
               type="button"
               onClick={onCadastrarProfissional}
-              className="mt-3 inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+              className="mt-3 inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover"
             >
               Cadastrar novo profissional
             </button>
@@ -4302,7 +4302,7 @@ export default function ConfiguracoesSalao({
                   <button
                     type="button"
                     onClick={() => setModalImportarAberto(true)}
-                    className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+                    className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover"
                   >
                     Importar do Google Calendar
                   </button>
@@ -4326,7 +4326,7 @@ export default function ConfiguracoesSalao({
                   type="button"
                   onClick={conectarGoogleCalendar}
                   disabled={carregandoGoogleCalendar}
-                  className="mt-3 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+                  className="mt-3 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Conectar Google Calendar
                 </button>
@@ -4460,7 +4460,7 @@ export default function ConfiguracoesSalao({
                   accept="image/*"
                   onChange={handleFotoPerfilChange}
                   disabled={carregandoFoto || enviandoFoto}
-                  className="block w-full text-sm text-body file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  className="block w-full text-sm text-body file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-medium file:text-on-primary disabled:cursor-not-allowed disabled:opacity-60"
                 />
                 {enviandoFoto && (
                   <p className="mt-2 text-xs text-muted">Enviando…</p>
@@ -4596,7 +4596,7 @@ export default function ConfiguracoesSalao({
                   pulaConfirmacao: true,
                 })
               }
-              className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+              className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover"
             >
               Continuar
             </button>

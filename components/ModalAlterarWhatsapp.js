@@ -246,7 +246,7 @@ export default function ModalAlterarWhatsapp({
             <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
               <button
                 type="submit"
-                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover"
+                className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
               >
                 Continuar
               </button>
@@ -277,7 +277,7 @@ export default function ModalAlterarWhatsapp({
                 type="button"
                 onClick={handleConfirmar}
                 disabled={salvando}
-                className="inline-flex flex-1 items-center justify-center rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex flex-1 items-center justify-center rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {salvando ? "Salvando..." : "Confirmar"}
               </button>

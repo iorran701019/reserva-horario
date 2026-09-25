@@ -383,7 +383,7 @@ export default function ModalVincularCliente({
             type="button"
             onClick={confirmar}
             disabled={salvando}
-            className="inline-flex flex-1 items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex flex-1 items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition disabled:cursor-not-allowed disabled:opacity-60"
           >
             {salvando ? "Salvando..." : "Vincular"}
           </button>

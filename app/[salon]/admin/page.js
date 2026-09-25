@@ -2619,6 +2619,12 @@ export default function AdminPage() {
         // tenant muda.
         "--color-primary": temaAtivo.botaoAdmin ?? temaAtivo.botao,
         "--color-primary-hover": temaAtivo.botaoAdminHover ?? temaAtivo.botaoHover,
+        // Texto sobre o botão: com botaoAdmin o botão é outro, então o texto
+        // vem de textoBotaoAdmin (opcional); sem ele o admin usa o botão
+        // público e herda o textoBotao dele, igual ao fluxo público.
+        "--color-on-primary": temaAtivo.botaoAdmin
+          ? (temaAtivo.textoBotaoAdmin ?? "#fdfcfa")
+          : (temaAtivo.textoBotao ?? "#fdfcfa"),
         "--color-heading": temaAtivo.textoPrincipal,
         // bordaAdmin (ex.: laysla) — borda própria do admin, mesmo molde do
         // bgCardAdmin: o toggle desligado usa bg-border e o ligado bg-primary,
@@ -5150,7 +5156,7 @@ export default function AdminPage() {
                   setEtiquetaParaAbrir(gateEtiqueta.chave);
                   setGateEtiqueta(null);
                 }}
-                className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:opacity-90"
+                className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:opacity-90"
               >
                 {gateEtiqueta.motivo === "sem_etiqueta"
                   ? "Definir etiqueta"
@@ -5610,7 +5616,7 @@ export default function AdminPage() {
                           className={[
                             "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
                             sel
-                              ? "bg-primary text-white ring-primary"
+                              ? "bg-primary text-on-primary ring-primary"
                               : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
                           ].join(" ")}
                         >
@@ -5640,7 +5646,7 @@ export default function AdminPage() {
                 type="button"
                 onClick={handleAlterarData}
                 disabled={!dataAlterarData || !horarioAlterarData || salvandoAlterarData}
-                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {salvandoAlterarData ? "Salvando..." : "Confirmar nova data"}
               </button>
@@ -5728,7 +5734,7 @@ export default function AdminPage() {
                   setFocarJanelaAgendamento(true);
                   setDrawerAberto(false);
                 }}
-                className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+                className="flex-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover"
               >
                 Abrir agenda por mês
               </button>

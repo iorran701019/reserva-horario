@@ -242,7 +242,7 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
                       <button
                         type="button"
                         onClick={buscarCalendarios}
-                        className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary-hover"
+                        className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover"
                       >
                         Listar calendários
                       </button>
@@ -266,7 +266,7 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
                           type="button"
                           onClick={salvarCalendario}
                           disabled={!calendarioEscolha || salvandoCalendario}
-                          className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {salvandoCalendario ? "Salvando..." : "Salvar"}
                         </button>
@@ -287,7 +287,7 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
                     type="button"
                     onClick={buscarCandidatos}
                     disabled={buscandoCandidatos}
-                    className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {buscandoCandidatos ? "Buscando..." : "Buscar candidatos"}
                   </button>
@@ -383,7 +383,7 @@ export default function ModalImportarGoogleCalendar({ estabelecimento, aberto, o
                         type="button"
                         onClick={confirmarImportacao}
                         disabled={enviando}
-                        className="mt-4 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+                        className="mt-4 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-on-primary transition disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {enviando
                           ? "Importando..."
