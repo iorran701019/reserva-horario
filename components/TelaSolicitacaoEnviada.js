@@ -78,6 +78,8 @@ export default function TelaSolicitacaoEnviada({
       nomeCliente,
       dataFormatada,
       horario,
+      // Par de duas datas (etapa anterior presente): leva a irmã junto.
+      comPar: etapaAnterior != null,
     });
 
     setCancelando(false);

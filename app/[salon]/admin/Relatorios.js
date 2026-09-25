@@ -99,6 +99,11 @@ function classificarDesfecho(item, agora, estabelecimento) {
     return fimDaRevisaoDeConclusao(item, estabelecimento) < agora ? "concluido" : null;
   }
   if (item.status !== "cancelado") return null;
+  // Etapa anterior de um par cancelada (por qualquer motivo, com ou sem flags):
+  // fora do desfecho. Cancelar o par grava a mesma flag nas duas linhas (admin)
+  // ou só o status na anterior (público), e contaria em dobro ou viraria
+  // "estimado". A falta (nao_compareceu) continua contando como comparecimento.
+  if (item.papel_reserva === "anterior" && !item.nao_compareceu) return null;
   if (item.cancelado_por_cliente) return "cliente";
   if (item.cancelado_pelo_salao || item.nao_compareceu) return "salao";
   if (item.expirado_automaticamente) return "expirado";
