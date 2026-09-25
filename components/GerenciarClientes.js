@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MessageCircleOff, Pencil, X } from "lucide-react";
+import { Calendar, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MessageCircleOff, Pencil, X } from "lucide-react";
 import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
 import { formatarPreco } from "@/lib/preco";
 import NavegacaoMes from "@/components/NavegacaoMes";
@@ -168,6 +168,8 @@ function DetalheCliente({
   onAgendarPara,
   onCancelarAgendamento,
   ultimoCancelamento,
+  onAlterarDataAgendamento,
+  ultimaAlteracaoData,
   onEtiquetaAlterada,
 }) {
   const router = useRouter();
@@ -184,6 +186,20 @@ function DetalheCliente({
 
   const [resumo, setResumo] = useState(null);
   const [carregando, setCarregando] = useState(true);
+
+  // Recusa do "Alterar data" (ver abrirAlterarDataAgendamento em page.js),
+  // presa ao id do agendamento: trocar de item no carrossel esconde o aviso, e
+  // cada nova tentativa o zera antes de perguntar de novo.
+  const [avisoAlterarData, setAvisoAlterarData] = useState(null);
+
+  async function tentarAlterarData(item, notificar) {
+    setAvisoAlterarData(null);
+    const recusa = await onAlterarDataAgendamento(
+      { ...item, nome_cliente: clienteAtual.nome, telefone: telefoneDigitos },
+      notificar
+    );
+    if (recusa) setAvisoAlterarData({ id: item.id, texto: recusa });
+  }
 
   // Existe modelo de anamnese ATIVO pro estabelecimento (ver lib/anamnese.js
   // existeModeloAtivo)? Decide se a seção "Anamnese" abaixo aparece —
@@ -295,6 +311,19 @@ function DetalheCliente({
       recarregarResumo();
     }
   }, [ultimoCancelamento]);
+
+  // Mesmo mecanismo, pra "Alterar data" salvo pelo modal do /admin: sem o
+  // refetch o carrossel seguiria mostrando a data antiga.
+  useEffect(() => {
+    if (
+      ultimaAlteracaoData &&
+      (resumo?.proximosAgendamentos ?? []).some(
+        (item) => item.id === ultimaAlteracaoData.id
+      )
+    ) {
+      recarregarResumo();
+    }
+  }, [ultimaAlteracaoData]);
 
   async function toggleHistorico() {
     const abrir = !historicoAberto;
@@ -625,6 +654,47 @@ function DetalheCliente({
             renderAcoes={(item) =>
               onCancelarAgendamento &&
               item && (
+                <>
+                {/* Alterar data: só ARMA o MESMO modal do detalhe do Painel
+                    (ver onAlterarDataAgendamento em page.js), com o mesmo
+                    botão dividido — zona grande notifica, pequena não. A
+                    regra de cancelado/concluído é reaplicada lá, sobre a
+                    linha viva. Estilo do Cancelar, só com tokens do tema. */}
+                {avisoAlterarData?.id === item.id && (
+                  <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
+                    {avisoAlterarData.texto}
+                  </p>
+                )}
+                {/* Par vinculado só altera depois de confirmado (par pendente é
+                    aceito/recusado inteiro): sem o botão. Se o botão vier e a
+                    linha viva recusar, o motivo aparece no <p> âmbar acima. */}
+                {onAlterarDataAgendamento &&
+                  !(item.reserva_grupo_id && item.status !== "confirmado") && (
+                  <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-border">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        tentarAlterarData(item, true)
+                      }
+                      className="inline-flex flex-1 items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium text-heading transition hover:bg-surface"
+                    >
+                      <Calendar className="h-3.5 w-3.5" />
+                      Alterar data
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        tentarAlterarData(item, false)
+                      }
+                      aria-label="Alterar data sem notificar cliente"
+                      title="Alterar data sem notificar cliente"
+                      className="inline-flex w-12 shrink-0 items-center justify-center gap-1 border-l border-border text-heading transition hover:bg-surface"
+                    >
+                      <Calendar className="h-3.5 w-3.5" aria-hidden="true" />
+                      <MessageCircleOff className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
                   <button
                     type="button"
@@ -663,6 +733,7 @@ function DetalheCliente({
                     <MessageCircleOff className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
                 </div>
+                </>
               )
             }
           />
@@ -1062,6 +1133,8 @@ export default function GerenciarClientes({
   onAgendarPara,
   onCancelarAgendamento,
   ultimoCancelamento,
+  onAlterarDataAgendamento,
+  ultimaAlteracaoData,
 }) {
   const [clientes, setClientes] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -1449,6 +1522,8 @@ export default function GerenciarClientes({
         onAgendarPara={onAgendarPara}
         onCancelarAgendamento={onCancelarAgendamento}
         ultimoCancelamento={ultimoCancelamento}
+        onAlterarDataAgendamento={onAlterarDataAgendamento}
+        ultimaAlteracaoData={ultimaAlteracaoData}
       />
     );
   }

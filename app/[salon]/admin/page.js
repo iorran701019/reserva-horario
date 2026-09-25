@@ -715,6 +715,8 @@ export default function AdminPage() {
   // objeto NOVO a cada cancelamento, senão cancelar o mesmo id duas vezes não
   // dispararia o efeito lá. null = nenhum cancelamento nesta sessão.
   const [ultimoCancelamento, setUltimoCancelamento] = useState(null);
+  // Mesmo papel, pra "Alterar data" concluído (ver handleAlterarData).
+  const [ultimaAlteracaoData, setUltimaAlteracaoData] = useState(null);
 
   // Agendamento aguardando confirmação da zona pequena de "Confirmar" (sem
   // notificar). Mesmo padrão de agendamentoParaCancelar: null = modal
@@ -1288,6 +1290,60 @@ export default function AdminPage() {
     setNotificarAoCancelar(notificar);
   }
 
+  // Arma o MESMO modal "Alterar data" do Painel (agendamentoParaAlterarData)
+  // a pedido da ficha do cliente (onAlterarDataAgendamento em
+  // GerenciarClientes.js). Os itens da ficha vêm da RPC de leitura, que não
+  // traz profissional_nome, reserva_grupo_id nem papel_reserva — e o modal
+  // precisa deles (profissional fixo, aviso de inversão do par) —, então relê
+  // a linha VIVA com o mesmo select de buscarAgendamentos. A irmã do par vai
+  // junto em `irmaFicha` porque `agendamentos` (state do Painel) pode não tê-la
+  // carregada. Mesma regra do detalhe do Painel: cancelado/concluído não
+  // altera. Só arma: quem grava é handleAlterarData. Devolve a mensagem de
+  // recusa (string) — a ficha a mostra no próprio lugar, em vez do `erro`
+  // global, que desmontaria a aba — ou null quando o modal abriu.
+  async function abrirAlterarDataAgendamento(agendamento, notificar) {
+    const { data: linha, error } = await supabase
+      .from("agendamentos")
+      .select("id, nome_cliente, telefone, data, horario, status, servico_id, profissional_id, reserva_grupo_id, papel_reserva, servicos(nome, duracao_min, nome_etapa_anterior), profissionais(nome)")
+      .eq("id", agendamento.id)
+      .eq("estabelecimento_id", estabelecimento.id)
+      .maybeSingle();
+
+    if (error || !linha) {
+      return `Não foi possível abrir a alteração de data${error ? `: ${error.message}` : "."}`;
+    }
+    if (linha.status === "cancelado" || linha.status === "concluido") {
+      return "Esse agendamento já foi cancelado ou concluído — não dá para alterar a data.";
+    }
+    // Par pendente é aceito ou recusado inteiro; alterar um lado só depois de
+    // confirmado. A ficha já esconde o botão; isto cobre a linha viva ter
+    // mudado (ou a RPC não ter trazido reserva_grupo_id). Não abre o modal.
+    if (linha.reserva_grupo_id && linha.status !== "confirmado") {
+      return "Este agendamento faz parte de um par de datas ainda pendente. Confirme o pedido em Pendentes antes de alterar a data.";
+    }
+
+    let irmaFicha = null;
+    if (linha.reserva_grupo_id) {
+      const { data: irma } = await supabase
+        .from("agendamentos")
+        .select("id, data, horario, status, papel_reserva, reserva_grupo_id")
+        .eq("reserva_grupo_id", linha.reserva_grupo_id)
+        .neq("id", linha.id)
+        .maybeSingle();
+      irmaFicha = irma ?? null;
+    }
+
+    setErro("");
+    setNotificarAoAlterarData(notificar);
+    setAgendamentoParaAlterarData({
+      ...linha,
+      duracao_min: linha.servicos?.duracao_min ?? null,
+      profissional_nome: linha.profissionais?.nome ?? null,
+      irmaFicha,
+    });
+    return null;
+  }
+
   // Botão B: só roda DEPOIS que o dono confirma no modal. Grava o status
   // 'cancelado' no banco e, se der certo, abre o WhatsApp com a mensagem de
   // cancelamento. Em caso de erro não abre o WhatsApp. `notificar=false`
@@ -1580,6 +1636,9 @@ export default function AdminPage() {
       data: dataAlterarData,
       horario: horarioAlterarData,
     });
+    // Mesmo sinal de ultimoCancelamento: a ficha do cliente (aba Clientes)
+    // refaz o resumo por ele, senão o carrossel mostraria a data antiga.
+    setUltimaAlteracaoData({ id: agendamentoParaAlterarData.id, em: carimboAgora() });
 
     if (notificarAoAlterarData) {
       abrirWhatsApp(
@@ -2578,7 +2637,8 @@ export default function AdminPage() {
   // Aviso (não bloqueia) de que a nova data do "Alterar data" inverte a ordem
   // do par: a anterior tem que acontecer ANTES da principal. Vale nos dois
   // sentidos. Compara "YYYY-MM-DD HH:MM" como texto (ordem lexicográfica).
-  const irmaAlterarData = irmaDoPar(agendamentoParaAlterarData);
+  const irmaAlterarData =
+    agendamentoParaAlterarData?.irmaFicha ?? irmaDoPar(agendamentoParaAlterarData);
   let avisoParAlterarData = null;
   if (irmaAlterarData && dataAlterarData && horarioAlterarData) {
     const nova = `${dataAlterarData} ${String(horarioAlterarData).slice(0, 5)}`;
@@ -4613,6 +4673,11 @@ export default function AdminPage() {
             // atualizarStatusLocal de handleCancelar patcha a lista DESTE
             // componente, que a aba Clientes não consome.
             ultimoCancelamento={ultimoCancelamento}
+            // "Alterar data" da ficha: arma o MESMO modal do detalhe do
+            // Painel (abrirAlterarDataAgendamento); ultimaAlteracaoData faz
+            // a ficha refazer o resumo depois de salvar.
+            onAlterarDataAgendamento={abrirAlterarDataAgendamento}
+            ultimaAlteracaoData={ultimaAlteracaoData}
             // "Agendar" da ficha do cliente: mesmo atalho do "Novo
             // agendamento" do Histórico (pula o pré-passo de busca por nome e
             // passa pelo aviso de pendente), só que aqui o cliente vem da
