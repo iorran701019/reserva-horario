@@ -11,23 +11,27 @@ Documento vivo. Atualizar conforme o protocolo evoluir (não é regra fixa e imu
 3. Revisão do diff/relatório retornado pelo Claude Code.
 4. Iorran testa localmente (e em staging, com push, se a mudança exigir).
 5. Merge imediato após validação — branch validada não fica esperando. Acúmulo de branches pendentes é anti-padrão.
-6. Iorran faz add/commit/push manualmente no VSCode. Claude sempre entrega o texto da mensagem de commit pronto.
+6. Iorran faz add/commit/push manualmente no VSCode. Claude sempre entrega a sequência completa de comandos (status, add arquivo por arquivo, commit com a mensagem pronta, log de conferência, merge, push, sincronização da `staging`, exclusão da branch).
 7. Só depois do merge da demanda atual (item 5) Claude parte pra próxima — mesmo que várias tenham sido citadas no início da sessão. Ver regra "uma demanda por vez" abaixo.
 
 **Antes de reescrever um arquivo grande:** olhar `git diff` ou trechos específicos primeiro, avaliar o impacto isolado, e alterar estritamente o necessário.
 
-**Confirmação de execução:** Iorran sempre traz de volta o output real do que rodou no VSCode (git status, git log, resultado de commit/merge/push etc.) antes de Claude assumir que um passo deu certo. Claude nunca presume sucesso sem ver o output colado. Se a saída colada parar no meio (ex.: termina no merge e não mostra o push nem a exclusão da branch), Claude pede uma conferência curta (`git log origin/main -1 --oneline`, `git branch -a`, `git status`) antes de considerar publicado.
+**Confirmação de execução:** Iorran sempre traz de volta o output real do que rodou no VSCode (git status, git log, resultado de commit/merge/push etc.) antes de Claude assumir que um passo deu certo. Claude nunca presume sucesso sem ver o output colado. Se a saída colada parar no meio (ex.: termina no merge e não mostra o push nem a exclusão da branch), Claude pede uma conferência curta (`git log origin/main -1 --oneline`, `git branch -a`, `git status`) antes de considerar publicado. "Already up to date" num merge que deveria trazer mudança é alarme, não sucesso.
 
 **Ida pra `main`/produção:** por padrão, o fluxo termina em `staging`. Subir pra `main` exige decisão explícita do Iorran na própria sessão, mesmo quando o trabalho já está validado em staging há várias sessões — não é assumido automaticamente.
 
 ---
 
-## 2. Regras de commit message
+## 2. Regras de commit message e terminal
 
 - Aspas simples em vez de aspas duplas (aspas duplas em linha fazem o VSCode interpretar como código).
 - Evitar aspas duplas mesmo dentro do texto da mensagem (ex: citando um nome) — no PowerShell isso quebra a string mesmo com aspas simples por fora.
 - Mensagem de uma linha só. Quando o Claude Code sugerir mensagem longa com corpo, usar só a primeira linha.
 - PowerShell exige `-LiteralPath` para caminhos com colchetes literais (ex: `app\[salon]\...`).
+- No `git add`, caminho com `[salon]` vai com o prefixo literal: `git add ':(literal)app/[salon]/admin/page.js'` — sem ele o git trata os colchetes como curinga.
+- Nunca `git add .`; sempre arquivo por arquivo, com `git status` antes do commit para conferir que só os arquivos esperados entraram.
+- `curl` no PowerShell é alias de `Invoke-WebRequest`: usar `curl.exe`. Git com `core.pager cat` para não travar em `less`.
+- Liberar a porta 3000 presa: `Get-NetTCPConnection -LocalPort 3000 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`.
 
 ---
 
@@ -36,12 +40,16 @@ Documento vivo. Atualizar conforme o protocolo evoluir (não é regra fixa e imu
 - **Autoria e aplicação passam sempre pelo chat.** O Claude Code não tem autorização de tocar no banco. Quando uma mudança exige um arquivo SQL grande (RPCs, por exemplo), o chat pode pedir explicitamente ao Claude Code que escreva a **proposta** em `sql/<nome>.sql`, sem aplicar — o chat revisa linha a linha e só então o Iorran cola no SQL Editor. O arquivo commitado precisa refletir exatamente o que foi aplicado (se algo foi ajustado na hora, o arquivo é corrigido antes do commit).
 - Todo bloco de SQL começa com comentário de ambiente em destaque: `-- STAGING` ou `-- PRODUÇÃO` (sempre maiúsculo).
 - Migrações vão primeiro para staging, confirmadas com `SELECT`, depois replicadas para produção com confirmação explícita entre ambientes.
+- **Merge nunca na mesma resposta que o SQL de produção** (incidente da Sessão 73): quando o código novo depende de schema novo, Claude entrega primeiro o SQL de produção com o `SELECT` de conferência, e os comandos de merge para `main` só na resposta seguinte, depois que o Iorran colar o resultado. Vale também para a `staging` se o banco de staging ainda não tiver o SQL. Sem isso, o push publica código que pede coluna inexistente e derruba o `/admin` (e o `/agendar`, quando a coluna entra em `lib/estabelecimento.js`) com 42703.
+- **Coluna aditiva pode ir aos dois bancos antes do código.** Coluna nova nullable ou com default, que nada no código ainda lê, pode ser criada em staging e produção logo no início da demanda — assim o merge nunca corre o risco acima.
 - Nunca aplicar SQL destrutivo sem um `SELECT` de confirmação prévio.
 - **IDs de `estabelecimento_id` não são iguais entre staging e produção** — sempre resolver por slug/nome antes de qualquer SQL que dependa do ID.
-- RLS: nunca confiar em handoff sobre policy aplicada — sempre reconferir via `SELECT` em `pg_policies` antes de assumir que está em vigor.
+- RLS: nunca confiar em handoff sobre policy aplicada — sempre reconferir via `SELECT` em `pg_policies` antes de assumir que está em vigor. O mesmo vale para estado de dados registrado em handoff (ex.: flag "ligada em todos os tenants") — conferir no banco antes de decidir.
 - **Os arquivos em `sql/` não são fonte de verdade.** Vários divergem do banco (tipos, nomes de coluna, policies que não existem mais). Antes de escrever qualquer SQL que dependa de tipo ou coluna, conferir no banco via `information_schema.columns`, `pg_get_viewdef`, `pg_proc.prosrc` ou `pg_policies`. Caso real (Sessão 71): o repo dizia `bigint` para ids que no banco são `uuid`, e a função teria compilado e quebrado só na hora em que a cliente tentasse reservar.
 - **Aplicar primeiro, conferir depois.** A conferência só faz sentido depois de colar e rodar o conteúdo do arquivo. Se a conferência voltar sem as linhas esperadas (ou com "function does not exist"), a primeira hipótese é que o arquivo não foi rodado naquele projeto.
-- O SQL Editor do Supabase roda o script inteiro numa transação: `create index concurrently` não funciona ali. Com as tabelas do tamanho atual, usar `create index if not exists` normal.
+- **SQL Editor do Supabase:** mostra só o resultado do último comando e roda só o trecho selecionado — colar o arquivo inteiro (Ctrl+A no VS Code) num editor vazio, sem nada selecionado. `BEGIN` e `COMMIT` em execuções separadas não gravam nada. Para testar sem deixar rastro: bloco `do $$ ... $$` único terminando em `raise exception` com o resultado.
+- O SQL Editor roda o script inteiro numa transação: `create index concurrently` não funciona ali. Com as tabelas do tamanho atual, usar `create index if not exists` normal.
+- Coluna nova: `notify pgrst, 'reload schema';` depois do `alter table`.
 - Colunas do catálogo do Postgres com tipo `"char"` (ex.: `attgenerated`) precisam de `::text` antes de concatenar.
 - Para provar o que um visitante anônimo enxerga, simular o papel direto no SQL Editor: `set role anon;` seguido da consulta. Tabela fechada devolve "permission denied".
 
@@ -49,7 +57,7 @@ Documento vivo. Atualizar conforme o protocolo evoluir (não é regra fixa e imu
 
 ## 4. Formato de resposta
 
-- Prosa corrida, sem cabeçalhos fixos repetitivos.
+- Prosa corrida, sem cabeçalhos fixos repetitivos (nada de "Contexto em 2 linhas", "O Código Prático").
 - No máximo 3 parágrafos curtos explicando o porquê da mudança e o impacto prático (linguagem de negócio, sem jargão de programação sênior).
 - Código/comando limpo, direto, sem floreio depois.
 
@@ -61,15 +69,18 @@ Depois de merges e SQLs do dia, Claude gera:
 - O handoff da sessão, em arquivo `.md`.
 - O conteúdo **completo e limpo** do `PENDENCIAS.md`, pronto para substituir o arquivo inteiro — só as seções "Em aberto" e "Backlog", sem seção "Resolvido" e nunca como diff com marcadores. O que foi resolvido na sessão sai do arquivo e fica registrado no handoff.
 - **Conferência de SQL staging → produção** — o resultado dessa conferência entra no handoff, mesmo quando não há pendência (registrar "nenhum SQL de schema pendente de replicar" é tão válido quanto listar um item em aberto).
+- O `PROTOCOLO_DESENVOLVIMENTO.md` completo, quando a sessão criou regra nova.
 - A sequência completa de comandos para commitar os arquivos de controle numa branch de fechamento e levá-los a `staging` e `main`.
 
 Iorran só cola o conteúdo pronto — nunca marca `[x]` manualmente. Itens marcados `[x]` sem handoff correspondente precisam ser reconfirmados antes de serem tratados como fechados.
+
+Handoffs antigos são compactados periodicamente num arquivo único (o mais recente: "Arquivo compactado Sessões 1–73"), com backup externo antes de remover os originais do projeto — a compactação tem perda.
 
 ---
 
 ## 6. Regras de schema e ambiente (aprendidas com incidentes)
 
-- Novas colunas em `estabelecimentos` precisam aparecer em `lib/estabelecimento.js` **e** `lib/perfil.js`, ou ficam invisíveis para contas `'dono'` (regra permanente, documentada no `QA_CHECKLIST.md`).
+- Novas colunas em `estabelecimentos` precisam aparecer em `lib/estabelecimento.js` **e** `lib/perfil.js`, ou ficam invisíveis para contas `'dono'` (regra permanente, documentada no `QA_CHECKLIST.md`). Exceção: coluna que só rotas de servidor leem por embed próprio (ex.: `google_calendar_cor_id`, lida só pelo sync do Calendar) não precisa entrar nos dois selects.
 - Datas no navegador: sempre `new Date(ano, mes-1, dia)`, nunca `new Date("YYYY-MM-DD")` (problema de fuso UTC/GMT-3).
 - **Datas e horas no servidor (rotas em `app/api/`, Vercel roda em UTC): nunca ler data/hora de parede pelo fuso do processo** (`getHours()`, `getDate()`, `new Date(ano, mes, dia, h, m)`). Converter sempre para `America/Sao_Paulo` com `Intl.DateTimeFormat` (padrão de `lib/googleCalendarImportacao.js` e `lib/disponibilidade.js` desde a Sessão 71), sem offset fixo `-03:00`. Comparar dois instantes absolutos (`Date.now()` contra um `timestamptz`) é seguro. No SQL, "hoje" é `(now() at time zone 'America/Sao_Paulo')::date`, nunca `current_date`. Caso de origem: a revalidação de antecedência recusava horários válidos com 3h de diferença e o corte das 19h disparava às 16h.
 - Para testar fuso localmente, rodar com `TZ=UTC` e `TZ=America/Sao_Paulo` no PowerShell (`$env:TZ = "..."`). No Git Bash, `TZ` com barra não funciona (o MSYS converte em caminho do Windows) — usar PowerShell ou `MSYS_NO_PATHCONV=1`.
@@ -79,6 +90,8 @@ Iorran só cola o conteúdo pronto — nunca marca `[x]` manualmente. Itens marc
 - Extensão `btree_gist` é necessária para constraints de exclusão por tenant em `agendamentos`.
 - No embed do Supabase, quando FK e relação são usadas juntas (`profissional_id` + `profissionais(nome)`), ambas precisam estar explícitas no select.
 - `DROP FUNCTION` + `CREATE` derruba os grants — sempre re-conceder e testar o caminho real depois.
+- Catálogo criado por SQL direto precisa do INSERT manual em `servico_profissional` (sem ele, o `/agendar` diz "nenhum profissional disponível" e a RPC `agendamento_criar` recusa com AG004).
+- Vercel Instant Rollback pode desligar a promoção automática da `main` até um deploy ser promovido à mão — depois de qualquer rollback, conferir que o próximo push virou Production.
 
 ---
 
@@ -95,8 +108,9 @@ Iorran só cola o conteúdo pronto — nunca marca `[x]` manualmente. Itens marc
 - Sempre investigar (raio-x / prompt somente leitura) antes de implementar.
 - **Nome do profissional só aparece em telas de agendamento com 2+ profissionais ativos** (`qtdProfissionaisAtivos > 1`; `null`/contagem carregando também esconde, nunca mostra por padrão). Regra permanente desde a Sessão 59 — qualquer novo ponto que exiba `profissional_nome` deve seguir essa condição.
 - Toda alteração de status feita por decisão da própria dona dentro do `/admin` (cancelar, resolver conflito de prazo, marcar exceção de conclusão) é tratada como "ação do salão" pra fins de estatística — independente do gatilho que levou a essa decisão (ex: conflito de prazo detectado pelo sistema ainda conta como cancelamento do salão, porque foi ela quem clicou).
-- **Tema do `/admin` pode divergir do público, campo a campo, sempre com fallback pro valor público correspondente:** `bgCardAdmin` (→ `--color-card`, fallback `bgHeader`), `botaoAdmin`/`botaoAdminHover` (→ `--color-primary`/hover, fallback `botao`/`botaoHover`), `bordaAdmin` (→ `--color-border`, fallback `bordaHeader`). Existe porque o admin ignora `textoCard` de propósito (sempre usa `textoPrincipal` como texto) — então um `bgHeader` ou `botao` escolhido pro público escuro/claro pode deixar o admin com texto ilegível, mesmo quando o público está perfeito. Regra prática: **todo tenant com `bgHeader` escuro precisa dos três campos** (ver `NOVO_TENANT_CHECKLIST.md`).
+- **Tema do `/admin` pode divergir do público, campo a campo, sempre com fallback pro valor público correspondente:** `bgCardAdmin` (→ `--color-card`, fallback `bgHeader`), `botaoAdmin`/`botaoAdminHover` (→ `--color-primary`/hover, fallback `botao`/`botaoHover`), `bordaAdmin` (→ `--color-border`, fallback `bordaHeader`), `textoBotaoAdmin` (→ `--color-on-primary` quando há `botaoAdmin`, fallback `#fdfcfa`; sem `botaoAdmin`, o admin usa `textoBotao` como o público). Existe porque o admin ignora `textoCard` de propósito (sempre usa `textoPrincipal` como texto) — então um `bgHeader` ou `botao` escolhido pro público escuro/claro pode deixar o admin com texto ilegível, mesmo quando o público está perfeito. Regra prática: **todo tenant com `bgHeader` escuro precisa de `bgCardAdmin`/`botaoAdmin`/`bordaAdmin`**, e todo botão claro precisa de texto escuro (ver `NOVO_TENANT_CHECKLIST.md`).
 - **Decisão de negócio que foge do escopo original do app (ex.: maquiadora em vez de manicure) prefere um flag/config por tenant a uma categoria geral de "tipo de salão"** — até que 2 ou mais features realmente exijam essa distinção. Criar a taxonomia geral antes disso é escopo maior que o necessário (ver "sem catedral"). Caso de origem: agendamento em grupo da Laryssa, resolvido com dois campos novos em `estabelecimentos` (`permite_agendamento_grupo`, `max_pessoas_grupo`) editáveis só no `/painel-global`, em vez de um sistema de segmentos.
+- **Etiqueta de cliente é dado passivo; o que gera fricção são os gates.** Desligar comportamento incômodo se faz pelo popup (bloco "Alertas e avisos"), nunca apagando a estrutura de etiquetas nem as regras que dependem dela (mês restrito, Lista de Bloqueio, filtros). Um interruptor de aviso não muda regra de agenda.
 
 ---
 
@@ -104,9 +118,9 @@ Iorran só cola o conteúdo pronto — nunca marca `[x]` manualmente. Itens marc
 
 - **Stack:** Next.js (App Router, JS), Supabase (Postgres + Storage + Auth + pg_cron + pg_net), Tailwind v4, Vercel (Hobby — atenção ao timeout de 60s), Recharts (gráficos, desde a Sessão 59).
 - **Ambientes Supabase:** staging (`reserva-staging` / `yebwkchcrvebvvjvvvyu`) e produção (`pwlvjaenryzdkatmrhul`) — projetos separados, sequências de ID independentes.
-- **Arquivos de controle:** `PENDENCIAS.md`, `QA_CHECKLIST.md`, `DEPLOY_CHECKLIST.md`, `NOVO_TENANT_CHECKLIST.md`, `THEMING.md`.
-- **Libs-chave:** `lib/disponibilidade.js`, `lib/whatsapp.js`, `lib/particao.js`, `lib/cliqueFora.js`, `lib/checagemWhatsapp.js`, `lib/comprimirImagem.js`, `lib/temas.js`, `lib/conclusao.js`, `lib/mes.js` (navegação mensal, `mesDeHoje`/`rotuloMes`).
-- **Camada pública de dados (desde a Sessão 71):** `sql/rpcs_agendamento_publico.sql` (cancelar, liberar reserva, declarar sinal, anexar comprovante, status da reserva), `sql/rpc_criacao_agendamento.sql` (`agendamento_criar`, com as respostas das perguntas na mesma transação e erros AG001–AG009), `sql/rpcs_leitura_cliente.sql` (painel da cliente por telefone + helper interno `normalizar_telefone`), rota `app/api/agendamentos/comprovante-upload` (URL assinada do comprovante). Toda mudança no fluxo público de agendamento passa por um desses.
+- **Arquivos de controle:** `PENDENCIAS.md`, `PROTOCOLO_DESENVOLVIMENTO.md`, `QA_CHECKLIST.md`, `DEPLOY_CHECKLIST.md`, `NOVO_TENANT_CHECKLIST.md`, `PROTOCOLO_NOVO_TENANT.md`, `THEMING.md`.
+- **Libs-chave:** `lib/disponibilidade.js`, `lib/whatsapp.js`, `lib/particao.js`, `lib/cliqueFora.js`, `lib/checagemWhatsapp.js`, `lib/comprimirImagem.js`, `lib/temas.js`, `lib/conclusao.js`, `lib/mes.js` (navegação mensal, `mesDeHoje`/`rotuloMes`), `lib/janelaAgendamento.js`, `lib/sinalRegra.js`, `lib/sinalPix.js`, `lib/googleCalendarSync.js`.
+- **Camada pública de dados (desde a Sessão 71):** `sql/rpcs_agendamento_publico.sql` (cancelar, liberar reserva, declarar sinal, anexar comprovante, status da reserva), `sql/rpc_criacao_agendamento.sql` (`agendamento_criar`, com as respostas das perguntas na mesma transação e erros AG001–AG009), `sql/rpcs_leitura_cliente.sql` (painel da cliente por telefone + helper interno `normalizar_telefone`), rota `app/api/agendamentos/comprovante-upload` (URL assinada do comprovante). Desde a Sessão 73: `agendamento_criar_interno` (sem grant), `agendamento_criar_par`, `agendamento_cancelar_cliente_par`. Toda mudança no fluxo público de agendamento passa por um desses.
 
 ---
 
@@ -115,15 +129,20 @@ Iorran só cola o conteúdo pronto — nunca marca `[x]` manualmente. Itens marc
 - Sessões de discussão/pesquisa separadas de sessões de implementação, para não reprocessar histórico completo a cada resposta.
 - Fragmentar sessões por demanda, com handoff e fechamento frequentes, em vez de uma sessão única acumulando contexto.
 - Raio-x enxuto: focar no que muda a decisão de implementação, não numa auditoria completa do arquivo — auditorias amplas ficam para sessões dedicadas.
+- Raio-x complexo pode ir para o Claude Code na nuvem (branch própria `claude/...`, container sem `node_modules` nem `.env.local`); implementação fica no local. Fluxo da nuvem: Code commita e dá push na branch dele → local `git fetch origin` + `git merge origin/claude/...` na branch de feature → teste → merge na `main` → `git push origin --delete claude/...`.
+- O conhecimento do projeto no claude.ai guarda só os `.md` de controle e os handoffs — código é lido pelo Claude Code direto do disco.
 
 ---
 
-## 10. BrowserMCP
+## 10. BrowserMCP e Claude Code
 
 - Desconectado por padrão — a definição da ferramenta consome ~38% do context window do Claude Code mesmo sem uso.
 - Reconectar apenas nas sessões em que for necessário teste ao vivo no navegador (Claude Code validando fluxo/staging por conta própria, como feito na Sessão 30).
 - Claude (chat) deve sinalizar quando uma demanda pedir esse tipo de validação, sugerindo reconectar antes do prompt pro Claude Code.
-- **O painel do navegador do Claude Code é um navegador separado do navegador pessoal do Iorran (Chrome/Edge).** Um login feito no Chrome do Iorran não vale nessa aba — qualquer tela protegida por senha (login do `/admin`, por exemplo) precisa ser preenchida por ele diretamente dentro do painel que aparece do lado da conversa. Fricção real, repetida mais de uma vez na sessão de 21/09 — sempre confirmar em qual navegador a ação precisa acontecer antes de pedir "faça login".
+- **O painel do navegador do Claude Code é um navegador separado do navegador pessoal do Iorran (Chrome/Edge).** Um login feito no Chrome do Iorran não vale nessa aba — qualquer tela protegida por senha (login do `/admin`, por exemplo) precisa ser preenchida por ele diretamente dentro do painel que aparece do lado da conversa. Sempre confirmar em qual navegador a ação precisa acontecer antes de pedir "faça login".
+- **O Claude Code não roda `next build` nem `next dev` com o servidor do Iorran ligado, e não encerra processos dele** (incidente da Sessão 74: `.next` corrompido servindo CSS antigo). Verificação padrão nos prompts: `npx eslint` nos arquivos tocados. Se o cache corromper: parar o servidor, apagar `.next\dev` e `.next\cache`, subir de novo com `npm run staging`.
+- Todo prompt de implementação termina com "não commite; me devolva o diff" e a mensagem de commit sugerida. Se o Code falhar por erro da própria ferramenta (ex.: classificador de permissões sem veredito), nada foi alterado — basta pedir "tenta de novo" ou reabrir a sessão com o mesmo prompt.
+- Worktree separado (ex.: `C:\Users\Iorran\BarberShop-laryssa`) aparece com `+` no `git branch`; fechar com `git worktree remove` antes de apagar a branch dele.
 
 ---
 
@@ -150,7 +169,7 @@ Iorran só cola o conteúdo pronto — nunca marca `[x]` manualmente. Itens marc
 **Subquery dentro de policy roda com a RLS de quem chama.** Um `EXISTS (select ... from agendamentos ...)` numa policy de outra tabela deixa de enxergar a linha quando a leitura de `agendamentos` é fechada para aquele papel — e o insert que dependia disso passa a falhar em silêncio. Ao fechar uma tabela, procurar policies de outras tabelas que a consultam.
 
 **Ordem de deploy com banco e código:**
-- Função nova: criar no banco (staging, depois produção) **antes** do merge do código que a chama.
+- Função ou coluna nova: criar no banco (staging, depois produção) **antes** do merge do código que a usa.
 - Policy ou grant antigo: remover só **depois** que o código novo estiver publicado em produção e testado.
 - Storage: código novo primeiro (esperar o deploy da Vercel terminar), regras antigas do bucket depois.
 - Invertida qualquer dessas ordens, as clientes reais ficam sem conseguir agendar, cancelar ou enviar comprovante até o passo seguinte.
@@ -159,13 +178,40 @@ Iorran só cola o conteúdo pronto — nunca marca `[x]` manualmente. Itens marc
 
 **Tabela nova:** RLS ligado desde a criação; nenhuma policy para `anon` a menos que seja dado de catálogo que o `/agendar` precisa ler e que não identifica ninguém; policies de dona no padrão acima. Dado sensível (chave de API, token, credencial) nunca vira coluna de `estabelecimentos` — a leitura pública dessa tabela é por linha, não por coluna.
 
-**Segredos:** nunca colar `.env.local`, chave de service role, secret de webhook ou token de sessão no chat. Se acontecer, trocar a chave no painel correspondente e na Vercel no mesmo dia.
+**Segredos:** nunca colar `.env.local`, chave de service role, secret de webhook ou token de sessão no chat. Se acontecer, trocar a chave no painel de origem (Supabase, Google Cloud, AbacatePay), na Vercel (Preview e Production), no `.env.local` e em qualquer função do banco que carregue o valor (triggers com `pg_net`), no mesmo dia.
 
 **Checklist de conferência de uma mudança de segurança:**
 1. Listar todas as policies das tabelas tocadas, nos dois bancos.
 2. `has_function_privilege` para cada função nova ou alterada.
 3. `set role anon;` + consulta para provar o que o anônimo enxerga.
 4. Teste manual do fluxo real da cliente no localhost contra staging e depois no tenant de teste em produção (`junior`/`acolhe`), incluindo pelo menos: agendar, trocar de horário pelo "Editar", cancelar, declarar sinal e anexar comprovante.
+
+---
+
+## 12. Tema e cores (regras da Sessão 74)
+
+- Todo elemento com fundo `bg-primary` usa `text-on-primary` — nunca `text-white`. Vale também para filhos com classe própria de texto. Botões semânticos (`bg-green/red/blue/amber-600 text-white`) ficam com branco fixo de propósito.
+- Texto sobre `bg-card` usa `text-on-card` (não `text-body`, pensado para o fundo `surface`).
+- Overlay de modal usa `bg-overlay/NN`, nunca `bg-primary/NN`.
+- Fundo derivado da cor de destaque por `color-mix` precisa de token com versão noturna (padrão `var(--destaque-suave, color-mix(...))`).
+- Cor nova no `/admin` sempre por token do tema ou escala do Tailwind — nunca hex em `style` inline, senão escapa do modo noturno.
+- Modo noturno existe só no `/admin`, nunca no fluxo público. Tenant novo é conferido também com o modo noturno ligado.
+- Aviso de recusa de ação dentro de uma aba não usa o `setErro` global do admin (ele desmonta a aba aberta); usar aviso local.
+- Tema novo é moldado primeiro no tenant `css` de staging (ver regra própria abaixo).
+
+---
+
+## 13. Alertas e avisos (regra da Sessão 75)
+
+Todo popup, aviso, confirmação ou lembrete novo (e mudança relevante num existente) passa por esta classificação **antes** de virar código, e o prompt do Claude Code já sai com a classificação decidida:
+
+- **Preferência** — só informa ou lembra, e a dona pode dispensar sem risco. Nasce com interruptor no bloco "Alertas e avisos" de Regras de negócio (`ConfiguracoesSalao.js`), **ligado por padrão**, coluna própria em `estabelecimentos`, salvamento otimista com `.select("id")` e patch no pai via `onAvisoAtualizado(coluna, valor)`.
+- **Proteção** — evita erro com dado real, conflito de agenda, perda de agendamento ou cobrança errada (colisão, fora da janela, prazo mínimo, confirmação de cancelamento, ação destrutiva). Fica fixo, sem interruptor.
+- **Texto da dona para a cliente** (ex.: `alerta_mensagem` de serviço/categoria) — nunca aparece no `/admin`, sem precisar de interruptor.
+- Na dúvida entre preferência e proteção, fica como proteção até decidir junto com o Iorran.
+- O interruptor é escrito como "mostrar X" (ligado = aparece), mesmo quando a coluna antiga diz "pular" — a inversão fica só na tela e documentada em comentário.
+- Todo popup novo entra classificado no inventário do painel global (`app/painel-global/AbaAuditoria.js`: `FLAGS_ALERTAS` se tiver coluna, `CATALOGO_SEM_CONTROLE` se for fixo), para o catálogo não ficar defasado.
+- Coluna nova do bloco segue a regra de `estabelecimentos`: entra em `lib/estabelecimento.js` e `lib/perfil.js`.
 
 ---
 
@@ -208,11 +254,12 @@ git branch -d nome-da-branch
 git push origin --delete nome-da-branch
 ```
 
-Nunca apagar `main` nem `staging` (branch permanente — alias estável usado pelos
-triggers de webhook, nunca deletar). Essa rotina cobre só as branches nascidas na
-própria sessão; o acúmulo histórico de branches antigas já mergeadas (a maior parte da
-saída de `git branch --merged main` hoje) segue como item de backlog à parte, tratado
-numa sessão dedicada de limpeza — não misturar os dois.
+Branch que nunca teve push só precisa do `git branch -d`. Branch de investigação sem
+commits também é apagada no fechamento. Nunca apagar `main` nem `staging` (branch
+permanente — alias estável usado pelos triggers de webhook, nunca deletar). Essa rotina
+cobre só as branches nascidas na própria sessão; o acúmulo histórico de branches antigas
+já mergeadas (a maior parte da saída de `git branch --merged main` hoje) segue como item
+de backlog à parte, tratado numa sessão dedicada de limpeza — não misturar os dois.
 
 ## Regra: conferência de SQL staging → produção antes de fechar sessão
 
@@ -220,7 +267,7 @@ No fechamento de toda sessão que rodou algum SQL de schema (ALTER/CREATE, não 
 
 ## Regra: decisões de negócio ambíguas exigem exemplo concreto, não princípio abstrato
 
-Quando uma regra de negócio nova tem zona cinzenta (ex: "isso conta como cancelamento do salão ou não?"), pedir ao Iorran um exemplo real do dia a dia em vez de insistir numa pergunta abstrata — a resposta concreta costuma resolver a ambiguidade de forma mais rápida e precisa que alternativas de múltipla escolha genéricas. Quando a decisão afeta a rotina das donas (ex.: expirar ou não uma reserva), vale ouvir as próprias donas antes de implementar — foi assim que a expiração automática de reservas foi descartada na Sessão 71.
+Quando uma regra de negócio nova tem zona cinzenta (ex: "isso conta como cancelamento do salão ou não?"), pedir ao Iorran um exemplo real do dia a dia em vez de insistir numa pergunta abstrata — a resposta concreta costuma resolver a ambiguidade de forma mais rápida e precisa que alternativas de múltipla escolha genéricas. Quando a decisão afeta a rotina das donas (ex.: expirar ou não uma reserva), vale ouvir as próprias donas antes de implementar — foi assim que a expiração automática de reservas foi descartada na Sessão 71. Antes de decidir sobre uma funcionalidade "que as donas usam ou não", medir o uso real em produção com um `SELECT` (caso da Sessão 75: todas as donas reais etiquetam, nenhuma usa mês restrito).
 
 ## Regra: tenant-modelo de tema em staging (slug `css`)
 
@@ -255,4 +302,4 @@ empilhado sobre o nome, proporção quase quadrada) — recorte em `laryssa-marc
 `laryssa-marcaTexto.png` (nome+tagline), mesmo padrão que a Laysla já usava antes de virar
 lockup único.
 
-*Última atualização: 23/09 (Sessão 71 — seção 11 de segurança de dados e camada pública por RPC; SQL proposto pelo Claude Code e aplicado pelo chat; `sql/` não é fonte de verdade; fuso no servidor; `periodo` como coluna gerada; reserva segura até a ação da dona; uma regra de negócio mora num lugar só; fechamento com `PENDENCIAS.md` completo; conferência `main..staging`; teste com duas clientes).*
+*Última atualização: 28/09 (Sessão 75 — seção 13 de alertas e avisos; seção 12 de tema e cores da Sessão 74; merge nunca junto do SQL de produção e coluna aditiva antes do código; Claude Code sem `next build`/`next dev` com o servidor do usuário ligado; `git add ':(literal)...'`; rotação de segredo inclui triggers do banco; medir uso real antes de decidir sobre funcionalidade).*
