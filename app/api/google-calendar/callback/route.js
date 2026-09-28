@@ -137,7 +137,7 @@ export async function GET(request) {
   const { data: agendamentosConfirmados } = await supabaseAdmin
     .from("agendamentos")
     .select(
-      "id, nome_cliente, telefone, data, horario, duracao_min, status, servico_livre, google_event_id, estabelecimento_id, servicos(nome), estabelecimentos(google_calendar_ordem_titulo)"
+      "id, nome_cliente, telefone, data, horario, duracao_min, status, servico_livre, google_event_id, estabelecimento_id, servicos(nome), estabelecimentos(google_calendar_ordem_titulo, google_calendar_cor_id)"
     )
     .eq("estabelecimento_id", estabelecimentoId)
     .in("status", STATUS_SUCESSO);
