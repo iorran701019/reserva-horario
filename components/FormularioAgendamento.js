@@ -19,7 +19,7 @@ import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 import BlocoQrCodeAbacatePay from "@/components/BlocoQrCodeAbacatePay";
 import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 import { formatarPreco } from "@/lib/preco";
-import { metodoDisponivelSinalPix } from "@/lib/sinalPix";
+import { metodoDisponivelSinalPixComRegra } from "@/lib/sinalPix";
 import { resolverSinal } from "@/lib/sinalRegra";
 import {
   formatarData,
@@ -1172,17 +1172,19 @@ export default function FormularioAgendamento({
     naListaBloqueio: clienteNaListaBloqueio,
   });
 
-  // Cobrança ligada -> método DISPONÍVEL (metodoDisponivelSinalPix), que ignora
-  // o corte de `sinal_regra` na cascata. Antes isso valia só pra Lista de
-  // Bloqueio; agora vale pra qualquer origem da cobrança, porque uma regra
-  // especial também liga o sinal num salão de `sinal_regra = 'desligado'` (o
-  // caso "dezembro todo mundo paga"). Com o padrão ligado as duas funções da
-  // cascata devolvem o mesmo método, então nada muda no caminho de hoje.
+  // Cobrança ligada -> método DISPONÍVEL (metodoDisponivelSinalPixComRegra),
+  // que ignora o corte de `sinal_regra` na cascata. Antes isso valia só pra
+  // Lista de Bloqueio; agora vale pra qualquer origem da cobrança, porque uma
+  // regra especial também liga o sinal num salão de `sinal_regra =
+  // 'desligado'` (o caso "dezembro todo mundo paga"). `sinalResolvido.metodo`
+  // é o método que a regra vencedora pediu (null = nenhuma regra opinou, cai
+  // no método do salão — ver lib/sinalPix.js). Com o padrão ligado e nenhuma
+  // regra opinando sobre método, o resultado é o mesmo de antes.
   //
   // Cobrança desligada -> 'desligado', que é o que metodoEfetivoSinalPix já
   // devolvia em todo caso que chegava aqui com `precisaSinal` falso.
   const metodoSinal = sinalResolvido.cobra
-    ? metodoDisponivelSinalPix(estabelecimento)
+    ? metodoDisponivelSinalPixComRegra(estabelecimento, sinalResolvido.metodo)
     : "desligado";
 
   const precisaSinal =

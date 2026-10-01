@@ -4,8 +4,8 @@ import { useState } from "react";
 import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 import BlocoQrCodeAbacatePay from "@/components/BlocoQrCodeAbacatePay";
 import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
-import { metodoDisponivelSinalPix } from "@/lib/sinalPix";
-import { valorSinalCentavos } from "@/lib/sinalRegra";
+import { metodoDisponivelSinalPixComRegra } from "@/lib/sinalPix";
+import { resolverSinal } from "@/lib/sinalRegra";
 import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento";
 import { formatarData } from "@/components/FormularioAgendamento";
 
@@ -65,20 +65,32 @@ export default function ConfirmacaoSinal({
   agendamento = null,
   nomeCliente = "",
 }) {
-  // Valor do sinal DESTA reserva: uma regra especial pode cobrar por serviço
-  // ou por período (lib/sinalRegra.js), então o número não sai mais do
-  // `sinal_valor_centavos` do salão direto.
+  // Valor E método do sinal DESTA reserva: uma regra especial pode mudar os
+  // dois por serviço e/ou por período (lib/sinalRegra.js), então nenhum dos
+  // dois sai mais do estabelecimento direto.
   //
   // `eh_manutencao` não viaja até aqui (a RPC de leitura devolve só
   // `servico_id` e o nome), e não faz falta: ele decide se COBRA, nunca
-  // quanto — e esta tela só existe pra uma linha que já está em
+  // quanto/como — e esta tela só existe pra uma linha que já está em
   // "aguardando_sinal", ou seja, a cobrança já foi decidida lá atrás, no
-  // wizard. O que se resolve aqui é exclusivamente o número a exibir.
-  const valorCentavos = valorSinalCentavos({
+  // wizard. O que se resolve aqui é exclusivamente o que EXIBIR.
+  const sinalResolvido = resolverSinal({
     estabelecimento,
     servico: agendamento?.servico_id == null ? null : { id: agendamento.servico_id },
     data: agendamento?.data ?? null,
   });
+  const valorCentavos = sinalResolvido.valor_centavos;
+
+  // Cobrança já gerada é sempre honrada: se o agendamento já tem uma cobrança
+  // AbacatePay (abacatepay_cobranca_id), o QR Code já existe e PRECISA
+  // continuar aparecendo, mesmo que a regra/salão tenham mudado de método
+  // depois. Só na ausência disso é que o método vem da cascata regra+salão
+  // (metodoDisponivelSinalPixComRegra, lib/sinalPix.js) — método DISPONÍVEL,
+  // e não o efetivo, pelo mesmo motivo de sempre: esta tela só existe pra uma
+  // linha que já está em "aguardando_sinal", a cobrança já foi decidida.
+  const metodoSinal = agendamento?.abacatepay_cobranca_id
+    ? "abacatepay"
+    : metodoDisponivelSinalPixComRegra(estabelecimento, sinalResolvido.metodo);
 
   const [sinalDeclarado, setSinalDeclarado] = useState(false);
   const [cancelando, setCancelando] = useState(false);
@@ -129,7 +141,7 @@ export default function ConfirmacaoSinal({
           decidida — inclusive pela Lista de Bloqueio com a regra do salão
           desligada, caso em que o efetivo diria 'desligado' e jogaria no
           bloco manual um salão que tem QR Code. */}
-      {metodoDisponivelSinalPix(estabelecimento) === "abacatepay" ? (
+      {metodoSinal === "abacatepay" ? (
         <BlocoQrCodeAbacatePay
           estabelecimento={estabelecimento}
           valorCentavos={valorCentavos}

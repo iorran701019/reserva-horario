@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
-import { valorSinalCentavos } from "@/lib/sinalRegra";
+import { resolverSinal } from "@/lib/sinalRegra";
+import { metodoDisponivelSinalPixComRegra } from "@/lib/sinalPix";
 
 // Gera (ou recupera) a cobrança Pix da AbacatePay pro sinal de reserva de um
 // agendamento. Rota PÚBLICA: quem chama é o /agendar, ainda sem sessão — não
@@ -73,11 +74,12 @@ export async function POST(request) {
     return Response.json({ pago: true, status: agendamento.status });
   }
 
-  // Só o valor do sinal e o método de cobrança: a validade do QR Code é a
-  // constante EXPIRACAO_PIX_HORAS lá em cima, não vem do salão.
+  // Valor, chave Pix manual (rede de segurança da cascata) e o método bruto
+  // do salão: a validade do QR Code é a constante EXPIRACAO_PIX_HORAS lá em
+  // cima, não vem do salão.
   const { data: estabelecimento, error: erroEstabelecimento } = await supabaseAdmin
     .from("estabelecimentos")
-    .select("sinal_valor_centavos, metodo_cobranca_pix")
+    .select("sinal_valor_centavos, metodo_cobranca_pix, sinal_chave_pix")
     .eq("id", agendamento.estabelecimento_id)
     .maybeSingle();
 
@@ -89,36 +91,6 @@ export async function POST(request) {
     );
     return Response.json({ erro: "Não foi possível gerar o Pix agora." }, { status: 500 });
   }
-
-  if (estabelecimento.metodo_cobranca_pix !== "abacatepay") {
-    return new Response(
-      "Este salão não usa cobrança automática via AbacatePay.",
-      { status: 400 }
-    );
-  }
-
-  const { data: credencial, error: erroCredencial } = await supabaseAdmin
-    .from("abacatepay_credenciais")
-    .select("api_key")
-    .eq("estabelecimento_id", agendamento.estabelecimento_id)
-    .maybeSingle();
-
-  if (erroCredencial) {
-    console.error("Falha ao buscar credencial da AbacatePay", agendamentoId, erroCredencial);
-    return Response.json({ erro: "Não foi possível gerar o Pix agora." }, { status: 500 });
-  }
-
-  if (!credencial?.api_key) {
-    return Response.json(
-      { erro: "Cobrança Pix não configurada para este salão." },
-      { status: 500 }
-    );
-  }
-
-  const cabecalhos = {
-    Authorization: `Bearer ${credencial.api_key}`,
-    "Content-Type": "application/json",
-  };
 
   // Cobrança que já existe e ainda não venceu é REAPROVEITADA. Sem isso, um
   // reload da tela de pagamento (ou o cliente voltando do app do banco) criaria
@@ -143,17 +115,19 @@ export async function POST(request) {
     });
   }
 
-  // Regras especiais de sinal do salão (valor por serviço e/ou por período).
-  // Query própria, e não embed no select acima, pelo mesmo motivo dos loaders:
-  // aquele select é a lista de colunas do estabelecimento.
+  // Regras especiais de sinal do salão (valor E método por serviço e/ou por
+  // período). Query própria, e não embed no select acima, pelo mesmo motivo
+  // dos loaders: aquele select é a lista de colunas do estabelecimento.
   //
-  // FALHA DE LEITURA VIRA LISTA VAZIA, que é o valor padrão do salão — o mesmo
-  // número que esta rota mandava antes das regras existirem. Abortar a cobrança
-  // porque uma tabela de exceções não respondeu seria trocar um valor
-  // possivelmente errado por nenhuma reserva.
+  // FALHA DE LEITURA VIRA LISTA VAZIA, que é o valor/método padrão do salão —
+  // o mesmo número que esta rota mandava antes das regras existirem. Abortar
+  // a cobrança porque uma tabela de exceções não respondeu seria trocar um
+  // valor possivelmente errado por nenhuma reserva.
   const { data: regrasSinal, error: erroRegrasSinal } = await supabaseAdmin
     .from("sinal_regras_especiais")
-    .select("servico_id, data_inicio, data_fim, cobranca, valor_centavos, criado_em")
+    .select(
+      "servico_id, data_inicio, data_fim, cobranca, valor_centavos, metodo_cobranca_pix, criado_em"
+    )
     .eq("estabelecimento_id", agendamento.estabelecimento_id);
 
   if (erroRegrasSinal) {
@@ -164,11 +138,12 @@ export async function POST(request) {
     );
   }
 
-  // O número que vai pra AbacatePay E pro banco. Um só, resolvido uma vez:
-  // `amount` e `sinal_valor_centavos` precisam ser o MESMO valor (ver o
-  // comentário do update lá embaixo), e resolver duas vezes abriria a fresta
-  // de eles divergirem.
-  const valorCentavos = valorSinalCentavos({
+  // Valor E método, resolvidos uma vez só. `amount` e `sinal_valor_centavos`
+  // precisam ser o MESMO valor (ver o comentário do update lá embaixo), e
+  // resolver duas vezes abriria a fresta de eles divergirem. `metodo` é o que
+  // decide, logo abaixo, se esta rota segue ou devolve o 400 de sempre — só
+  // que agora pela regra + salão, não só pelo `metodo_cobranca_pix` cru.
+  const sinalResolvido = resolverSinal({
     estabelecimento,
     servico:
       agendamento.servico_id == null
@@ -180,6 +155,42 @@ export async function POST(request) {
     data: agendamento.data,
     regras: regrasSinal ?? [],
   });
+  const valorCentavos = sinalResolvido.valor_centavos;
+
+  const { data: credencial, error: erroCredencial } = await supabaseAdmin
+    .from("abacatepay_credenciais")
+    .select("api_key")
+    .eq("estabelecimento_id", agendamento.estabelecimento_id)
+    .maybeSingle();
+
+  if (erroCredencial) {
+    console.error("Falha ao buscar credencial da AbacatePay", agendamentoId, erroCredencial);
+    return Response.json({ erro: "Não foi possível gerar o Pix agora." }, { status: 500 });
+  }
+
+  // Método EFETIVO desta cobrança: a regra vencedora (ou, sem regra, o
+  // `metodo_cobranca_pix` do salão) por cima da cascata de capacidade real
+  // (lib/sinalPix.js) — a mesma cascata que o wizard já aplicou pra decidir
+  // se mostra o QR Code. Esta rota só gera cobrança AbacatePay: qualquer
+  // resultado diferente de 'abacatepay' (salão/regra não pedem automático, OU
+  // pedem mas sem credencial) é o mesmo 400 de antes.
+  const metodoResolvido = metodoDisponivelSinalPixComRegra(
+    estabelecimento,
+    sinalResolvido.metodo,
+    { abacatepayConectado: Boolean(credencial?.api_key) }
+  );
+
+  if (metodoResolvido !== "abacatepay") {
+    return new Response(
+      "Este salão não usa cobrança automática via AbacatePay.",
+      { status: 400 }
+    );
+  }
+
+  const cabecalhos = {
+    Authorization: `Bearer ${credencial.api_key}`,
+    "Content-Type": "application/json",
+  };
 
   const expiresIn = EXPIRACAO_PIX_HORAS * 3600;
 

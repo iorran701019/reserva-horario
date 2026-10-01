@@ -6,7 +6,7 @@ import FotoPerfilCircular, { ZOOM_MINIMO } from "@/components/FotoPerfilCircular
 import CampoMensagemWhatsapp from "@/components/CampoMensagemWhatsapp";
 import ModalImportarGoogleCalendar from "@/components/ModalImportarGoogleCalendar";
 import { MENSAGENS_WHATSAPP_CONFIG, substituirVariaveis } from "@/lib/whatsapp";
-import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
+import { mensagemFalhaSalvar, mensagemFalhaDelete } from "@/lib/erroSalvar";
 import { calcularStatusSinalPix } from "@/lib/sinalPix";
 import { formatarPreco } from "@/lib/preco";
 import { buscarEtiquetasAtivas } from "@/lib/clientesAdmin";
@@ -125,6 +125,7 @@ function agruparRegrasEspeciais(regras, hoje) {
       data_fim: regra.data_fim,
       cobranca: regra.cobranca,
       valor_centavos: regra.valor_centavos,
+      metodo_cobranca_pix: regra.metodo_cobranca_pix,
       criado_em: regra.criado_em,
       servicoIds: [regra.servico_id],
       vigencia: vigenciaRegra(regra, hoje),
@@ -156,13 +157,25 @@ function textoQuemPagaRegra(grupo) {
     : `Todas pagam ${valor}`;
 }
 
+// "Pix manual" / "Pix automático", só quando a regra SOBRESCREVE a forma de
+// cobrança do salão — `metodo_cobranca_pix` nulo é "Padrão do salão" e não
+// aparece no cartão, pelo mesmo motivo de `textoQuemPagaRegra` não repetir "o
+// valor padrão" quando não há nada de especial a dizer.
+function textoFormaCobrancaRegra(grupo) {
+  if (grupo.metodo_cobranca_pix === "abacatepay") return "Pix automático";
+  if (grupo.metodo_cobranca_pix === "manual") return "Pix manual";
+  return null;
+}
+
 // Todas as regras especiais do salão, cruas (uma linha por serviço). Erro de
 // leitura vira lista vazia com log: a tela toda não deve cair por causa da
 // seção de exceções, e "nenhuma regra" é o estado de 100% dos salões hoje.
 async function buscarRegrasEspeciais(estabelecimentoId) {
   const { data, error } = await supabase
     .from("sinal_regras_especiais")
-    .select("id, grupo_id, servico_id, data_inicio, data_fim, cobranca, valor_centavos, criado_em")
+    .select(
+      "id, grupo_id, servico_id, data_inicio, data_fim, cobranca, valor_centavos, metodo_cobranca_pix, criado_em"
+    )
     .eq("estabelecimento_id", estabelecimentoId);
 
   if (error) {
@@ -311,6 +324,10 @@ export default function ConfiguracoesSalao({
   // coluna `cobranca`, sem tradução no meio do caminho.
   const [reQuemPaga, setReQuemPaga] = useState("todas");
   const [reValor, setReValor] = useState("");
+  // 'padrao' (grava null, segue o método do salão) | 'manual' | 'abacatepay'
+  // — a UI usa 'padrao' pra não confundir "nunca escolhido" com o valor null
+  // de verdade que vai pro banco.
+  const [reFormaCobranca, setReFormaCobranca] = useState("padrao");
   const [reErro, setReErro] = useState("");
   const [reSalvando, setReSalvando] = useState(false);
   // Grupo pendente de confirmação de exclusão (o modal abaixo da lista) —
@@ -2216,6 +2233,7 @@ export default function ConfiguracoesSalao({
     setReServicos([]);
     setReQuemPaga("todas");
     setReValor("");
+    setReFormaCobranca("padrao");
   }
 
   function alternarServicoRegra(id) {
@@ -2300,6 +2318,19 @@ export default function ConfiguracoesSalao({
     const grupoId = crypto.randomUUID();
     const semCobranca = reQuemPaga === "nao_cobrar";
     const valorDigitado = reValor.trim() === "" ? null : reaisParaCentavos(reValor);
+    // "Ninguém paga" também não tem forma de cobrança: null é o único valor
+    // que faz sentido pra uma cobrança que não acontece — mesmo raciocínio do
+    // valor logo abaixo. 'padrao' (nada escolhido) também vira null: é o
+    // "segue o método do salão" que resolverSinal já trata como ausência de
+    // regra de método (ver lib/sinalRegra.js). `abacatepayConectado !== true`
+    // força null mesmo que `reFormaCobranca` esteja com um valor de uma
+    // sessão em que o campo esteve visível: o campo está ESCONDIDO nesse
+    // caso (ver JSX acima), e o state não pode vazar pro insert por trás da
+    // tela.
+    const metodoCobranca =
+      semCobranca || reFormaCobranca === "padrao" || abacatepayConectado !== true
+        ? null
+        : reFormaCobranca;
 
     const linhas = alvos.map((servicoId) => ({
       estabelecimento_id: estabelecimento.id,
@@ -2312,13 +2343,17 @@ export default function ConfiguracoesSalao({
       // cobrança que não acontece, e reapareceria na tela se a dona trocasse a
       // regra depois.
       valor_centavos: semCobranca ? null : valorDigitado,
+      metodo_cobranca_pix: metodoCobranca,
     }));
 
     setReSalvando(true);
-    const { error } = await supabase.from("sinal_regras_especiais").insert(linhas);
+    const { data: linhasInseridas, error } = await supabase
+      .from("sinal_regras_especiais")
+      .insert(linhas)
+      .select("id");
     setReSalvando(false);
 
-    if (error) {
+    if (error || !linhasInseridas || linhasInseridas.length !== linhas.length) {
       setReErro(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
       return;
     }
@@ -2330,14 +2365,15 @@ export default function ConfiguracoesSalao({
   // Apaga o grupo inteiro de uma vez — as N linhas são uma regra só pra dona.
   async function excluirRegraEspecial(grupoId) {
     setReErro("");
-    const { error } = await supabase
+    const { data: linhasExcluidas, error } = await supabase
       .from("sinal_regras_especiais")
       .delete()
       .eq("estabelecimento_id", estabelecimento.id)
-      .eq("grupo_id", grupoId);
+      .eq("grupo_id", grupoId)
+      .select("id");
 
-    if (error) {
-      setReErro(`Não foi possível excluir: ${mensagemFalhaSalvar(error)}`);
+    if (error || !linhasExcluidas || linhasExcluidas.length === 0) {
+      setReErro(`Não foi possível excluir: ${mensagemFalhaDelete(error)}`);
       return;
     }
 
@@ -4019,6 +4055,35 @@ export default function ConfiguracoesSalao({
                   </label>
                 )}
 
+                {/* Mesmo corte de "Valor" (regra sem cobrança não tem forma
+                    de cobrança) SOMADO à conta AbacatePay conectada: sem
+                    credencial não há escolha real a fazer (o salão só tem
+                    Pix manual), então o campo nem aparece — e a regra grava
+                    metodo_cobranca_pix = null (ver metodoCobranca abaixo,
+                    que ignora reFormaCobranca neste caso). */}
+                {reQuemPaga !== "nao_cobrar" && abacatepayConectado === true && (
+                  <label className="mt-2 block text-xs font-medium text-body">
+                    Forma de cobrança
+                    <select
+                      value={reFormaCobranca}
+                      onChange={(e) => setReFormaCobranca(e.target.value)}
+                      className={`mt-1 block w-full ${classeCampoRegra}`}
+                    >
+                      {/* Rótulo da opção "sem regra de método" diz o que o
+                          salão realmente cobra hoje, não um "padrão" vago —
+                          `metodoCobrancaPix` é o state já carregado logo
+                          acima, na seção de sinal do salão. */}
+                      <option value="padrao">
+                        {metodoCobrancaPix === "abacatepay"
+                          ? "Igual ao salão (Pix automático)"
+                          : "Igual ao salão (Pix manual)"}
+                      </option>
+                      <option value="manual">Pix manual</option>
+                      <option value="abacatepay">Pix automático</option>
+                    </select>
+                  </label>
+                )}
+
                 {reErro && (
                   <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 ring-1 ring-red-100">
                     {reErro}
@@ -4068,6 +4133,12 @@ export default function ConfiguracoesSalao({
                               .join(", ")}
                             {" · "}
                             {textoQuemPagaRegra(grupo)}
+                            {textoFormaCobrancaRegra(grupo) && (
+                              <>
+                                {" · "}
+                                {textoFormaCobrancaRegra(grupo)}
+                              </>
+                            )}
                           </p>
                           {(encerrada || grupo.vigencia === "futura") && (
                             <p className="mt-0.5 text-xs text-muted">
