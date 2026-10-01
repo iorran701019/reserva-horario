@@ -5,28 +5,39 @@ Ordem sugerida (cada item depende do anterior). Rodar sempre em staging primeiro
 ## 1. Estabelecimento
 ```sql
 insert into estabelecimentos (slug, nome, whatsapp, segmento, cadastro_completo,
-  sinal_regra, sinal_valor_centavos, sinal_chave_pix, granularidade_min, ativo)
-values ('slug-aqui', 'Nome Real', '55...', 'manicure_podologia' | 'salao_barbershop',
-  true | false, 'desligado'|'novos'|'todos', <centavos ou null>, '<chave pix ou null>',
-  30 | 60, true);
+  sinal_regra, sinal_valor_centavos, sinal_chave_pix, granularidade_min, ativo,
+  janela_agendamento_fim)
+values ('slug-aqui', 'Nome Real', '55...',
+  'manicure_podologia' | 'salao_barbershop' | 'maquiagem',
+  true | false, 'desligado'|'novos'|'todos'|'exceto_manutencao',
+  <centavos ou null>, '<chave pix ou null>', 30 | 60, true, '2030-12-31')
+returning id, slug, nome;
 ```
+
+**`janela_agendamento_fim` é obrigatória (NOT NULL, tipo date)** — sem ela o insert falha com
+`23502`. Desde a Sessão 41 a coluna é decorativa (quem manda é a janela mensal), então usar
+`'2030-12-31'`, como Layra e Laryssa. Guardar o `id` retornado: ele é diferente entre staging e
+produção.
 
 **Decisões a bater com o cliente antes de rodar:**
 - `cadastro_completo`: `true` = pede endereço completo (CEP/número/bairro/cidade) quando
   faltar; `false` = só nome + WhatsApp bastam, nunca pede endereço.
-- `sinal_regra`: cobra sinal de quem? (ninguém / só clientes novos / todos). Sem chave Pix
-  ainda, é normal deixar `'desligado'` e resolver numa sessão futura (não bloqueia o resto).
+- `sinal_regra`: cobra sinal de quem? (ninguém / só clientes novos / todos / todos exceto
+  manutenção). Valores aceitos hoje: `desligado`, `novos`, `todos`, `exceto_manutencao`. Sem
+  chave Pix ainda, é normal deixar `'desligado'` e resolver numa sessão futura (não bloqueia
+  o resto).
 - `granularidade_min`: só importa se o profissional for modo 'janela' — de quanto em
   quanto tempo a agenda abre horário (30 ou 60 min, geralmente).
-- `segmento`: hoje só aceita `'manicure_podologia'` ou `'salao_barbershop'` no CHECK
-  constraint. Pra profissionais fora desse escopo (ex.: maquiadora), gravar o valor
-  existente mais próximo — sem efeito funcional, é só rótulo interno (caso real: Laryssa).
+- `segmento`: o CHECK aceita `'manicure_podologia'`, `'salao_barbershop'` e `'maquiagem'`
+  (conferido no banco em 01/10/2026). Para outro tipo de profissional, ampliar o CHECK por
+  SQL em vez de gravar um valor que não descreve o negócio.
 
 ## 2. Profissional(is)
 ```sql
 insert into profissionais (estabelecimento_id, nome, ativo, modo_horario)
 values ((select id from estabelecimentos where slug='slug-aqui'), 'Nome', true,
-  'janela' | 'fixo');
+  'janela' | 'fixo')
+returning id, nome;
 ```
 
 **Decisão:** agenda por **janela contínua** (entrada/almoço/saída, gera slots automáticos)
@@ -39,15 +50,40 @@ espaçados"?
   produto; trocar o modo é feito direto no banco quando necessário. Se os horários reais
   ainda não estiverem definidos, tudo bem deixar o modo decidido e os horários como
   placeholder temporário, preenchidos depois direto na tela (sem SQL).
-- Se `fixo`: inserir cada horário manualmente:
+- Se `fixo`: inserir os horários. Para o mesmo conjunto de horários em vários dias, gerar
+  por produto cartesiano (caso real: Lilian, terça a sábado, 9h/11h/14h/16h = 20 linhas):
 ```sql
-  insert into horarios_fixos (profissional_id, dia_semana, horario) values
-    (<id>, <0=domingo..6=sábado>, 'HH:MM'), ...;
+  insert into horarios_fixos (profissional_id, dia_semana, horario)
+  select p.id, d.dia, h.hora
+  from profissionais p
+  cross join (values (2), (3), (4), (5), (6)) as d(dia)   -- 0=domingo..6=sábado
+  cross join (values ('09:00'::time), ('11:00'::time), ('14:00'::time), ('16:00'::time)) as h(hora)
+  where p.estabelecimento_id = (select id from estabelecimentos where slug='slug-aqui');
 ```
+  Conferir a contagem por dia (`group by dia_semana`). Para horários diferentes por dia,
+  inserir linha a linha: `(<id>, <dia>, 'HH:MM'), ...`. Dá para editar depois na aba
+  Horários da profissional.
 
 ## 3. Serviços
 Cadastrar pela tela (aba Serviços) ou via INSERT em `servicos` — nome, duração, preço,
-categoria. Perguntar: algum serviço deve ter um alerta pós-seleção (`alerta_mensagem`, ex.:
+categoria. Categoria é opcional (`categoria_id` aceita nulo); pode ser criada pela tela depois.
+
+Insert por SQL (todas as colunas `NOT NULL` explícitas — preço em centavos; caso real: Lilian):
+```sql
+insert into servicos (estabelecimento_id, nome, duracao_min, preco_centavos, ativo,
+  categoria_id, ocultar_preco, ocultar_duracao, ordem, eh_manutencao, oculto,
+  manutencao_externa, exige_segunda_data)
+select e.id, v.nome, <duracao_min>, v.preco, true, null, false, false, v.ordem,
+  false, false, false, false
+from estabelecimentos e
+cross join (values ('Serviço A', 4000, 1), ('Serviço B', 7000, 2)) as v(nome, preco, ordem)
+where e.slug = 'slug-aqui'
+returning id, nome, preco_centavos, duracao_min;
+```
+Perguntar a duração real de cada serviço (combos como "mãos e pés" costumam levar mais que
+o simples).
+
+Perguntar também: algum serviço deve ter um alerta pós-seleção (`alerta_mensagem`, ex.:
 regra de manutenção)? E o salão quer esconder preço e/ou duração de TODOS os serviços?
 (`estabelecimentos.ocultar_preco_servicos` / `ocultar_duracao_servicos` — config única do
 salão; as antigas `servicos.ocultar_preco`/`ocultar_duracao` não são mais lidas.)
@@ -57,6 +93,12 @@ salão; as antigas `servicos.ocultar_preco`/`ocultar_duracao` não são mais lid
 insert into servico_profissional (servico_id, profissional_id)
 select id, <profissional_id> from servicos
 where estabelecimento_id = (select id from estabelecimentos where slug='slug-aqui');
+
+-- conferir
+select s.nome, sp.profissional_id
+from servicos s join servico_profissional sp on sp.servico_id = s.id
+where s.estabelecimento_id = (select id from estabelecimentos where slug='slug-aqui')
+order by s.ordem;
 ```
 Sem esse passo, o `/agendar` mostra "Nenhum profissional atende este serviço" mesmo com
 tudo certo nas outras tabelas — já foi causa de bug real, conferir sempre (repetiu na
@@ -96,7 +138,8 @@ Substituir o padrão só quando o cliente tiver marca própria (logo e/ou paleta
   Ver mecanismo completo no Protocolo de Desenvolvimento.
 
 ## 8. Login de produção
-- Criar o usuário em Authentication → Users (Supabase) com e-mail/senha reais do dono.
+- Criar o usuário em Authentication → Users (Supabase) com e-mail/senha reais do dono,
+  marcando "Auto Confirm User". Copiar o UID; a senha nunca passa pelo chat.
 - Vincular o perfil:
 ```sql
   insert into perfis (user_id, estabelecimento_id, papel)
@@ -107,12 +150,47 @@ Substituir o padrão só quando o cliente tiver marca própria (logo e/ou paleta
   where user_id = '<uuid>'`) — `user_id` é chave primária, então um UID já vinculado a
   outro tenant (ou duplicado por engano) falha com `23505` em vez de sobrescrever.
 
-## 9. Checagem final antes de considerar "no ar"
+## 9. Google Calendar (se a dona usar)
+A conexão é feita pela própria dona, logada no `/admin`, em Configurações (autorização do
+Google). O app só exporta para o Calendar (mão única); bloqueio pessoal continua sendo
+lançado em Ausências.
+
+**Cor dos eventos exportados** (Sessão 76, coluna `estabelecimentos.google_calendar_cor_id`):
+- [ ] Perguntar à dona se ela organiza o Calendar por cor e qual cor quer para os
+      agendamentos do app.
+- [ ] Sem preferência: não fazer nada (padrão é `'7'`, Peacock/azul).
+- [ ] Com preferência: gravar por SQL (não há tela). Valores válidos, nomes da paleta do
+      Google:
+      `1` Lavender · `2` Sage · `3` Grape · `4` Flamingo · `5` Banana · `6` Tangerine
+      `7` Peacock · `8` Graphite · `9` Blueberry · `10` Basil · `11` Tomato
+      Qualquer outro valor cai no azul padrão, sem erro.
+```sql
+-- PRODUÇÃO
+update estabelecimentos
+set google_calendar_cor_id = '5'
+where slug = 'slug-aqui'
+returning slug, google_calendar_ativo, google_calendar_cor_id;
+```
+- Eventos já exportados só mudam de cor quando o agendamento for alterado; os novos já
+  nascem na cor escolhida.
+- Pedir à dona que confira no celular dela: alguns aparelhos (ex.: Samsung) desenham tons
+  próprios para a mesma cor. Caso real: Laryssa, amarelo (`'5'`).
+
+## 10. Janela de agendamento (obrigatório antes de entregar o link)
+Mês sem registro na janela mensal fica **fechado** (Sessão 41): sem este passo o `/slug-aqui`
+mostra zero vagas mesmo com horários, serviços e vínculo corretos. Entrar em
+`/slug-aqui/admin` → Regras de negócio → janela de agendamento e abrir o mês atual e o
+seguinte (status "aberto").
+
+## 11. Checagem final antes de considerar "no ar"
 - [ ] RLS ativo e cobrindo `anon` + `authenticated` em toda tabela nova usada por esse tenant
-- [ ] Testar `/slug-aqui` (fluxo completo: identificação → serviço → data → confirmação)
+- [ ] Testar `/slug-aqui` (fluxo completo: identificação → serviço → data → confirmação) e
+      cancelar o agendamento de teste sem notificar
 - [ ] Testar `/slug-aqui/admin` (login funciona, todas as abas carregam)
 - [ ] Se `bgHeader`/`botao` for escuro: conferir também `bgCardAdmin`/`botaoAdmin`/`bordaAdmin`
       no `/admin` (Regras de negócio, drawer mobile, botões de Clientes/Serviços)
+- [ ] Se a dona conectou o Google Calendar: criar um agendamento de teste e conferir que o
+      evento aparece no Calendar dela, na cor combinada (depois cancelar sem notificar)
 - [ ] Confirmar que nenhum outro tenant mudou de comportamento (rodar smoke test rápido em
       `/teste` ou outro tenant de controle)
 

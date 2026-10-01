@@ -247,3 +247,66 @@ Mudança da Sessão 74: o `/admin` agora define `--color-on-primary` e todos os 
 - Painel de Alertas (`/painel-global` → Auditoria → Alertas): cobre os toggles que já são coluna (incluindo `lembrete_etiqueta_ativo` desde a Sessão 75). Os popups fixos (`CATALOGO_SEM_CONTROLE`) ficam catalogados só como leitura — migrar para o bloco "Alertas e avisos" item a item, conforme a classificação preferência × proteção e a necessidade real.
 - Fase futura: logo do `/admin` virar link pro Instagram do Acolhe.
 - Sessão dedicada de limpeza das branches antigas já mergeadas (a lista local passa de 130; `tema-laryssa-fix-botao-admin` está aberta em outra worktree e precisa ser resolvida lá antes — ver seção da Laryssa).
+
+# Diff do PENDENCIAS.md — Sessão 76
+
+Seis edições, na ordem em que aparecem no arquivo. O PENDENCIAS atual não tem seção "Resolvido": como nos fechamentos anteriores, o que foi resolvido sai do arquivo e fica registrado no handoff.
+
+---
+
+## 1. Seção da Laryssa: trocar a linha do Google Calendar
+
+**Localizar** a linha que começa com `- **Google Calendar em amarelo (Sessão 75):**` e **substituir a linha inteira** por:
+
+```markdown
+- **Google Calendar em amarelo (Sessões 75–76):** coluna `estabelecimentos.google_calendar_cor_id` criada nos dois bancos e gravada `'5'` (Banana) na Laryssa; Calendar dela conectado. Código em produção desde a Sessão 76 (`c5de66b`): quem não tem cor configurada segue em `'7'`. **Falta:** criar um agendamento de teste no admin dela, conferir o evento amarelo no Calendar, cancelar sem notificar, e ela confirmar que o tom bate com o do celular (Samsung desenha os tons um pouco diferente do Google). Eventos antigos só mudam de cor quando o agendamento for mexido.
+```
+
+## 2. Apagar a seção inteira da cor do Calendar
+
+**Apagar** desde a linha `### Cor do evento no Google Calendar por salão (Sessão 75) — código pendente` até a linha anterior a `### Agendamento em grupo pra maquiadoras — desenho congelado, aguardando alinhamento com a Laryssa` (são o título e 4 itens; o conteúdo útil já está na linha do item 1 e no `NOVO_TENANT_CHECKLIST.md`).
+
+## 3. Nova seção: Lilian
+
+**Inserir** logo depois da seção `### Laryssa — onboarding (Sessões 67, 69 e 72)` (antes de `### Agendamento em grupo pra maquiadoras`):
+
+```markdown
+### Lilian — onboarding (Sessão 76)
+- **Criada em produção em 30/09** (`estabelecimentos.id = 14`, slug `lilian`, nome "Lilian Unhas", WhatsApp `5524993233098`). Não existe em staging. Profissional id 17, modo `fixo`, terça a sábado às 9h, 11h, 14h e 16h. Serviços 401 Manicure (mãos) R$40, 402 Pedicure (pés) R$40 e 403 Completo (mãos e pés) R$70, todos com 60 min provisórios e sem categoria. Sinal `desligado`, 5 etiquetas padrão, login vinculado como `dono` (UID `dd304206-09ae-47b2-8364-25eff7d2c666`).
+- **Falta antes de mandar o link:** abrir o mês atual e o seguinte na janela de agendamento (sem isso o `/lilian` mostra zero vagas), testar o fluxo completo em `/lilian` e o `/lilian/admin`, cancelar o agendamento de teste sem notificar.
+- **Falta depois:** definir a duração real do Completo (hoje 60 min), chave Pix e sinal quando ela tiver, mensagens de WhatsApp personalizadas, categorias e fotos dos serviços se ela quiser.
+- **Identidade visual (a partir de 02/10):** nasce no tema rosa padrão; arte e paleta entram pelo tenant-modelo `css` em staging, depois copiar para o tenant real e apagar a entrada `css` (Protocolo).
+```
+
+## 4. Nova seção: sinal manual ou automático por regra
+
+**Inserir** logo depois da seção `### Laysla — financeiro (Sessão 64)`:
+
+```markdown
+### Sinal Pix especial com escolha manual ou automático (pedido da Laysla, Sessão 76)
+- **Pedido:** nas regras especiais de sinal (Sessão 72), poder escolher se o Pix daquele período é manual ou automático (AbacatePay). Exemplo dela: manual como padrão e automático só em dezembro.
+- **Hoje:** a regra especial só define valor fixo (`sinal_resolver`). O método vem da cascata `calcularStatusSinalPix` (Sessão 53), que já cai em manual se faltar credencial AbacatePay.
+- **Escopo previsto:** coluna nova na tabela das regras especiais, ajuste em `sinal_resolver` e na cascata, tela de regras com a escolha. Exige SQL em staging, conferência em produção antes do merge e teste do wizard dos dois caminhos.
+- **Decidir antes de desenhar:** a escolha vale só para regras de período ou também para as de serviço? Confirmar também se a Laysla já criou a conta AbacatePay dela (CNPJ/MEI obrigatório, ver "AbacatePay — itens residuais").
+- Sessão própria, já combinada como a próxima demanda grande.
+```
+
+## 5. Seção "Processo": dois itens novos
+
+**Inserir** depois da seção `### Processo — catálogo criado por SQL direto não popula servico_profissional (Sessão 67)`:
+
+```markdown
+### Processo — onboarding de tenant e Claude Code (Sessão 76)
+- **`NOVO_TENANT_CHECKLIST.md` atualizado** com o que o onboarding da Lilian mostrou: `janela_agendamento_fim` obrigatória (usar `2030-12-31`), colunas `NOT NULL` de `servicos`, geração dos horários fixos por produto cartesiano, valores aceitos hoje em `segmento` e `sinal_regra`, passo da janela mensal (obrigatório antes de entregar o link) e passo da cor do Google Calendar. Rodar `select column_name from information_schema.columns where table_name = 'estabelecimentos' and is_nullable = 'NO' and column_default is null` sempre que o checklist de insert voltar a falhar por coluna obrigatória nova.
+- **Claude Code em modo automático pode travar todas as edições** (classificador de permissões sem veredito; 14 falhas na Sessão 76, sem nenhum arquivo alterado). Trocar o modo na sessão já aberta não resolveu. Saída que funcionou: autorizar no prompt, de forma delimitada, a aplicação por script em Node (só os arquivos listados, abortar se o trecho não aparecer exatamente uma vez, sem `next build`/`next dev`, sem encerrar processos).
+- **Modelo:** Sonnet 5.5 (lançado em 28/09, mesmo preço, até 30% menos por tarefa segundo a Anthropic). Em avaliação: trocar nas sessões e no Code e acompanhar o consumo de cota por alguns dias; voltar ao 5.0 só se piorar.
+```
+
+## 6. "Dados de teste a limpar": dois itens novos
+
+**Acrescentar** ao final dessa seção:
+
+```markdown
+- Produção (Sessão 76): registros de teste das Exceções de horário (ausência/liberação/exclusividade) criados em 01/10 ao testar o tipo de ausência vazio; conferir em Horários do tenant usado e apagar. Mesmo cuidado com o agendamento de teste da cor do Calendar na Laryssa e com o de `/lilian`, quando forem feitos.
+- Dado de teste não apagado em staging: nada novo nesta sessão.
+```
