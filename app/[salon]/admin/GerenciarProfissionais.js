@@ -1574,7 +1574,7 @@ function SecaoAusencias({
   const [tipoRegistro, setTipoRegistro] = useState("ausencia");
 
   // Formato de cadastro escolhido na lista suspensa.
-  const [modo, setModo] = useState("recorrente");
+  const [modo, setModo] = useState("");
   const [formErro, setFormErro] = useState("");
   const [salvando, setSalvando] = useState(false);
 
@@ -1695,6 +1695,10 @@ function SecaoAusencias({
 
   // Zera os campos de todos os formatos (chamado após salvar com sucesso).
   function limparCampos() {
+    // Em Liberar só existe a opção "umdia" (sem opção vazia no select — ver
+    // OPCAO_LIBERACAO_UNICA), então o reset pro estado vazio vale só pro
+    // fluxo de Bloquear.
+    if (tipoRegistro === "ausencia") setModo("");
     setRecDias([]);
     setRecInicio("");
     setRecFim("");
@@ -1722,6 +1726,8 @@ function SecaoAusencias({
   // topo do formulário. Liberação precisa de um horário específico — não faz
   // sentido em "dia inteiro" (não haveria horário pra liberar).
   function coletarLinhas() {
+    if (!modo) return { erro: "Escolha o tipo de ausência." };
+
     if (modo === "recorrente") {
       if (recDias.length === 0) return { erro: "Selecione ao menos um dia." };
       if (!recInicio || !recFim) {
@@ -2134,6 +2140,11 @@ function SecaoAusencias({
                   // Liberar só oferece "Um dia específico" — força o modo pra
                   // manter select e estado consistentes.
                   if (opcao.valor === "liberacao") setModo("umdia");
+                  // Entrar em Bloquear vindo de outro tipo volta o select pro
+                  // estado vazio — clique redundante em Bloquear já selecionado
+                  // não apaga o que já estava preenchido.
+                  else if (opcao.valor === "ausencia" && tipoRegistro !== "ausencia")
+                    setModo("");
                 }}
                 className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium ring-1 transition ${
                   selecionado
@@ -2174,8 +2185,15 @@ function SecaoAusencias({
               setModo(e.target.value);
               setFormErro("");
             }}
-            className={`mt-1 block w-full ${classeCampo}`}
+            className={`mt-1 block w-full ${classeCampo} ${
+              modo === "" ? "border-primary ring-2 ring-primary/30" : ""
+            }`}
           >
+            {tipoRegistro !== "liberacao" && (
+              <option value="" disabled>
+                Toque para escolher o tipo de ausência
+              </option>
+            )}
             {opcoesModo.map((o) => (
               <option key={o.valor} value={o.valor}>
                 {o.exemplo ? `${o.rotulo} — ex.: ${o.exemplo}` : o.rotulo}
@@ -2552,22 +2570,24 @@ function SecaoAusencias({
           </p>
         )}
 
-        <button
-          type="button"
-          onClick={salvar}
-          disabled={salvando}
-          className={`mt-3 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
-            tipoRegistro === "liberacao"
-              ? "bg-green-600 text-white hover:bg-green-700"
-              : "bg-primary text-on-primary hover:bg-primary-hover"
-          }`}
-        >
-          {salvando
-            ? "Adicionando..."
-            : tipoRegistro === "liberacao"
-              ? "Adicionar liberação"
-              : "Adicionar bloqueio"}
-        </button>
+        {modo !== "" && (
+          <button
+            type="button"
+            onClick={salvar}
+            disabled={salvando}
+            className={`mt-3 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+              tipoRegistro === "liberacao"
+                ? "bg-green-600 text-white hover:bg-green-700"
+                : "bg-primary text-on-primary hover:bg-primary-hover"
+            }`}
+          >
+            {salvando
+              ? "Adicionando..."
+              : tipoRegistro === "liberacao"
+                ? "Adicionar liberação"
+                : "Adicionar bloqueio"}
+          </button>
+        )}
           </>
         )}
       </div>
