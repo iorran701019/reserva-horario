@@ -10,9 +10,9 @@
 - **Bucket `comprovantes-pix` sem lista de tipos aceitos.** Aplicado só `file_size_limit = 10 MB` (staging e produção). `allowed_mime_types` (jpeg, png, webp, heic, heif, pdf) ficou de fora até testar uma foto HEIC de iPhone de verdade — o filtro casa com o content-type enviado e pode recusar em silêncio. Testar iPhone e então aplicar.
 - **Comprovantes órfãos no reenvio com extensão diferente** (print `.jpg` e depois `.pdf`): o arquivo antigo fica no bucket, sem nada apagando. A rota `app/api/agendamentos/comprovante-upload` (service role) poderia listar `<id>/` e remover os antigos antes de emitir o token — item separado.
 - **Divergência de `roles` entre staging e produção** nas policies `leitura de agendamentos para logados` e `atualizacao de agendamentos para logados`: staging `{public}`, produção `{authenticated}`. Sem risco (as duas exigem `auth.uid()` de dona ou global), mas alinhar staging a produção quando houver uma janela.
-- **Leituras anônimas com `using = true` ainda não revisadas coluna a coluna:** `estabelecimentos` (toda coluna é legível por anônimo — RLS é por linha, não por coluna; conferir se alguma coluna sensível entrou ali desde a Sessão 49), `ausencias` (inclui o campo `motivo`, texto livre da dona), `horarios_trabalho`, `horarios_fixos`, `profissionais`, `servico_profissional`, `categorias_servico`, `servicos`, `servico_perguntas`, `servico_pergunta_opcoes`, `janela_agendamento_meses`. São dados de catálogo/agenda necessários ao `/agendar`, mas nunca foram auditados campo a campo.
+- **Leituras anônimas com `using = true` ainda não revisadas coluna a coluna:** `estabelecimentos` (toda coluna é legível por anônimo — RLS é por linha, não por coluna; conferir se alguma coluna sensível entrou ali desde a Sessão 49), `ausencias` (inclui o campo `motivo`, texto livre da dona; desde a Sessão 77 o wizard público também lê as liberações para abrir dias de folga no calendário), `horarios_trabalho`, `horarios_fixos`, `profissionais`, `servico_profissional`, `categorias_servico`, `servicos`, `servico_perguntas`, `servico_pergunta_opcoes`, `janela_agendamento_meses`, `sinal_regras_especiais`. São dados de catálogo/agenda necessários ao `/agendar`, mas nunca foram auditados campo a campo.
 - **Riscos aceitos, registrados para não serem redescobertos:** (1) as RPCs de leitura do painel da cliente usam o telefone como único fator — quem souber o número de outra pessoa vê os agendamentos dela naquele salão (mesmo modelo de `cliente_buscar_por_whatsapp`; segundo fator é decisão de produto); (2) as RPCs por id e a rota de upload do comprovante confiam no `uuid` aleatório do agendamento como "senha" — vale também para `agendamento_cancelar_cliente_par` (Sessão 73), que além disso só alcança irmãs do mesmo grupo, mesmo salão e mesmo telefone; (3) `agendamento_criar` valida pertencimento e limites, mas não regra de negócio — uma chamada direta à RPC ainda reserva fora da janela/antecedência e escolhe entre `pendente`/`aguardando_sinal`; a revisão manual da dona nos Pendentes é a trava final.
-- **`sql/` do repositório diverge do banco em vários arquivos** — enganou a investigação na Sessão 71: `sql/pendencias_admin.sql` declara `agendamento_id bigint` (no banco é `uuid`); `sql/fidelidade_resgates.sql` declara `criado_em` (no banco é `resgatado_em`) e não tem a policy pública que existia em produção; `sql/agendamentos_anon_update_policy.sql` descreve uma policy removida na Etapa 5; as policies do bucket `comprovantes-pix` nunca estiveram no repo; `sql/estabelecimentos_segmento.sql` não tem o valor `maquiagem` (Sessão 72); `concluir_agendamentos_confirmados_vencidos` só existe no banco. Atualizar para o estado real (ou marcar como históricos) numa sessão curta dedicada.
+- **`sql/` do repositório diverge do banco em vários arquivos** — enganou a investigação na Sessão 71: `sql/pendencias_admin.sql` declara `agendamento_id bigint` (no banco é `uuid`); `sql/fidelidade_resgates.sql` declara `criado_em` (no banco é `resgatado_em`) e não tem a policy pública que existia em produção; `sql/agendamentos_anon_update_policy.sql` descreve uma policy removida na Etapa 5; as policies do bucket `comprovantes-pix` nunca estiveram no repo; `sql/estabelecimentos_segmento.sql` não tem o valor `maquiagem` (Sessão 72); `concluir_agendamentos_confirmados_vencidos` só existe no banco; `sql/sinal_regras_especiais.sql` não tem a coluna `metodo_cobranca_pix` (Sessão 77). Atualizar para o estado real (ou marcar como históricos) numa sessão curta dedicada.
 
 ### Cores, contraste e modo noturno — residuais (Sessão 74)
 - **Acolhe e Julia sem `textoBotao` no tema:** botão de destaque em tom médio cai no fallback quase branco `#fdfcfa`. Contraste no público e no `/admin`: Acolhe 2,60:1 em repouso e 3,99:1 no hover; Julia 3,52:1 em repouso (hover 4,64:1 passa). Correção é só dado de tema (`textoBotao` escuro em `lib/temas.js`), mas muda a cara do botão — na Julia, mostrar a ela antes.
@@ -22,16 +22,16 @@
 - **Bordas fracas no modo claro em todos os tenants:** `border-border` contra `bg-field` entre 1,32:1 (Flávia) e 1,95:1 (TEMA_PADRAO); trilho desligado do `Interruptor` contra a bolinha branca, 1,42 a 2,13:1; checkbox "Almoço" contra o campo chega a 2,44:1 (Acolhe). Mínimo recomendado para elementos de interface é 3:1. Dívida de design sistêmica.
 - **`--color-on-card` no `/admin` é sempre `textoPrincipal`** (ignora `textoCard` de propósito). Com header escuro sem `bgCardAdmin`, o card fica escuro com texto escuro. Contornado pelo checklist de tenant com header escuro (ver "Processo") — conferir a Laryssa (ver seção dela).
 - **Cores fixas fora do tema (Sessão 68):** dias de manutenção no calendário do público (`bg-green-50`/`bg-orange-50`) e o botão "Entrar em contato" da ficha do cliente (`bg-blue-50`) não leem o tema — destoam da paleta bege da Layra. Baixa prioridade.
-- **Modo noturno — pontos não cobertos:** cores inline do `CORES_EVENTO` (`PainelCalendario.js`) e de `Relatorios.js` não mudam (pílulas claras sobre a grade escura, legíveis mas "acesas"); a cor "interna" `#8b5cf6` de Relatórios fica em 4,42:1 sobre o fundo escuro; `bg-stone-300` (1 uso), tons 300/400 de borda/anel e a cauda longa das escalas (rose, fuchsia, cyan, sky, orange etc.) sem override; dias passados do calendário a 2,09:1 (desabilitado, isento). Não testado ainda: Relatórios e Configurações inteiras no noturno.
+- **Modo noturno — pontos não cobertos:** cores inline do `CORES_EVENTO` (`PainelCalendario.js`) e de `Relatorios.js` não mudam (pílulas claras sobre a grade escura, legíveis mas "acesas"); a cor "interna" `#8b5cf6` de Relatórios fica em 4,42:1 sobre o fundo escuro; `bg-stone-300` (1 uso), tons 300/400 de borda/anel e a cauda longa das escalas (rose, sky, orange etc.) sem override — ciano e fúcsia foram cobertos na Sessão 77 por causa das etiquetas; dias passados do calendário a 2,09:1 (desabilitado, isento). Não testado ainda: Relatórios e Configurações inteiras no noturno.
 - **Preferência do modo noturno é por aparelho e por endereço** (localStorage): ligar no localhost não liga em produção, e trocar de celular zera. Se as donas pedirem sincronização, a opção é uma coluna em `perfis`, aceitando uma piscada no carregamento.
 - **Conferir o modo noturno em produção** com a Laysla e a Flávia (ligar pelo menu na primeira vez) e colher a impressão delas.
 
 ### Agendamento com segunda data — residuais (Sessão 73)
-- **Vercel depois do rollback instantâneo de 25/09:** confirmar que um push novo na `main` volta a virar Production sozinho (o rollback pode desligar a promoção automática até um deploy ser promovido à mão). Na Sessão 74 houve seis pushes na `main` — conferir em produção que o modo noturno do admin e o "Alterar data" da ficha da cliente estão no ar; se o deploy ficou só como Preview, promover manualmente e conferir a configuração do projeto.
+- **Vercel depois do rollback instantâneo de 25/09:** confirmar que um push novo na `main` volta a virar Production sozinho (o rollback pode desligar a promoção automática até um deploy ser promovido à mão). Houve vários pushes na `main` nas Sessões 74 a 77 — conferir no painel que os últimos deploys aparecem como Production; se algum ficou só como Preview, promover manualmente e conferir a configuração do projeto.
 - **Laryssa:** ligar a segunda data no serviço de noiva e confirmar com ela o nome da etapa ("Teste" é o padrão). Configurar também o aviso da categoria (Penteados e/ou Noiva) pedindo o cabelo lavado, se ainda não foi feito.
 - **Duas pushes por pedido de par sem sinal** (`app/api/notificacoes/route.js` dispara uma por linha inserida como `pendente`). Com sinal, sai uma só, citando a data do teste.
 - **Popup de prazo mínimo do wizard** (`confirmarTrocaPrazo`, `FormularioAgendamento.js`) ainda oferece cancelar a "vizinha" mesmo quando ela é metade de um par, e cancela só uma linha. A RPC `agendamentos_cliente_janela_prazo` não devolve `reserva_grupo_id`; corrigir exige SQL ou esconder o botão. No `/admin` o mesmo popup já esconde a opção.
-- **RPC `agendamentos_cliente_ativos` também não devolve `reserva_grupo_id`** (Sessão 74): na ficha da cliente, o botão "Alterar data" aparece para par pendente e, ao clicar, mostra o aviso âmbar "Confirme o pedido em Pendentes". Ideal é a RPC devolver a coluna (SQL em staging e produção) para esconder o botão. Fazer junto com a RPC do item anterior.
+- **RPC `agendamentos_cliente_ativos` também não devolve `reserva_grupo_id`** (Sessão 74): na ficha da cliente, o botão "Alterar data" aparece para par pendente e, ao clicar, mostra o aviso âmbar "Confirme o pedido em Pendentes". Ideal é a RPC devolver a coluna (SQL em staging e produção) para esconder o botão. Fazer junto com a RPC do item anterior — e, na mesma mudança, devolver também `abacatepay_cobranca_id` (ver "Sinal Pix por regra especial — residuais").
 - **`app/api/agendamentos/remarcar/route.js` não conhece o par:** cancela a linha e recria sem `reserva_grupo_id`/`papel_reserva`. Hoje o wizard bloqueia remarcação de par ("fale com o salão"), mas a rota em si não checa.
 - **`concluir_agendamentos_confirmados_vencidos` grava o preço cheio do serviço na etapa anterior** quando conclui sozinho. Relatórios já ignoram esse valor; o dado gravado fica "errado". A função não está no repositório — trazer o corpo antes de mexer.
 - **"Último atendimento" pode ser a etapa anterior** (`buscarUltimoAtendimento` na ficha e `agendamentos_cliente_ultimos_sucesso` na manutenção sugerida).
@@ -39,14 +39,15 @@
 - **"Alterar data" no `/admin` não valida janela nem antecedência** — vale para o detalhe de qualquer confirmado (Sessão 73), para "Fora da janela" (comportamento antigo) e, desde a Sessão 74, para a ficha da cliente, que reaproveita o mesmo modal e o mesmo `handleAlterarData`.
 - **Aviso de janela ao reduzir** (`ConfiguracoesSalao.js`) conta as duas linhas do par. Cosmético.
 - **Quadro de fase no tema da Laysla (público):** o `botao` do tema é `#E9E7E3`, então a borda do quadro quase some. O quadro continua destacado pelo fundo claro sobre o card escuro.
+- **`semDiaDepoisDoTeste` ignora liberações** (`FormularioAgendamento.js` ~4702, achado na Sessão 77): percorre até 400 dias olhando só `diasSemanaAtivos`. Se os dias normais estiverem todos fechados no intervalo mas houver liberação válida, mostra o aviso "sem dia depois do teste" por engano (só mensagem; o calendário já abre o dia liberado).
 - **Achados de baixa gravidade da bateria de testes:** a confirmação no `/admin` decide a irmã com o estado do momento do clique (janela de milissegundos com duas ações simultâneas); o gate de prazo recebe o próprio id duplicado (inofensivo, usa `Set`); cancelar o par pelo id da anterior faria o card de pendência citar a data do teste (nenhum caminho faz isso hoje).
 
 ### Motor de agenda — achados do raio-x de 22/09 (nenhum com perda confirmada em produção hoje)
-- **Liberação em dia sem expediente nunca chega ao público.** `diasSemanaAtivos` (`FormularioAgendamento.js`) só lê `horarios_trabalho`/`horarios_fixos` e ignora as liberações de `ausencias` — o dia fica fechado e inclicável no calendário, embora o motor calcule o horário certo. No admin (modo livre) parece aberto, então a dona acredita que liberou. Consulta de 22/09 em produção: zero liberações nessa situação. Correção de poucas linhas; prioridade antes que alguma dona use liberação num domingo/folga.
 - **Mês do `/admin` diverge do motor.** `PainelCalendario.diasSemVagas` reimplementa "dia sem vaga" olhando só expediente semanal + ausência de dia inteiro (sem horários fixos parciais, liberações, exclusividade, restrição, janela de mês nem ocupação real). A faixa visual do dia usa `HORA_ABERTURA`/`HORA_FECHAMENTO` fixos em 09:00–18:00 (`lib/horarios.js`), e ausência de dia inteiro é desenhada como bloco 09–18 mesmo para quem trabalha 07–21. Não perde vaga diretamente, mas induz a dona a decisões erradas.
+- **Painel ignora `dia_semana` em registros `recorrente_periodo`** (achado na Sessão 77): `eventosAusencia` e `diasSemVagas` (`PainelCalendario.js` ~296 e ~487) tratam qualquer `tipo !== 'recorrente'` como período puro. Hoje inofensivo (os dois só olham `tipo_registro='ausencia'` e nenhum bloqueio usa `recorrente_periodo`), mas se um dia um bloqueio usar esse tipo, ele apareceria em todos os dias do intervalo, não só no dia da semana marcado. O motor (`excecoesDoDia`) também não entende `recorrente_periodo` fora de exclusividade — por isso a liberação por período da Sessão 77 grava liberações de um dia.
 - **Ausência avulsa parcial bloqueia 1h fixa** (`somarUmaHora(hora_inicio)` em `GerenciarProfissionais.js`), independente da granularidade e da duração — em grade de 30 min, marcar um horário derruba dois.
 - **Modo `fixo` não confere se o serviço cabe no expediente** (candidatos de `horarios_fixos` sem `hora_fim`): um fixo às 17h oferece serviço de 3h. Vaga indevida, não perda.
-- **Liberação não confere se o serviço cabe** (usa só `hora_inicio`, ignora `hora_fim`) e não trata virada de meia-noite. Baixo volume.
+- **Liberação não confere se o serviço cabe** (usa só `hora_inicio`, ignora `hora_fim`) e não trata virada de meia-noite. Com a liberação por período (Sessão 77) o uso tende a crescer — reavaliar se aparecer serviço longo passando do horário pretendido pela dona.
 - **Importação do Google Calendar escolhe profissional arbitrário** (`.limit(1)` sem `.order()` em `app/api/google-calendar/importar/route.js`). Inofensivo em tenant de uma profissional; em multi-profissional o evento pode bloquear a agenda da colega.
 - **Marca `erroDeLeitura` do Map de `janela_agendamento_meses` se perde ao recriar o Map** (`new Map(atual)`), e o fail-open por falha de rede vira fail-closed silencioso (agenda inteira fechada). Baixa frequência, impacto total quando ocorre.
 - **Sem virada de meia-noite em expediente e exceções:** `hora_fim < hora_inicio` gera zero horários em silêncio (o formulário só valida dentro do mesmo dia).
@@ -85,14 +86,14 @@ Trechos já revisados, falta só aplicar numa branch isolada e testar no dev ser
 - Identidade visual completa: logo em duas peças (`laryssa-marca.png` e `laryssa-marcaTexto.png`), `layoutMarca:'esquerda'`, paleta preto/branco/rosa (`#FF68AF`), header calibrado via `alturaMonograma`/`alturaMarcaTexto`.
 - **Correção do `/admin` NÃO está em produção (conferido na revisão de 26/09):** a branch `tema-laryssa-fix-botao-admin` (`bgCardAdmin: '#F2F2F2'`, `botaoAdmin: '#000000'`, `botaoAdminHover: '#2A2A2A'`), aberta no worktree separado `C:\Users\Iorran\BarberShop-laryssa`, nunca foi mergeada (Sessão 69). O raio-x da Sessão 74 confirma a Laryssa sem `botaoAdmin`; desde então o admin dela herda o `textoBotao` preto (botões rosa passam de 2,67:1 para 7,85:1). **Falta:** conferir em `lib/temas.js` se a entrada `laryssa` tem `bgCardAdmin` (sem ele, header preto deixa acordeões de Regras de negócio e o drawer mobile com texto preto sobre preto); decidir entre aplicar só `bgCardAdmin` sobre a `main` atual ou descartar a branch; fechar o worktree e apagar a branch em seguida. Conferir o admin dela em produção, claro e noturno.
 - Login de produção vinculado (UID `6f56b137-ca46-4a8b-962e-83cb829b6bb2`, perfil `dono`).
-- **Google Calendar em amarelo (Sessão 75):** coluna `estabelecimentos.google_calendar_cor_id` criada em staging e produção e gravada `'5'` (Banana) na Laryssa; Calendar dela conectado. **O código ainda não foi aplicado** — ver "Cor do evento no Google Calendar por salão". Depois do merge, testar com um agendamento real no admin dela e ela confirmar que o amarelo bate com o que usa no celular (Samsung desenha os tons um pouco diferente do Google).
+- **Google Calendar em amarelo (Sessões 75–76):** coluna `estabelecimentos.google_calendar_cor_id` criada nos dois bancos e gravada `'5'` (Banana) na Laryssa; Calendar dela conectado. Código em produção desde a Sessão 76 (`c5de66b`): quem não tem cor configurada segue em `'7'`. **Falta:** criar um agendamento de teste no admin dela, conferir o evento amarelo no Calendar, cancelar sem notificar, e ela confirmar que o tom bate com o do celular (Samsung desenha os tons um pouco diferente do Google). Eventos antigos só mudam de cor quando o agendamento for mexido.
 - **Falta:** horários reais, mensagens de WhatsApp personalizadas, chave Pix (decisão adiada), endereço do studio (o Iorran cadastra manualmente: Praça Doutor Teixeira Brandão, 286, Centro, Quatis/RJ), segunda data no serviço de noiva e aviso de cabelo lavado na categoria (ver "Agendamento com segunda data — residuais").
 
-### Cor do evento no Google Calendar por salão (Sessão 75) — código pendente
-- SQL feito nos dois bancos (`google_calendar_cor_id text`, nullable). Nada no código lê a coluna ainda, então hoje todo evento continua saindo Peacock (`'7'`), inclusive o da Laryssa.
-- A implementação falhou no Claude Code por erro do classificador de permissões (nenhum arquivo alterado). Plano já validado pelo raio-x dele: em `lib/googleCalendarSync.js`, trocar `COLOR_ID_EVENTO = "7"` por `COLOR_ID_PADRAO = "7"` + `resolverColorId(corId)` (aceita só `'1'`–`'11'`, senão `'7'`), passar a cor para `corpoEvento`; incluir `google_calendar_cor_id` no embed de `estabelecimentos(...)` em `app/api/google-calendar/sync/route.js` (~30) e `app/api/google-calendar/callback/route.js` (~140). Nenhum outro ponto cria ou atualiza evento. Branch `feat/cor-calendar-por-tenant` criada (sem commits).
-- O `colorId` vai no POST e no PATCH, então eventos antigos da Laryssa ficam amarelos assim que o agendamento for mexido; os outros salões conectados (Laysla, Flávia, Acolhe) continuam no azul.
-- Sem tela: a cor é configurada por SQL no onboarding, como o CNPJ. Incluir no `NOVO_TENANT_CHECKLIST.md` depois do merge (tabela dos colorIds do Google: 1 Lavanda, 2 Sálvia, 3 Uva, 4 Flamingo, 5 Banana, 6 Tangerina, 7 Pavão, 8 Grafite, 9 Mirtilo, 10 Manjericão, 11 Tomate).
+### Lilian — onboarding (Sessão 76)
+- **Criada em produção em 30/09** (`estabelecimentos.id = 14`, slug `lilian`, nome "Lilian Unhas", WhatsApp `5524993233098`). Não existe em staging. Profissional id 17, modo `fixo`, terça a sábado às 9h, 11h, 14h e 16h. Serviços 401 Manicure (mãos) R$40, 402 Pedicure (pés) R$40 e 403 Completo (mãos e pés) R$70, todos com 60 min provisórios e sem categoria. Sinal `desligado`, 5 etiquetas padrão, login vinculado como `dono` (UID `dd304206-09ae-47b2-8364-25eff7d2c666`).
+- **Falta antes de mandar o link:** abrir o mês atual e o seguinte na janela de agendamento (sem isso o `/lilian` mostra zero vagas), testar o fluxo completo em `/lilian` e o `/lilian/admin`, cancelar o agendamento de teste sem notificar.
+- **Falta depois:** definir a duração real do Completo (hoje 60 min), chave Pix e sinal quando ela tiver, mensagens de WhatsApp personalizadas, categorias e fotos dos serviços se ela quiser.
+- **Identidade visual (a partir de 02/10):** nasce no tema rosa padrão; arte e paleta entram pelo tenant-modelo `css` em staging, depois copiar para o tenant real e apagar a entrada `css` (Protocolo).
 
 ### Agendamento em grupo pra maquiadoras — desenho congelado, aguardando alinhamento com a Laryssa
 Demanda motivada pela Laryssa: uma cliente agenda pra um grupo (2 a um teto configurável, sugerido 8), cada pessoa ocupando um horário consecutivo — ex.: 4 pessoas = 4 agendamentos de 1h seguidos, todos sob o cadastro da cliente principal. Investigação técnica já feita:
@@ -119,14 +120,21 @@ Mudança da Sessão 74: o `/admin` agora define `--color-on-primary` e todos os 
 - O vínculo `servico_profissional` só é gravado automaticamente pela tela `GerenciarServicos.js` no submit. Catálogo criado direto por SQL fica sem vínculo e o `/agendar` reporta "nenhum profissional disponível".
 - **Checklist permanente:** todo catálogo novo criado via banco precisa do INSERT manual em `servico_profissional`. Desde a Sessão 71 isso também é exigido pela RPC `agendamento_criar` (erro AG004 sem o vínculo).
 
+### Processo — onboarding de tenant e Claude Code (Sessões 76–77)
+- **`NOVO_TENANT_CHECKLIST.md` atualizado** com o que o onboarding da Lilian mostrou: `janela_agendamento_fim` obrigatória (usar `2030-12-31`), colunas `NOT NULL` de `servicos`, geração dos horários fixos por produto cartesiano, valores aceitos hoje em `segmento` e `sinal_regra`, passo da janela mensal (obrigatório antes de entregar o link) e passo da cor do Google Calendar. Rodar `select column_name from information_schema.columns where table_name = 'estabelecimentos' and is_nullable = 'NO' and column_default is null` sempre que o checklist de insert voltar a falhar por coluna obrigatória nova.
+- **Claude Code em modo automático pode travar todas as edições** (classificador de permissões sem veredito; 14 falhas na Sessão 76, sem nenhum arquivo alterado). Trocar o modo na sessão já aberta não resolveu. Saída que funcionou: autorizar no prompt, de forma delimitada, a aplicação por script em Node (só os arquivos listados, abortar se o trecho não aparecer exatamente uma vez, sem `next build`/`next dev`, sem encerrar processos).
+- **Modelo:** Sonnet 5.5 (lançado em 28/09, mesmo preço, até 30% menos por tarefa segundo a Anthropic). Em avaliação: trocar nas sessões e no Code e acompanhar o consumo de cota por alguns dias; voltar ao 5.0 só se piorar.
+- **Branch de demanda sempre a partir da `main` atualizada** (`git checkout main` + `git pull` antes do `checkout -b`). Na Sessão 77 uma branch nasceu em cima de `docs/fechamento-sessao-76` não mergeada e o merge levou o fechamento junto.
+
 ### Alertas e avisos — próximos passos (Sessão 75)
 - **Estado atual:** bloco "Alertas e avisos" em Regras de negócio com dois interruptores — "Lembrete de etiqueta ao confirmar ou cancelar pendentes" (`lembrete_etiqueta_ativo`, default ligado) e "Perguntas do serviço e confirmação de manutenção ao agendar pelo admin" (tela invertida sobre `pular_perguntas_adicionais_admin`). Alertas de serviço e de categoria (`alerta_mensagem`) nunca aparecem no admin, sem flag.
 - **Correção de registro:** a Sessão 67 dizia que `pular_perguntas_adicionais_admin` estava ligada em todos os tenants reais. Conferido em produção na Sessão 75: ligada só em Flávia, Layra e Laysla; **Julia, Laryssa e acolhe-comercial estão com a flag desligada** (ou seja, veem perguntas e confirmação de manutenção ao agendar pelo admin). Não alterado por SQL — perguntar à Julia e à Laryssa se preferem desligar no bloco novo.
 - **Candidatos à v2 do bloco** (classificados como preferência no raio-x, cada um com coluna própria): "Essa cliente tem agendamento pendente" (`ModalClientePendente`), "Meses ainda fechados na agenda" (só se o banner do Painel ficar como aviso único), "Confirmar agendamento sem notificar" (hoje proteção por cautela).
-- **Catálogo do painel global desatualizado** (`app/painel-global/AbaAuditoria.js`, `CATALOGO_SEM_CONTROLE`): "Reduzir janela de agendamento" não existe mais (UI oculta); faltam "Excluir exclusividade", "Excluir regra especial" de sinal, alertas de serviço/categoria e perguntas (hoje só implícitos), o aviso de Regras do agendamento no grupo Público; "Confirmar manutenção" está só em Público mas também aparece no admin. Alinhar numa passada curta e manter o catálogo como inventário de todo popup novo (regra do Protocolo).
+- **Catálogo do painel global desatualizado** (`app/painel-global/AbaAuditoria.js`, `CATALOGO_SEM_CONTROLE`): "Reduzir janela de agendamento" não existe mais (UI oculta); faltam "Excluir exclusividade", "Excluir regra especial" de sinal, "Excluir liberação por período" (Sessão 77), alertas de serviço/categoria e perguntas (hoje só implícitos), o aviso de Regras do agendamento no grupo Público; "Confirmar manutenção" está só em Público mas também aparece no admin. Alinhar numa passada curta e manter o catálogo como inventário de todo popup novo (regra do Protocolo).
 - **Mês restrito com lembrete de etiqueta desligado:** se a dona desligar os lembretes e nunca etiquetar ninguém, um mês "restrito" fica fechado para todas as clientes. Ideia registrada: aviso na grade da Janela de agendamento quando nenhuma cliente tem a etiqueta liberada. Baixa prioridade — nenhuma dona real usa mês restrito hoje (só `junior` e `acolhe`, conferido em 26/09).
 
-### Julia — pendências residuais (Sessões 62 e 67)
+### Julia — pendências residuais (Sessões 62, 67 e 77)
+- **Horários extras de dezembro (pedido de 01/10):** a liberação por período está em produção (Sessão 77). Falta abrir dezembro na janela mensal dela, criar o período em Exceções de horário (ela trabalha de segunda a sábado; domingo também funciona, desde a correção do calendário público) e conferir no `/julia` em aba anônima.
 - Testar ao vivo, com a conta Google da Julia, a lista de eventos ignorados na importação do Calendar e garimpar manualmente os que forem atendimento real.
 - Confirmar merge de `fix/lista-ignorados-import-calendar` e `fix/equipe-acordeao` pra `main`, se ainda não tiver sido feito.
 - **Terceiro UID de login gerado pro mesmo e-mail dela (`julia@julia.com`)** — vínculo em `perfis` refeito e funcionando (Sessão 67), mas o padrão de precisar recriar o login três vezes não foi investigado. Hipótese registrada na Sessão 66: dashboard do Supabase apontando para o projeto errado (staging × produção) na hora do vínculo.
@@ -149,6 +157,13 @@ Mudança da Sessão 74: o `/admin` agora define `--color-on-primary` e todos os 
 - Pendente: conversa presencial pra reconciliar o valor do curso de setembro (R$800 numa conversa, R$1.600 em outra).
 - Rastrear receita fora de agendamentos (cursos etc.) seria funcionalidade nova — avaliar só se ela confirmar interesse.
 
+### Sinal Pix por regra especial — residuais (Sessão 77)
+- **Em produção desde `bfaaf98`:** cada regra especial pode definir a forma de cobrança (`sinal_regras_especiais.metodo_cobranca_pix`, nula = segue o salão). O valor vem da regra mais específica; o método vem da regra mais específica que tenha método preenchido. O campo só aparece em Regras de negócio para salão com AbacatePay conectada.
+- **Laysla (produção, id 5):** padrão manual, credencial AbacatePay e webhook cadastrados (conferido em 01/10). **Falta:** conferir o campo "Forma de cobrança" no admin dela e fazer o teste controlado — regra "Pix automático" para um único dia livre, agendar no `/laysla` com o número do Iorran, conferir o QR, cancelar sem notificar sem pagar e apagar a regra. Depois, ela cria a regra de dezembro.
+- **Conexão AbacatePay em salão manual:** conferir se a tela de conexão aparece com o padrão em manual. Se só aparecer no modo automático, a dona precisa trocar, conectar e voltar ao manual. Não afeta a Laysla (já conectada).
+- **`ConfirmacaoSinal` sem `abacatepay_cobranca_id`:** as RPCs `agendamentos_cliente_ativos`/`...historico` não devolvem a coluna, então o ramo "cobrança já gerada é honrada" está pronto mas inerte. Efeito só se a dona trocar a regra de automático para manual depois de o QR ser gerado. Corrigir junto com o `reserva_grupo_id` dessas RPCs (ver "Agendamento com segunda data — residuais").
+- Nenhum tenant de staging tem credencial AbacatePay: para testar o caminho automático fora de produção, conectar uma chave do modo de desenvolvimento no Salão de Teste (id 1).
+
 ### CRM Comercial (trilha separada — Sessão 63 e reconstrução de 16/09)
 - **Estado (conferido na revisão de 26/09):** o schema do CRM (`leads`, `tags`, `lead_tags`, `interacoes`, `tipos_atendimento`, `cidades` + RLS só para `papel='global'`) e o tenant `acolhe-comercial` existem em staging **e produção**, sincronizados desde 16/09; todo o código está em `main`. O item antigo "existe só em staging — replicar" não vale mais.
 - **Decisão de 16/09 que substitui o teste antigo do gatilho de demonstração:** todo agendamento criado pelo CRM fica permanentemente `status='pendente'` (nunca `confirmado`, para poder apagar/recriar sob a policy de DELETE), com `telefone=null` e `origem='crm'`. O cenário "agendamento termina `confirmado` no Painel do `acolhe-comercial`" não se aplica mais.
@@ -158,8 +173,10 @@ Mudança da Sessão 74: o `/admin` agora define `--color-on-primary` e todos os 
 
 ### Dados de teste a limpar
 - Staging, Laysla (`estabelecimento_id=3`, slug `laysla`): lotes nunca limpos — `Teste Aguardando Confirmação`, `Teste Editar no Histórico`, `Teste Sinal - Aguardando Conclusão`, `Teste Sinal - Editar Histórico`, `Teste Sinal - Sem Valor Registrado`, `TESTE QA - Sinal Pago`, `TESTE QA - Sem Sinal`, `TESTE QA - Marca Editado`, mais os agendamentos e comprovantes de teste da Sessão 71 e as alterações de data do teste da Sessão 74. Os dois "Molde F1" da cliente `xuxa` são dado pré-existente — não apagar.
+- Staging, Laysla (Sessão 77): regras especiais de sinal, liberações por período e agendamentos criados nos testes da forma de cobrança e da liberação por período — conferir em Regras de negócio e em Exceções de horário e apagar.
 - Staging, Flávia: serviços de teste com nomes aleatórios (`teste`, `ffjfdfddjj`, `xzcbxzbcbzbxzbxzc`) vistos na Sessão 74 — confirmar se são lixo e apagar.
 - Produção, tenants de teste `junior` e `acolhe`: agendamentos e comprovantes de teste da Sessão 71.
+- Produção (Sessão 76): registros de teste das Exceções de horário (ausência/liberação/exclusividade) criados em 01/10 ao testar o tipo de ausência vazio; conferir em Horários do tenant usado e apagar. Mesmo cuidado com o agendamento de teste da cor do Calendar na Laryssa, com o de `/lilian` e com o teste controlado do QR automático na Laysla, quando forem feitos.
 - Salão de Teste (staging): setembro e outubro/2026 gravados como `'fechado'` em `janela_agendamento_meses` (Sessão 57). Novembro e dezembro/2026 marcados `'aberto'` de propósito na Sessão 72.
 - Salão de Teste (staging): cliente `Cliente Teste Par` (`(24) 98888-0001`) e os pares das Sessões 72–73; "Segunda data" ligada nos serviços do teste e fidelidade ligada com meta baixa — desligar/reverter se ainda não foi feito.
 - Salão de Teste (staging, id 1): `sinal_valor_centavos`/`sinal_chave_pix` preenchidos com `sinal_regra` desligado — residual da marca Acolhe.
@@ -207,12 +224,13 @@ Mudança da Sessão 74: o `/admin` agora define `--color-on-primary` e todos os 
 - Sinal retido histórico de cancelados ficou fora do backfill de sinal por incerteza de estorno — se um dia quiser recuperar, precisa de critério próprio.
 - Rota estática `/home` colide conceitualmente com `/[salon]`: não é bloqueante (estático vence dinâmico), mas o slug `home` fica indisponível para qualquer tenant.
 - **Segmento "cabeleireira"** não existe no CHECK de `estabelecimentos.segmento` — criar só quando entrar a primeira. Sem tela de segmento no `/painel-global` enquanto nenhuma regra depender dele.
+- **Liberação por período não permite tirar um dia isolado do bloco** (Sessão 77): a exclusão apaga o grupo inteiro; para fechar um dia específico, a dona usa Bloquear naquele dia (bloqueio vence liberação). Reavaliar só se as donas pedirem edição do bloco.
 
 ### AbacatePay — itens residuais (baixo risco)
 - Remarcação (`app/api/agendamentos/remarcar/route.js`): restauração best-effort do status da linha antiga quando o insert da nova falha, sem transação atômica (a correção definitiva seria uma RPC). Desde a Sessão 71 a rota grava as respostas das perguntas com service role; resposta inválida é descartada com log.
-- Fail-open silencioso na leitura de credencial (`abacatepay_conectado: true` em erro de leitura, rota `/api/abacatepay/conectado`) — decisão consciente para um blip de rede não virar "parou de cobrar".
+- Fail-open silencioso na leitura de credencial (`abacatepay_conectado: true` em erro de leitura, rota `/api/abacatepay/conectado`) — decisão consciente para um blip de rede não virar "parou de cobrar". Desde a Sessão 77 a leitura também roda quando alguma regra especial pede Pix automático.
 - Rebaixamento silencioso da cascata de sinal Pix pra "desligado" quando falta chave manual e credencial AbacatePay ao mesmo tempo.
-- Toda conta AbacatePay nova precisa de chave com escopo **Completo** (sem ele, o webhook é criado mas não removido); Flávia e Laysla ainda não criaram contas próprias (CNPJ/MEI obrigatório).
+- Toda conta AbacatePay nova precisa de chave com escopo **Completo** (sem ele, o webhook é criado mas não removido). A Laysla já tem conta conectada em produção (credencial e webhook conferidos em 01/10); a Flávia ainda não criou conta própria (CNPJ/MEI obrigatório).
 
 ### Limpeza de código
 - String de fallback `"a equipe"` duplicada em três lugares.
@@ -226,6 +244,7 @@ Mudança da Sessão 74: o `/admin` agora define `--color-on-primary` e todos os 
 - Bloco oculto de `restricoes_agenda` em `ConfiguracoesSalao.js` (`{false && ...}`): se algum dia reativado, depende de state removido do `page.js` na Sessão 41. Mecanismo aposentado em favor da janela mensal — decidir remoção.
 - `remotePattern` de `fotos-perfil` em `next.config.mjs` sem consumidor desde a Sessão 34 (dialog de zoom usa `<img>` nativa).
 - `salvarRespostasPerguntas` agora só é usada pelo `/admin` — conferir se ainda precisa morar em `FormularioAgendamento.js`.
+- `lib/abacatepay/confirmarPagamento.js` passou a selecionar `metodo_cobranca_pix` das regras sem usar o campo (Sessão 77, por uniformidade) — inofensivo.
 - **`buscarTema` é chamado em 5 pontos independentes** (`page.js`, `admin/page.js`, `FormularioAgendamento.js`, `Hero.js`, `AvisoTopo.js`), sem contexto único — pré-requisito antes de qualquer tema vindo do banco.
 - **eslint acusa 13 erros `set-state-in-effect`** em `app/[salon]/admin/page.js` e vizinhos (pré-existentes, o build passa).
 - Conteúdo dentro do `<div className="escopo-admin">` de `admin/page.js` não foi reindentado (de propósito) — só estética.
@@ -247,66 +266,3 @@ Mudança da Sessão 74: o `/admin` agora define `--color-on-primary` e todos os 
 - Painel de Alertas (`/painel-global` → Auditoria → Alertas): cobre os toggles que já são coluna (incluindo `lembrete_etiqueta_ativo` desde a Sessão 75). Os popups fixos (`CATALOGO_SEM_CONTROLE`) ficam catalogados só como leitura — migrar para o bloco "Alertas e avisos" item a item, conforme a classificação preferência × proteção e a necessidade real.
 - Fase futura: logo do `/admin` virar link pro Instagram do Acolhe.
 - Sessão dedicada de limpeza das branches antigas já mergeadas (a lista local passa de 130; `tema-laryssa-fix-botao-admin` está aberta em outra worktree e precisa ser resolvida lá antes — ver seção da Laryssa).
-
-# Diff do PENDENCIAS.md — Sessão 76
-
-Seis edições, na ordem em que aparecem no arquivo. O PENDENCIAS atual não tem seção "Resolvido": como nos fechamentos anteriores, o que foi resolvido sai do arquivo e fica registrado no handoff.
-
----
-
-## 1. Seção da Laryssa: trocar a linha do Google Calendar
-
-**Localizar** a linha que começa com `- **Google Calendar em amarelo (Sessão 75):**` e **substituir a linha inteira** por:
-
-```markdown
-- **Google Calendar em amarelo (Sessões 75–76):** coluna `estabelecimentos.google_calendar_cor_id` criada nos dois bancos e gravada `'5'` (Banana) na Laryssa; Calendar dela conectado. Código em produção desde a Sessão 76 (`c5de66b`): quem não tem cor configurada segue em `'7'`. **Falta:** criar um agendamento de teste no admin dela, conferir o evento amarelo no Calendar, cancelar sem notificar, e ela confirmar que o tom bate com o do celular (Samsung desenha os tons um pouco diferente do Google). Eventos antigos só mudam de cor quando o agendamento for mexido.
-```
-
-## 2. Apagar a seção inteira da cor do Calendar
-
-**Apagar** desde a linha `### Cor do evento no Google Calendar por salão (Sessão 75) — código pendente` até a linha anterior a `### Agendamento em grupo pra maquiadoras — desenho congelado, aguardando alinhamento com a Laryssa` (são o título e 4 itens; o conteúdo útil já está na linha do item 1 e no `NOVO_TENANT_CHECKLIST.md`).
-
-## 3. Nova seção: Lilian
-
-**Inserir** logo depois da seção `### Laryssa — onboarding (Sessões 67, 69 e 72)` (antes de `### Agendamento em grupo pra maquiadoras`):
-
-```markdown
-### Lilian — onboarding (Sessão 76)
-- **Criada em produção em 30/09** (`estabelecimentos.id = 14`, slug `lilian`, nome "Lilian Unhas", WhatsApp `5524993233098`). Não existe em staging. Profissional id 17, modo `fixo`, terça a sábado às 9h, 11h, 14h e 16h. Serviços 401 Manicure (mãos) R$40, 402 Pedicure (pés) R$40 e 403 Completo (mãos e pés) R$70, todos com 60 min provisórios e sem categoria. Sinal `desligado`, 5 etiquetas padrão, login vinculado como `dono` (UID `dd304206-09ae-47b2-8364-25eff7d2c666`).
-- **Falta antes de mandar o link:** abrir o mês atual e o seguinte na janela de agendamento (sem isso o `/lilian` mostra zero vagas), testar o fluxo completo em `/lilian` e o `/lilian/admin`, cancelar o agendamento de teste sem notificar.
-- **Falta depois:** definir a duração real do Completo (hoje 60 min), chave Pix e sinal quando ela tiver, mensagens de WhatsApp personalizadas, categorias e fotos dos serviços se ela quiser.
-- **Identidade visual (a partir de 02/10):** nasce no tema rosa padrão; arte e paleta entram pelo tenant-modelo `css` em staging, depois copiar para o tenant real e apagar a entrada `css` (Protocolo).
-```
-
-## 4. Nova seção: sinal manual ou automático por regra
-
-**Inserir** logo depois da seção `### Laysla — financeiro (Sessão 64)`:
-
-```markdown
-### Sinal Pix especial com escolha manual ou automático (pedido da Laysla, Sessão 76)
-- **Pedido:** nas regras especiais de sinal (Sessão 72), poder escolher se o Pix daquele período é manual ou automático (AbacatePay). Exemplo dela: manual como padrão e automático só em dezembro.
-- **Hoje:** a regra especial só define valor fixo (`sinal_resolver`). O método vem da cascata `calcularStatusSinalPix` (Sessão 53), que já cai em manual se faltar credencial AbacatePay.
-- **Escopo previsto:** coluna nova na tabela das regras especiais, ajuste em `sinal_resolver` e na cascata, tela de regras com a escolha. Exige SQL em staging, conferência em produção antes do merge e teste do wizard dos dois caminhos.
-- **Decidir antes de desenhar:** a escolha vale só para regras de período ou também para as de serviço? Confirmar também se a Laysla já criou a conta AbacatePay dela (CNPJ/MEI obrigatório, ver "AbacatePay — itens residuais").
-- Sessão própria, já combinada como a próxima demanda grande.
-```
-
-## 5. Seção "Processo": dois itens novos
-
-**Inserir** depois da seção `### Processo — catálogo criado por SQL direto não popula servico_profissional (Sessão 67)`:
-
-```markdown
-### Processo — onboarding de tenant e Claude Code (Sessão 76)
-- **`NOVO_TENANT_CHECKLIST.md` atualizado** com o que o onboarding da Lilian mostrou: `janela_agendamento_fim` obrigatória (usar `2030-12-31`), colunas `NOT NULL` de `servicos`, geração dos horários fixos por produto cartesiano, valores aceitos hoje em `segmento` e `sinal_regra`, passo da janela mensal (obrigatório antes de entregar o link) e passo da cor do Google Calendar. Rodar `select column_name from information_schema.columns where table_name = 'estabelecimentos' and is_nullable = 'NO' and column_default is null` sempre que o checklist de insert voltar a falhar por coluna obrigatória nova.
-- **Claude Code em modo automático pode travar todas as edições** (classificador de permissões sem veredito; 14 falhas na Sessão 76, sem nenhum arquivo alterado). Trocar o modo na sessão já aberta não resolveu. Saída que funcionou: autorizar no prompt, de forma delimitada, a aplicação por script em Node (só os arquivos listados, abortar se o trecho não aparecer exatamente uma vez, sem `next build`/`next dev`, sem encerrar processos).
-- **Modelo:** Sonnet 5.5 (lançado em 28/09, mesmo preço, até 30% menos por tarefa segundo a Anthropic). Em avaliação: trocar nas sessões e no Code e acompanhar o consumo de cota por alguns dias; voltar ao 5.0 só se piorar.
-```
-
-## 6. "Dados de teste a limpar": dois itens novos
-
-**Acrescentar** ao final dessa seção:
-
-```markdown
-- Produção (Sessão 76): registros de teste das Exceções de horário (ausência/liberação/exclusividade) criados em 01/10 ao testar o tipo de ausência vazio; conferir em Horários do tenant usado e apagar. Mesmo cuidado com o agendamento de teste da cor do Calendar na Laryssa e com o de `/lilian`, quando forem feitos.
-- Dado de teste não apagado em staging: nada novo nesta sessão.
-```
