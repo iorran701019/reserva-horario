@@ -1788,9 +1788,7 @@ function SecaoAusencias({
 
   // Zera os campos de todos os formatos (chamado após salvar com sucesso).
   function limparCampos() {
-    // Em Liberar não há opção vazia no select (ver OPCOES_LIBERACAO), então o
-    // reset pro estado vazio vale só pro fluxo de Bloquear.
-    if (tipoRegistro === "ausencia") setModo("");
+    setModo("");
     setRecDias([]);
     setRecInicio("");
     setRecFim("");
@@ -1824,7 +1822,14 @@ function SecaoAusencias({
   // topo do formulário. Liberação precisa de um horário específico — não faz
   // sentido em "dia inteiro" (não haveria horário pra liberar).
   function coletarLinhas() {
-    if (!modo) return { erro: "Escolha o tipo de ausência." };
+    if (!modo) {
+      return {
+        erro:
+          tipoRegistro === "liberacao"
+            ? "Escolha o tipo de liberação."
+            : "Escolha o tipo de ausência.",
+      };
+    }
 
     if (modo === "recorrente") {
       if (recDias.length === 0) return { erro: "Selecione ao menos um dia." };
@@ -2372,13 +2377,13 @@ function SecaoAusencias({
                 onClick={() => {
                   setTipoRegistro(opcao.valor);
                   setFormErro("");
-                  // Liberar só oferece "Um dia específico" — força o modo pra
-                  // manter select e estado consistentes.
-                  if (opcao.valor === "liberacao") setModo("umdia");
-                  // Entrar em Bloquear vindo de outro tipo volta o select pro
-                  // estado vazio — clique redundante em Bloquear já selecionado
-                  // não apaga o que já estava preenchido.
-                  else if (opcao.valor === "ausencia" && tipoRegistro !== "ausencia")
+                  // Entrar em Bloquear/Liberar vindo de outro tipo volta o
+                  // select pro estado vazio — clique redundante no já
+                  // selecionado não apaga o que já estava preenchido.
+                  if (
+                    (opcao.valor === "ausencia" || opcao.valor === "liberacao") &&
+                    tipoRegistro !== opcao.valor
+                  )
                     setModo("");
                 }}
                 className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium ring-1 transition ${
@@ -2424,11 +2429,11 @@ function SecaoAusencias({
               modo === "" ? "border-primary ring-2 ring-primary/30" : ""
             }`}
           >
-            {tipoRegistro !== "liberacao" && (
-              <option value="" disabled>
-                Toque para escolher o tipo de ausência
-              </option>
-            )}
+            <option value="" disabled>
+              {tipoRegistro === "liberacao"
+                ? "Toque para escolher o tipo de liberação"
+                : "Toque para escolher o tipo de ausência"}
+            </option>
             {opcoesModo.map((o) => (
               <option key={o.valor} value={o.valor}>
                 {o.exemplo ? `${o.rotulo} — ex.: ${o.exemplo}` : o.rotulo}
