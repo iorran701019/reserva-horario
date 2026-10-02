@@ -189,6 +189,10 @@ const NENHUM_MES_CONFIGURADO = new Map();
 // vazio de módulo, estável entre renders.
 const NENHUMA_RESTRICAO = [];
 
+// Mesmo motivo dos defaults acima, agora pra prop `datasLiberadas` de
+// CalendarioDias (ver diasComLiberacao em FormularioAgendamento).
+const NENHUMA_DATA_LIBERADA = new Set();
+
 // "YYYY-MM-DD" -> "dd/mm · dia da semana". Mora em lib/data.js desde que
 // BlocoConfirmacaoPix passou a usá-la também (importar de volta daqui fecharia
 // um ciclo, igual formatarPreco); reexportada pra não mexer em quem já
@@ -426,6 +430,17 @@ function perguntaDeveAparecer(pergunta, respostas) {
 //   mes              – Date no primeiro dia do mês exibido.
 //   min              – "YYYY-MM-DD" mínimo (hoje); datas anteriores ficam cinza.
 //   diasSemanaAtivos – Set<number> de dias da semana (0–6) com atendimento.
+//   datasLiberadas   – Set<string> de datas "YYYY-MM-DD" do mês exibido com
+//                   uma liberação (ausencias: tipo_registro='liberacao')
+//                   cobrindo aquele dia pro(s) profissional(is) candidato(s)
+//                   (ver diasComLiberacao em FormularioAgendamento). Abre o
+//                   dia mesmo que o dia da semana não esteja em
+//                   diasSemanaAtivos (folga/fora do expediente normal) — só
+//                   isso: `diasSemVaga`/antecedência/janela continuam
+//                   decidindo se sobra horário de verdade. Default vazio:
+//                   quem não passa a prop (modal "Alterar data" do /admin,
+//                   que já ignora `fechado` via modoLivre) tem exatamente o
+//                   comportamento de sempre.
 //   diasSemVaga      – Set<string> de datas "YYYY-MM-DD" do mês exibido que
 //                   não têm NENHUM horário livre (todos já reservados, ou
 //                   removidos por ausência/antecedência) — calculadas em
@@ -488,6 +503,7 @@ export function CalendarioDias({
   mes,
   min,
   diasSemanaAtivos,
+  datasLiberadas = NENHUMA_DATA_LIBERADA,
   diasSemVaga = NENHUM_DIA_SEM_VAGA,
   selecionado,
   onSelecionar,
@@ -584,7 +600,10 @@ export function CalendarioDias({
           // Piso do serviço de duas datas — ver a prop minExclusivo. Nunca
           // dispensado pelo modo livre, igual a `passado`.
           const antesDoPiso = minExclusivo != null && iso <= minExclusivo;
-          const fechado = !diasSemanaAtivos.has(date.getDay());
+          // Uma liberação cobrindo ESTA data abre o dia mesmo fora do dia da
+          // semana normal (ver a prop datasLiberadas) — dia da semana E data
+          // são portas independentes, qualquer uma abre.
+          const fechado = !diasSemanaAtivos.has(date.getDay()) && !datasLiberadas.has(iso);
           const foraDaJanela = !dataAgendavelComMes(
             iso,
             estabelecimento,
@@ -933,6 +952,15 @@ export default function FormularioAgendamento({
   const [profissionaisDoServico, setProfissionaisDoServico] = useState([]);
   const [profissionalSelecionado, setProfissionalSelecionado] = useState(null);
   const [carregandoProfissionais, setCarregandoProfissionais] = useState(false);
+
+  // Liberações de horário (ausencias: tipo_registro='liberacao', tipo=
+  // 'periodo') dos profissionais candidatos — carregadas no MESMO efeito que
+  // busca `profissionaisDoServico` (ver abaixo), já que dependem dos mesmos
+  // ids e do mesmo gatilho (servicoSelecionado). O wizard nunca consultava
+  // `ausencias`; é consulta nova, só pra decidir quais dias o calendário
+  // abre (ver diasComLiberacao), nunca pra calcular vaga (isso continua 100%
+  // em calcularVagasDoMes/calcularVagasPorHorario, em lib/disponibilidade.js).
+  const [liberacoesPeriodo, setLiberacoesPeriodo] = useState([]);
 
   // Refs para rolar suavemente até o bloco que surge após cada escolha, pra ele
   // não passar despercebido abaixo da dobra (salões com muitos serviços). Vale
@@ -1535,6 +1563,7 @@ export default function FormularioAgendamento({
     async function carregarProfissionais() {
       if (!servicoSelecionado) {
         setProfissionaisDoServico([]);
+        setLiberacoesPeriodo([]);
         return;
       }
 
@@ -1558,6 +1587,28 @@ export default function FormularioAgendamento({
             .filter(Boolean)
             .sort((a, b) => a.nome.localeCompare(b.nome));
       setProfissionaisDoServico(lista);
+
+      // Liberações (tipo_registro='liberacao', tipo='periodo') dos
+      // profissionais candidatos — só pra abrir o dia certo no calendário
+      // (ver diasComLiberacao); o cálculo de vaga em si continua intocado.
+      // Sem profissional candidato, nem consulta.
+      if (lista.length === 0) {
+        setLiberacoesPeriodo([]);
+      } else {
+        const { data: liberacoes, error: erroLiberacoes } = await supabase
+          .from("ausencias")
+          .select("profissional_id, data_inicio, data_fim")
+          .in(
+            "profissional_id",
+            lista.map((p) => p.id)
+          )
+          .eq("tipo_registro", "liberacao")
+          .eq("tipo", "periodo");
+
+        if (!ativo) return;
+        setLiberacoesPeriodo(erroLiberacoes ? [] : liberacoes ?? []);
+      }
+
       setCarregandoProfissionais(false);
     }
 
@@ -1770,6 +1821,54 @@ export default function FormularioAgendamento({
     });
     return set;
   })();
+
+  // Liberações (ver liberacoesPeriodo acima) dos profissionais CANDIDATOS —
+  // mesmo filtro de profissional de diasSemanaAtivos (só o selecionado, no
+  // fluxo "cliente escolhe"; todos, no encaixe automático). Base dos dois
+  // derivados abaixo (diasComLiberacao e existeLiberacaoFutura).
+  const liberacoesRelevantes = (() => {
+    const idsRelevantes = escolherProfissional
+      ? profissionalSelecionado
+        ? [profissionalSelecionado.id]
+        : []
+      : profissionaisDoServico.map((p) => p.id);
+    if (idsRelevantes.length === 0 || liberacoesPeriodo.length === 0) return [];
+    const idsSet = new Set(idsRelevantes);
+    return liberacoesPeriodo.filter((a) => idsSet.has(a.profissional_id));
+  })();
+
+  // Datas "YYYY-MM-DD" do mês VISÍVEL cobertas por uma liberação. Faz o
+  // calendário abrir um dia de folga/fora do expediente normal quando existe
+  // liberação cobrindo aquela data específica — diferente de diasSemanaAtivos
+  // (que é por DIA DA SEMANA, vale pra qualquer semana), liberação é por
+  // DATA, então não dá pra só somar ao Set de dias da semana (abriria a
+  // MESMA semana inteira, todo mês). Só abre o dia; quem decide se sobra vaga
+  // de verdade continua sendo calcularVagasDoMes/diasSemVaga, como sempre
+  // (ver CalendarioDias).
+  const diasComLiberacao = (() => {
+    if (liberacoesRelevantes.length === 0) return NENHUMA_DATA_LIBERADA;
+
+    const ano = mesVisivel.getFullYear();
+    const mesIdx = mesVisivel.getMonth();
+    const diasNoMes = new Date(ano, mesIdx + 1, 0).getDate();
+
+    const set = new Set();
+    for (let d = 1; d <= diasNoMes; d++) {
+      const iso = formatarISO(new Date(ano, mesIdx, d));
+      if (liberacoesRelevantes.some((a) => a.data_inicio <= iso && iso <= a.data_fim)) {
+        set.add(iso);
+      }
+    }
+    return set;
+  })();
+
+  // Existe liberação futura (hoje ou depois) pra algum candidato, em QUALQUER
+  // mês — não só o visível. Sem isto, o gate "sem profissional pra agendar"
+  // (ver semProfissionalParaAgendar/diasSemanaAtivos.size===0 abaixo) fecharia
+  // o calendário por completo — nem os botões de navegação de mês apareceriam
+  // — pra um profissional que só atende por liberação pontual num mês futuro
+  // ainda não visível, antes mesmo de a cliente poder clicar em "próximo mês".
+  const existeLiberacaoFutura = liberacoesRelevantes.some((a) => a.data_fim >= hoje);
 
   // Dias do mês visível que abrem, mas em que já não sobrou nenhum horário —
   // o calendário os cinza junto com os fechados (ver CalendarioDias). Deriva
@@ -5043,7 +5142,8 @@ export default function FormularioAgendamento({
                 <p className="text-sm text-on-card">
                   Carregando disponibilidade...
                 </p>
-              ) : semProfissionalParaAgendar || (!modoLivre && diasSemanaAtivos.size === 0) ? (
+              ) : semProfissionalParaAgendar ||
+                (!modoLivre && diasSemanaAtivos.size === 0 && !existeLiberacaoFutura) ? (
                 <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
                   {escolherProfissional
                     ? "Este profissional não tem dias de atendimento."
@@ -5054,6 +5154,7 @@ export default function FormularioAgendamento({
                   mes={mesVisivel}
                   min={hoje}
                   diasSemanaAtivos={diasSemanaAtivos}
+                  datasLiberadas={diasComLiberacao}
                   diasSemVaga={diasSemVaga}
                   selecionado={form.data}
                   onSelecionar={selecionarData}

@@ -54,6 +54,10 @@ const DIAS = [
   { n: 6, rotulo: "Sábado", curto: "Sáb" },
 ];
 
+// Ordem de exibição "Seg a Dom" (a convenção de dia_semana/DIAS acima é
+// 0=domingo primeiro) — só pra UI; o valor salvo continua o `n` de DIAS.
+const ORDEM_SEG_DOM = [1, 2, 3, 4, 5, 6, 0];
+
 // Etapas do wizard de criação (só no "novo"). A edição usa a tela de resumo.
 const ETAPAS = [
   { id: "A", rotulo: "Identificação e dias" },
@@ -739,17 +743,35 @@ const OPCOES_AUSENCIA = [
   },
 ];
 
-// No modo Liberar, só "Um dia específico" é oferecido — liberação recorrente
-// deve ser feita editando a agenda de verdade (horarios_fixos ou a
-// janela/expediente), não como exceção aqui. Vale pra QUALQUER profissional
-// (fixo ou janela).
-const OPCAO_LIBERACAO_UNICA = [
+// No modo Liberar, só estes dois formatos são oferecidos — liberação
+// recorrente (toda semana, sem data final) deve ser feita editando a agenda
+// de verdade (horarios_fixos ou a janela/expediente), não como exceção aqui.
+// Vale pra QUALQUER profissional (fixo ou janela).
+//   umdia            – data única, grade de marcadores (ver MARCADORES_HORARIO).
+//   liberacao_periodo – mesma grade de marcadores, repetida nos dias da semana
+//                      marcados dentro de um intervalo data_inicio..data_fim —
+//                      o motor NÃO muda: cada combinação (data × horário)
+//                      expande numa linha comum de liberação de um dia, só que
+//                      presas por um grupo_id (ver coletarLinhas).
+const OPCOES_LIBERACAO = [
   {
     valor: "umdia",
     rotulo: "Um dia específico",
     exemplo: "abrir horário extra numa data pontual",
   },
+  {
+    valor: "liberacao_periodo",
+    rotulo: "Vários dias num período",
+    exemplo: "horários extras em dezembro",
+  },
 ];
+
+// Teto de linhas por lote de "Vários dias num período" — cada combinação
+// (data × horário) é uma linha própria (ver coletarLinhas), e um intervalo
+// largo + muitos dias da semana + muitos horários pode gerar centenas delas.
+// Acima disso, pedimos pra reduzir o lote em vez de inserir silenciosamente
+// uma quantidade gigante de linhas.
+const LIMITE_LOTE_LIBERACAO_PERIODO = 600;
 
 // Marcadores de horário sugerido (grade de 07:00 a 21:00, de hora em hora)
 // pro modo Liberar + "Um dia específico".
@@ -786,6 +808,34 @@ function paraISOLocal(date) {
   const mes = String(date.getMonth() + 1).padStart(2, "0");
   const dia = String(date.getDate()).padStart(2, "0");
   return `${ano}-${mes}-${dia}`;
+}
+
+// PURA. Datas "YYYY-MM-DD" entre `inicioISO` e `fimISO` (inclusive) cujo dia
+// da semana está em `diasSemana`, nunca antes de hoje (mesmo que `inicioISO`
+// peça uma data passada — o min dos campos de data já impede isso na UI, mas
+// a função fica defensiva). Usada tanto pelo resumo ao vivo quanto por
+// coletarLinhas no modo "liberacao_periodo", pra nunca divergirem. Mesma
+// construção componente-a-componente dos demais loops de data do arquivo
+// (nunca string/UTC).
+function datasNoPeriodoPorDiaSemana(inicioISO, fimISO, diasSemana) {
+  if (!inicioISO || !fimISO || !diasSemana || diasSemana.size === 0) return [];
+  const hojeISO = hojeISOLocal();
+  const inicioEfetivo = inicioISO < hojeISO ? hojeISO : inicioISO;
+  if (fimISO < inicioEfetivo) return [];
+
+  const [ai, mi, di] = inicioEfetivo.split("-").map(Number);
+  const [af, mf, df] = fimISO.split("-").map(Number);
+  const fim = new Date(af, mf - 1, df);
+
+  const datas = [];
+  for (
+    let cursor = new Date(ai, mi - 1, di);
+    cursor <= fim;
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1)
+  ) {
+    if (diasSemana.has(cursor.getDay())) datas.push(paraISOLocal(cursor));
+  }
+  return datas;
 }
 
 // Marcadores "HH:00" cuja hora já começou — desabilitados no grid de
@@ -1618,10 +1668,29 @@ function SecaoAusencias({
   const [avulsasHorarios, setAvulsasHorarios] = useState([]); // "HH:MM" marcados, multi-seleção
   const [avulsasMotivo, setAvulsasMotivo] = useState("");
 
+  // Campos "Vários dias num período" (liberacao_periodo): intervalo
+  // data_inicio..data_fim + dias da semana marcados + grade de horários (igual
+  // à de "Um dia específico"). Ao salvar, expande em uma linha de liberação
+  // comum por (data × horário), presas por um grupo_id novo (ver
+  // coletarLinhas). Só existe no fluxo Liberar.
+  const [libPerInicio, setLibPerInicio] = useState("");
+  const [libPerFim, setLibPerFim] = useState("");
+  const [libPerDias, setLibPerDias] = useState([]); // dia_semana 0..6 marcados
+  const [libPerHorarios, setLibPerHorarios] = useState([]);
+  const [libPerOutroHorario, setLibPerOutroHorario] = useState("");
+  const [libPerMotivo, setLibPerMotivo] = useState("");
+
   // Grupo de "Datas avulsas" pendente de confirmação de exclusão (ver
   // agruparPorGrupoId) — mesma ideia de confirmarBloqueio, mas aqui a
   // exclusão sempre apaga o grupo_id inteiro de uma vez.
   const [confirmarExclusaoGrupo, setConfirmarExclusaoGrupo] = useState(null);
+
+  // Grupo de "Vários dias num período" (liberacao_periodo) pendente de
+  // confirmação de exclusão — mesma mecânica de confirmarExclusaoGrupo
+  // (exclusão por grupo_id inteiro, ver excluirGrupo), card/texto próprios
+  // porque aqui excluir FECHA horários liberados, não "desbloqueia" nada.
+  const [confirmarExclusaoLiberacaoPeriodo, setConfirmarExclusaoLiberacaoPeriodo] =
+    useState(null);
 
   // Exclusividade de serviço pendente de confirmação de exclusão (ver
   // agruparExclusividades) — apaga todas as linhas do grupo pelos ids.
@@ -1685,6 +1754,30 @@ function SecaoAusencias({
     );
   }
 
+  function alternarLibPerDia(n) {
+    setLibPerDias((atual) =>
+      atual.includes(n) ? atual.filter((d) => d !== n) : [...atual, n]
+    );
+  }
+
+  function alternarLibPerHorario(h) {
+    setLibPerHorarios((atual) =>
+      atual.includes(h) ? atual.filter((x) => x !== h) : [...atual, h]
+    );
+  }
+
+  // Preenche início/fim do período com o mês inteiro de (ano, mesIdx 0-based) —
+  // atalho dos chips de mês. Início nunca fica no passado (mesmo pedindo o mês
+  // atual): usa hoje nesse caso, igual ao `min` dos campos de data.
+  function aplicarLibPerChipMes(ano, mesIdx) {
+    const ultimoDia = new Date(ano, mesIdx + 1, 0).getDate();
+    const inicioISO = paraISOLocal(new Date(ano, mesIdx, 1));
+    const fimISO = paraISOLocal(new Date(ano, mesIdx, ultimoDia));
+    const hojeISO = hojeISOLocal();
+    setLibPerInicio(inicioISO < hojeISO ? hojeISO : inicioISO);
+    setLibPerFim(fimISO);
+  }
+
   function avulsasMesAnterior() {
     setAvulsasMes((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1));
   }
@@ -1695,9 +1788,8 @@ function SecaoAusencias({
 
   // Zera os campos de todos os formatos (chamado após salvar com sucesso).
   function limparCampos() {
-    // Em Liberar só existe a opção "umdia" (sem opção vazia no select — ver
-    // OPCAO_LIBERACAO_UNICA), então o reset pro estado vazio vale só pro
-    // fluxo de Bloquear.
+    // Em Liberar não há opção vazia no select (ver OPCOES_LIBERACAO), então o
+    // reset pro estado vazio vale só pro fluxo de Bloquear.
     if (tipoRegistro === "ausencia") setModo("");
     setRecDias([]);
     setRecInicio("");
@@ -1717,6 +1809,12 @@ function SecaoAusencias({
     setAvulsasDiaInteiro(true);
     setAvulsasHorarios([]);
     setAvulsasMotivo("");
+    setLibPerInicio("");
+    setLibPerFim("");
+    setLibPerDias([]);
+    setLibPerHorarios([]);
+    setLibPerOutroHorario("");
+    setLibPerMotivo("");
   }
 
   // Valida conforme o `modo` e monta as linhas a inserir. Devolve { erro } ou
@@ -1820,6 +1918,74 @@ function SecaoAusencias({
       };
     }
 
+    // modo === "liberacao_periodo": intervalo data_inicio..data_fim × dias da
+    // semana marcados × horários marcados. Cada combinação (data que casa num
+    // dos dias × horário) vira UMA linha de liberação comum (mesmo formato de
+    // "umdia" acima: tipo "periodo" com data_inicio=data_fim, dia_inteiro
+    // false), todas com o MESMO grupo_id novo — é só uma forma de cadastrar
+    // várias liberações de uma vez; o motor de disponibilidade nunca vê
+    // "período", só as linhas de um dia já expandidas. Só existe no fluxo
+    // Liberar (tipoRegistro já é sempre "liberacao" aqui).
+    if (modo === "liberacao_periodo") {
+      if (!libPerInicio || !libPerFim) {
+        return { erro: "Informe as datas de início e fim do período." };
+      }
+      if (libPerFim < libPerInicio) {
+        return { erro: "A data de fim deve ser igual ou depois do início." };
+      }
+      if (libPerDias.length === 0) {
+        return { erro: "Selecione ao menos um dia da semana." };
+      }
+      const horarios = [
+        ...new Set([
+          ...libPerHorarios,
+          ...(libPerOutroHorario ? [libPerOutroHorario] : []),
+        ]),
+      ];
+      if (horarios.length === 0) {
+        return { erro: "Selecione ao menos um horário." };
+      }
+
+      const datas = datasNoPeriodoPorDiaSemana(
+        libPerInicio,
+        libPerFim,
+        new Set(libPerDias)
+      );
+      if (datas.length === 0) {
+        return {
+          erro: "Nenhuma data do período (a partir de hoje) cai nos dias da semana escolhidos.",
+        };
+      }
+
+      const totalLinhas = datas.length * horarios.length;
+      if (totalLinhas > LIMITE_LOTE_LIBERACAO_PERIODO) {
+        return {
+          erro: `Esse período geraria ${totalLinhas} horários extras, acima do limite de ${LIMITE_LOTE_LIBERACAO_PERIODO}. Reduza o intervalo, os dias ou os horários.`,
+        };
+      }
+
+      const grupoId = crypto.randomUUID();
+      const motivo = libPerMotivo.trim() || null;
+
+      return {
+        linhas: datas.flatMap((data) =>
+          horarios.map((hora_inicio) => ({
+            profissional_id: profissionalId,
+            estabelecimento_id: estabelecimentoId,
+            tipo: "periodo",
+            tipo_registro: "liberacao",
+            data_inicio: data,
+            data_fim: data,
+            dia_inteiro: false,
+            hora_inicio,
+            hora_fim: somarUmaHora(hora_inicio),
+            motivo,
+            grupo_id: grupoId,
+          }))
+        ),
+      };
+    }
+
     // modo === "varios": intervalo sempre em dia inteiro (não combina com liberação).
     if (modo === "varios") {
       if (tipoRegistro === "liberacao") {
@@ -1852,7 +2018,7 @@ function SecaoAusencias({
     }
 
     // modo === "avulsas": N datas não sequenciais, sempre tipo_registro=
-    // "ausencia" (não oferecido em Liberar — ver OPCAO_LIBERACAO_UNICA).
+    // "ausencia" (não oferecido em Liberar — ver OPCOES_LIBERACAO).
     // Todas as linhas do lote levam o MESMO grupo_id novo, pra poder excluir
     // o grupo inteiro de uma vez (ver agruparPorGrupoId / excluirGrupo).
     if (avulsasDatas.length === 0) {
@@ -2040,12 +2206,60 @@ function SecaoAusencias({
     await excluirGrupo(grupoId);
   }
 
+  // Mesma excluirGrupo (delete por grupo_id) do grupo de "Vários dias num
+  // período" — a exclusão em si não distingue a natureza do grupo.
+  async function confirmarExclusaoLiberacaoPeriodoConfirmada() {
+    if (!confirmarExclusaoLiberacaoPeriodo) return;
+    const grupoId = confirmarExclusaoLiberacaoPeriodo.grupoId;
+    setConfirmarExclusaoLiberacaoPeriodo(null);
+    await excluirGrupo(grupoId);
+  }
+
   const classeCampo =
     "rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10";
 
-  // No modo Liberar só "Um dia específico" é oferecido (ver OPCAO_LIBERACAO_UNICA).
+  // No modo Liberar só os formatos de OPCOES_LIBERACAO são oferecidos.
   const opcoesModo =
-    tipoRegistro === "liberacao" ? OPCAO_LIBERACAO_UNICA : OPCOES_AUSENCIA;
+    tipoRegistro === "liberacao" ? OPCOES_LIBERACAO : OPCOES_AUSENCIA;
+
+  // Derivados do modo "liberacao_periodo", pro resumo ao vivo e pro botão de
+  // salvar (ver JSX abaixo): MESMA lista que coletarLinhas calcularia, pra
+  // nunca divergir do que de fato seria salvo.
+  const libPerHorariosEfetivos = [
+    ...new Set([
+      ...libPerHorarios,
+      ...(libPerOutroHorario ? [libPerOutroHorario] : []),
+    ]),
+  ];
+  const libPerDatas = datasNoPeriodoPorDiaSemana(
+    libPerInicio,
+    libPerFim,
+    new Set(libPerDias)
+  );
+  const libPerTotalLinhas = libPerDatas.length * libPerHorariosEfetivos.length;
+  // null quando dá pra salvar; senão, a frase curta do que falta (ver OPÇÃO
+  // "Vários dias num período" no JSX, que desabilita o botão com isto).
+  const libPerFaltando =
+    !libPerInicio || !libPerFim
+      ? "Informe o período."
+      : libPerDatas.length === 0
+        ? "Nenhum dia do período cai nos dias da semana marcados."
+        : libPerHorariosEfetivos.length === 0
+          ? "Selecione ao menos um horário."
+          : null;
+
+  // Atalhos de mês: mês atual + os dois seguintes, rótulo capitalizado
+  // ("Outubro", não "outubro").
+  const libPerChipsMes = [0, 1, 2].map((offset) => {
+    const base = new Date();
+    const data = new Date(base.getFullYear(), base.getMonth() + offset, 1);
+    const nomeMes = data.toLocaleDateString("pt-BR", { month: "long" });
+    return {
+      ano: data.getFullYear(),
+      mesIdx: data.getMonth(),
+      rotulo: nomeMes.charAt(0).toUpperCase() + nomeMes.slice(1),
+    };
+  });
 
   // Marcadores já "normais" pro dia da semana da data escolhida — desabilitados
   // no grid de liberação.
@@ -2078,12 +2292,33 @@ function SecaoAusencias({
     .sort((a, b) =>
       a.data_inicio < b.data_inicio ? -1 : a.data_inicio > b.data_inicio ? 1 : 0
     );
-  // Registros de grupo_id (Datas avulsas) ficam de FORA do agrupamento por
-  // dia único/vários dias — têm o card próprio de agruparPorGrupoId.
+  // Registros de grupo_id ficam de FORA do agrupamento por dia único/vários
+  // dias — têm cartão próprio. Duas naturezas de grupo_id hoje, e cada uma
+  // tem o seu: "Datas avulsas" (tipo_registro="ausencia", card lista cada
+  // data) e "Vários dias num período" (tipo_registro="liberacao", card
+  // mostra faixa de datas + dias da semana — ver gruposLiberacaoPeriodo mais
+  // abaixo). Splitadas por tipo_registro porque são a única marca que as
+  // distingue (mesma tabela, mesma coluna grupo_id).
   const periodosIndividuais = periodos.filter((a) => !a.grupo_id);
-  const periodosAvulsos = periodos.filter((a) => a.grupo_id);
+  const periodosAvulsos = periodos.filter(
+    (a) => a.grupo_id && a.tipo_registro !== "liberacao"
+  );
+  const periodosLiberacaoPeriodo = periodos.filter(
+    (a) => a.grupo_id && a.tipo_registro === "liberacao"
+  );
   const { grupos: gruposPeriodo, multiDia } = agruparPeriodosPorDia(periodosIndividuais);
   const gruposAvulsos = agruparPorGrupoId(periodosAvulsos);
+  // Enriquecido com dataInicio/dataFim (extremos de `datas`) e os dias da
+  // semana presentes no grupo (derivados das próprias datas, não guardados
+  // em coluna própria) — é o que o cartão exibe em vez de listar cada data.
+  const gruposLiberacaoPeriodo = agruparPorGrupoId(periodosLiberacaoPeriodo).map(
+    (grupo) => ({
+      ...grupo,
+      dataInicio: grupo.datas[0],
+      dataFim: grupo.datas[grupo.datas.length - 1],
+      diasSemana: [...new Set(grupo.datas.map(diaSemanaDeISO))].sort((a, b) => a - b),
+    })
+  );
   const vazio =
     gruposRec.length === 0 && periodos.length === 0 && gruposExclusividade.length === 0;
 
@@ -2422,6 +2657,139 @@ function SecaoAusencias({
           </>
         )}
 
+        {/* OPÇÃO — Vários dias num período (liberacao_periodo): intervalo de
+            datas × dias da semana × horários, expandido em liberações de um
+            dia por coletarLinhas. Só existe no fluxo Liberar. */}
+        {modo === "liberacao_periodo" && (
+          <>
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="text-xs font-medium text-body">
+                De
+                <input
+                  type="date"
+                  aria-label="Data de início do período"
+                  min={hoje}
+                  value={libPerInicio}
+                  onChange={(e) => setLibPerInicio(e.target.value)}
+                  className={`mt-1 block ${classeCampo}`}
+                />
+              </label>
+              <label className="text-xs font-medium text-body">
+                Até
+                <input
+                  type="date"
+                  aria-label="Data de fim do período"
+                  min={libPerInicio || hoje}
+                  value={libPerFim}
+                  onChange={(e) => setLibPerFim(e.target.value)}
+                  className={`mt-1 block ${classeCampo}`}
+                />
+              </label>
+            </div>
+
+            <div className="mt-2 flex flex-wrap gap-2">
+              {libPerChipsMes.map((chip) => (
+                <button
+                  key={`${chip.ano}-${chip.mesIdx}`}
+                  type="button"
+                  onClick={() => aplicarLibPerChipMes(chip.ano, chip.mesIdx)}
+                  className="rounded-lg bg-surface px-2.5 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-card"
+                >
+                  {chip.rotulo}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-3">
+              <span className="block text-xs font-medium text-body">
+                Dias da semana
+              </span>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {ORDEM_SEG_DOM.map((n) => {
+                  const info = DIAS.find((d) => d.n === n);
+                  const ativo = libPerDias.includes(n);
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={ativo}
+                      onClick={() => alternarLibPerDia(n)}
+                      className={`rounded-lg px-2.5 py-1.5 text-sm font-medium ring-1 transition ${
+                        ativo
+                          ? "bg-green-600 text-white ring-green-600"
+                          : "bg-card text-body ring-border hover:bg-surface"
+                      }`}
+                    >
+                      {info.curto}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-3">
+              <span className="block text-xs font-medium text-body">
+                Horários
+              </span>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {MARCADORES_HORARIO.map((h) => {
+                  const selecionado = libPerHorarios.includes(h);
+                  return (
+                    <button
+                      key={h}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={selecionado}
+                      onClick={() => alternarLibPerHorario(h)}
+                      className={`flex h-10 w-10 items-center justify-center rounded-full text-xs font-medium ring-1 transition ${
+                        selecionado
+                          ? "bg-green-600 text-white ring-green-600"
+                          : "bg-card text-body ring-border hover:bg-surface"
+                      }`}
+                    >
+                      {h}
+                    </button>
+                  );
+                })}
+              </div>
+              <label className="mt-3 block text-xs font-medium text-body">
+                Outro horário (opcional)
+                <input
+                  type="time"
+                  aria-label="Outro horário de liberação"
+                  value={libPerOutroHorario}
+                  onChange={(e) => setLibPerOutroHorario(e.target.value)}
+                  className={`mt-1 block w-28 ${classeCampo}`}
+                />
+              </label>
+            </div>
+
+            <label className="mt-3 block text-xs font-medium text-body">
+              Motivo (opcional)
+              <input
+                type="text"
+                value={libPerMotivo}
+                onChange={(e) => setLibPerMotivo(e.target.value)}
+                placeholder="Ex.: horários extras de fim de ano…"
+                className={`mt-1 block w-full ${classeCampo}`}
+              />
+            </label>
+
+            <p className="mt-3 text-xs text-muted">
+              {libPerFaltando
+                ? libPerFaltando
+                : `Isso abre ${libPerTotalLinhas} horário${
+                    libPerTotalLinhas === 1 ? "" : "s"
+                  } extra${libPerTotalLinhas === 1 ? "" : "s"} em ${
+                    libPerDatas.length
+                  } dia${libPerDatas.length === 1 ? "" : "s"}, de ${formatarDataBR(
+                    libPerInicio
+                  )} a ${formatarDataBR(libPerFim)}.`}
+            </p>
+          </>
+        )}
+
         {/* OPÇÃO 3 — Vários dias (periodo, intervalo, sempre dia inteiro). */}
         {modo === "varios" && (
           <>
@@ -2574,7 +2942,7 @@ function SecaoAusencias({
           <button
             type="button"
             onClick={salvar}
-            disabled={salvando}
+            disabled={salvando || (modo === "liberacao_periodo" && Boolean(libPerFaltando))}
             className={`mt-3 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
               tipoRegistro === "liberacao"
                 ? "bg-green-600 text-white hover:bg-green-700"
@@ -2722,6 +3090,49 @@ function SecaoAusencias({
                   </li>
                 ))}
               </ul>
+            </div>
+          ))}
+
+          {/* Grupos de "Vários dias num período" (liberacao_periodo), um
+              cartão por grupo_id — SEMPRE visível, fora da paginação por mês
+              (o período pode atravessar vários meses). Mostra a faixa de
+              datas + dias da semana + horários, nunca cada data isolada (ver
+              gruposLiberacaoPeriodo acima); excluir apaga o grupo_id inteiro
+              (mesma excluirGrupo das Datas avulsas). */}
+          {gruposLiberacaoPeriodo.length > 0 && (
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Liberações por período
+            </p>
+          )}
+          {gruposLiberacaoPeriodo.map((grupo) => (
+            <div
+              key={grupo.grupoId}
+              className="flex items-start justify-between gap-3 rounded-xl border-l-4 border-l-green-500 bg-card p-3 ring-1 ring-border"
+            >
+              <div className="min-w-0">
+                <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-heading">
+                  <SeloTipoRegistro tipoRegistro="liberacao" />
+                  De {formatarDataBR(grupo.dataInicio)} a{" "}
+                  {formatarDataBR(grupo.dataFim)}
+                </p>
+                <p className="mt-1 text-xs text-body">
+                  {grupo.diasSemana
+                    .map((n) => DIAS.find((d) => d.n === n)?.curto)
+                    .join(", ")}
+                  {" · "}
+                  {grupo.horarios.join(", ")}
+                </p>
+                {grupo.motivo && (
+                  <p className="mt-0.5 text-xs text-muted">{grupo.motivo}</p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmarExclusaoLiberacaoPeriodo(grupo)}
+                className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+              >
+                Excluir
+              </button>
             </div>
           ))}
 
@@ -2899,6 +3310,58 @@ function SecaoAusencias({
               <button
                 type="button"
                 onClick={() => setConfirmarExclusaoGrupo(null)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmação: exclusão de um grupo inteiro de "Vários dias num
+          período" (ver confirmarExclusaoLiberacaoPeriodoConfirmada) — texto
+          próprio porque aqui excluir FECHA horários liberados, não
+          "desbloqueia" nada (ver o diálogo de Datas avulsas acima). */}
+      {confirmarExclusaoLiberacaoPeriodo && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-excluir-liberacao-periodo"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
+          onClick={() => setConfirmarExclusaoLiberacaoPeriodo(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-excluir-liberacao-periodo"
+              className="text-lg font-semibold text-heading"
+            >
+              Excluir liberação por período
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Tem certeza que deseja excluir este grupo? Isso vai fechar{" "}
+              <span className="font-medium text-heading">
+                {confirmarExclusaoLiberacaoPeriodo.datas.length === 1
+                  ? "1 horário liberado"
+                  : `${confirmarExclusaoLiberacaoPeriodo.datas.length * confirmarExclusaoLiberacaoPeriodo.horarios.length} horários liberados`}
+              </span>
+              .
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarExclusaoLiberacaoPeriodoConfirmada}
+                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700"
+              >
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmarExclusaoLiberacaoPeriodo(null)}
                 className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Cancelar
