@@ -7,6 +7,7 @@ import { useSessaoAdmin } from "@/hooks/useSessaoAdmin";
 import AbaCrm, { VISOES_CRM } from "./crm/AbaCrm";
 import AbaAgenda from "./AbaAgenda";
 import AbaAuditoria from "./AbaAuditoria";
+import AbaFinanceiro from "./AbaFinanceiro";
 import MenuSuspenso from "./MenuSuspenso";
 
 // Shell único do /painel-global: guarda de acesso (login + papel 'global'),
@@ -19,6 +20,7 @@ const ABAS = [
   { id: "crm", rotulo: "CRM" },
   { id: "agenda", rotulo: "Agenda" },
   { id: "auditoria", rotulo: "Auditoria" },
+  { id: "financeiro", rotulo: "Financeiro" },
 ];
 
 const ABA_PADRAO = "crm";
@@ -31,6 +33,7 @@ const LARGURA_ABA = {
   crm: "max-w-7xl",
   agenda: "max-w-5xl",
   auditoria: "max-w-2xl",
+  financeiro: "max-w-5xl",
 };
 
 export default function HubPainelGlobal({ abaInicial }) {
@@ -277,6 +280,7 @@ export default function HubPainelGlobal({ abaInicial }) {
         </div>
       )}
       {aba === "auditoria" && <AbaAuditoria />}
+      {aba === "financeiro" && <AbaFinanceiro />}
     </main>
   );
 }
