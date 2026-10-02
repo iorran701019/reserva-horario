@@ -23,6 +23,8 @@ export const metadata = {
     "Sistema de agendamento online para manicures e profissionais de beleza: a cliente marca sozinha, paga o sinal por Pix e recebe os lembretes automaticamente.",
 };
 
+const CNPJ_ACOLHE = "69.166.081/0001-09";
+
 // Âncoras do menu. Fonte única — a ordem aqui é a ordem na tela.
 const SECOES = [
   { href: "#o-que-e", rotulo: "O que é" },
@@ -80,6 +82,18 @@ export default function HomePage() {
             © 2026 Acolhe. Todos os direitos reservados.
           </p>
         </div>
+        <p className="mt-2 text-center text-[10px] text-muted sm:text-xs">
+          CNPJ {CNPJ_ACOLHE}
+        </p>
+        <p className="mt-2 text-center text-[10px] text-muted sm:text-xs">
+          <Link href="/termos" className="underline underline-offset-2 hover:text-heading">
+            Termos de uso
+          </Link>
+          <span aria-hidden="true"> · </span>
+          <Link href="/privacidade" className="underline underline-offset-2 hover:text-heading">
+            Política de privacidade
+          </Link>
+        </p>
       </footer>
     </div>
   );
