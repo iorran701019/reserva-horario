@@ -62,13 +62,22 @@ export function somarMeses(competencia, n) {
 // Quantos meses à frente as faturas são geradas automaticamente.
 export const MESES_A_FRENTE = 3;
 
+// Teto de geração: a RPC não cria faturas além de mês corrente + 6.
+export const MESES_MAXIMO_FRENTE = 6;
+
+export function competenciaMaxima() {
+  return somarMeses(competenciaAtual(), MESES_MAXIMO_FRENTE);
+}
+
 // Até onde gerar automaticamente: o maior entre (mês corrente + 3) e (início
-// da cobrança do salão + 3), para que um início futuro não fique sem faturas.
+// da cobrança do salão + 3), para que um início futuro não fique sem faturas,
+// nunca passando de mês corrente + 6.
 export function horizonteGeracao(inicioCobranca) {
   const base = somarMeses(competenciaAtual(), MESES_A_FRENTE);
-  if (!inicioCobranca) return base;
-  const doInicio = somarMeses(inicioCobranca, MESES_A_FRENTE);
-  return doInicio > base ? doInicio : base;
+  const doInicio = inicioCobranca ? somarMeses(inicioCobranca, MESES_A_FRENTE) : base;
+  const horizonte = doInicio > base ? doInicio : base;
+  const maximo = competenciaMaxima();
+  return horizonte > maximo ? maximo : horizonte;
 }
 
 // "YYYY-MM-DD" -> Date local (meio-dia não é necessário: só formatamos).
@@ -137,6 +146,20 @@ export function faturaVencida(fatura, hoje) {
   return fatura.status === "aberta" && fatura.vencimento < hoje;
 }
 
+// Aberta com pagamento informado pela dona, esperando confirmação do global.
+export function faturaInformada(fatura) {
+  return fatura.status === "aberta" && Boolean(fatura.pagamento_informado_em);
+}
+
+// Aberta cujo pagamento informado foi recusado (e ainda não reinformado).
+export function faturaRecusada(fatura) {
+  return (
+    fatura.status === "aberta" &&
+    !fatura.pagamento_informado_em &&
+    Boolean(fatura.pagamento_recusado_em)
+  );
+}
+
 export const ROTULO_STATUS = {
   aberta: "Aberta",
   paga: "Paga",
@@ -146,7 +169,8 @@ export const ROTULO_STATUS = {
 
 // Classes de badge por status (tokens de cor do tema, sem hex).
 export function classeBadge(fatura, hoje) {
-  if (faturaVencida(fatura, hoje)) return "bg-red-50 text-red-700 ring-red-200";
+  if (faturaInformada(fatura)) return "bg-amber-50 text-amber-700 ring-amber-200";
+  if (faturaRecusada(fatura) || faturaVencida(fatura, hoje)) return "bg-red-50 text-red-700 ring-red-200";
   if (fatura.status === "paga") return "bg-green-50 text-green-700 ring-green-200";
   if (fatura.status === "aberta") return "bg-amber-50 text-amber-700 ring-amber-200";
   if (fatura.status === "isenta") return "bg-blue-50 text-blue-700 ring-blue-200";

@@ -73,6 +73,7 @@ import {
   Pencil,
   PieChart,
   Moon,
+  CreditCard,
 } from "lucide-react";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
@@ -91,6 +92,7 @@ import {
 } from "@/lib/clientesAdmin";
 import ConfiguracoesSalao from "./ConfiguracoesSalao";
 import Relatorios from "./Relatorios";
+import AbaAssinatura from "./AbaAssinatura";
 import FormularioAgendamento, { CalendarioDias } from "@/components/FormularioAgendamento";
 import IdentificacaoClienteAdmin from "@/components/IdentificacaoClienteAdmin";
 import AtivarNotificacoes from "@/components/AtivarNotificacoes";
@@ -308,6 +310,8 @@ const ABAS_PAI = [
   { id: "clientes", rotulo: "Clientes", Icone: UserRound },
   { id: "relatorios", rotulo: "Relatórios", Icone: PieChart },
   { id: "regras", rotulo: "Regras de negócio", Icone: Settings },
+  // Só aparece pra salão com linha em `assinaturas` (ver temAssinatura).
+  { id: "assinatura", rotulo: "Assinatura", Icone: CreditCard },
 ];
 
 // Filtros da aba Histórico (client-side, por categoria de rotuloHistorico).
@@ -1783,6 +1787,26 @@ export default function AdminPage() {
       ativo = false;
     };
   }, [autenticado, salon]);
+
+  // A aba "Assinatura" só existe pra salão com linha em `assinaturas` (a dona
+  // tem SELECT só na do próprio salão). Erro de leitura = sem aba.
+  const [temAssinatura, setTemAssinatura] = useState(false);
+  const estabelecimentoId = estabelecimento?.id;
+  useEffect(() => {
+    if (!estabelecimentoId) return;
+    let ativo = true;
+    (async () => {
+      const { data } = await supabase
+        .from("assinaturas")
+        .select("estabelecimento_id")
+        .eq("estabelecimento_id", estabelecimentoId)
+        .limit(1);
+      if (ativo) setTemAssinatura(Boolean(data?.length));
+    })();
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimentoId]);
 
   // Popup diário de virada de mês: o mês corrente e/ou o seguinte não têm
   // registro em janela_agendamento_meses (ver mesesViradaFaltando). Com a
@@ -4708,6 +4732,10 @@ export default function AdminPage() {
           <Relatorios estabelecimento={estabelecimento} />
         )}
 
+        {!carregando && !erro && viewPai === "assinatura" && temAssinatura && (
+          <AbaAssinatura estabelecimento={estabelecimento} />
+        )}
+
         {/* Regras de negócio: config do salão (escolha_profissional, sinal/Pix
             e prazo de vencimento da manutenção), particionado pelo
             estabelecimento resolvido. */}
@@ -4814,7 +4842,7 @@ export default function AdminPage() {
           </div>
 
           <nav className="flex-1 overflow-y-auto p-2">
-            {ABAS_PAI.map((aba) => {
+            {ABAS_PAI.filter((aba) => aba.id !== "assinatura" || temAssinatura).map((aba) => {
               const ativa = viewPai === aba.id;
               const Icone = iconeAba(aba);
               return (

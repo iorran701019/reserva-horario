@@ -3,11 +3,14 @@
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
+import FormRecusa from "./FormRecusa";
 import SeletorMes from "./SeletorMes";
 import {
   ROTULO_STATUS,
   centavosParaInput,
   classeBadge,
+  faturaInformada,
+  faturaRecusada,
   faturaVencida,
   formatarBRL,
   formatarData,
@@ -64,6 +67,7 @@ export default function DetalheSalao({
   const [salvandoCond, setSalvandoCond] = useState(false);
 
   const [ocupada, setOcupada] = useState(null); // id da fatura/condição em ação
+  const [recusandoId, setRecusandoId] = useState(null);
 
   const [mostrarCanceladas, setMostrarCanceladas] = useState(false);
 
@@ -209,7 +213,13 @@ export default function DetalheSalao({
   const marcarPaga = (f) =>
     mutarFatura(
       f,
-      { status: "paga", pago_em: new Date().toISOString(), forma_pagamento: "manual" },
+      {
+        status: "paga",
+        pago_em: new Date().toISOString(),
+        forma_pagamento: "manual",
+        pagamento_recusado_em: null,
+        pagamento_recusa_motivo: null,
+      },
       (q) => q.eq("status", "aberta"),
       "Fatura marcada como paga."
     );
@@ -217,10 +227,38 @@ export default function DetalheSalao({
   const desfazerPagamento = (f) =>
     mutarFatura(
       f,
-      { status: "aberta", pago_em: null, forma_pagamento: null },
+      { status: "aberta", pago_em: null, forma_pagamento: null, pagamento_informado_em: null },
       (q) => q.eq("status", "paga").eq("forma_pagamento", "manual").is("nf_emitida_em", null),
       "Pagamento desfeito."
     );
+
+  const confirmarInformado = (f) =>
+    mutarFatura(
+      f,
+      {
+        status: "paga",
+        pago_em: new Date().toISOString(),
+        forma_pagamento: "manual",
+        pagamento_recusado_em: null,
+        pagamento_recusa_motivo: null,
+      },
+      (q) => q.eq("status", "aberta").not("pagamento_informado_em", "is", null),
+      "Pagamento confirmado."
+    );
+
+  async function recusarInformado(f, motivo) {
+    await mutarFatura(
+      f,
+      {
+        pagamento_informado_em: null,
+        pagamento_recusado_em: new Date().toISOString(),
+        pagamento_recusa_motivo: motivo,
+      },
+      (q) => q.eq("status", "aberta").not("pagamento_informado_em", "is", null),
+      "Pagamento recusado."
+    );
+    setRecusandoId(null);
+  }
 
   const cancelarFatura = (f) => {
     if (!window.confirm(`Cancelar a fatura de ${rotuloCompetencia(f.competencia)}?`)) return;
@@ -441,7 +479,9 @@ export default function DetalheSalao({
         ) : (
           <ul className="divide-y divide-border">
             {faturasVisiveis.map((f) => {
-              const vencida = faturaVencida(f, hoje);
+              const informada = faturaInformada(f);
+              const recusada = faturaRecusada(f);
+              const vencida = !informada && !recusada && faturaVencida(f, hoje);
               const livre = ocupada === f.id;
               return (
                 <li key={f.id} className="py-3 text-sm">
@@ -466,10 +506,36 @@ export default function DetalheSalao({
                     <span
                       className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ${classeBadge(f, hoje)}`}
                     >
-                      {vencida ? "Vencida" : ROTULO_STATUS[f.status]}
+                      {informada
+                        ? "Aguardando confirmação"
+                        : recusada
+                          ? "Recusado"
+                          : vencida
+                            ? "Vencida"
+                            : ROTULO_STATUS[f.status]}
                     </span>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2">
+                    {informada && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={livre}
+                          onClick={() => confirmarInformado(f)}
+                          className={CLASSE_BOTAO}
+                        >
+                          Confirmar pagamento
+                        </button>
+                        <button
+                          type="button"
+                          disabled={livre}
+                          onClick={() => setRecusandoId(f.id)}
+                          className={CLASSE_BOTAO_PERIGO}
+                        >
+                          Recusar
+                        </button>
+                      </>
+                    )}
                     {f.status === "aberta" && (
                       <>
                         <button
@@ -523,6 +589,13 @@ export default function DetalheSalao({
                       </button>
                     )}
                   </div>
+                  {recusandoId === f.id && (
+                    <FormRecusa
+                      ocupado={livre}
+                      aoConfirmar={(motivo) => recusarInformado(f, motivo)}
+                      aoCancelar={() => setRecusandoId(null)}
+                    />
+                  )}
                 </li>
               );
             })}

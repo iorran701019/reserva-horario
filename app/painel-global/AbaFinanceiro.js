@@ -5,12 +5,14 @@ import { supabase } from "@/lib/supabaseClient";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import AtivarAssinatura from "./financeiro/AtivarAssinatura";
 import DetalheSalao from "./financeiro/DetalheSalao";
+import FormRecusa from "./financeiro/FormRecusa";
 import SeletorMes from "./financeiro/SeletorMes";
 import {
   ROTULO_STATUS,
   classeBadge,
   MES_MINIMO,
   competenciaAtual,
+  faturaInformada,
   faturaVencida,
   formatarBRL,
   formatarInstante,
@@ -45,6 +47,7 @@ export default function AbaFinanceiro() {
   );
   const [gerando, setGerando] = useState(false);
   const [ocupado, setOcupado] = useState(null);
+  const [recusandoId, setRecusandoId] = useState(null);
 
   const avisar = useCallback((tipo, texto) => setAviso({ tipo, texto }), []);
 
@@ -133,6 +136,8 @@ export default function AbaFinanceiro() {
     [faturas, assPorSalao]
   );
 
+  const informados = useMemo(() => faturas.filter(faturaInformada), [faturas]);
+
   const nomeSalao = (id) => saloes?.find((s) => s.id === id)?.nome ?? `Salão ${id}`;
 
   async function marcarNf(fatura) {
@@ -151,6 +156,51 @@ export default function AbaFinanceiro() {
     await carregar();
     setOcupado(null);
     avisar("ok", "Nota fiscal marcada como emitida.");
+  }
+
+  async function resolverInformado(fatura, campos, mensagemOk) {
+    setOcupado(fatura.id);
+    const { data: linhas, error } = await supabase
+      .from("assinatura_faturas")
+      .update(campos)
+      .eq("id", fatura.id)
+      .eq("status", "aberta")
+      .not("pagamento_informado_em", "is", null)
+      .select("id");
+    if (error || !linhas?.length) {
+      setOcupado(null);
+      avisar("erro", `Não foi possível atualizar a fatura: ${mensagemFalhaSalvar(error)}`);
+      return;
+    }
+    await carregar();
+    setOcupado(null);
+    avisar("ok", mensagemOk);
+  }
+
+  const confirmarPagamento = (f) =>
+    resolverInformado(
+      f,
+      {
+        status: "paga",
+        pago_em: new Date().toISOString(),
+        forma_pagamento: "manual",
+        pagamento_recusado_em: null,
+        pagamento_recusa_motivo: null,
+      },
+      "Pagamento confirmado."
+    );
+
+  async function recusarPagamento(f, motivo) {
+    await resolverInformado(
+      f,
+      {
+        pagamento_informado_em: null,
+        pagamento_recusado_em: new Date().toISOString(),
+        pagamento_recusa_motivo: motivo,
+      },
+      "Pagamento recusado."
+    );
+    setRecusandoId(null);
   }
 
   async function ativarAssinatura(salao, campos) {
@@ -249,6 +299,54 @@ export default function AbaFinanceiro() {
 
       <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
         <h2 className="mb-3 text-sm font-semibold text-heading">
+          Pagamentos informados ({informados.length})
+        </h2>
+        {informados.length === 0 ? (
+          <p className="text-sm text-body">Nenhum pagamento aguardando confirmação.</p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {informados.map((f) => (
+              <li key={f.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                <div>
+                  <p className="font-medium text-heading">{nomeSalao(f.estabelecimento_id)}</p>
+                  <p className="text-xs capitalize text-body">
+                    {rotuloCompetencia(f.competencia)} · {formatarBRL(f.valor_centavos)} · informado em{" "}
+                    {formatarInstante(f.pagamento_informado_em)}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={ocupado === f.id}
+                    onClick={() => confirmarPagamento(f)}
+                    className={CLASSE_BOTAO}
+                  >
+                    Confirmar pagamento
+                  </button>
+                  <button
+                    type="button"
+                    disabled={ocupado === f.id}
+                    onClick={() => setRecusandoId(f.id)}
+                    className={CLASSE_BOTAO}
+                  >
+                    Recusar
+                  </button>
+                </div>
+                {recusandoId === f.id && (
+                  <FormRecusa
+                    ocupado={ocupado === f.id}
+                    aoConfirmar={(motivo) => recusarPagamento(f, motivo)}
+                    aoCancelar={() => setRecusandoId(null)}
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="mb-4 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
+        <h2 className="mb-3 text-sm font-semibold text-heading">
           Notas fiscais pendentes ({nfPendentes.length})
         </h2>
         {nfPendentes.length === 0 ? (
@@ -280,7 +378,7 @@ export default function AbaFinanceiro() {
 
       <section className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
         <span className="text-sm font-semibold text-heading">Gerar faturas até</span>
-        <SeletorMes valor={mesGerar} onChange={setMesGerar} rotulo="Gerar faturas até" />
+        <SeletorMes valor={mesGerar} onChange={setMesGerar} rotulo="Gerar faturas até" limitarAoTeto />
         <button type="button" disabled={gerando} onClick={gerarAte} className={CLASSE_BOTAO_PRIMARIO}>
           {gerando ? "Gerando..." : "Gerar faturas"}
         </button>
