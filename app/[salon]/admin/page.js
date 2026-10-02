@@ -93,6 +93,8 @@ import {
 import ConfiguracoesSalao from "./ConfiguracoesSalao";
 import Relatorios from "./Relatorios";
 import AbaAssinatura from "./AbaAssinatura";
+import { alertaAssinatura } from "@/lib/assinatura";
+import { hojeStr, rotuloCompetencia } from "../../painel-global/financeiro/util";
 import FormularioAgendamento, { CalendarioDias } from "@/components/FormularioAgendamento";
 import IdentificacaoClienteAdmin from "@/components/IdentificacaoClienteAdmin";
 import AtivarNotificacoes from "@/components/AtivarNotificacoes";
@@ -1808,6 +1810,76 @@ export default function AdminPage() {
     };
   }, [estabelecimentoId]);
 
+  // Alerta de assinatura (Pendentes + bolinha do menu): faturas do salão, mesma
+  // consulta da AbaAssinatura. Recarrega quando ela informa um pagamento
+  // (versaoFaturas). Calculado, nunca gravado em pendencias_admin.
+  const [faturasAssinatura, setFaturasAssinatura] = useState([]);
+  const [versaoFaturas, setVersaoFaturas] = useState(0);
+  useEffect(() => {
+    if (!estabelecimentoId || !temAssinatura) return;
+    let ativo = true;
+    (async () => {
+      const { data, error } = await supabase
+        .from("assinatura_faturas")
+        .select("*")
+        .eq("estabelecimento_id", estabelecimentoId)
+        .neq("status", "cancelada")
+        .order("competencia", { ascending: false });
+      if (ativo && !error) setFaturasAssinatura(data ?? []);
+    })();
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimentoId, temAssinatura, versaoFaturas]);
+
+  const alertaAssin = temAssinatura ? alertaAssinatura(faturasAssinatura, hojeStr()) : null;
+  const alertaAssinFaturaId = alertaAssin?.fatura.id;
+
+  // "Ciente" do aviso 'proxima': localStorage por fatura; sem storage, só na sessão.
+  const [avisosAssinaturaVistos, setAvisosAssinaturaVistos] = useState([]);
+  function avisoAssinaturaVisto(faturaId) {
+    if (avisosAssinaturaVistos.includes(faturaId)) return true;
+    if (typeof window === "undefined") return false;
+    try {
+      return Boolean(localStorage.getItem(`assinaturaAvisoVisto:${faturaId}`));
+    } catch {
+      return false; // Storage indisponível: o aviso reaparece na próxima sessão.
+    }
+  }
+
+  const cardAssinatura =
+    alertaAssin && (alertaAssin.tipo !== "proxima" || !avisoAssinaturaVisto(alertaAssinFaturaId))
+      ? alertaAssin
+      : null;
+
+  function ciente(faturaId) {
+    setAvisosAssinaturaVistos((v) => [...v, faturaId]);
+    try {
+      localStorage.setItem(`assinaturaAvisoVisto:${faturaId}`, "1");
+    } catch {
+      // Sem storage: vale só até recarregar.
+    }
+  }
+
+  // Rolagem do menu: esmaecido + "Mais opções" quando a lista transborda e não
+  // está no fim.
+  const navDrawerRef = useRef(null);
+  const [menuTemMais, setMenuTemMais] = useState(false);
+  const verificarRolagemMenu = useCallback(() => {
+    const el = navDrawerRef.current;
+    if (!el) return;
+    setMenuTemMais(el.scrollHeight - el.scrollTop - el.clientHeight > 4);
+  }, []);
+  useEffect(() => {
+    if (!drawerAberto) return;
+    const quadro = requestAnimationFrame(verificarRolagemMenu);
+    window.addEventListener("resize", verificarRolagemMenu);
+    return () => {
+      cancelAnimationFrame(quadro);
+      window.removeEventListener("resize", verificarRolagemMenu);
+    };
+  }, [drawerAberto, temAssinatura, verificarRolagemMenu]);
+
   // Popup diário de virada de mês: o mês corrente e/ou o seguinte não têm
   // registro em janela_agendamento_meses (ver mesesViradaFaltando). Com a
   // regra fail-closed (ver mesAgendavel em lib/janelaAgendamento.js) isso
@@ -2820,6 +2892,14 @@ export default function AdminPage() {
         className="fixed right-3 top-3 z-40 rounded-lg bg-black/40 p-2 text-white ring-1 ring-white/20 backdrop-blur-sm transition hover:bg-black/55 sm:right-4 sm:top-4"
       >
         <Menu className="h-7 w-7" />
+        {alertaAssin && (
+          <span
+            aria-hidden="true"
+            className={`absolute right-1 top-1 h-2.5 w-2.5 rounded-full ring-2 ring-white ${
+              alertaAssin.tipo === "proxima" ? "bg-amber-500" : "bg-red-500"
+            }`}
+          />
+        )}
       </button>
 
       <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:py-10">
@@ -3007,14 +3087,73 @@ export default function AdminPage() {
             somem daqui. Confirmar/Cancelar usam os MESMOS handlers de sempre
             (incl. o modal); o refresh derivado faz o item sair do inbox sozinho. */}
         {!carregando && !erro && viewPai === "pendentes" && !verAguardandoConclusao && (
-          inbox.length === 0 && pendenciasAdmin.length === 0 && foraDaJanela.length === 0 ? (
+          inbox.length === 0 && pendenciasAdmin.length === 0 && foraDaJanela.length === 0 && !cardAssinatura ? (
             <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
               Nenhuma pendência.
             </p>
           ) : (
             <>
-            {(inbox.length > 0 || pendenciasAdmin.length > 0) && (
+            {(inbox.length > 0 || pendenciasAdmin.length > 0 || cardAssinatura) && (
             <ul className="space-y-3">
+              {/* Alerta de assinatura: card calculado (não vem de
+                  pendencias_admin), sempre no topo. Vencida/recusada = vermelho
+                  fixo, sem arquivar; próxima = âmbar com "Ciente". */}
+              {cardAssinatura && (() => {
+                const { tipo, fatura } = cardAssinatura;
+                const competencia = rotuloCompetencia(fatura.competencia);
+                const rotuloMes = competencia.charAt(0).toUpperCase() + competencia.slice(1);
+                const vermelho = tipo !== "proxima";
+                return (
+                  <li
+                    key="alerta-assinatura"
+                    className={`rounded-2xl p-4 shadow-sm ring-1 ${
+                      vermelho
+                        ? "bg-red-50 ring-red-200"
+                        : "bg-amber-50 ring-amber-200"
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <CreditCard
+                        className={`h-5 w-5 shrink-0 ${vermelho ? "text-red-600" : "text-amber-600"}`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-heading">
+                          {tipo === "vencida"
+                            ? `Sua assinatura de ${rotuloMes} venceu em ${formatarData(fatura.vencimento)}.`
+                            : tipo === "recusada"
+                              ? `Seu pagamento de ${rotuloMes} não foi confirmado.`
+                              : `Sua assinatura de ${rotuloMes} vence em ${formatarData(fatura.vencimento)}.`}
+                        </p>
+                        {tipo === "recusada" && fatura.pagamento_recusa_motivo && (
+                          <p className="mt-0.5 text-sm text-body">{fatura.pagamento_recusa_motivo}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-4 flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setViewPai("assinatura");
+                          router.push(`${pathname}?aba=assinatura`, { scroll: false });
+                        }}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover"
+                      >
+                        Pagar agora
+                      </button>
+                      {tipo === "proxima" && (
+                        <button
+                          type="button"
+                          onClick={() => ciente(fatura.id)}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading ring-1 ring-border transition hover:bg-surface"
+                        >
+                          Ciente
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })()}
+
               {/* Pendências administrativas (tabela pendencias_admin, ex.:
                   cancelamento pela cliente) — cards visualmente distintos dos
                   agendamentos pendentes abaixo (ver TIPOS_PENDENCIA). */}
@@ -4733,7 +4872,10 @@ export default function AdminPage() {
         )}
 
         {!carregando && !erro && viewPai === "assinatura" && temAssinatura && (
-          <AbaAssinatura estabelecimento={estabelecimento} />
+          <AbaAssinatura
+            estabelecimento={estabelecimento}
+            onPagamentoInformado={() => setVersaoFaturas((v) => v + 1)}
+          />
         )}
 
         {/* Regras de negócio: config do salão (escolha_profissional, sinal/Pix
@@ -4841,7 +4983,12 @@ export default function AdminPage() {
             </button>
           </div>
 
-          <nav className="flex-1 overflow-y-auto p-2">
+          <div className="relative flex min-h-0 flex-1 flex-col">
+          <nav
+            ref={navDrawerRef}
+            onScroll={verificarRolagemMenu}
+            className="flex-1 overflow-y-auto p-2"
+          >
             {ABAS_PAI.filter((aba) => aba.id !== "assinatura" || temAssinatura).map((aba) => {
               const ativa = viewPai === aba.id;
               const Icone = iconeAba(aba);
@@ -4867,11 +5014,41 @@ export default function AdminPage() {
                   }`}
                 >
                   <Icone className="h-5 w-5 shrink-0" />
-                  {rotuloAba(aba)}
+                  {aba.id === "assinatura" && alertaAssin ? (
+                    <>
+                      <span className="font-bold">{rotuloAba(aba)}</span>
+                      <span
+                        aria-hidden="true"
+                        className={`h-2.5 w-2.5 rounded-full ${
+                          alertaAssin.tipo === "proxima" ? "bg-amber-500" : "bg-red-500"
+                        }`}
+                      />
+                    </>
+                  ) : (
+                    rotuloAba(aba)
+                  )}
                 </button>
               );
             })}
           </nav>
+          {menuTemMais && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-card via-card/90 to-transparent pb-2 pt-8">
+              <button
+                type="button"
+                onClick={() =>
+                  navDrawerRef.current?.scrollTo({
+                    top: navDrawerRef.current.scrollHeight,
+                    behavior: "smooth",
+                  })
+                }
+                className="pointer-events-auto inline-flex items-center gap-1 rounded-full bg-card px-3 py-1 text-xs font-semibold text-body ring-1 ring-border transition hover:bg-surface hover:text-heading"
+              >
+                Mais opções
+                <ChevronDown className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+          </div>
 
           {/* Item fixo, visível em qualquer aba (ver componente). */}
           <AtivarNotificacoes estabelecimento={estabelecimento} />

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
-import { situacaoAssinatura } from "@/lib/assinatura";
+import { alertaAssinatura, situacaoAssinatura } from "@/lib/assinatura";
 import { linkWhatsApp, msgComprovanteAssinatura } from "@/lib/whatsapp";
 import { CHAVE_PIX_ACOLHE, TITULAR_PIX_ACOLHE, WHATSAPP_ACOLHE } from "@/lib/plataforma";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
@@ -169,7 +169,7 @@ function BlocoPagamento({ fatura, nomeSalao, aoInformar, erro }) {
   );
 }
 
-export default function AbaAssinatura({ estabelecimento }) {
+export default function AbaAssinatura({ estabelecimento, onPagamentoInformado }) {
   const estabId = estabelecimento?.id;
   const [faturas, setFaturas] = useState(null);
   const [erroCarga, setErroCarga] = useState("");
@@ -219,6 +219,7 @@ export default function AbaAssinatura({ estabelecimento }) {
     }
     setEscolhidaId(null);
     aplicar(await buscar());
+    onPagamentoInformado?.();
     return true;
   }
 
@@ -235,7 +236,7 @@ export default function AbaAssinatura({ estabelecimento }) {
 
   const hoje = hojeStr();
   const mesCorrente = competenciaAtual();
-  const situacao = situacaoAssinatura(faturas, hoje);
+  const alerta = alertaAssinatura(faturas, hoje);
   const faturaMes = faturas.find((f) => f.competencia === mesCorrente);
 
   // O bloco principal é SEMPRE a aberta mais antiga: informada = protocolo
@@ -245,20 +246,34 @@ export default function AbaAssinatura({ estabelecimento }) {
     .filter((f) => f.status === "aberta")
     .sort((a, b) => (a.competencia < b.competencia ? -1 : 1));
   const maisAntiga = abertas[0] ?? null;
-  const proximas = abertas
-    .filter(
-      (f) =>
-        f.id !== maisAntiga?.id && !f.pagamento_informado_em && f.competencia > mesCorrente
-    )
-    .slice(0, MAX_PROXIMAS_FATURAS); // `abertas` já vem por competência crescente
+  // `abertas` já vem por competência crescente.
+  const candidatasAdiantar = abertas.filter(
+    (f) => !f.pagamento_informado_em && f.competencia > mesCorrente
+  );
   // Histórico: até o mês corrente + futuras já pagas ou informadas (adiantadas).
   // Aberta futura não informada nunca entra. `faturas` vem decrescente da query.
   const historico = faturas.filter(
     (f) =>
       f.competencia <= mesCorrente || f.status === "paga" || Boolean(f.pagamento_informado_em)
   );
-  const escolhida = proximas.find((f) => f.id === escolhidaId) ?? null;
-  const faturaBloco = escolhida ?? (maisAntiga && !maisAntiga.pagamento_informado_em ? maisAntiga : null);
+  const escolhida = candidatasAdiantar.find((f) => f.id === escolhidaId) ?? null;
+  // Com alerta, o bloco é a fatura do alerta (mesmo com outra mais antiga já
+  // informada); sem alerta, a regra de sempre.
+  const faturaPadrao = alerta
+    ? alerta.fatura
+    : maisAntiga && !maisAntiga.pagamento_informado_em
+      ? maisAntiga
+      : null;
+  const faturaBloco = escolhida ?? faturaPadrao;
+  const proximas = candidatasAdiantar
+    .filter((f) => f.id !== faturaBloco?.id)
+    .slice(0, MAX_PROXIMAS_FATURAS);
+  // Protocolos: com alerta, uma linha por informada; sem, só a mais antiga.
+  const protocolos = alerta
+    ? abertas.filter(informada)
+    : maisAntiga && informada(maisAntiga)
+      ? [maisAntiga]
+      : [];
 
   function destaqueMes() {
     if (!faturaMes) return { texto: "Sem fatura neste mês", detalhe: null };
@@ -294,18 +309,20 @@ export default function AbaAssinatura({ estabelecimento }) {
       <div
         role="status"
         className={`rounded-2xl px-4 py-3 text-sm font-medium ring-1 ${
-          situacao.nivel === "vencida"
-            ? "bg-red-50 text-red-700 ring-red-200"
-            : situacao.nivel === "proxima"
+          !alerta
+            ? "bg-green-50 text-green-700 ring-green-200"
+            : alerta.tipo === "proxima"
               ? "bg-amber-50 text-amber-700 ring-amber-200"
-              : "bg-green-50 text-green-700 ring-green-200"
+              : "bg-red-50 text-red-700 ring-red-200"
         }`}
       >
-        {situacao.nivel === "vencida"
-          ? `Sua fatura de ${maiuscula(rotuloCompetencia(situacao.fatura.competencia))} está vencida desde ${diaMes(situacao.fatura.vencimento)}.`
-          : situacao.nivel === "proxima"
-            ? `Sua fatura de ${maiuscula(rotuloCompetencia(situacao.fatura.competencia))} vence em ${diaMes(situacao.fatura.vencimento)}.`
-            : "Você está em dia com a assinatura."}
+        {!alerta
+          ? "Você está em dia com a assinatura."
+          : alerta.tipo === "vencida"
+            ? `Sua fatura de ${maiuscula(rotuloCompetencia(alerta.fatura.competencia))} está vencida desde ${diaMes(alerta.fatura.vencimento)}.`
+            : alerta.tipo === "recusada"
+              ? `Seu pagamento de ${maiuscula(rotuloCompetencia(alerta.fatura.competencia))} não foi confirmado.`
+              : `Sua fatura de ${maiuscula(rotuloCompetencia(alerta.fatura.competencia))} vence em ${diaMes(alerta.fatura.vencimento)}.`}
       </div>
 
       <section className={CLASSE_CARTAO}>
@@ -322,11 +339,27 @@ export default function AbaAssinatura({ estabelecimento }) {
         )}
       </section>
 
-      {maisAntiga && informada(maisAntiga) && (
-        <section className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-700 ring-1 ring-amber-200">
-          Pagamento de {maiuscula(rotuloCompetencia(maisAntiga.competencia))} informado em{" "}
-          {formatarDiaHora(maisAntiga.pagamento_informado_em)}. Aguardando confirmação.
+      {protocolos.map((f) => (
+        <section
+          key={f.id}
+          className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-700 ring-1 ring-amber-200"
+        >
+          Pagamento de {maiuscula(rotuloCompetencia(f.competencia))} informado em{" "}
+          {formatarDiaHora(f.pagamento_informado_em)}. Aguardando confirmação.
         </section>
+      ))}
+
+      {escolhida && faturaPadrao && (
+        <button
+          type="button"
+          onClick={() => {
+            setErroPagamento("");
+            setEscolhidaId(null);
+          }}
+          className="text-xs text-muted underline transition hover:text-heading"
+        >
+          Voltar para {maiuscula(rotuloCompetencia(faturaPadrao.competencia))}
+        </button>
       )}
 
       {faturaBloco && (
@@ -359,7 +392,7 @@ export default function AbaAssinatura({ estabelecimento }) {
                   }}
                   className={CLASSE_BOTAO}
                 >
-                  {escolhidaId === f.id ? "Selecionada" : "Pagar adiantado"}
+                  Pagar adiantado
                 </button>
               </li>
             ))}
