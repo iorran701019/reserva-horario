@@ -417,6 +417,12 @@ html[data-modo="noturno"] .escopo-admin {
   --color-teal-50: #1b2f2e;
   --color-teal-100: #1b3836;
   --color-teal-200: #1a4541;
+  --color-cyan-50: #1a2e33;
+  --color-cyan-100: #19373d;
+  --color-cyan-200: #17444b;
+  --color-fuchsia-50: #302238;
+  --color-fuchsia-100: #3a2443;
+  --color-fuchsia-200: #4a2756;
   --color-indigo-50: #252537;
   --color-indigo-100: #292944;
   --color-indigo-200: #2e2f55;
@@ -502,6 +508,20 @@ html[data-modo="noturno"] .escopo-admin .text-teal-700,
 html[data-modo="noturno"] .escopo-admin .text-teal-800,
 html[data-modo="noturno"] .escopo-admin .text-teal-900 {
   color: #5eead4;
+}
+html[data-modo="noturno"] .escopo-admin .text-cyan-500,
+html[data-modo="noturno"] .escopo-admin .text-cyan-600,
+html[data-modo="noturno"] .escopo-admin .text-cyan-700,
+html[data-modo="noturno"] .escopo-admin .text-cyan-800,
+html[data-modo="noturno"] .escopo-admin .text-cyan-900 {
+  color: #67e8f9;
+}
+html[data-modo="noturno"] .escopo-admin .text-fuchsia-500,
+html[data-modo="noturno"] .escopo-admin .text-fuchsia-600,
+html[data-modo="noturno"] .escopo-admin .text-fuchsia-700,
+html[data-modo="noturno"] .escopo-admin .text-fuchsia-800,
+html[data-modo="noturno"] .escopo-admin .text-fuchsia-900 {
+  color: #f0abfc;
 }
 html[data-modo="noturno"] .escopo-admin .text-indigo-500,
 html[data-modo="noturno"] .escopo-admin .text-indigo-600,

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Calendar, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MessageCircleOff, Pencil, X } from "lucide-react";
+import { Calendar, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MessageCircleOff, Pencil, UserRound, X } from "lucide-react";
 import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
 import { formatarPreco } from "@/lib/preco";
 import NavegacaoMes from "@/components/NavegacaoMes";
@@ -40,6 +40,26 @@ import SeletorEtiquetaRapido, {
   COR_ETIQUETA_PADRAO,
   corEtiqueta,
 } from "@/components/SeletorEtiquetaRapido";
+
+// Pílula de contagem do bloco "Etiquetas": ícone de pessoa + número, sem
+// palavra. O texto vai em title/aria-label.
+// `classeCor` é o par de cor do badge da etiqueta (corEtiqueta(cor).badge, o
+// mesmo dos cards); sem ele a pílula fica neutra (desativada / Sem etiqueta).
+// Ícone e número herdam o text-* da pílula via currentColor.
+const CLASSE_PILULA_NEUTRA = "bg-surface text-body ring-border";
+
+function PilulaContagem({ total, descricao, classeCor = CLASSE_PILULA_NEUTRA }) {
+  return (
+    <span
+      title={descricao}
+      aria-label={descricao}
+      className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 ring-1 ${classeCor}`}
+    >
+      <UserRound aria-hidden="true" className="h-3 w-3" />
+      <span className="text-xs font-semibold">{total}</span>
+    </span>
+  );
+}
 
 // Aba "Clientes" do /admin: lista somente-leitura dos clientes do salão
 // (tabela `clientes`, particionada por estabelecimento_id) com busca por nome
@@ -1446,6 +1466,20 @@ export default function GerenciarClientes({
     [etiquetas]
   );
 
+  // Contagem de clientes por etiqueta, derivada da lista `clientes` já em
+  // memória (sem consulta nova). Como patchEtiquetaDoCliente e os handlers de
+  // etiqueta já mexem nesse state, a contagem acompanha sem recarregar.
+  // Etiqueta desativada continua contando: soft delete não desmarca ninguém.
+  const { contagemPorEtiqueta, semEtiqueta } = useMemo(() => {
+    const porEtiqueta = new Map();
+    let sem = 0;
+    for (const c of clientes) {
+      if (c.etiqueta_id == null) sem += 1;
+      else porEtiqueta.set(c.etiqueta_id, (porEtiqueta.get(c.etiqueta_id) ?? 0) + 1);
+    }
+    return { contagemPorEtiqueta: porEtiqueta, semEtiqueta: sem };
+  }, [clientes]);
+
   // Nome + situação de agenda + etiqueta, os três combinados em AND numa
   // passada só. Tudo client-side sobre a lista já carregada.
   const clientesFiltrados = useMemo(() => {
@@ -1546,6 +1580,9 @@ export default function GerenciarClientes({
 
         {blocoEtiquetasAberto && (
           <div className="mt-3 space-y-3">
+            <p className="text-xs text-body">
+              O número indica quantas clientes estão em cada etiqueta.
+            </p>
             {carregandoEtiquetas ? (
               <p className="text-sm text-body">Carregando etiquetas...</p>
             ) : (
@@ -1625,12 +1662,22 @@ export default function GerenciarClientes({
                               <span className="min-w-0 truncate text-sm font-medium text-heading">
                                 {etiqueta.nome}
                               </span>
-
                               {!etiqueta.ativa && (
                                 <span className="shrink-0 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-body ring-1 ring-border">
                                   desativada
                                 </span>
                               )}
+                              <PilulaContagem
+                                total={contagemPorEtiqueta.get(etiqueta.id) ?? 0}
+                                classeCor={
+                                  etiqueta.ativa ? corEtiqueta(etiqueta.cor).badge : undefined
+                                }
+                                descricao={
+                                  (contagemPorEtiqueta.get(etiqueta.id) ?? 0) === 1
+                                    ? "1 cliente com esta etiqueta"
+                                    : `${contagemPorEtiqueta.get(etiqueta.id) ?? 0} clientes com esta etiqueta`
+                                }
+                              />
                             </div>
 
                             {/* Barra de ações: sempre os mesmos 4 controles,
@@ -1692,6 +1739,21 @@ export default function GerenciarClientes({
                         )}
                       </li>
                     ))}
+                    <li className="rounded-lg bg-surface px-3 py-2 ring-1 ring-border">
+                      <div className="flex items-center gap-2">
+                        <span
+                          aria-hidden="true"
+                          className="h-3 w-3 shrink-0 rounded-full ring-1 ring-border"
+                        />
+                        <span className="min-w-0 truncate text-sm font-medium text-heading">
+                          Sem etiqueta
+                        </span>
+                        <PilulaContagem
+                          total={semEtiqueta}
+                          descricao={`${semEtiqueta} ${semEtiqueta === 1 ? "cliente sem etiqueta" : "clientes sem etiqueta"}`}
+                        />
+                      </div>
+                    </li>
                   </ul>
                 )}
 
@@ -1818,6 +1880,23 @@ export default function GerenciarClientes({
             ))}
           </select>
         </div>
+
+        <p className="mt-3 flex items-center gap-1.5 text-xs text-body">
+          <UserRound aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            {algumFiltroAtivo ? (
+              <>
+                <b className="font-semibold text-heading">{clientesFiltrados.length}</b> de{" "}
+                <b className="font-semibold text-heading">{clientes.length}</b> clientes
+              </>
+            ) : (
+              <>
+                <b className="font-semibold text-heading">{clientes.length}</b>{" "}
+                {clientes.length === 1 ? "cliente cadastrada" : "clientes cadastradas"}
+              </>
+            )}
+          </span>
+        </p>
       </div>
 
       {clientesFiltrados.length === 0 ? (
