@@ -952,6 +952,10 @@ export default function FormularioAgendamento({
   const [profissionaisDoServico, setProfissionaisDoServico] = useState([]);
   const [profissionalSelecionado, setProfissionalSelecionado] = useState(null);
   const [carregandoProfissionais, setCarregandoProfissionais] = useState(false);
+  // Falha na consulta de profissionais/liberações do serviço (≠ lista vazia
+  // real). `tentativaCarga` só existe pra "Tentar de novo" re-disparar o efeito.
+  const [erroCargaAgenda, setErroCargaAgenda] = useState(false);
+  const [tentativaCarga, setTentativaCarga] = useState(0);
 
   // Liberações de horário (ausencias: tipo_registro='liberacao', tipo=
   // 'periodo') dos profissionais candidatos — carregadas no MESMO efeito que
@@ -1564,6 +1568,7 @@ export default function FormularioAgendamento({
       if (!servicoSelecionado) {
         setProfissionaisDoServico([]);
         setLiberacoesPeriodo([]);
+        setErroCargaAgenda(false);
         return;
       }
 
@@ -1580,12 +1585,21 @@ export default function FormularioAgendamento({
 
       if (!ativo) return;
 
-      const lista = error
-        ? []
-        : (data ?? [])
-            .map((v) => v.profissionais)
-            .filter(Boolean)
-            .sort((a, b) => a.nome.localeCompare(b.nome));
+      // Erro de consulta NÃO é "nenhum profissional": sem este estado a lista
+      // vazia deixava o calendário aparecer todo cinza (parece agenda lotada).
+      if (error) {
+        console.error("Erro ao carregar profissionais do serviço:", error);
+        setProfissionaisDoServico([]);
+        setLiberacoesPeriodo([]);
+        setErroCargaAgenda(true);
+        setCarregandoProfissionais(false);
+        return;
+      }
+
+      const lista = (data ?? [])
+        .map((v) => v.profissionais)
+        .filter(Boolean)
+        .sort((a, b) => a.nome.localeCompare(b.nome));
       setProfissionaisDoServico(lista);
 
       // Liberações (tipo_registro='liberacao', tipo='periodo') dos
@@ -1606,9 +1620,17 @@ export default function FormularioAgendamento({
           .eq("tipo", "periodo");
 
         if (!ativo) return;
-        setLiberacoesPeriodo(erroLiberacoes ? [] : liberacoes ?? []);
+        if (erroLiberacoes) {
+          console.error("Erro ao carregar liberações de período:", erroLiberacoes);
+          setLiberacoesPeriodo([]);
+          setErroCargaAgenda(true);
+          setCarregandoProfissionais(false);
+          return;
+        }
+        setLiberacoesPeriodo(liberacoes ?? []);
       }
 
+      setErroCargaAgenda(false);
       setCarregandoProfissionais(false);
     }
 
@@ -1616,7 +1638,7 @@ export default function FormularioAgendamento({
     return () => {
       ativo = false;
     };
-  }, [servicoSelecionado, estabelecimento.id]);
+  }, [servicoSelecionado, estabelecimento.id, tentativaCarga]);
 
   // Recalcula o preço de exibição/cobrança quando servicoSelecionado é uma
   // manutenção (ver calcularPrecoManutencao). Precisa do telefone da cliente,
@@ -2220,7 +2242,9 @@ export default function FormularioAgendamento({
         });
       } catch {
         // Falha aqui só devolve o comportamento antigo (abre no mês corrente):
-        // não é erro que a cliente precise ver.
+        // não é erro que a cliente precise ver. Mas a chave sai do Set pra
+        // uma nova tentativa (ex.: "Tentar de novo") poder refazer a busca.
+        mesAutoBuscadoRef.current.delete(chave);
       }
     })();
 
@@ -5142,6 +5166,20 @@ export default function FormularioAgendamento({
                 <p className="text-sm text-on-card">
                   Carregando disponibilidade...
                 </p>
+              ) : erroCargaAgenda ? (
+                <div className="rounded-lg bg-surface px-3 py-3 text-sm text-on-card">
+                  <p>
+                    Não conseguimos carregar a agenda. Verifique sua internet e
+                    tente de novo.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setTentativaCarga((n) => n + 1)}
+                    className="mt-2 rounded-lg bg-primary px-4 py-2 font-medium text-on-primary"
+                  >
+                    Tentar de novo
+                  </button>
+                </div>
               ) : semProfissionalParaAgendar ||
                 (!modoLivre && diasSemanaAtivos.size === 0 && !existeLiberacaoFutura) ? (
                 <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
