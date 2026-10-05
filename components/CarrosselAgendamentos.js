@@ -1,9 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
 import { formatarDataBR, formatarHorario } from "@/lib/data";
 import { nomeEtapaAnterior } from "@/lib/agendamentosCliente";
+import LinkComprovantePix from "@/components/LinkComprovantePix";
+import IconeWhatsApp from "@/components/IconeWhatsApp";
+
+// timestamptz -> "DD/MM, HH:MM" em horário local, pro "enviado em" do comprovante.
+function formatarEnviadoEm(timestamp) {
+  return new Date(timestamp).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 // Selo de status dos agendamentos ATIVOS. Mesma paleta do PainelCliente
 // (SELO_STATUS) — mantém a linguagem visual do status já usada no público.
@@ -162,6 +174,25 @@ export default function CarrosselAgendamentos({
             )}
           </ConteudoItem>
         )}
+        {/* Sinal Pix: arquivo anexado (URL assinada só no clique) ou, sem
+            arquivo, a declaração da cliente. Mesma regra do card de Pendentes. */}
+        {atual?.abacatepay_pago_em ? (
+          <p className="inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-xs font-semibold text-body ring-1 ring-border">
+            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+            Pix confirmado pelo AbacatePay
+          </p>
+        ) : atual?.comprovante_pix_url ? (
+          <LinkComprovantePix
+            caminho={atual.comprovante_pix_url}
+            enviadoEm={atual.comprovante_pix_enviado_em}
+            formatarEnviadoEm={formatarEnviadoEm}
+          />
+        ) : atual?.sinal_declarado_pago ? (
+          <p className="inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-body ring-1 ring-border">
+            <IconeWhatsApp className="h-3.5 w-3.5" />
+            Comprovante declarado pelo WhatsApp
+          </p>
+        ) : null}
         {renderAcoes && renderAcoes(atual)}
       </div>
     </div>

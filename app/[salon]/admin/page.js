@@ -5262,6 +5262,27 @@ export default function AdminPage() {
               </div>
             </dl>
 
+            {/* Sinal Pix: mesma ordem do card de Pendentes (gateway, arquivo anexado ou
+                declaração sem arquivo). `selecionado` vem de `agendamentos`,
+                cujo select já traz as três colunas. */}
+            {selecionado.abacatepay_pago_em ? (
+              <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-xs font-semibold text-body ring-1 ring-border">
+                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                Pix confirmado pelo AbacatePay
+              </p>
+            ) : selecionado.comprovante_pix_url ? (
+              <LinkComprovantePix
+                caminho={selecionado.comprovante_pix_url}
+                enviadoEm={selecionado.comprovante_pix_enviado_em}
+                formatarEnviadoEm={formatarEnviadoEm}
+              />
+            ) : selecionado.sinal_declarado_pago ? (
+              <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-body ring-1 ring-border">
+                <IconeWhatsApp className="h-3.5 w-3.5" />
+                Comprovante declarado pelo WhatsApp
+              </p>
+            ) : null}
+
             {/* Bloco de agenda: estado do lembrete + ação (enviar/reenviar). */}
             <div className="mt-5 border-t border-border pt-4">
               {selecionado.lembrete_enviado_em && (
