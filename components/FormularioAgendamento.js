@@ -153,7 +153,7 @@ const ESTADOS_GRADE_ADMIN = {
     classe: "border-2 border-dashed border-muted bg-card text-on-card",
   },
   liberacao: {
-    legenda: "Liberação extra",
+    legenda: "Horário aberto por você",
     rotulo: null,
     classe: "border-2 border-green-300 bg-green-50 text-on-card",
   },
@@ -965,6 +965,10 @@ export default function FormularioAgendamento({
   const [vagas, setVagas] = useState({});
   const [carregandoSlots, setCarregandoSlots] = useState(false);
   const [erroSlots, setErroSlots] = useState("");
+  // ADMIN (modoLivre): data para a qual o usuário expandiu "outros horários"
+  // da grade. Guardar a data (e não um booleano) faz o estado voltar a
+  // recolhido sozinho ao trocar de dia, sem effect.
+  const [outrosHorariosAbertosEm, setOutrosHorariosAbertosEm] = useState("");
   // Vagas do MÊS VISÍVEL inteiro ({ "YYYY-MM-DD": mapa de vagas }), pra saber
   // de antemão quais dias já não têm horário nenhum e cinzá-los no calendário
   // — sem isso, só descobriríamos isso clicando dia a dia. null = ainda não
@@ -2042,7 +2046,7 @@ export default function FormularioAgendamento({
     ? filtrarPorAntecedenciaMinima(vagas, form.data, estabelecimento, "admin")
     : {};
   // Horários "HH:MM" abertos por uma liberação cobrindo form.data — só pra
-  // pintar o estado "Liberação extra" na grade do admin (a liberação entra em
+  // pintar o estado "Horário aberto por você" na grade do admin (a liberação entra em
   // `livres` no motor, sem marca). Vazio fora do modoLivre.
   const horariosDeLiberacaoDoDia = new Set(
     modoLivre && form.data
@@ -2093,6 +2097,34 @@ export default function FormularioAgendamento({
           .filter(Boolean)
           .filter(({ horario }) => !horarioJaPassouHoje(form.data, horario))
       : [];
+
+  // ADMIN (modoLivre): só "fora do expediente" fica recolhido por padrão. O
+  // horário selecionado nunca é escondido. Expandido, a faixa 05:00–22:00
+  // aparece inteira; fora dela só entra quem tem regra (itens visíveis, que
+  // já são sempre renderizados) — fora do expediente e sem regra, não.
+  const gradeAdminVisiveis = gradeAdmin.filter(
+    (g) => g.chave !== "foraDoModo" || g.horario === horarioSelecionado
+  );
+  const gradeAdminRecolhidos = gradeAdmin.filter(
+    (g) =>
+      g.chave === "foraDoModo" &&
+      g.horario !== horarioSelecionado &&
+      g.horario >= "05:00" &&
+      g.horario <= "22:00"
+  );
+  const selecionadoNoRecolhido = gradeAdmin.some(
+    (g) => g.chave === "foraDoModo" && g.horario === horarioSelecionado
+  );
+  const outrosHorariosExpandidos =
+    gradeAdminRecolhidos.length > 0 &&
+    (outrosHorariosAbertosEm === form.data ||
+      gradeAdminVisiveis.length === 0 ||
+      selecionadoNoRecolhido);
+  const gradeAdminExibida = outrosHorariosExpandidos
+    ? [...gradeAdminVisiveis, ...gradeAdminRecolhidos].sort((a, b) =>
+        a.horario.localeCompare(b.horario)
+      )
+    : gradeAdminVisiveis;
 
   // Mantém `vagas` (mapa horário -> profissionais livres) sincronizado com a
   // data/serviço selecionados. A flag `ativo` cancela corridas entre datas e
@@ -5391,9 +5423,15 @@ export default function FormularioAgendamento({
 
                     {gradeAdmin.length > 0 && (
                       <>
+                        {gradeAdminVisiveis.length === 0 && (
+                          <p className="mb-2 text-xs text-muted">
+                            Nenhum horário em uso neste dia; mostrando também os
+                            fora do expediente.
+                          </p>
+                        )}
                         <ul className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
                           {Object.entries(ESTADOS_GRADE_ADMIN)
-                            .filter(([chave]) => gradeAdmin.some((g) => g.chave === chave))
+                            .filter(([chave]) => gradeAdminExibida.some((g) => g.chave === chave))
                             .map(([chave, estado]) => (
                               <li key={chave} className="flex items-center gap-1.5">
                                 <span
@@ -5405,7 +5443,7 @@ export default function FormularioAgendamento({
                             ))}
                         </ul>
                         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                          {gradeAdmin.map(({ horario, status, motivo, chave }) => {
+                          {gradeAdminExibida.map(({ horario, status, motivo, chave }) => {
                             const selecionado = horarioSelecionado === horario;
                             const estado = ESTADOS_GRADE_ADMIN[chave];
 
@@ -5419,7 +5457,9 @@ export default function FormularioAgendamento({
                                 title={
                                   status === "bloqueado"
                                     ? `Fora das regras normais de agendamento (${ROTULOS_MOTIVO_BLOQUEIO[motivo] ?? motivo})`
-                                    : undefined
+                                    : chave === "liberacao"
+                                      ? "Horário aberto por você"
+                                      : undefined
                                 }
                                 className={[
                                   "flex flex-col items-center rounded-lg px-2 py-2 text-sm font-medium transition hover:border-primary disabled:cursor-not-allowed disabled:opacity-60",
@@ -5438,6 +5478,24 @@ export default function FormularioAgendamento({
                             );
                           })}
                         </div>
+                        {gradeAdminRecolhidos.length > 0 &&
+                          gradeAdminVisiveis.length > 0 &&
+                          !selecionadoNoRecolhido && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setOutrosHorariosAbertosEm(
+                                  outrosHorariosExpandidos ? "" : form.data
+                                )
+                              }
+                              aria-expanded={outrosHorariosExpandidos}
+                              className="mt-2 text-xs text-muted underline-offset-2 transition hover:text-on-card hover:underline"
+                            >
+                              {outrosHorariosExpandidos
+                                ? "Ocultar outros horários"
+                                : `Ver outros horários (${gradeAdminRecolhidos.length})`}
+                            </button>
+                          )}
                       </>
                     )}
                   </>
