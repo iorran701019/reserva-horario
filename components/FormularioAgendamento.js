@@ -145,12 +145,12 @@ const ESTADOS_GRADE_ADMIN = {
   livre: {
     legenda: "Livre",
     rotulo: null,
-    classe: "border-2 border-transparent bg-card text-on-card ring-1 ring-border",
+    classe: "border-2 border-transparent bg-card font-semibold text-heading ring-1 ring-border",
   },
   foraDoModo: {
     legenda: "Fora do expediente",
     rotulo: null,
-    classe: "border-2 border-dashed border-muted bg-card text-on-card",
+    classe: "border-2 border-dashed border-border/60 bg-card text-heading/60",
   },
   liberacao: {
     legenda: "Horário aberto por você",
@@ -702,15 +702,17 @@ export function CalendarioDias({
                   ? "bg-green-50 text-body ring-1 ring-green-200 hover:border-primary hover:ring-primary"
                   : foraDoPrazo
                   ? "bg-orange-50 text-body ring-1 ring-orange-200 hover:border-primary hover:ring-primary"
+                  : liberado
+                  ? "bg-field text-heading/60 hover:border-primary"
                   : "bg-field text-body ring-1 ring-border hover:border-primary hover:ring-primary",
-                liberado && !sel ? "border-2 border-dashed border-muted" : "",
+                liberado && !sel ? "border-2 border-dashed border-border/60" : "",
               ].join(" ")}
             >
               {d}
               {liberado && (
                 <span
                   aria-hidden="true"
-                  className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-muted"
+                  className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-border/60"
                 />
               )}
             </button>
@@ -720,7 +722,7 @@ export function CalendarioDias({
 
       {modoLivre && (
         <p className="mt-2 flex items-center gap-1.5 text-xs text-muted">
-          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-muted" />
+          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-border/60" />
           Fora das regras normais de agendamento (modo livre)
         </p>
       )}
