@@ -5275,6 +5275,7 @@ export default function AdminPage() {
                 caminho={selecionado.comprovante_pix_url}
                 enviadoEm={selecionado.comprovante_pix_enviado_em}
                 formatarEnviadoEm={formatarEnviadoEm}
+                neutro
               />
             ) : selecionado.sinal_declarado_pago ? (
               <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-body ring-1 ring-border">

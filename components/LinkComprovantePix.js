@@ -31,10 +31,13 @@ const VALIDADE_SEGUNDOS = 600;
 //   enviadoEm – agendamentos.comprovante_pix_enviado_em.
 //   formatarEnviadoEm – formatador de timestamp de quem monta (o /admin já
 //               tem o dele, em hora LOCAL).
+//   neutro    – troca o verde fixo (card de Pendentes) por tokens de tema, pra
+//               telas que não são o card de Pendentes (modal do Painel, ficha).
 export default function LinkComprovantePix({
   caminho,
   enviadoEm,
   formatarEnviadoEm,
+  neutro = false,
 }) {
   const [url, setUrl] = useState("");
   const [carregando, setCarregando] = useState(false);
@@ -63,9 +66,15 @@ export default function LinkComprovantePix({
   }
 
   return (
-    <div className="mt-3 rounded-lg bg-green-50 px-3 py-2 ring-1 ring-green-200">
+    <div
+      className={`mt-3 rounded-lg px-3 py-2 ring-1 ${
+        neutro ? "bg-surface ring-border" : "bg-green-50 ring-green-200"
+      }`}
+    >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <p className="text-xs font-bold text-green-800">Comprovante do Pix</p>
+        <p className={`text-xs font-bold ${neutro ? "text-heading" : "text-green-800"}`}>
+          Comprovante do Pix
+        </p>
         {enviadoEm && (
           <p className="text-xs text-body">
             enviado em {formatarEnviadoEm ? formatarEnviadoEm(enviadoEm) : enviadoEm}
@@ -78,7 +87,11 @@ export default function LinkComprovantePix({
           type="button"
           onClick={abrir}
           disabled={carregando}
-          className="mt-1.5 rounded-lg bg-card px-3 py-1.5 text-xs font-medium text-green-800 ring-1 ring-green-200 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+          className={`mt-1.5 rounded-lg bg-card px-3 py-1.5 text-xs font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60 ${
+            neutro
+              ? "text-heading ring-border hover:bg-surface"
+              : "text-green-800 ring-green-200 hover:bg-green-100"
+          }`}
         >
           {carregando ? "Abrindo..." : "Ver comprovante"}
         </button>

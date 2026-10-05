@@ -186,6 +186,7 @@ export default function CarrosselAgendamentos({
             caminho={atual.comprovante_pix_url}
             enviadoEm={atual.comprovante_pix_enviado_em}
             formatarEnviadoEm={formatarEnviadoEm}
+            neutro
           />
         ) : atual?.sinal_declarado_pago ? (
           <p className="inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-body ring-1 ring-border">
