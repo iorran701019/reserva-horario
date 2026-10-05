@@ -137,6 +137,51 @@ const ROTULOS_MOTIVO_BLOQUEIO = {
   antecedencia: "fora da antecedência mínima do salão",
 };
 
+// Visual de cada estado da grade do admin (só modoLivre). Só tokens/escalas de
+// tema (o noturno remapeia as escalas em globals.css), nunca hex. `rotulo` é o
+// texto curto dentro do quadrado (null = sem texto); `legenda` é o nome na
+// legenda acima da grade. Nenhum estado usa ring junto de borda tracejada.
+const ESTADOS_GRADE_ADMIN = {
+  livre: {
+    legenda: "Livre",
+    rotulo: null,
+    classe: "border-2 border-transparent bg-card text-on-card ring-1 ring-border",
+  },
+  foraDoModo: {
+    legenda: "Fora do expediente",
+    rotulo: null,
+    classe: "border-2 border-dashed border-muted bg-card text-on-card",
+  },
+  liberacao: {
+    legenda: "Liberação extra",
+    rotulo: null,
+    classe: "border-2 border-green-300 bg-green-50 text-on-card",
+  },
+  ausencia: {
+    legenda: "Ausência",
+    rotulo: "Ausência",
+    classe: "border-[3px] border-rose-300 bg-gray-100 text-body",
+  },
+  exclusividade: {
+    legenda: "Exclusividade",
+    rotulo: "Exclusividade",
+    classe: "border-[3px] border-rose-300 bg-gray-100 text-body",
+  },
+  antecedencia: {
+    legenda: "Antecedência",
+    rotulo: "Antecedência",
+    classe: "border-2 border-amber-300 bg-amber-50 text-on-card",
+  },
+};
+
+// motivo (disponibilidade.js) -> chave de ESTADOS_GRADE_ADMIN.
+const CHAVE_POR_MOTIVO = {
+  excecao_ausencia: "ausencia",
+  exclusividade_servico: "exclusividade",
+  antecedencia: "antecedencia",
+  fora_do_modo: "foraDoModo",
+};
+
 // "YYYY-MM-DD" de hoje em horário local — usado como mínimo do date picker.
 function dataDeHoje() {
   const agora = new Date();
@@ -658,14 +703,14 @@ export function CalendarioDias({
                   : foraDoPrazo
                   ? "bg-orange-50 text-body ring-1 ring-orange-200 hover:border-primary hover:ring-primary"
                   : "bg-field text-body ring-1 ring-border hover:border-primary hover:ring-primary",
-                liberado && !sel ? "border-2 border-dashed border-violet-300" : "",
+                liberado && !sel ? "border-2 border-dashed border-muted" : "",
               ].join(" ")}
             >
               {d}
               {liberado && (
                 <span
                   aria-hidden="true"
-                  className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-violet-500"
+                  className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-muted"
                 />
               )}
             </button>
@@ -675,7 +720,7 @@ export function CalendarioDias({
 
       {modoLivre && (
         <p className="mt-2 flex items-center gap-1.5 text-xs text-muted">
-          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-violet-500" />
+          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-muted" />
           Fora das regras normais de agendamento (modo livre)
         </p>
       )}
@@ -1611,7 +1656,7 @@ export default function FormularioAgendamento({
       } else {
         const { data: liberacoes, error: erroLiberacoes } = await supabase
           .from("ausencias")
-          .select("profissional_id, data_inicio, data_fim")
+          .select("profissional_id, data_inicio, data_fim, hora_inicio, dia_inteiro")
           .in(
             "profissional_id",
             lista.map((p) => p.id)
@@ -1996,6 +2041,22 @@ export default function FormularioAgendamento({
   const vagasAdminComAntecedencia = modoLivre
     ? filtrarPorAntecedenciaMinima(vagas, form.data, estabelecimento, "admin")
     : {};
+  // Horários "HH:MM" abertos por uma liberação cobrindo form.data — só pra
+  // pintar o estado "Liberação extra" na grade do admin (a liberação entra em
+  // `livres` no motor, sem marca). Vazio fora do modoLivre.
+  const horariosDeLiberacaoDoDia = new Set(
+    modoLivre && form.data
+      ? liberacoesRelevantes
+          .filter(
+            (a) =>
+              a.hora_inicio &&
+              !a.dia_inteiro &&
+              a.data_inicio <= form.data &&
+              form.data <= a.data_fim
+          )
+          .map((a) => String(a.hora_inicio).slice(0, 5))
+      : []
+  );
   const idProfissionalAlvoAdmin = escolherProfissional
     ? profissionalSelecionado?.id ?? null
     : null;
@@ -2005,18 +2066,27 @@ export default function FormularioAgendamento({
           .sort()
           .map((horario) => {
             const entrada = vagasAdminComAntecedencia[horario];
+            const livre = () => ({
+              horario,
+              status: "livre",
+              chave: horariosDeLiberacaoDoDia.has(horario) ? "liberacao" : "livre",
+            });
+            const bloqueadoPor = (motivo) => ({
+              horario,
+              status: "bloqueado",
+              motivo,
+              chave: CHAVE_POR_MOTIVO[motivo] ?? "foraDoModo",
+            });
             if (idProfissionalAlvoAdmin != null) {
-              if (entrada.livres.includes(idProfissionalAlvoAdmin)) {
-                return { horario, status: "livre" };
-              }
+              if (entrada.livres.includes(idProfissionalAlvoAdmin)) return livre();
               const bloqueio = entrada.bloqueados.find(
                 (b) => b.profissionalId === idProfissionalAlvoAdmin
               );
-              return bloqueio ? { horario, status: "bloqueado", motivo: bloqueio.motivo } : null;
+              return bloqueio ? bloqueadoPor(bloqueio.motivo) : null;
             }
-            if (entrada.livres.length > 0) return { horario, status: "livre" };
+            if (entrada.livres.length > 0) return livre();
             if (entrada.bloqueados.length > 0) {
-              return { horario, status: "bloqueado", motivo: entrada.bloqueados[0].motivo };
+              return bloqueadoPor(entrada.bloqueados[0].motivo);
             }
             return null;
           })
@@ -5320,43 +5390,55 @@ export default function FormularioAgendamento({
                     )}
 
                     {gradeAdmin.length > 0 && (
-                      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                        {gradeAdmin.map(({ horario, status, motivo }) => {
-                          const selecionado = horarioSelecionado === horario;
-                          const bloqueado = status === "bloqueado";
-
-                          return (
-                            <button
-                              key={horario}
-                              type="button"
-                              onClick={() => selecionarHorario(horario)}
-                              disabled={criandoReserva}
-                              aria-pressed={selecionado}
-                              title={
-                                bloqueado
-                                  ? `Fora das regras normais de agendamento (${ROTULOS_MOTIVO_BLOQUEIO[motivo] ?? motivo})`
-                                  : undefined
-                              }
-                              className={[
-                                "relative rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
-                                selecionado
-                                  ? "bg-primary text-on-primary ring-primary"
-                                  : bloqueado
-                                  ? "border-2 border-dashed border-violet-300 bg-card text-on-card ring-border hover:border-violet-400"
-                                  : "bg-card text-on-card ring-border hover:border-primary hover:ring-primary",
-                              ].join(" ")}
-                            >
-                              {horario}
-                              {bloqueado && !selecionado && (
+                      <>
+                        <ul className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+                          {Object.entries(ESTADOS_GRADE_ADMIN)
+                            .filter(([chave]) => gradeAdmin.some((g) => g.chave === chave))
+                            .map(([chave, estado]) => (
+                              <li key={chave} className="flex items-center gap-1.5">
                                 <span
                                   aria-hidden="true"
-                                  className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-violet-500"
+                                  className={`h-3 w-3 rounded ${estado.classe}`}
                                 />
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
+                                {estado.legenda}
+                              </li>
+                            ))}
+                        </ul>
+                        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                          {gradeAdmin.map(({ horario, status, motivo, chave }) => {
+                            const selecionado = horarioSelecionado === horario;
+                            const estado = ESTADOS_GRADE_ADMIN[chave];
+
+                            return (
+                              <button
+                                key={horario}
+                                type="button"
+                                onClick={() => selecionarHorario(horario)}
+                                disabled={criandoReserva}
+                                aria-pressed={selecionado}
+                                title={
+                                  status === "bloqueado"
+                                    ? `Fora das regras normais de agendamento (${ROTULOS_MOTIVO_BLOQUEIO[motivo] ?? motivo})`
+                                    : undefined
+                                }
+                                className={[
+                                  "flex flex-col items-center rounded-lg px-2 py-2 text-sm font-medium transition hover:border-primary disabled:cursor-not-allowed disabled:opacity-60",
+                                  selecionado
+                                    ? "border-2 border-primary bg-primary text-on-primary"
+                                    : estado.classe,
+                                ].join(" ")}
+                              >
+                                {horario}
+                                {estado.rotulo && (
+                                  <span className="text-[10px] font-normal leading-none">
+                                    {estado.rotulo}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
                     )}
                   </>
                 )}
