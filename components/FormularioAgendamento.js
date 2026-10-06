@@ -1231,9 +1231,12 @@ export default function FormularioAgendamento({
   // Etiqueta da cliente que está agendando. No público vem de
   // clienteInicial.etiqueta_id, propagado pelas RPCs de identificação/cadastro
   // (SÓ o id trafega: nenhuma tela pública mostra nome/emoji de etiqueta). No
-  // /admin, IdentificacaoClienteAdmin já entrega o objeto `etiqueta` inteiro —
-  // os dois formatos são aceitos aqui pra este componente não depender de qual
-  // dos dois consumidores o montou. Declarada AQUI, antes de precisaSinal, que
+  // /admin, clienteInicial pode trazer `etiqueta_id` direto (busca por nome e
+  // ficha do cliente) e/ou o objeto `etiqueta` (com `id` quando vem do
+  // embed ou do SeletorEtiquetaRapido; sem id nos atalhos de Pendentes/
+  // Histórico, que não conhecem a etiqueta) — os dois formatos são aceitos
+  // aqui pra este componente não depender de qual consumidor o montou.
+  // Declarada AQUI, antes de precisaSinal, que
   // a lê (const em TDZ: mais abaixo daria ReferenceError no render).
   const etiquetaClienteId =
     clienteInicial?.etiqueta_id ?? clienteInicial?.etiqueta?.id ?? null;

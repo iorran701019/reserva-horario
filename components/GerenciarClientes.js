@@ -547,6 +547,7 @@ function DetalheCliente({
                   id: clienteAtual.id,
                   nome: clienteAtual.nome,
                   telefone: clienteAtual.whatsapp,
+                  etiqueta_id: clienteAtual.etiqueta_id ?? null,
                 })
               }
               className="inline-flex items-center gap-1.5 rounded-lg bg-field px-3 py-1.5 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
