@@ -30,6 +30,8 @@ import { useNavegacaoTrimestre } from "@/lib/useNavegacaoTrimestre";
 import {
   buscarMesesJanela,
   calcularVagasPorHorario,
+  horarioDentroDaAntecedencia,
+  horarioJaPassou,
   profissionaisLivresNoHorario,
 } from "@/lib/disponibilidade";
 import {
@@ -2168,8 +2170,10 @@ export default function AdminPage() {
           excluirAgendamentoId: agendamentoParaAlterarData.id,
         });
         if (!ativo) return;
+        const agoraGrade = new Date();
         const livres = Object.keys(vagas)
           .filter((h) => vagas[h].includes(agendamentoParaAlterarData.profissional_id))
+          .filter((h) => !horarioJaPassou(dataAlterarData, h, agoraGrade))
           .sort();
         setHorariosAlterarData(livres);
       } catch (e) {
@@ -5982,6 +5986,11 @@ export default function AdminPage() {
                   <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                     {horariosAlterarData.map((slot) => {
                       const sel = horarioAlterarData === slot;
+                      const dentroAntecedencia = horarioDentroDaAntecedencia(
+                        dataAlterarData,
+                        slot,
+                        estabelecimento
+                      );
                       return (
                         <button
                           key={slot}
@@ -5997,6 +6006,11 @@ export default function AdminPage() {
                           ].join(" ")}
                         >
                           {slot}
+                          {dentroAntecedencia && (
+                            <span className="block text-[10px] font-normal leading-tight opacity-80">
+                              Antecedência
+                            </span>
+                          )}
                         </button>
                       );
                     })}
