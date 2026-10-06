@@ -589,6 +589,17 @@ html[data-modo="noturno"] .escopo-admin .grade-livre:not(:hover) {
   border-color: transparent;
 }
 
+/* Fora do expediente / fora das regras: no claro é branco com tracejado e
+   texto cheio; no noturno mantém o visual aprovado (card, texto e tracejado
+   esmaecidos). */
+html[data-modo="noturno"] .escopo-admin .grade-fora {
+  background-color: var(--color-card);
+  color: color-mix(in oklab, var(--color-heading) 50%, transparent);
+}
+html[data-modo="noturno"] .escopo-admin .grade-fora:not(:hover) {
+  border-color: color-mix(in oklab, var(--color-heading) 30%, transparent);
+}
+
 /* FullCalendar sobre ~#121212: borda e listras de ausência mais claras. */
 html[data-modo="noturno"] .escopo-admin .fc {
   --fc-border-color: rgba(255, 255, 255, 0.18);

@@ -150,7 +150,7 @@ const ESTADOS_GRADE_ADMIN = {
   foraDoModo: {
     legenda: "Fora do expediente",
     rotulo: null,
-    classe: "border-2 border-dashed border-heading/30 bg-card text-heading/50",
+    classe: "grade-fora border-2 border-dashed border-heading/50 bg-white text-heading",
   },
   liberacao: {
     legenda: "Horário aberto por você",
@@ -703,11 +703,11 @@ export function CalendarioDias({
                   : foraDoPrazo
                   ? "bg-orange-50 text-body ring-1 ring-orange-200 hover:border-primary hover:ring-primary"
                   : liberado
-                  ? "bg-field text-heading/50 hover:border-primary"
+                  ? "grade-fora bg-white text-heading hover:border-primary"
                   : modoLivre
                   ? "grade-livre border-2 border-heading/60 bg-white text-heading hover:border-primary"
                   : "bg-field text-body ring-1 ring-border hover:border-primary hover:ring-primary",
-                liberado && !sel ? "border-2 border-dashed border-heading/30" : "",
+                liberado && !sel ? "border-2 border-dashed border-heading/50" : "",
               ].join(" ")}
             >
               {d}
