@@ -2162,10 +2162,9 @@ export default function FormularioAgendamento({
                 status: "ocupado",
                 chave: "ocupado",
                 agendamentoId: ag?.id ?? null,
-                rotuloOcupado:
-                  ag && oc.inicial
-                    ? [ag.nome_cliente, nomeServico].filter(Boolean).join(" · ")
-                    : null,
+                rotuloOcupado: ag
+                  ? [ag.nome_cliente, nomeServico].filter(Boolean).join(" · ")
+                  : null,
               };
             };
             const ocupados = entrada.ocupados ?? [];
@@ -2228,6 +2227,24 @@ export default function FormularioAgendamento({
           .map((a) => `${a.id}:${a.status}:${a.horario}:${a.profissional_id}`)
           .join("|")
       : "";
+
+  // Nº real de colunas do grid da grade (muda com as classes responsivas):
+  // lido do CSS resolvido, pra o conector entre slots ocupados do mesmo
+  // agendamento saber quando o vizinho caiu na linha de baixo.
+  const gradeAdminRef = useRef(null);
+  const [colunasGradeAdmin, setColunasGradeAdmin] = useState(3);
+  useEffect(() => {
+    if (!modoLivre) return;
+    function medir() {
+      const el = gradeAdminRef.current;
+      if (!el) return;
+      const n = getComputedStyle(el).gridTemplateColumns.split(" ").filter(Boolean).length;
+      if (n > 0) setColunasGradeAdmin(n);
+    }
+    medir();
+    window.addEventListener("resize", medir);
+    return () => window.removeEventListener("resize", medir);
+  }, [modoLivre, gradeAdminExibida.length]);
 
   // Mantém `vagas` (mapa horário -> profissionais livres) sincronizado com a
   // data/serviço selecionados. A flag `ativo` cancela corridas entre datas e
@@ -5546,11 +5563,18 @@ export default function FormularioAgendamento({
                               </li>
                             ))}
                         </ul>
-                        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                          {gradeAdminExibida.map(({ horario, status, motivo, chave, agendamentoId, rotuloOcupado }) => {
+                        <div ref={gradeAdminRef} className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                          {gradeAdminExibida.map(({ horario, status, motivo, chave, agendamentoId, rotuloOcupado }, indice) => {
                             const ocupado = status === "ocupado";
                             const selecionado = !ocupado && horarioSelecionado === horario;
                             const estado = ESTADOS_GRADE_ADMIN[chave];
+                            const proximo = gradeAdminExibida[indice + 1];
+                            const ligaAoProximo =
+                              ocupado &&
+                              agendamentoId != null &&
+                              proximo?.status === "ocupado" &&
+                              proximo.agendamentoId === agendamentoId &&
+                              (indice + 1) % colunasGradeAdmin !== 0;
 
                             return (
                               <button
@@ -5577,6 +5601,7 @@ export default function FormularioAgendamento({
                                   selecionado
                                     ? "border-2 border-primary bg-primary text-on-primary"
                                     : estado.classe,
+                                  ocupado ? "relative" : "",
                                 ].join(" ")}
                               >
                                 {horario}
@@ -5589,6 +5614,12 @@ export default function FormularioAgendamento({
                                   <span className="mt-0.5 w-full truncate text-[10px] font-normal leading-tight">
                                     {rotuloOcupado}
                                   </span>
+                                )}
+                                {ligaAoProximo && (
+                                  <span
+                                    aria-hidden="true"
+                                    className="pointer-events-none absolute left-full top-1/2 w-2 border-t-2 border-dashed border-heading/40"
+                                  />
                                 )}
                               </button>
                             );
