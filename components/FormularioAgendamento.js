@@ -155,7 +155,7 @@ const ESTADOS_GRADE_ADMIN = {
   liberacao: {
     legenda: "Horário aberto por você",
     rotulo: null,
-    classe: "border-2 border-green-300 bg-green-50 text-on-card",
+    classe: "border-2 border-blue-300 bg-blue-50 text-on-card",
   },
   ausencia: {
     legenda: "Ausência",
@@ -578,6 +578,34 @@ export function CalendarioDias({
     year: "numeric",
   });
 
+  // Legenda (só modoLivre): cada entrada só aparece se existir na tela.
+  const legendaCalendario = [];
+  if (modoLivre) {
+    let temDentro = false;
+    let temFora = false;
+    let temForaRegras = false;
+    for (let d = 1; d <= diasNoMes; d++) {
+      const date = new Date(ano, mesIdx, d);
+      const iso = formatarISO(date);
+      if (iso < min || (minExclusivo != null && iso <= minExclusivo)) continue;
+      if (vencimentoManutencao != null) {
+        if (date <= vencimentoManutencao) temDentro = true;
+        else temFora = true;
+      }
+      if (
+        (!diasSemanaAtivos.has(date.getDay()) && !datasLiberadas.has(iso)) ||
+        !dataAgendavelComMes(iso, estabelecimento, mesesJanela, etiquetaClienteId) ||
+        !diaLiberadoPorEtiqueta(iso, restricoes, etiquetaClienteId)
+      ) {
+        temForaRegras = true;
+      }
+    }
+    if (temDentro) legendaCalendario.push(["dentro", "border-2 border-heading/60 bg-green-100", "Fundo verde = dentro do prazo"]);
+    if (temFora) legendaCalendario.push(["fora", "border-2 border-heading/60 bg-orange-100", "Fundo laranja = fora do prazo"]);
+    if ((temDentro || temFora) && temForaRegras)
+      legendaCalendario.push(["regras", "border-2 border-dashed border-heading/50 bg-white", "Borda tracejada = fora das regras"]);
+  }
+
   return (
     <div className="rounded-xl bg-card p-3 ring-1 ring-border">
       <div className="mb-2 flex items-center justify-between">
@@ -699,18 +727,22 @@ export function CalendarioDias({
                   : sel
                   ? "bg-primary font-semibold text-on-primary ring-1 ring-primary"
                   : dentroDoPrazo
-                  ? `bg-green-50 text-body ring-1 ring-green-200 hover:border-primary hover:ring-primary${modoLivre ? " border-2 border-green-300" : ""}`
+                  ? `bg-green-100 text-body hover:border-primary${modoLivre ? "" : " ring-1 ring-green-200 hover:ring-primary"}`
                   : foraDoPrazo
-                  ? `bg-orange-50 text-body ring-1 ring-orange-200 hover:border-primary hover:ring-primary${modoLivre ? " border-2 border-orange-300" : ""}`
+                  ? `bg-orange-100 text-body hover:border-primary${modoLivre ? "" : " ring-1 ring-orange-200 hover:ring-primary"}`
                   : liberado
                   ? "grade-fora bg-white text-heading hover:border-primary"
                   : modoLivre
                   ? "grade-livre border-2 border-heading/60 bg-white text-heading hover:border-primary"
                   : "bg-field text-body ring-1 ring-border hover:border-primary hover:ring-primary",
-                liberado && !sel
-                  ? `border-2 border-dashed ${
-                      dentroDoPrazo ? "border-green-300" : foraDoPrazo ? "border-orange-300" : "border-heading/50"
-                    }`
+                // Fundo = prazo de manutenção; borda = exceção (nunca a
+                // mesma cor nos dois canais). Só modoLivre tem borda.
+                !sel && (dentroDoPrazo || foraDoPrazo) && modoLivre
+                  ? liberado
+                    ? "border-2 border-dashed border-heading/50"
+                    : "border-2 border-heading/60"
+                  : liberado && !sel
+                  ? "border-2 border-dashed border-heading/50"
                   : "",
               ].join(" ")}
             >
@@ -731,6 +763,17 @@ export function CalendarioDias({
           <span aria-hidden="true" className="h-2 w-2 rounded-full bg-border/60" />
           Fora das regras normais de agendamento (modo livre)
         </p>
+      )}
+
+      {modoLivre && legendaCalendario.length > 0 && (
+        <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+          {legendaCalendario.map(([chave, icone, texto]) => (
+            <li key={chave} className="flex items-center gap-1.5">
+              <span aria-hidden="true" className={`h-3 w-3 rounded ${icone}`} />
+              {texto}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
