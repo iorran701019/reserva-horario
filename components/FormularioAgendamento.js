@@ -145,12 +145,12 @@ const ESTADOS_GRADE_ADMIN = {
   livre: {
     legenda: "Livre",
     rotulo: null,
-    classe: "border-2 border-transparent bg-card font-semibold text-heading ring-1 ring-border",
+    classe: "grade-livre border-2 border-heading/40 bg-white font-semibold text-heading",
   },
   foraDoModo: {
     legenda: "Fora do expediente",
     rotulo: null,
-    classe: "border-2 border-dashed border-border/60 bg-card text-heading/60",
+    classe: "border-2 border-dashed border-heading/30 bg-card text-heading/50",
   },
   liberacao: {
     legenda: "Horário aberto por você",
@@ -703,9 +703,11 @@ export function CalendarioDias({
                   : foraDoPrazo
                   ? "bg-orange-50 text-body ring-1 ring-orange-200 hover:border-primary hover:ring-primary"
                   : liberado
-                  ? "bg-field text-heading/60 hover:border-primary"
+                  ? "bg-field text-heading/50 hover:border-primary"
+                  : modoLivre
+                  ? "grade-livre border-2 border-heading/40 bg-white text-heading hover:border-primary"
                   : "bg-field text-body ring-1 ring-border hover:border-primary hover:ring-primary",
-                liberado && !sel ? "border-2 border-dashed border-border/60" : "",
+                liberado && !sel ? "border-2 border-dashed border-heading/30" : "",
               ].join(" ")}
             >
               {d}
