@@ -145,7 +145,7 @@ const ESTADOS_GRADE_ADMIN = {
   livre: {
     legenda: "Livre",
     rotulo: null,
-    classe: "grade-livre border-2 border-heading/40 bg-white font-semibold text-heading",
+    classe: "grade-livre border-2 border-heading/60 bg-white font-semibold text-heading",
   },
   foraDoModo: {
     legenda: "Fora do expediente",
@@ -705,7 +705,7 @@ export function CalendarioDias({
                   : liberado
                   ? "bg-field text-heading/50 hover:border-primary"
                   : modoLivre
-                  ? "grade-livre border-2 border-heading/40 bg-white text-heading hover:border-primary"
+                  ? "grade-livre border-2 border-heading/60 bg-white text-heading hover:border-primary"
                   : "bg-field text-body ring-1 ring-border hover:border-primary hover:ring-primary",
                 liberado && !sel ? "border-2 border-dashed border-heading/30" : "",
               ].join(" ")}
