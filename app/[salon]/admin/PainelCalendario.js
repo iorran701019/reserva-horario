@@ -125,6 +125,46 @@ function paraHoraCompleta(hora) {
   return `${String(hora).slice(0, 5)}:00`;
 }
 
+// Passo visual (min) do "buraco" que uma liberação de data específica abre
+// dentro de uma ausência recorrente. Aproximação: a duração real do serviço
+// não é conhecida aqui (o motor só protege o INÍCIO do horário liberado).
+const PASSO_LIBERACAO_MIN = 30;
+
+// Horários (minutos) liberados POR DATA ('periodo') pro profissional em `iso`.
+// Só esses vencem uma ausência recorrente — ver aplicarExcecoes em
+// lib/disponibilidade.js. Liberação dia_inteiro/sem hora não abre horário.
+function liberadosPorDataEm(ausencias, profissionalId, iso) {
+  return ausencias
+    .filter(
+      (l) =>
+        (l.tipo_registro ?? "ausencia") === "liberacao" &&
+        l.tipo === "periodo" &&
+        l.profissional_id === profissionalId &&
+        !l.dia_inteiro &&
+        l.hora_inicio &&
+        l.data_inicio <= iso &&
+        iso <= l.data_fim
+    )
+    .map((l) => horaParaMin(l.hora_inicio));
+}
+
+// Recorta [iniMin, fimMin) tirando um buraco por horário liberado; devolve os
+// pedaços restantes ([ini, fim] em minutos), em ordem.
+function recortarLiberados(iniMin, fimMin, liberadosMin) {
+  let pedacos = [[iniMin, fimMin]];
+  for (const lib of [...liberadosMin].sort((a, b) => a - b)) {
+    const buracoFim = lib + PASSO_LIBERACAO_MIN;
+    pedacos = pedacos.flatMap(([ini, fim]) => {
+      if (buracoFim <= ini || lib >= fim) return [[ini, fim]];
+      const resto = [];
+      if (lib > ini) resto.push([ini, lib]);
+      if (buracoFim < fim) resto.push([buracoFim, fim]);
+      return resto;
+    });
+  }
+  return pedacos;
+}
+
 // Calendário do Painel. Recebe `agendamentos` já carregado pela página (sem
 // fetch novo) e deriva os eventos pendentes/confirmados. View inicial é
 // sempre Dia, independente de mobile ou desktop — Dia/Lista/Mês só trocam
@@ -455,7 +495,9 @@ export default function PainelCalendario({
   // do próprio registro. `classNames` aplica o padrão de listras diagonais
   // (ver .ag-evento-ausencia-bloco em app/globals.css) — visualmente distinto
   // de qualquer agendamento real, mesmo tendo a mesma cor de base do
-  // "pendente".
+  // "pendente". Ausência RECORRENTE é recortada nos horários liberados por
+  // data específica (liberacao/periodo): a liberação vence a ausência fixa,
+  // como em aplicarExcecoes; ausência 'periodo' (pontual) nunca é recortada.
   const eventosAusencia = useMemo(() => {
     if (!rangeVisivel) return [];
     const relevantes = ausencias.filter(
@@ -494,22 +536,33 @@ export default function PainelCalendario({
         const horaFim = a.dia_inteiro ? HORA_FECHAMENTO : a.hora_fim;
         const nome = nomePorProfissional.get(a.profissional_id) ?? "Profissional";
 
-        lista.push({
-          id: `ausencia-${a.id}-${iso}`,
-          title: a.motivo ? `Ausência · ${nome} · ${a.motivo}` : `Ausência · ${nome}`,
-          start: `${iso}T${paraHoraCompleta(horaInicio)}`,
-          end: `${iso}T${paraHoraCompleta(horaFim)}`,
-          backgroundColor: CORES_EVENTO.ausencia.fundo,
-          borderColor: CORES_EVENTO.ausencia.borda,
-          textColor: CORES_EVENTO.ausencia.texto,
-          classNames: ["ag-evento-ausencia-bloco"],
-          extendedProps: {
-            ausencia: true,
-            ausenciaRecorrente: a.tipo === "recorrente",
-            motivo: a.motivo ?? "",
-            profissionalNome: nome,
-            diaInteiro: Boolean(a.dia_inteiro),
-          },
+        const pedacos =
+          a.tipo === "recorrente"
+            ? recortarLiberados(
+                horaParaMin(horaInicio),
+                horaParaMin(horaFim),
+                liberadosPorDataEm(ausencias, a.profissional_id, iso)
+              )
+            : [[horaParaMin(horaInicio), horaParaMin(horaFim)]];
+
+        pedacos.forEach(([pIni, pFim], idx) => {
+          lista.push({
+            id: idx === 0 ? `ausencia-${a.id}-${iso}` : `ausencia-${a.id}-${iso}-${idx}`,
+            title: a.motivo ? `Ausência · ${nome} · ${a.motivo}` : `Ausência · ${nome}`,
+            start: `${iso}T${paraHoraCompleta(minParaHora(pIni))}`,
+            end: `${iso}T${paraHoraCompleta(minParaHora(pFim))}`,
+            backgroundColor: CORES_EVENTO.ausencia.fundo,
+            borderColor: CORES_EVENTO.ausencia.borda,
+            textColor: CORES_EVENTO.ausencia.texto,
+            classNames: ["ag-evento-ausencia-bloco"],
+            extendedProps: {
+              ausencia: true,
+              ausenciaRecorrente: a.tipo === "recorrente",
+              motivo: a.motivo ?? "",
+              profissionalNome: nome,
+              diaInteiro: Boolean(a.dia_inteiro),
+            },
+          });
         });
       }
     }
@@ -572,9 +625,15 @@ export default function PainelCalendario({
         if (!dias || !dias.has(diaSemana)) return false;
         const ausenteHoje = ausenciasDiaInteiro.some((a) => {
           if (a.profissional_id !== id) return false;
-          return a.tipo === "recorrente"
-            ? a.dia_semana === diaSemana
-            : a.data_inicio <= iso && iso <= a.data_fim;
+          // Dia_inteiro recorrente cede a uma liberação de data específica
+          // (sobra ao menos aquele horário); o pontual nunca cede.
+          if (a.tipo === "recorrente") {
+            return (
+              a.dia_semana === diaSemana &&
+              liberadosPorDataEm(ausencias, id, iso).length === 0
+            );
+          }
+          return a.data_inicio <= iso && iso <= a.data_fim;
         });
         return !ausenteHoje;
       });

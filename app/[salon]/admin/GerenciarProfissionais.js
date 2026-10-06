@@ -907,27 +907,44 @@ function statusGradeDoDia(lista, diaData, diaSemana) {
   let diaTodoBloqueado = false;
   if (!diaData) return { bloqueados, liberados, diaTodoBloqueado };
 
+  const casaNoDia = (a) =>
+    !ehExclusividade(a) &&
+    ((a.tipo === "recorrente" && a.dia_semana === diaSemana) ||
+      (a.tipo === "periodo" && a.data_inicio <= diaData && diaData <= a.data_fim));
+  const ehLiberacao = (a) => (a.tipo_registro ?? "ausencia") === "liberacao";
+
+  // Passe 1: liberações (mesma ordem de aplicarExcecoes). As de data
+  // específica ('periodo') protegem o horário dos bloqueios FIXOS (recorrentes).
+  const liberadosPorData = new Set();
   for (const a of lista) {
     // Exclusividade não bloqueia nem libera nada — não pinta a grade.
-    if (ehExclusividade(a)) continue;
-    const casaRecorrente = a.tipo === "recorrente" && a.dia_semana === diaSemana;
-    const casaPeriodo =
-      a.tipo === "periodo" && a.data_inicio <= diaData && diaData <= a.data_fim;
-    if (!casaRecorrente && !casaPeriodo) continue;
+    if (!casaNoDia(a) || !ehLiberacao(a) || !a.hora_inicio) continue;
+    liberados.add(paraHHMM(a.hora_inicio));
+    if (a.tipo === "periodo") liberadosPorData.add(paraHHMM(a.hora_inicio));
+  }
 
-    if ((a.tipo_registro ?? "ausencia") === "liberacao") {
-      if (a.hora_inicio) liberados.add(paraHHMM(a.hora_inicio));
-      continue;
-    }
+  // Passe 2: bloqueios. Pontual ('periodo') vence tudo; fixo ('recorrente')
+  // cede aos horários liberados por data e, por isso, nunca marca o dia todo
+  // como bloqueado (a liberação de data é justamente o que o vence).
+  for (const a of lista) {
+    if (!casaNoDia(a) || ehLiberacao(a)) continue;
+    const fixo = a.tipo === "recorrente";
 
     if (a.dia_inteiro) {
-      diaTodoBloqueado = true;
+      if (!fixo) {
+        diaTodoBloqueado = true;
+        continue;
+      }
+      for (const marcador of MARCADORES_HORARIO) {
+        if (!liberadosPorData.has(marcador)) bloqueados.add(marcador);
+      }
       continue;
     }
     if (!a.hora_inicio || !a.hora_fim) continue;
     const ini = minutos(paraHHMM(a.hora_inicio));
     const fim = minutos(paraHHMM(a.hora_fim));
     for (const marcador of MARCADORES_HORARIO) {
+      if (fixo && liberadosPorData.has(marcador)) continue;
       const m = minutos(marcador);
       if (m >= ini && m < fim) bloqueados.add(marcador);
     }
