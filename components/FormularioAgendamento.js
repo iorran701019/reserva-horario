@@ -699,15 +699,19 @@ export function CalendarioDias({
                   : sel
                   ? "bg-primary font-semibold text-on-primary ring-1 ring-primary"
                   : dentroDoPrazo
-                  ? "bg-green-50 text-body ring-1 ring-green-200 hover:border-primary hover:ring-primary"
+                  ? `bg-green-50 text-body ring-1 ring-green-200 hover:border-primary hover:ring-primary${modoLivre ? " border-2 border-green-300" : ""}`
                   : foraDoPrazo
-                  ? "bg-orange-50 text-body ring-1 ring-orange-200 hover:border-primary hover:ring-primary"
+                  ? `bg-orange-50 text-body ring-1 ring-orange-200 hover:border-primary hover:ring-primary${modoLivre ? " border-2 border-orange-300" : ""}`
                   : liberado
                   ? "grade-fora bg-white text-heading hover:border-primary"
                   : modoLivre
                   ? "grade-livre border-2 border-heading/60 bg-white text-heading hover:border-primary"
                   : "bg-field text-body ring-1 ring-border hover:border-primary hover:ring-primary",
-                liberado && !sel ? "border-2 border-dashed border-heading/50" : "",
+                liberado && !sel
+                  ? `border-2 border-dashed ${
+                      dentroDoPrazo ? "border-green-300" : foraDoPrazo ? "border-orange-300" : "border-heading/50"
+                    }`
+                  : "",
               ].join(" ")}
             >
               {d}
