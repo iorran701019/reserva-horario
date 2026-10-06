@@ -172,7 +172,20 @@ const ESTADOS_GRADE_ADMIN = {
     rotulo: "Antecedência",
     classe: "border-2 border-amber-300 bg-amber-50 text-on-card",
   },
+  ocupado: {
+    legenda: "Ocupado",
+    rotulo: null,
+    classe: "border-2 border-heading/40 bg-slate-200 text-body",
+  },
 };
+
+// Status de `agendamentos` que ocupam o horário (rotulam o quadrado "Ocupado").
+const STATUS_OCUPAM_HORARIO = ["confirmado", "pendente", "aguardando_sinal", "concluido"];
+
+function minutosDoHorario(horario) {
+  const [h, m] = String(horario ?? "").split(":").map(Number);
+  return h * 60 + (m || 0);
+}
 
 // motivo (disponibilidade.js) -> chave de ESTADOS_GRADE_ADMIN.
 const CHAVE_POR_MOTIVO = {
@@ -861,6 +874,11 @@ export function CalendarioDias({
 //                   (2+ => entra; 1, 0 ou null => omitido). Não confundir com
 //                   `profissionaisDoServico`, que é a lista de quem atende o
 //                   SERVIÇO escolhido e existe pra outra coisa (o seletor).
+//   agendamentosDoDia / onAbrirAgendamento – SÓ /admin (modoLivre). Lista de
+//                   `agendamentos` do Painel (qualquer data) usada pra rotular os
+//                   quadrados "Ocupado" da grade (nome + serviço); clicar num
+//                   deles chama onAbrirAgendamento(id) em vez de escolher o
+//                   horário.
 //   onEtiquetaAlterada – SÓ /admin, par de mostrarEtiquetaAdmin. Recebe a
 //                   etiqueta nova (ou null) depois do popover gravar, pra quem
 //                   monta patchar o próprio clienteInicial — este componente
@@ -891,6 +909,8 @@ export default function FormularioAgendamento({
   mostrarEtiquetaAdmin = false,
   onEtiquetaAlterada = null,
   qtdProfissionaisAtivos = null,
+  agendamentosDoDia = null,
+  onAbrirAgendamento = null,
 }) {
   const [form, setForm] = useState(() => ({
     ...ESTADO_INICIAL,
@@ -2125,7 +2145,33 @@ export default function FormularioAgendamento({
               motivo,
               chave: CHAVE_POR_MOTIVO[motivo] ?? "foraDoModo",
             });
+            // Casa o intervalo ocupado com o agendamento do Painel (mesmo
+            // profissional e mesmo início). Sem correspondência: Ocupado sem
+            // rótulo e sem id (clique inerte).
+            const ocupadoPor = (oc) => {
+              const ag = (agendamentosDoDia ?? []).find(
+                (a) =>
+                  a.data === form.data &&
+                  a.profissional_id === oc.profissionalId &&
+                  STATUS_OCUPAM_HORARIO.includes(a.status) &&
+                  minutosDoHorario(a.horario) === oc.inicio
+              );
+              const nomeServico = ag?.servicos?.nome ?? ag?.servico_livre ?? null;
+              return {
+                horario,
+                status: "ocupado",
+                chave: "ocupado",
+                agendamentoId: ag?.id ?? null,
+                rotuloOcupado:
+                  ag && oc.inicial
+                    ? [ag.nome_cliente, nomeServico].filter(Boolean).join(" · ")
+                    : null,
+              };
+            };
+            const ocupados = entrada.ocupados ?? [];
             if (idProfissionalAlvoAdmin != null) {
+              const oc = ocupados.find((o) => o.profissionalId === idProfissionalAlvoAdmin);
+              if (oc) return ocupadoPor(oc);
               if (entrada.livres.includes(idProfissionalAlvoAdmin)) return livre();
               const bloqueio = entrada.bloqueados.find(
                 (b) => b.profissionalId === idProfissionalAlvoAdmin
@@ -2136,6 +2182,7 @@ export default function FormularioAgendamento({
             if (entrada.bloqueados.length > 0) {
               return bloqueadoPor(entrada.bloqueados[0].motivo);
             }
+            if (ocupados.length > 0) return ocupadoPor(ocupados[0]);
             return null;
           })
           .filter(Boolean)
@@ -2169,6 +2216,18 @@ export default function FormularioAgendamento({
         a.horario.localeCompare(b.horario)
       )
     : gradeAdminVisiveis;
+
+  // Assinatura do que o Painel sabe do dia (modoLivre): quando um agendamento
+  // muda de data/horário/status/profissional (Alterar data, Cancelar, Trocar
+  // profissional pelo modal), `vagas` precisa ser refeito junto, senão os
+  // quadrados "Ocupado" (prop) e o motor (banco) discordam.
+  const assinaturaAgendamentosDoDia =
+    modoLivre && form.data
+      ? (agendamentosDoDia ?? [])
+          .filter((a) => a.data === form.data)
+          .map((a) => `${a.id}:${a.status}:${a.horario}:${a.profissional_id}`)
+          .join("|")
+      : "";
 
   // Mantém `vagas` (mapa horário -> profissionais livres) sincronizado com a
   // data/serviço selecionados. A flag `ativo` cancela corridas entre datas e
@@ -2233,6 +2292,7 @@ export default function FormularioAgendamento({
     etiquetaClienteId,
     perguntasServico,
     respostasPerguntas,
+    assinaturaAgendamentosDoDia,
   ]);
 
   // Mantém `vagasDoMes` sincronizado com o MÊS VISÍVEL do calendário — uma
@@ -5487,19 +5547,26 @@ export default function FormularioAgendamento({
                             ))}
                         </ul>
                         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                          {gradeAdminExibida.map(({ horario, status, motivo, chave }) => {
-                            const selecionado = horarioSelecionado === horario;
+                          {gradeAdminExibida.map(({ horario, status, motivo, chave, agendamentoId, rotuloOcupado }) => {
+                            const ocupado = status === "ocupado";
+                            const selecionado = !ocupado && horarioSelecionado === horario;
                             const estado = ESTADOS_GRADE_ADMIN[chave];
 
                             return (
                               <button
                                 key={horario}
                                 type="button"
-                                onClick={() => selecionarHorario(horario)}
+                                onClick={() =>
+                                  ocupado
+                                    ? agendamentoId != null && onAbrirAgendamento?.(agendamentoId)
+                                    : selecionarHorario(horario)
+                                }
                                 disabled={criandoReserva}
-                                aria-pressed={selecionado}
+                                aria-pressed={ocupado ? undefined : selecionado}
                                 title={
-                                  status === "bloqueado"
+                                  ocupado
+                                    ? rotuloOcupado ?? "Ocupado"
+                                    : status === "bloqueado"
                                     ? `Fora das regras normais de agendamento (${ROTULOS_MOTIVO_BLOQUEIO[motivo] ?? motivo})`
                                     : chave === "liberacao"
                                       ? "Horário aberto por você"
@@ -5516,6 +5583,11 @@ export default function FormularioAgendamento({
                                 {estado.rotulo && (
                                   <span className="text-[10px] font-normal leading-none">
                                     {estado.rotulo}
+                                  </span>
+                                )}
+                                {rotuloOcupado && (
+                                  <span className="mt-0.5 w-full truncate text-[10px] font-normal leading-tight">
+                                    {rotuloOcupado}
                                   </span>
                                 )}
                               </button>

@@ -4777,6 +4777,8 @@ export default function AdminPage() {
                   // atende — a contagem já está em memória (mesmo estado que
                   // esconde "Trocar profissional"), então não custa uma query.
                   qtdProfissionaisAtivos={qtdProfissionaisAtivos}
+                  agendamentosDoDia={agendamentos}
+                  onAbrirAgendamento={(id) => setIdSelecionado(id)}
                   onSucesso={async ({ form, horario, etapaAnterior }) => {
                     // `form.data`/`horario` são sempre os do atendimento
                     // principal — nos serviços de duas datas o wizard já
