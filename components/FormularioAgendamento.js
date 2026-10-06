@@ -143,7 +143,7 @@ const ROTULOS_MOTIVO_BLOQUEIO = {
 // legenda acima da grade. Nenhum estado usa ring junto de borda tracejada.
 const ESTADOS_GRADE_ADMIN = {
   livre: {
-    legenda: "Livre",
+    legenda: "Disponível",
     rotulo: null,
     classe: "grade-livre border-2 border-heading/60 bg-white font-semibold text-heading",
   },
@@ -600,10 +600,10 @@ export function CalendarioDias({
         temForaRegras = true;
       }
     }
-    if (temDentro) legendaCalendario.push(["dentro", "border-2 border-heading/60 bg-green-100", "Fundo verde = dentro do prazo"]);
-    if (temFora) legendaCalendario.push(["fora", "border-2 border-heading/60 bg-orange-100", "Fundo laranja = fora do prazo"]);
-    if ((temDentro || temFora) && temForaRegras)
-      legendaCalendario.push(["regras", "border-2 border-dashed border-heading/50 bg-white", "Borda tracejada = fora das regras"]);
+    if (temDentro) legendaCalendario.push(["dentro", "border-2 border-heading/60 bg-green-100", "Dentro do prazo de manutenção"]);
+    if (temFora) legendaCalendario.push(["fora", "border-2 border-heading/60 bg-orange-100", "Fora do prazo de manutenção"]);
+    if (temForaRegras)
+      legendaCalendario.push(["regras", "grade-fora border-2 border-dashed border-heading/50 bg-white", "Fora do expediente"]);
   }
 
   return (
@@ -758,15 +758,8 @@ export function CalendarioDias({
         })}
       </div>
 
-      {modoLivre && (
-        <p className="mt-2 flex items-center gap-1.5 text-xs text-muted">
-          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-border/60" />
-          Fora das regras normais de agendamento (modo livre)
-        </p>
-      )}
-
       {modoLivre && legendaCalendario.length > 0 && (
-        <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+        <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
           {legendaCalendario.map(([chave, icone, texto]) => (
             <li key={chave} className="flex items-center gap-1.5">
               <span aria-hidden="true" className={`h-3 w-3 rounded ${icone}`} />
