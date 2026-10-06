@@ -184,6 +184,9 @@ seguinte (status "aberto").
 
 ## 11. Checagem final antes de considerar "no ar"
 - [ ] RLS ativo e cobrindo `anon` + `authenticated` em toda tabela nova usada por esse tenant
+      (toda tabela lida pelo fluxo público precisa de SELECT também para `authenticated`:
+      a dona navega o `/agendar` dos outros salões com a sessão ativa — causa da "agenda
+      sumiu" da Sessão 80)
 - [ ] Testar `/slug-aqui` (fluxo completo: identificação → serviço → data → confirmação) e
       cancelar o agendamento de teste sem notificar
 - [ ] Testar `/slug-aqui/admin` (login funciona, todas as abas carregam)
@@ -198,21 +201,23 @@ seguinte (status "aberto").
 ## Etiquetas de cliente padrão
 
 Ao cadastrar um novo tenant (staging e produção), rodar o SQL abaixo trocando
-`<ID_DO_TENANT>` pelo `estabelecimento_id` real:
+`<ID_DO_TENANT>` pelo `estabelecimento_id` real. Desde a Sessão 80 cada etiqueta nasce com
+uma cor diferente (antes todas nasciam `violeta`):
 
 ```sql
 -- STAGING ou PRODUÇÃO (trocar <ID_DO_TENANT> pelo id real do novo tenant)
 insert into etiquetas_cliente (estabelecimento_id, nome, cor) values
-  (<ID_DO_TENANT>, 'Cliente Fixo', 'violeta'),
-  (<ID_DO_TENANT>, 'Cliente Nova', 'violeta'),
+  (<ID_DO_TENANT>, 'Cliente Fixo', 'esmeralda'),
+  (<ID_DO_TENANT>, 'Cliente Nova', 'azul'),
   (<ID_DO_TENANT>, 'Cliente Ocasional', 'violeta'),
-  (<ID_DO_TENANT>, 'Lista de Espera', 'violeta'),
-  (<ID_DO_TENANT>, 'Lista de Bloqueio', 'violeta');
+  (<ID_DO_TENANT>, 'Lista de Espera', 'fucsia'),
+  (<ID_DO_TENANT>, 'Lista de Bloqueio', 'rosa');
 ```
 
 `cor` aceita só um enum fixo — hoje: `violeta`, `azul`, `rosa`, `esmeralda`, `indigo`,
 `ciano`, `fucsia`, `teal` (conferir a constraint `etiquetas_cliente_cor_check` antes de
-usar outro valor).
+usar outro valor). O enum não tem vermelho nem verde puro: `rosa` marca a Lista de Bloqueio
+e `esmeralda` o Cliente Fixo.
 
 Confirmar com `select * from etiquetas_cliente where estabelecimento_id = <ID_DO_TENANT>;`
 antes de considerar o passo concluído.
