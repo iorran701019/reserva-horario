@@ -727,9 +727,9 @@ export function CalendarioDias({
                   : sel
                   ? "bg-primary font-semibold text-on-primary ring-1 ring-primary"
                   : dentroDoPrazo
-                  ? `bg-green-100 text-body hover:border-primary${modoLivre ? "" : " ring-1 ring-green-200 hover:ring-primary"}`
+                  ? `bg-green-100 text-body hover:border-primary${modoLivre ? " grade-prazo" : " ring-1 ring-green-200 hover:ring-primary"}`
                   : foraDoPrazo
-                  ? `bg-orange-100 text-body hover:border-primary${modoLivre ? "" : " ring-1 ring-orange-200 hover:ring-primary"}`
+                  ? `bg-orange-100 text-body hover:border-primary${modoLivre ? " grade-prazo" : " ring-1 ring-orange-200 hover:ring-primary"}`
                   : liberado
                   ? "grade-fora bg-white text-heading hover:border-primary"
                   : modoLivre
