@@ -663,7 +663,7 @@ const SELOS_TIPO_REGISTRO = {
   ausencia: { rotulo: "Bloqueio", classe: "bg-red-50 text-red-700 ring-1 ring-red-100" },
   liberacao: { rotulo: "Liberação", classe: "bg-green-50 text-green-700 ring-1 ring-green-100" },
   exclusividade_servico: {
-    rotulo: "Exclusivo",
+    rotulo: "Restrição",
     classe: "bg-blue-50 text-blue-700 ring-1 ring-blue-100",
   },
 };
@@ -1579,7 +1579,7 @@ function SecaoExclusividade({
                 De
                 <input
                   type="date"
-                  aria-label="Início da exclusividade"
+                  aria-label="Início da restrição"
                   min={hoje}
                   value={dataInicio}
                   onChange={(e) => setDataInicio(e.target.value)}
@@ -1590,7 +1590,7 @@ function SecaoExclusividade({
                 Até
                 <input
                   type="date"
-                  aria-label="Fim da exclusividade"
+                  aria-label="Fim da restrição"
                   min={dataInicio || hoje}
                   value={dataFim}
                   onChange={(e) => setDataFim(e.target.value)}
@@ -1614,7 +1614,7 @@ function SecaoExclusividade({
         disabled={salvando}
         className="mt-3 inline-flex items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {salvando ? "Adicionando..." : "Adicionar exclusividade"}
+        {salvando ? "Adicionando..." : "Adicionar restrição de serviço"}
       </button>
     </>
   );
@@ -2207,7 +2207,7 @@ function SecaoAusencias({
       .in("id", grupo.ids)
       .select("id");
     if (error || !linhas?.length) {
-      setErro(`Não foi possível excluir a exclusividade: ${mensagemFalhaSalvar(error)}`);
+      setErro(`Não foi possível excluir a restrição de serviço: ${mensagemFalhaSalvar(error)}`);
       return;
     }
     const idsExcluidos = new Set(linhas.map((l) => l.id));
@@ -2383,7 +2383,7 @@ function SecaoAusencias({
           {[
             { valor: "ausencia", rotulo: "Bloquear horário" },
             { valor: "liberacao", rotulo: "Liberar horário" },
-            { valor: "exclusividade_servico", rotulo: "Exclusividade de serviço" },
+            { valor: "exclusividade_servico", rotulo: "Restrição de serviço" },
           ].map((opcao) => {
             const selecionado = tipoRegistro === opcao.valor;
             return (
@@ -3010,7 +3010,7 @@ function SecaoAusencias({
               bloqueio: borda/selo azuis. */}
           {gruposExclusividade.length > 0 && (
             <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-              Exclusividades de serviço
+              Restrições de serviço
             </p>
           )}
           {gruposExclusividade.map((grupo) => {
@@ -3411,7 +3411,7 @@ function SecaoAusencias({
               id="titulo-excluir-exclusividade"
               className="text-lg font-semibold text-heading"
             >
-              Excluir exclusividade
+              Excluir restrição de serviço
             </h2>
             <p className="mt-2 text-sm text-body">
               O serviço volta a aceitar qualquer horário da agenda. Deseja
