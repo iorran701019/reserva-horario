@@ -1977,7 +1977,7 @@ export default function FormularioAgendamento({
         onClick={() => selecionarServico(servico)}
         aria-pressed={selecionado}
         className={[
-          "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left shadow-sm ring-1 transition active:scale-[0.99]",
+          "flex w-full items-center justify-between gap-3 rounded-lg border-l-4 border-l-primary py-3 pl-2 pr-3 text-left shadow-sm ring-1 transition active:scale-[0.99]",
           selecionado
             ? tema
               ? ""
