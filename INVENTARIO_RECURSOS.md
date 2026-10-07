@@ -30,7 +30,7 @@ Criado na Sessão 82 (07/10/2026), a partir do raio-x somente leitura do Claude 
 | 16 | Cor do evento do Google Calendar | `lib/googleCalendarSync.js` ~28 `COLOR_ID_PADRAO="7"`; coluna `estabelecimentos.google_calendar_cor_id` (criada na Sessão 75; gravada `'5'` na Laryssa por SQL) | SQL | Painel global | Baixo | Decidir (varredura 3: entra em "Dados do salão") |
 | 17 | Mensagens de WhatsApp (12 colunas `msg_*`) | Padrões em `lib/whatsapp.js` 62–82; mapa `MENSAGENS_WHATSAPP_CONFIG` ~88 | Dona em `ConfiguracoesSalao`, com prévia e lista de variáveis | Dona (correto) | Baixo | OK |
 | 18 | Alertas de serviço e categoria (`alerta_mensagem`): conteúdo e ordem dos popups | `servicos.alerta_mensagem`, `categorias_servico.alerta_mensagem` | Dona (campo livre) e SQL nos hotfixes da Flávia | Dona, editor estruturado (ver 5 e 6) | Alto enquanto o editor não existe | A fazer (varredura 4) |
-| 19 | Pergunta de pés nas manutenções e aviso "só mãos" nos serviços só de mãos | Perguntas/opções e alertas por serviço, hoje montados por SQL por tenant | SQL | Dona (perguntas já têm tela; alerta ganha o editor de 5) | Médio — onboarding repete o trabalho | Entra no `NOVO_TENANT_CHECKLIST.md` |
+| 19 | Pergunta de pés nas manutenções e aviso "só mãos" nos serviços só de mãos | Perguntas/opções e alertas por serviço, hoje montados por SQL por tenant | SQL | Dona (perguntas já têm tela; alerta ganha o editor de 5) | Médio — onboarding repete o trabalho | Entra no `NOVO_TENANT.md` |
 | 20 | Quem cancelou e quando (`agendamentos` sem carimbo de cancelamento) | Não existe | — | Código: tabela `agendamentos_log` (decidir) | Médio — impede explicar "sumiu" | Decidir |
 
 ## Pontos de atenção cruzados
