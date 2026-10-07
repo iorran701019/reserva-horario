@@ -1899,7 +1899,13 @@ export default function FormularioAgendamento({
     }
     const categoria = categorias.find((c) => c.id === id);
     if (
-      categoria?.alerta_mensagem &&
+      categoria &&
+      resolverMarcadorManutencao(
+        categoria.alerta_mensagem,
+        null,
+        servicos,
+        ocultarPreco
+      ) &&
       !modoLivre &&
       !categoriasAvisadas.has(id)
     ) {
@@ -2846,7 +2852,17 @@ export default function FormularioAgendamento({
       setManutencaoPendente(servico);
       return;
     }
-    if (servico.alerta_mensagem && !modoLivre) {
+    // Decide pela mensagem JÁ resolvida: alerta que só tinha a linha do
+    // marcador (sem manutenção ligada) fica vazio e não abre popup à toa.
+    if (
+      !modoLivre &&
+      resolverMarcadorManutencao(
+        servico.alerta_mensagem,
+        servico,
+        servicos,
+        ocultarPreco
+      )
+    ) {
       setAlertaPendente(servico);
       return;
     }
