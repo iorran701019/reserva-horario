@@ -1961,7 +1961,7 @@ export default function FormularioAgendamento({
 
   // Botão de serviço reaproveitado tanto pelos soltos (sem categoria) quanto
   // pelos agrupados dentro de cada categoria aberta.
-  function renderBotaoServico(servico) {
+  function renderBotaoServico(servico, esmaecer = false) {
     const selecionado = servicoSelecionado?.id === servico.id;
     // Tema (laysla) selecionado: fundo é um TOM CLARO derivado de
     // var(--color-primary) (não mais preenchimento sólido) — texto continua
@@ -1978,6 +1978,9 @@ export default function FormularioAgendamento({
         aria-pressed={selecionado}
         className={[
           "flex w-full items-center justify-between gap-3 rounded-lg border-l-4 border-l-primary py-3 pl-2 pr-3 text-left shadow-sm ring-1 transition active:scale-[0.99]",
+          esmaecer && !selecionado
+            ? "opacity-70 hover:opacity-100 focus-visible:opacity-100 active:opacity-100"
+            : "",
           selecionado
             ? tema
               ? ""
@@ -5253,7 +5256,14 @@ export default function FormularioAgendamento({
                     return (
                       <div
                         key={categoria.id}
-                        className="rounded-lg bg-field ring-1 ring-border"
+                        className={[
+                          "rounded-lg bg-field transition",
+                          aberta
+                            ? "shadow-md ring-2 ring-primary/40"
+                            : categoriaAberta
+                              ? "opacity-70 ring-1 ring-border hover:opacity-100 focus-within:opacity-100 active:opacity-100"
+                              : "ring-1 ring-border",
+                        ].join(" ")}
                       >
                         {/* Cabeçalho: miniatura (opcional) + nome + seta. A
                             foto fica IRMÃ do botão, não dentro dele —
@@ -5336,7 +5346,7 @@ export default function FormularioAgendamento({
                   })}
 
                   {servicosSemCategoria.map((servico) =>
-                    renderBotaoServico(servico)
+                    renderBotaoServico(servico, Boolean(categoriaAberta))
                   )}
                 </div>
               )}
