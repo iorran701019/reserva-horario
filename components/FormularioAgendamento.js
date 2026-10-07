@@ -5795,7 +5795,7 @@ export default function FormularioAgendamento({
                                 )
                               }
                               aria-expanded={outrosHorariosExpandidos}
-                              className="mt-2 text-xs text-muted underline-offset-2 transition hover:text-on-card hover:underline"
+                              className="grade-livre mt-2 w-full rounded-lg border-2 border-heading/60 bg-white px-2 py-2 text-sm font-semibold text-heading transition hover:border-primary active:scale-[0.98]"
                             >
                               {outrosHorariosExpandidos
                                 ? "Ocultar outros horários"
