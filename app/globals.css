@@ -603,6 +603,18 @@ html[data-modo="noturno"] .escopo-admin .grade-fora:not(:hover) {
   border-color: color-mix(in oklab, var(--color-heading) 30%, transparent);
 }
 
+/* Dia fora das regras no CALENDÁRIO (.grade-fora-dia, só no botão do dia; os
+   horários "Fora do expediente" e a legenda seguem com o esmaecido acima):
+   número em cor cheia (--color-heading, igual ao dia disponível) e tracejado opaco (--color-muted), pra
+   parecer clicável. Cores explícitas, sem alpha; o pontinho não é afetado. */
+html[data-modo="noturno"] .escopo-admin .grade-fora.grade-fora-dia {
+  color: var(--color-heading);
+}
+html[data-modo="noturno"] .escopo-admin .grade-fora.grade-fora-dia:not(:hover),
+html[data-modo="noturno"] .escopo-admin .grade-prazo.grade-fora-dia.border-dashed:not(:hover) {
+  border-color: var(--color-muted);
+}
+
 /* Dia de manutenção no calendário do modo livre: fundo (green-100/orange-100)
    vem do noturno; a borda firme do claro vira anel, como no .grade-livre. No
    caso tracejado (fora das regras) preserva o tracejado esmaecido, como no

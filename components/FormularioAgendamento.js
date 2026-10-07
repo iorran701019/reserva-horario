@@ -835,10 +835,10 @@ export function CalendarioDias({
                 // mesma cor nos dois canais). Só modoLivre tem borda.
                 !sel && (dentroDoPrazo || foraDoPrazo) && modoLivre
                   ? liberado
-                    ? "border-2 border-dashed border-heading/50"
+                    ? "grade-fora-dia border-2 border-dashed border-heading/50"
                     : "border-2 border-heading/60"
                   : liberado && !sel
-                  ? "border-2 border-dashed border-heading/50"
+                  ? "grade-fora-dia border-2 border-dashed border-heading/50"
                   : "",
               ].join(" ")}
             >
