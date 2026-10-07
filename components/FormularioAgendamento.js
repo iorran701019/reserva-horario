@@ -1979,7 +1979,7 @@ export default function FormularioAgendamento({
         className={[
           "flex w-full items-center justify-between gap-3 rounded-lg border-l-4 border-l-primary py-3 pl-2 pr-3 text-left shadow-sm ring-1 transition active:scale-[0.99]",
           esmaecer && !selecionado
-            ? "opacity-70 hover:opacity-100 focus-visible:opacity-100 active:opacity-100"
+            ? "opacity-50 hover:opacity-100 focus-visible:opacity-100 active:opacity-100"
             : "",
           selecionado
             ? tema
@@ -5259,9 +5259,9 @@ export default function FormularioAgendamento({
                         className={[
                           "rounded-lg bg-field transition",
                           aberta
-                            ? "shadow-md ring-2 ring-primary/40"
+                            ? "shadow-md ring-2 ring-primary/70"
                             : categoriaAberta
-                              ? "opacity-70 ring-1 ring-border hover:opacity-100 focus-within:opacity-100 active:opacity-100"
+                              ? "opacity-50 ring-1 ring-border hover:opacity-100 focus-within:opacity-100 active:opacity-100"
                               : "ring-1 ring-border",
                         ].join(" ")}
                       >
