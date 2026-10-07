@@ -29,7 +29,8 @@ import {
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import {
   calcularPrecoManutencao,
-  buscarVencimentoManutencao,
+  buscarUltimoConcluidoManutencao,
+  classificarDiasManutencao,
 } from "@/lib/manutencaoSugerida";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 import { ehStatusSucesso } from "@/lib/particao";
@@ -609,10 +610,14 @@ function perguntaDeveAparecer(pergunta, respostas) {
 //                   aqui: no público a etiqueta é invisível, só o id decide.
 //   etiquetaClienteId – clientes.etiqueta_id de quem está agendando (null =
 //                   sem cliente identificado ou sem etiqueta).
-//   vencimentoManutencao – Date (meia-noite local) do vencimento da manutenção
-//                   selecionada, ou null. Quando presente, só INFORMA (não
-//                   bloqueia): dias até e incluindo o vencimento ganham um
-//                   fundo verde sutil, dias após ganham laranja. Um dia
+//   ultimoConcluidoManutencao – "YYYY-MM-DD" do último atendimento concluído
+//                   do serviço de origem da manutenção selecionada, ou null.
+//   manutencao       – a manutenção selecionada (precisa de prazo_inicio_dias/
+//                   prazo_fim_dias). Juntas, as duas props classificam cada dia
+//                   (classificarDiasManutencao): "dentro" da faixa = fundo
+//                   verde sutil, "depois" = laranja, "sem-info" = sem cor.
+//                   "antes" (cedo demais): no PÚBLICO o dia fica desabilitado;
+//                   no modoLivre (admin) não bloqueia e fica sem cor. Um dia
 //                   desabilitado (cinza, sem profissional) mantém prioridade
 //                   visual sobre essas cores.
 //   modoLivre        – true no /admin (ver FormularioAgendamento): `fechado`,
@@ -655,7 +660,8 @@ export function CalendarioDias({
   mesesJanela = NENHUM_MES_CONFIGURADO,
   restricoes = NENHUMA_RESTRICAO,
   etiquetaClienteId = null,
-  vencimentoManutencao,
+  ultimoConcluidoManutencao = null,
+  manutencao = null,
   minExclusivo = null,
   modoLivre = false,
 }) {
@@ -684,10 +690,9 @@ export function CalendarioDias({
       const date = new Date(ano, mesIdx, d);
       const iso = formatarISO(date);
       if (iso < min || (minExclusivo != null && iso <= minExclusivo)) continue;
-      if (vencimentoManutencao != null) {
-        if (date <= vencimentoManutencao) temDentro = true;
-        else temFora = true;
-      }
+      const estadoPrazo = classificarDiasManutencao(ultimoConcluidoManutencao, iso, manutencao);
+      if (estadoPrazo === "dentro") temDentro = true;
+      else if (estadoPrazo === "depois") temFora = true;
       if (
         (!diasSemanaAtivos.has(date.getDay()) && !datasLiberadas.has(iso)) ||
         !dataAgendavelComMes(iso, estabelecimento, mesesJanela, etiquetaClienteId) ||
@@ -792,20 +797,29 @@ export function CalendarioDias({
           // No modo livre, `fechado`/`foraDaJanela` deixam de desabilitar —
           // só continuam existindo pra saber quando aplicar o selo (abaixo).
           // `passado` nunca é dispensado, nos dois modos.
+          const estadoPrazo = classificarDiasManutencao(
+            ultimoConcluidoManutencao,
+            iso,
+            manutencao
+          );
+          // BLOQUEIO DO PÚBLICO: dia "antes" da faixa da manutenção (cedo
+          // demais) fica desabilitado. Condição isolada de propósito — pra
+          // desligar, basta trocar por `false`. O admin (modoLivre) nunca
+          // bloqueia aqui.
+          const antesDaFaixa = !modoLivre && estadoPrazo === "antes";
           const desabilitado =
             passado ||
             antesDoPiso ||
             semVaga ||
+            antesDaFaixa ||
             (!modoLivre && (fechado || foraDaJanela || restrito));
           // Dia que só está clicável PORQUE está em modo livre (normalmente
           // seria cinza) — ganha o selo/borda tracejada distintos.
           const liberado =
             modoLivre && !desabilitado && (fechado || foraDaJanela || restrito);
           const sel = iso === selecionado;
-          const dentroDoPrazo =
-            vencimentoManutencao != null && date <= vencimentoManutencao;
-          const foraDoPrazo =
-            vencimentoManutencao != null && date > vencimentoManutencao;
+          const dentroDoPrazo = estadoPrazo === "dentro";
+          const foraDoPrazo = estadoPrazo === "depois";
 
           return (
             <button
@@ -1075,11 +1089,12 @@ export default function FormularioAgendamento({
   // abaixo, que chama calcularPrecoManutencao assim que serviço + telefone da
   // cliente estão disponíveis). { centavos, valorCheio } quando pronto.
   const [precoManutencao, setPrecoManutencao] = useState(null);
-  // Vencimento (Date à meia-noite local) da manutenção selecionada, pra
-  // colorir o calendário da etapa "Data" — ver buscarVencimentoManutencao e o
-  // efeito abaixo. null enquanto não se aplica (serviço normal) ou sem
-  // atendimento de referência (cliente nova pro serviço de origem).
-  const [vencimentoManutencao, setVencimentoManutencao] = useState(null);
+  // Data ISO do último atendimento concluído do serviço de origem da
+  // manutenção selecionada, pra classificar/colorir o calendário da etapa
+  // "Data" — ver buscarUltimoConcluidoManutencao e o efeito abaixo. null
+  // enquanto não se aplica (serviço normal) ou sem atendimento de referência
+  // (cliente nova pro serviço de origem).
+  const [ultimoConcluidoManutencao, setUltimoConcluidoManutencao] = useState(null);
   const [carregandoServicos, setCarregandoServicos] = useState(true);
   const [erroServicos, setErroServicos] = useState("");
 
@@ -1882,10 +1897,10 @@ export default function FormularioAgendamento({
     estabelecimento.id,
   ]);
 
-  // Busca o vencimento pra colorir o calendário (ver CalendarioDias) quando
-  // servicoSelecionado é uma manutenção — mesmo gate de telefone do efeito
-  // acima, mas SEM depender de form.data (o vencimento não muda conforme a
-  // data escolhida no wizard, só o preço). Reset ao trocar de serviço mora em
+  // Busca o último concluído pra classificar o calendário (ver CalendarioDias)
+  // quando servicoSelecionado é uma manutenção — mesmo gate de telefone do
+  // efeito acima, mas SEM depender de form.data (a referência não muda
+  // conforme a data escolhida no wizard, só o preço). Reset ao trocar de serviço mora em
   // confirmarSelecaoServico, mesmo padrão do efeito de preço.
   useEffect(() => {
     const telefoneDigitos = (clienteInicial?.telefone ?? form.telefone).replace(
@@ -1898,12 +1913,12 @@ export default function FormularioAgendamento({
     }
 
     let ativo = true;
-    buscarVencimentoManutencao(
+    buscarUltimoConcluidoManutencao(
       estabelecimento.id,
       telefoneDigitos,
       servicoSelecionado
     ).then((resultado) => {
-      if (ativo) setVencimentoManutencao(resultado);
+      if (ativo) setUltimoConcluidoManutencao(resultado);
     });
     return () => {
       ativo = false;
@@ -3007,7 +3022,7 @@ export default function FormularioAgendamento({
     // pro novo serviço — os efeitos acima recalculam do zero quando o novo
     // for manutenção.
     setPrecoManutencao(null);
-    setVencimentoManutencao(null);
+    setUltimoConcluidoManutencao(null);
     // A troca muda os dias/horários válidos: zera a data pra não ficar uma
     // seleção antiga num dia que virou indisponível.
     setForm((anterior) => ({ ...anterior, data: "" }));
@@ -5585,7 +5600,8 @@ export default function FormularioAgendamento({
                   mesesJanela={mesesJanela}
                   restricoes={restricoesAgenda}
                   etiquetaClienteId={etiquetaClienteId}
-                  vencimentoManutencao={vencimentoManutencao}
+                  ultimoConcluidoManutencao={ultimoConcluidoManutencao}
+                  manutencao={servicoSelecionado}
                   // Segunda passagem (o evento): só dias ESTRITAMENTE depois do
                   // teste. Filtro de grade, não erro no submit (ver minExclusivo).
                   minExclusivo={
