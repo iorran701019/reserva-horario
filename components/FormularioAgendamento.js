@@ -336,13 +336,46 @@ function resolverMarcadorManutencao(mensagem, servico, servicos, ocultarPreco) {
   return resolvida.replace(/\n{3,}/g, "\n\n").trim();
 }
 
+// Quebra a mensagem de alerta em pedaços (popups em sequência). Uma linha com
+// apenas --- separa os pedaços. Cada pedaço passa por resolverMarcadorManutencao
+// separadamente e some se ficar vazio. Mensagem COM ---: pedaço de 2+ linhas
+// tem a primeira como título e o resto como corpo; de 1 linha, título
+// "Atenção". Mensagem SEM ---: um pedaço só, título "Atenção" e a mensagem
+// inteira no corpo (idêntico ao comportamento anterior à fila).
+function partesDoAlerta(mensagem, servico, servicos, ocultarPreco) {
+  if (!mensagem) return [];
+  const blocos = [[]];
+  for (const linha of mensagem.split(/\r?\n/)) {
+    if (linha.trim() === "---") blocos.push([]);
+    else blocos[blocos.length - 1].push(linha);
+  }
+  const comSeparador = blocos.length > 1;
+  return blocos
+    .map((b) =>
+      (
+        resolverMarcadorManutencao(b.join("\n"), servico, servicos, ocultarPreco) ?? ""
+      ).trim()
+    )
+    .filter(Boolean)
+    .map((texto) => {
+      const linhas = texto.split("\n");
+      if (!comSeparador || linhas.length < 2) {
+        return { titulo: "Atenção", corpo: texto };
+      }
+      return {
+        titulo: linhas[0].trim(),
+        corpo: linhas.slice(1).join("\n").trim(),
+      };
+    });
+}
+
 // Popup de aviso da dona (o "Atenção" com o triângulo amarelo). Extraído
 // porque hoje é usado em DOIS lugares com o mesmo visual: o alerta do serviço
 // tocado (servicos.alerta_mensagem, dois botões) e o alerta da categoria
 // aberta (categorias_servico.alerta_mensagem, um botão só). Os botões vêm por
 // `children` — é a única coisa que muda entre os dois. `onFechar` é o clique
 // no overlay.
-function ModalAlerta({ tituloId, mensagem, onFechar, children }) {
+function ModalAlerta({ tituloId, titulo = "Atenção", mensagem, onFechar, children }) {
   return (
     <div
       role="dialog"
@@ -371,7 +404,7 @@ function ModalAlerta({ tituloId, mensagem, onFechar, children }) {
           </svg>
           <div>
             <h2 id={tituloId} className="text-lg font-semibold text-on-card">
-              Atenção
+              {titulo}
             </h2>
             <p className="mt-2 whitespace-pre-line text-sm text-on-card">{mensagem}</p>
           </div>
@@ -1063,6 +1096,9 @@ export default function FormularioAgendamento({
   // Ids das categorias cujo alerta já foi mostrado nesta visita — fechar e
   // abrir de novo não repete o popup.
   const [categoriasAvisadas, setCategoriasAvisadas] = useState(() => new Set());
+  // Índice do pedaço em exibição na fila de popups do alerta (serviço ou
+  // categoria — nunca os dois abertos juntos). Zera ao abrir e ao fechar.
+  const [indiceAlerta, setIndiceAlerta] = useState(0);
 
   // Mapa horário -> [profissional_id livres], vindo de calcularVagasPorHorario.
   const [vagas, setVagas] = useState({});
@@ -1900,15 +1936,12 @@ export default function FormularioAgendamento({
     const categoria = categorias.find((c) => c.id === id);
     if (
       categoria &&
-      resolverMarcadorManutencao(
-        categoria.alerta_mensagem,
-        null,
-        servicos,
-        ocultarPreco
-      ) &&
+      partesDoAlerta(categoria.alerta_mensagem, null, servicos, ocultarPreco)
+        .length > 0 &&
       !modoLivre &&
       !categoriasAvisadas.has(id)
     ) {
+      setIndiceAlerta(0);
       setAlertaCategoriaPendente(categoria);
       return;
     }
@@ -1923,6 +1956,7 @@ export default function FormularioAgendamento({
     setCategoriasAvisadas((atuais) => new Set(atuais).add(id));
     setCategoriaAberta(id);
     setAlertaCategoriaPendente(null);
+    setIndiceAlerta(0);
   }
 
   // Botão de serviço reaproveitado tanto pelos soltos (sem categoria) quanto
@@ -2856,13 +2890,10 @@ export default function FormularioAgendamento({
     // marcador (sem manutenção ligada) fica vazio e não abre popup à toa.
     if (
       !modoLivre &&
-      resolverMarcadorManutencao(
-        servico.alerta_mensagem,
-        servico,
-        servicos,
-        ocultarPreco
-      )
+      partesDoAlerta(servico.alerta_mensagem, servico, servicos, ocultarPreco)
+        .length > 0
     ) {
+      setIndiceAlerta(0);
       setAlertaPendente(servico);
       return;
     }
@@ -2996,12 +3027,14 @@ export default function FormularioAgendamento({
   function confirmarAlerta() {
     confirmarSelecaoServico(alertaPendente);
     setAlertaPendente(null);
+    setIndiceAlerta(0);
   }
 
   // Modal do alerta — "Voltar": fecha sem selecionar nada, deixando o cliente
   // escolher outro serviço.
   function cancelarAlerta() {
     setAlertaPendente(null);
+    setIndiceAlerta(0);
   }
 
   // Registra a resposta de uma pergunta sim_nao/multipla_escolha (opção
@@ -3327,9 +3360,19 @@ export default function FormularioAgendamento({
   // handler, então sempre há um re-render fresco logo em seguida pra
   // recalcular isto como false e (re)armar voltarFisicoData.
   const restaurandoParaDados = pendenteRestaurarRef.current?.horario != null;
+  // Fila de alertas: pedaços do alerta aberto (serviço ou categoria). Num
+  // pedaço INTERMEDIÁRIO o voltar físico fica bloqueado (só Continuar avança);
+  // no último pedaço, ou num alerta de um pedaço só, nada muda.
+  const partesAlerta = alertaPendente
+    ? partesDoAlerta(alertaPendente.alerta_mensagem, alertaPendente, servicos, ocultarPreco)
+    : alertaCategoriaPendente
+      ? partesDoAlerta(alertaCategoriaPendente.alerta_mensagem, null, servicos, ocultarPreco)
+      : [];
+  const alertaIntermediario = indiceAlerta < partesAlerta.length - 1;
   const voltarFisicoServico = useVoltarFisico(
     onVoltarAntes,
     !status &&
+      !alertaIntermediario &&
       Boolean(onVoltarAntes) &&
       etapa === "servico" &&
       !servicoInicialPendente &&
@@ -6142,29 +6185,33 @@ export default function FormularioAgendamento({
           seleção; Voltar fecha sem selecionar nada. */}
       {alertaPendente && (
         <ModalAlerta
+          key={`alerta-servico-${indiceAlerta}`}
           tituloId="titulo-alerta-servico"
-          mensagem={resolverMarcadorManutencao(
-            alertaPendente.alerta_mensagem,
-            alertaPendente,
-            servicos,
-            ocultarPreco
-          )}
-          onFechar={cancelarAlerta}
+          titulo={partesAlerta[indiceAlerta]?.titulo}
+          mensagem={partesAlerta[indiceAlerta]?.corpo}
+          onFechar={alertaIntermediario ? undefined : cancelarAlerta}
         >
           <button
             type="button"
-            onClick={confirmarAlerta}
+            autoFocus
+            onClick={
+              alertaIntermediario
+                ? () => setIndiceAlerta((i) => i + 1)
+                : confirmarAlerta
+            }
             className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
           >
             Continuar
           </button>
-          <button
-            type="button"
-            onClick={cancelarAlerta}
-            className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
-          >
-            Voltar
-          </button>
+          {!alertaIntermediario && (
+            <button
+              type="button"
+              onClick={cancelarAlerta}
+              className="flex-1 rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
+            >
+              Voltar
+            </button>
+          )}
         </ModalAlerta>
       )}
 
@@ -6174,21 +6221,23 @@ export default function FormularioAgendamento({
           confirmarAlertaCategoria). */}
       {alertaCategoriaPendente && (
         <ModalAlerta
+          key={`alerta-categoria-${indiceAlerta}`}
           tituloId="titulo-alerta-categoria"
-          mensagem={resolverMarcadorManutencao(
-            alertaCategoriaPendente.alerta_mensagem,
-            null,
-            servicos,
-            ocultarPreco
-          )}
-          onFechar={confirmarAlertaCategoria}
+          titulo={partesAlerta[indiceAlerta]?.titulo}
+          mensagem={partesAlerta[indiceAlerta]?.corpo}
+          onFechar={alertaIntermediario ? undefined : confirmarAlertaCategoria}
         >
           <button
             type="button"
-            onClick={confirmarAlertaCategoria}
+            autoFocus
+            onClick={
+              alertaIntermediario
+                ? () => setIndiceAlerta((i) => i + 1)
+                : confirmarAlertaCategoria
+            }
             className="flex-1 rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
           >
-            Ciente
+            {alertaIntermediario ? "Continuar" : "Ciente"}
           </button>
         </ModalAlerta>
       )}
