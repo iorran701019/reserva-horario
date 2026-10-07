@@ -3728,7 +3728,9 @@ function ordenar(lista) {
 // cima/baixo e desenhar as setinhas, mantendo consistência com o
 // agrupamento exibido no acordeão.
 function grupoDaCategoria(lista, servico) {
-  return lista.filter((s) => s.categoria_id === servico.categoria_id);
+  return lista.filter(
+    (s) => s.categoria_id === servico.categoria_id && s.ativo && !s.oculto
+  );
 }
 
 // Nomes das manutenções ATIVAS vinculadas a este serviço original
