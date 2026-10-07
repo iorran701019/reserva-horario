@@ -634,3 +634,41 @@ html[data-modo="noturno"] .escopo-admin .ag-evento-mes-ausencia {
 html[data-modo="noturno"] .escopo-admin .ag-evento-mes-ausencia {
   border-color: rgba(209, 213, 219, 0.6);
 }
+
+/* Janela de aviso do fluxo público (PopupRegrasAgendamento e ModalAlerta em
+   FormularioAgendamento): altura máxima na viewport dinâmica, em coluna —
+   cabeçalho e rodapé fixos, só o corpo do texto rola. O vh vem antes como
+   fallback para navegador sem dvh. */
+.modal-janela {
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+  max-height: 85dvh;
+}
+.modal-janela-corpo {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 1.5rem; /* mesma altura do desvanecido: último trecho fica acima dele */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-muted) transparent;
+}
+.modal-janela-corpo::-webkit-scrollbar { width: 6px; }
+.modal-janela-corpo::-webkit-scrollbar-track { background: transparent; }
+.modal-janela-corpo::-webkit-scrollbar-thumb {
+  background: var(--color-muted);
+  border-radius: 999px;
+}
+/* Desvanecido na base do corpo (iOS esconde a barra): não captura toque. */
+.modal-janela-fade {
+  pointer-events: none;
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 1.5rem;
+  background: linear-gradient(to bottom, transparent, var(--color-card));
+}
+.modal-janela-rodape {
+  padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+}

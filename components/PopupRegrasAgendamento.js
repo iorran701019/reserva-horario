@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 // Popup bloqueante exibido no fluxo público do FormularioAgendamento antes
 // de a cliente se comprometer com o agendamento — sempre, com ou sem sinal a
 // pagar — quando o salão tem um aviso configurado
@@ -30,6 +32,15 @@ function formatarAviso(texto) {
 }
 
 export default function PopupRegrasAgendamento({ texto, onConfirmar }) {
+  // Trava a rolagem do fundo enquanto o popup está aberto.
+  useEffect(() => {
+    const anterior = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = anterior;
+    };
+  }, []);
+
   return (
     <div
       role="dialog"
@@ -37,16 +48,21 @@ export default function PopupRegrasAgendamento({ texto, onConfirmar }) {
       aria-labelledby="titulo-aviso-regras-agendamento"
       className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 px-4"
     >
-      <div className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border">
+      <div className="modal-janela w-full max-w-sm rounded-2xl bg-card shadow-lg ring-1 ring-border">
         <h2 id="titulo-aviso-regras-agendamento" className="sr-only">
           Aviso
         </h2>
 
-        <p className="whitespace-pre-wrap text-sm text-on-card">
-          {formatarAviso(texto)}
-        </p>
+        <div className="relative flex min-h-0 flex-1 flex-col pt-6">
+          <div className="modal-janela-corpo px-6">
+            <p className="whitespace-pre-wrap text-sm text-on-card">
+              {formatarAviso(texto)}
+            </p>
+          </div>
+          <div className="modal-janela-fade" aria-hidden="true" />
+        </div>
 
-        <div className="mt-6">
+        <div className="modal-janela-rodape px-6 pt-2">
           <button
             type="button"
             onClick={onConfirmar}

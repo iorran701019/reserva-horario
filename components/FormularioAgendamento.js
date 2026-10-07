@@ -376,6 +376,15 @@ function partesDoAlerta(mensagem, servico, servicos, ocultarPreco) {
 // `children` — é a única coisa que muda entre os dois. `onFechar` é o clique
 // no overlay.
 function ModalAlerta({ tituloId, titulo = "Atenção", mensagem, onFechar, children }) {
+  // Trava a rolagem do fundo enquanto o popup está aberto.
+  useEffect(() => {
+    const anterior = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = anterior;
+    };
+  }, []);
+
   return (
     <div
       role="dialog"
@@ -385,10 +394,10 @@ function ModalAlerta({ tituloId, titulo = "Atenção", mensagem, onFechar, child
       onClick={onFechar}
     >
       <div
-        className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+        className="modal-janela w-full max-w-sm rounded-2xl bg-card shadow-lg ring-1 ring-border"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start gap-3">
+        <div className="flex items-start gap-3 px-6 pt-6">
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -402,15 +411,19 @@ function ModalAlerta({ tituloId, titulo = "Atenção", mensagem, onFechar, child
             <path d="M12 9v4M12 17h.01" />
             <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
           </svg>
-          <div>
-            <h2 id={tituloId} className="text-lg font-semibold text-on-card">
-              {titulo}
-            </h2>
-            <p className="mt-2 whitespace-pre-line text-sm text-on-card">{mensagem}</p>
-          </div>
+          <h2 id={tituloId} className="text-lg font-semibold text-on-card">
+            {titulo}
+          </h2>
         </div>
 
-        <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+        <div className="relative flex min-h-0 flex-1 flex-col pt-2">
+          <div className="modal-janela-corpo pl-[3.75rem] pr-6">
+            <p className="whitespace-pre-line text-sm text-on-card">{mensagem}</p>
+          </div>
+          <div className="modal-janela-fade" aria-hidden="true" />
+        </div>
+
+        <div className="modal-janela-rodape flex flex-col gap-2 px-6 pt-2 sm:flex-row-reverse">
           {children}
         </div>
       </div>
