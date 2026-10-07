@@ -200,6 +200,15 @@ function rotuloStatus(status) {
   return status;
 }
 
+// Nome do serviço sem o trecho final entre parênteses e sem ponto final:
+// "Manutenção – Fibra de vidro (Sem decoração.)" -> "Manutenção – Fibra de vidro".
+function nomeCurtoServico(nome) {
+  return String(nome ?? "")
+    .replace(/\s*\([^()]*\)\s*\.?\s*$/, "")
+    .replace(/\.\s*$/, "")
+    .trim();
+}
+
 // Quantos "Agendamentos confirmados" o card de pendente mostra antes de
 // truncar o resto atrás do "+N outros" (ver inbox mais abaixo).
 const MAX_CONFIRMADOS_VISIVEIS = 2;
@@ -2683,6 +2692,40 @@ export default function AdminPage() {
     estaAguardandoConclusao(item, agora)
   );
 
+  // Aviso de serviço diferente da última visita: ativo até a dona dar
+  // "Ciente" (estado local, nada vai pro banco).
+  function avisoDesvioAtivo(item) {
+    const id = String(item.id);
+    return desviosPorAgendamento.has(id) && !desviosCientes.has(id);
+  }
+
+  function renderAvisoDesvio(item) {
+    const id = String(item.id);
+    const desvio = desviosPorAgendamento.get(id);
+    return (
+      <div className="flex flex-col gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-300">
+        <div className="flex items-start gap-1.5">
+          <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <div className="flex flex-col gap-0.5">
+            <p className="font-bold uppercase">ATENÇÃO!</p>
+            <p>
+              Serviço anterior ({desvio.feitoEm.slice(8, 10)}/{desvio.feitoEm.slice(5, 7)}):{" "}
+              {nomeCurtoServico(desvio.feitoNome)}
+            </p>
+            <p>Serviço solicitado agora: {nomeCurtoServico(item.servicos?.nome)}</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setDesviosCientes((atuais) => new Set(atuais).add(id))}
+          className="self-end rounded-lg bg-card px-3 py-1 text-xs font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
+        >
+          Ciente
+        </button>
+      </div>
+    );
+  }
+
   // Intercepta Confirmar/Cancelar do inbox pra checar a etiqueta da cliente
   // ANTES de agir. `executar` é a ação original (o mesmo callback que o botão
   // rodaria sozinho): o gate ou a chama na hora, ou a guarda pro modal.
@@ -3673,32 +3716,6 @@ export default function AdminPage() {
                     </p>
                   ) : null}
 
-                  {desviosPorAgendamento.has(String(item.id)) &&
-                    !desviosCientes.has(String(item.id)) && (
-                      <div className="mt-3 flex flex-col gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-200">
-                        <p className="flex items-start gap-1.5">
-                          <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                          <span>
-                            Atenção: esta cliente fez{" "}
-                            {desviosPorAgendamento.get(String(item.id)).feitoNome} em{" "}
-                            {desviosPorAgendamento.get(String(item.id)).feitoEm.slice(8, 10)}/
-                            {desviosPorAgendamento.get(String(item.id)).feitoEm.slice(5, 7)} e
-                            agendou {item.servicos?.nome ?? "—"}. Confirme com ela antes de
-                            confirmar.
-                          </span>
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setDesviosCientes((atuais) => new Set(atuais).add(String(item.id)))
-                          }
-                          className="self-end rounded-lg bg-white px-3 py-1 text-xs font-medium text-amber-900 ring-1 ring-amber-300 transition hover:bg-amber-100"
-                        >
-                          Ciente
-                        </button>
-                      </div>
-                    )}
-
                   {/* Accordion de detalhes secundários (progressive
                       disclosure). Tudo que é operacional — respostas do popup
                       de perguntas do serviço, profissional, outros
@@ -3878,6 +3895,12 @@ export default function AdminPage() {
                       pelo aviso abre em seguida o popup de "sem notificar" que
                       já existia, dois modais em sequência. */}
                   <div className="mt-4 flex flex-col gap-2">
+                    {/* Aviso de serviço diferente da última visita: enquanto
+                        ativo, ocupa o lugar do Confirmar (não há como confirmar
+                        sem dar "Ciente"). O Cancelar segue visível abaixo. */}
+                    {avisoDesvioAtivo(item) ? (
+                      renderAvisoDesvio(item)
+                    ) : (
                     <div className="flex items-stretch overflow-hidden rounded-lg bg-green-50 ring-1 ring-green-100">
                       <button
                         type="button"
@@ -3911,6 +3934,7 @@ export default function AdminPage() {
                         <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
                       </button>
                     </div>
+                    )}
 
                     <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
                       <button
@@ -4133,6 +4157,9 @@ export default function AdminPage() {
                         )}
 
                       <div className="mt-4 flex flex-wrap gap-2">
+                        {avisoDesvioAtivo(item) ? (
+                          <div className="w-full">{renderAvisoDesvio(item)}</div>
+                        ) : (<>
                         {/* Confirmar, dividido no mesmo padrão do inbox
                             normal (ver acima): a zona maior chama
                             handleConfirmar direto (que já checa
@@ -4185,6 +4212,7 @@ export default function AdminPage() {
                             <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
                           </button>
                         </div>
+                        </>)}
 
                         {/* Cancelar, dividido no mesmo padrão do inbox
                             normal (ver acima): reaproveita o mesmo modal de
