@@ -299,6 +299,43 @@ function BotaoServico({ servico, selecionado, onSelect }) {
   );
 }
 
+// Troca o marcador {valor_manutencao_30} da mensagem de alerta pelo preço base
+// da manutenção da faixa mais alta (maior prazo_inicio_dias) ligada ao serviço
+// tocado. Sem manutenção ligada (ou com ocultar_preco_servicos), remove a
+// linha inteira que contém o marcador — ele nunca chega à cliente. `servico`
+// é null no alerta de categoria, que por isso sempre cai no caso "sem valor".
+const MARCADOR_VALOR_MANUTENCAO = /\{\s*valor_manutencao_30\s*\}/;
+
+function resolverMarcadorManutencao(mensagem, servico, servicos, ocultarPreco) {
+  if (!mensagem || !MARCADOR_VALOR_MANUTENCAO.test(mensagem)) return mensagem;
+
+  const manutencao =
+    servico && !ocultarPreco
+      ? servicos
+          .filter(
+            (s) =>
+              s.eh_manutencao && s.servico_origem_id === servico.id && !s.oculto
+          )
+          .sort(
+            (a, b) =>
+              (b.prazo_inicio_dias ?? b.prazo_fim_dias ?? -1) -
+              (a.prazo_inicio_dias ?? a.prazo_fim_dias ?? -1)
+          )[0]
+      : null;
+
+  const resolvida = manutencao
+    ? mensagem.replace(
+        new RegExp(MARCADOR_VALOR_MANUTENCAO.source, "g"),
+        formatarPreco(manutencao.preco_centavos)
+      )
+    : mensagem
+        .split("\n")
+        .filter((linha) => !MARCADOR_VALOR_MANUTENCAO.test(linha))
+        .join("\n");
+
+  return resolvida.replace(/\n{3,}/g, "\n\n").trim();
+}
+
 // Popup de aviso da dona (o "Atenção" com o triângulo amarelo). Extraído
 // porque hoje é usado em DOIS lugares com o mesmo visual: o alerta do serviço
 // tocado (servicos.alerta_mensagem, dois botões) e o alerta da categoria
@@ -1631,7 +1668,7 @@ export default function FormularioAgendamento({
         supabase
           .from("servicos")
           .select(
-            "id, nome, duracao_min, preco_centavos, categoria_id, alerta_mensagem, servico_origem_id, eh_manutencao, exige_segunda_data, nome_etapa_anterior"
+            "id, nome, duracao_min, preco_centavos, categoria_id, alerta_mensagem, servico_origem_id, eh_manutencao, oculto, prazo_inicio_dias, prazo_fim_dias, exige_segunda_data, nome_etapa_anterior"
           )
           .eq("estabelecimento_id", estabelecimento.id)
           .eq("ativo", true)
@@ -6090,7 +6127,12 @@ export default function FormularioAgendamento({
       {alertaPendente && (
         <ModalAlerta
           tituloId="titulo-alerta-servico"
-          mensagem={alertaPendente.alerta_mensagem}
+          mensagem={resolverMarcadorManutencao(
+            alertaPendente.alerta_mensagem,
+            alertaPendente,
+            servicos,
+            ocultarPreco
+          )}
           onFechar={cancelarAlerta}
         >
           <button
@@ -6117,7 +6159,12 @@ export default function FormularioAgendamento({
       {alertaCategoriaPendente && (
         <ModalAlerta
           tituloId="titulo-alerta-categoria"
-          mensagem={alertaCategoriaPendente.alerta_mensagem}
+          mensagem={resolverMarcadorManutencao(
+            alertaCategoriaPendente.alerta_mensagem,
+            null,
+            servicos,
+            ocultarPreco
+          )}
           onFechar={confirmarAlertaCategoria}
         >
           <button
