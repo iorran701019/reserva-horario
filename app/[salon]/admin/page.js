@@ -42,6 +42,10 @@ import {
   statusDoMes,
 } from "@/lib/janelaAgendamento";
 import { rotuloMesLongo } from "@/lib/mes";
+import {
+  buscarUltimoConcluidoQualquer,
+  avaliarDesvioDeServico,
+} from "@/lib/manutencaoSugerida";
 import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
 import { buscarConflitoPrazoMinimo, nomeEtapaAnterior } from "@/lib/agendamentosCliente";
 import { verificarFidelidadeClientes, buscarProgressoFidelidade } from "@/lib/fidelidade";
@@ -857,6 +861,12 @@ export default function AdminPage() {
   // segundos e também ao sair da aba (ver handler de troca de aba abaixo).
   const [agendarKey, setAgendarKey] = useState(0);
   const [avisoAgendar, setAvisoAgendar] = useState("");
+  // Aviso "serviço diferente da última visita" nos cards pendentes: lista de
+  // serviços compartilhada (uma consulta só), desvio por id de agendamento e
+  // ids com o aviso escondido ("Ciente"; só na tela, nada vai pro banco).
+  const [servicosDesvio, setServicosDesvio] = useState([]);
+  const [desviosPorAgendamento, setDesviosPorAgendamento] = useState(new Map());
+  const [desviosCientes, setDesviosCientes] = useState(new Set());
   // Cliente resolvido pelo pré-passo IdentificacaoClienteAdmin (busca por
   // nome, ver componente) — null = ainda não passou pela identificação,
   // então mostra o pré-passo em vez do FormularioAgendamento. Vira
@@ -2337,6 +2347,65 @@ export default function AdminPage() {
     .sort()
     .join(",");
 
+  // Aviso de desvio (só orienta): lista de serviços do salão, uma consulta.
+  useEffect(() => {
+    if (!estabelecimento?.id) return;
+    let ativo = true;
+    supabase
+      .from("servicos")
+      .select(
+        "id, nome, ativo, eh_manutencao, servico_origem_id, prazo_inicio_dias, prazo_fim_dias, preco_centavos"
+      )
+      .eq("estabelecimento_id", estabelecimento.id)
+      .then(({ data, error }) => {
+        if (ativo && !error) setServicosDesvio(data ?? []);
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento?.id]);
+
+  // Um buscarUltimoConcluidoQualquer por cartão pendente com telefone >= 10
+  // dígitos; o resultado é cruzado com o serviço do cartão.
+  const chavePendentesDesvio = agendamentos
+    .filter(
+      (item) =>
+        item.finalizado &&
+        item.servico_id &&
+        item.telefone &&
+        (item.status === "pendente" || item.status === "aguardando_sinal") &&
+        String(item.telefone).replace(/\D/g, "").length >= 10
+    )
+    .map((item) => `${item.id}:${item.servico_id}:${String(item.telefone).replace(/\D/g, "")}`)
+    .join(",");
+
+  useEffect(() => {
+    if (!estabelecimento?.id || servicosDesvio.length === 0 || !chavePendentesDesvio) {
+      setDesviosPorAgendamento(new Map());
+      return;
+    }
+    let ativo = true;
+    const itens = chavePendentesDesvio.split(",").map((c) => c.split(":"));
+    Promise.all(
+      itens.map(async ([id, servicoId, tel]) => {
+        const escolhido = servicosDesvio.find((s) => String(s.id) === servicoId);
+        if (!escolhido?.eh_manutencao) return null;
+        const ultimo = await buscarUltimoConcluidoQualquer(estabelecimento.id, tel);
+        const desvio = avaliarDesvioDeServico({
+          servicos: servicosDesvio,
+          servicoEscolhido: escolhido,
+          ultimoConcluido: ultimo,
+        });
+        return desvio ? [id, desvio] : null;
+      })
+    ).then((pares) => {
+      if (ativo) setDesviosPorAgendamento(new Map(pares.filter(Boolean)));
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento?.id, servicosDesvio, chavePendentesDesvio]);
+
   // Busca as etiquetas desses telefones. Roda DEPOIS do fetch principal e não
   // segura nada: a lista de pendentes já está na tela, e os badges aparecem um
   // instante depois — mesmo padrão da tag "Agendado" da aba Clientes (ver
@@ -3603,6 +3672,32 @@ export default function AdminPage() {
                       Nenhum sinal de Pix foi cobrado
                     </p>
                   ) : null}
+
+                  {desviosPorAgendamento.has(String(item.id)) &&
+                    !desviosCientes.has(String(item.id)) && (
+                      <div className="mt-3 flex flex-col gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-200">
+                        <p className="flex items-start gap-1.5">
+                          <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                          <span>
+                            Atenção: esta cliente fez{" "}
+                            {desviosPorAgendamento.get(String(item.id)).feitoNome} em{" "}
+                            {desviosPorAgendamento.get(String(item.id)).feitoEm.slice(8, 10)}/
+                            {desviosPorAgendamento.get(String(item.id)).feitoEm.slice(5, 7)} e
+                            agendou {item.servicos?.nome ?? "—"}. Confirme com ela antes de
+                            confirmar.
+                          </span>
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDesviosCientes((atuais) => new Set(atuais).add(String(item.id)))
+                          }
+                          className="self-end rounded-lg bg-white px-3 py-1 text-xs font-medium text-amber-900 ring-1 ring-amber-300 transition hover:bg-amber-100"
+                        >
+                          Ciente
+                        </button>
+                      </div>
+                    )}
 
                   {/* Accordion de detalhes secundários (progressive
                       disclosure). Tudo que é operacional — respostas do popup

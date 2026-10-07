@@ -32,6 +32,8 @@ import {
   buscarUltimoConcluidoManutencao,
   classificarDiasManutencao,
   acharManutencaoDaFaixa,
+  buscarUltimoConcluidoQualquer,
+  avaliarDesvioDeServico,
 } from "@/lib/manutencaoSugerida";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 import { ehStatusSucesso } from "@/lib/particao";
@@ -1116,6 +1118,9 @@ export default function FormularioAgendamento({
   // no acordeão, aguardando confirmação de que já fez o serviço de origem
   // antes (ver selecionarServico). Intercepta ANTES do alerta_mensagem.
   const [manutencaoPendente, setManutencaoPendente] = useState(null);
+  // Aviso (só orienta) de que a manutenção tocada é de outra família que a do
+  // último atendimento concluído; ver avaliarDesvioDeServico. Null = sem aviso.
+  const [desvioManutencao, setDesvioManutencao] = useState(null);
   // Mensagem de erro ao clicar "Sim, em outro salão" sem a dona ter
   // configurado o serviço de manutenção externa (ver
   // confirmarManutencaoOutroSalao) — some sozinha depois de alguns segundos
@@ -1903,6 +1908,35 @@ export default function FormularioAgendamento({
       ativo = false;
     };
   }, [servicoSelecionado, estabelecimento.id, tentativaCarga]);
+
+  // Desvio de serviço: ao abrir o popup de manutenção, compara com o último
+  // concluído da cliente. `ativo` descarta resposta atrasada de um popup já
+  // fechado/trocado. Fechar o popup limpa o estado (cleanup + reset abaixo).
+  useEffect(() => {
+    if (!manutencaoPendente) {
+      setDesvioManutencao(null);
+      return;
+    }
+    const telefoneDigitos = (clienteInicial?.telefone ?? form.telefone).replace(/\D/g, "");
+    if (telefoneDigitos.length < 10) return;
+
+    let ativo = true;
+    buscarUltimoConcluidoQualquer(estabelecimento.id, telefoneDigitos).then((ultimo) => {
+      if (!ativo) return;
+      setDesvioManutencao(
+        avaliarDesvioDeServico({
+          servicos,
+          servicoEscolhido: manutencaoPendente,
+          ultimoConcluido: ultimo,
+        })
+      );
+    });
+    return () => {
+      ativo = false;
+      setDesvioManutencao(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manutencaoPendente]);
 
   // Recalcula o preço de exibição/cobrança quando servicoSelecionado é uma
   // manutenção (ver calcularPrecoManutencao). Precisa do telefone da cliente,
@@ -6326,6 +6360,33 @@ export default function FormularioAgendamento({
             <p className="mt-2 text-sm text-on-card">
               Você já está com as unhas de alongamento ou gel aplicadas?
             </p>
+
+            {desvioManutencao && (
+              <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+                Sua última visita foi {desvioManutencao.feitoNome}, em{" "}
+                {desvioManutencao.feitoEm.slice(8, 10)}/{desvioManutencao.feitoEm.slice(5, 7)}.
+                A manutenção que você escolheu é de{" "}
+                {servicos.find((s) => s.id === manutencaoPendente.servico_origem_id)?.nome ??
+                  "outro serviço"}
+                .
+                {desvioManutencao.sugerida && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const alvo = desvioManutencao.sugerida;
+                      setManutencaoPendente(null);
+                      confirmarSelecaoServico(alvo);
+                    }}
+                    className="mt-2 w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
+                  >
+                    Trocar para {desvioManutencao.sugerida.nome}
+                    {!ocultarPreco && desvioManutencao.sugerida.preco_centavos > 0
+                      ? ` · ${formatarPreco(desvioManutencao.sugerida.preco_centavos)}`
+                      : ""}
+                  </button>
+                )}
+              </div>
+            )}
 
             <div className="mt-6 flex flex-col gap-2">
               <button
