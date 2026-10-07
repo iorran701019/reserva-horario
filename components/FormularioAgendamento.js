@@ -1014,6 +1014,8 @@ export default function FormularioAgendamento({
   // a validação (confirmarModalPerguntas) quanto o cálculo de ajuste de preço
   // (ver calcularAjustePerguntas) e a gravação em agendamento_respostas.
   const [respostasPerguntas, setRespostasPerguntas] = useState({});
+  // Snapshot das respostas ao reabrir o popup no mesmo serviço (null = primeira seleção).
+  const respostasAnterioresRef = useRef(null);
   const [erroModalPerguntas, setErroModalPerguntas] = useState("");
   const [categorias, setCategorias] = useState([]);
   const [categoriaAberta, setCategoriaAberta] = useState(null);
@@ -2865,6 +2867,12 @@ export default function FormularioAgendamento({
   // avançar (ver avancarAposServico, chamado só depois de confirmarModalPerguntas
   // quando há perguntas, ou direto daqui quando não há).
   async function confirmarSelecaoServico(servico) {
+    // Toque no MESMO serviço já selecionado (e com perguntas carregadas): é só
+    // uma revisão — mantém as respostas e guarda um snapshot pro "Voltar" do
+    // popup restaurar (ver cancelarModalPerguntas).
+    const revisando =
+      servicoSelecionado?.id === servico.id && perguntasServico.length > 0;
+    respostasAnterioresRef.current = revisando ? respostasPerguntas : null;
     setServicoSelecionado(servico);
     setHorarioSelecionado("");
     setProfissionalSelecionado(null);
@@ -2886,12 +2894,16 @@ export default function FormularioAgendamento({
     // A troca muda os dias/horários válidos: zera a data pra não ficar uma
     // seleção antiga num dia que virou indisponível.
     setForm((anterior) => ({ ...anterior, data: "" }));
-    setRespostasPerguntas({});
+    if (!revisando) setRespostasPerguntas({});
     setErroModalPerguntas("");
     // Seleção manual de um novo serviço cancela qualquer restauração de
     // sessão ainda pendente (ver pendenteRestaurarRef) — a escolha fresca da
     // cliente sempre vence sobre um rascunho antigo.
     pendenteRestaurarRef.current = null;
+    if (revisando) {
+      setModalPerguntasAberto(true);
+      return;
+    }
     // /admin com pular_perguntas_adicionais_admin ligado: nem busca as
     // perguntas — zera perguntasServico (sem sobra de uma seleção anterior) e
     // avança com preço/duração base. modoLivre garante que /agendar nunca pula.
@@ -2957,6 +2969,14 @@ export default function FormularioAgendamento({
   // outro serviço em vez de responder).
   function cancelarModalPerguntas() {
     setModalPerguntasAberto(false);
+    // Revisão do mesmo serviço: restaura as respostas de antes e mantém a
+    // seleção, em vez de desfazer tudo.
+    if (respostasAnterioresRef.current) {
+      setRespostasPerguntas(respostasAnterioresRef.current);
+      respostasAnterioresRef.current = null;
+      setErroModalPerguntas("");
+      return;
+    }
     setPerguntasServico([]);
     setRespostasPerguntas({});
     setErroModalPerguntas("");
