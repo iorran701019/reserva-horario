@@ -44,6 +44,7 @@ Regra de ambiente: o build (`npm run build`) é rodado pelo Iorran, nunca pelo C
 - [ ] Assinatura (aba só aparece para salão com linha em `assinaturas`) — próximas faturas e histórico carregam; informar pagamento de uma fatura aberta (Pix) e conferir que o aviso/alerta da aba some ou muda; salão sem assinatura não vê a aba
 - [ ] Login — logout + login de novo
 - [ ] **Se o tenant tiver `bgHeader`/`botao` escuro:** conferir `bgCardAdmin` (cards e drawer mobile legíveis), `botaoAdmin` (botões cheios com texto legível) e `bordaAdmin` (toggle ligado/desligado distinguível) — regressão real encontrada na Laysla e na Laryssa (Sessão 21/09): texto escuro sobre escuro ou claro sobre claro sem esses três campos
+- [ ] **Se o tenant for claro mas `bgHeader` for mais escuro que `bgBody`:** conferir também `bgCardAdmin` (mais claro que a página) e `bordaAdmin` (toggle desligado com pelo menos 3:1 contra `bgBody`) — regressão real encontrada na Layra: linhas ligadas/desligadas invertidas, aba selecionada e toggle quase invisíveis
 
 ### /agendar
 - [ ] Identificação por WhatsApp (número novo e já cadastrado)

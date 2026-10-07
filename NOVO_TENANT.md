@@ -184,6 +184,7 @@ Substituir o padrão só quando o cliente tiver marca própria (logo e/ou paleta
 - Sem logo: omitir `marca` — o Hero cai no nome em texto centralizado, nas cores do tema (ex.: `teste`).
 - Logo vinda de foto/JPEG (não vetor) com composição alta/quadrada: separar ícone e texto em dois arquivos e usar `layoutMarca: 'esquerda'`, em vez de espremer tudo num lockup único — ver técnica no Protocolo de Desenvolvimento.
 - **Se `bgHeader` (ou `botao`) do tenant for escuro: definir também `bgCardAdmin`, `botaoAdmin`/`botaoAdminHover` e `bordaAdmin`.** O `/admin` herda essas cores do público e ignora `textoCard` de propósito — sem os campos próprios, card, drawer mobile e/ou botões do admin ficam com texto ilegível (achado real: Laysla e Laryssa, Sessão 21/09). Ver mecanismo completo no Protocolo de Desenvolvimento.
+- **Se o tenant for claro mas o `bgHeader` for mais escuro que o `bgBody` (card mais escuro que a página): definir também `bgCardAdmin` (mais claro que a página) e `bordaAdmin`.** O admin pressupõe card claro sobre página (linha ligada `bg-card`, desligada `bg-surface`, toggle desligado `bg-border`); com a relação invertida, a linha desligada fica mais clara que a ligada e o toggle some. Card e página devem diferir de forma perceptível e `bordaAdmin` deve dar pelo menos 3:1 contra `bgBody` (achado real: Layra).
 
 ## B.9 Login de produção
 - Criar o usuário em Authentication → Users (Supabase) com e-mail/senha reais do dono, marcando "Auto Confirm User". Copiar o UID; a senha nunca passa pelo chat.
