@@ -31,6 +31,7 @@ import {
   calcularPrecoManutencao,
   buscarUltimoConcluidoManutencao,
   classificarDiasManutencao,
+  acharManutencaoDaFaixa,
 } from "@/lib/manutencaoSugerida";
 import { lerFatia, salvarFatia, limparFatia } from "@/lib/persistenciaAgendamento";
 import { ehStatusSucesso } from "@/lib/particao";
@@ -368,6 +369,42 @@ function partesDoAlerta(mensagem, servico, servicos, ocultarPreco) {
         corpo: linhas.slice(1).join("\n").trim(),
       };
     });
+}
+
+// Aviso ao clicar num dia depois da faixa da manutenção (laranja): mesmo shell
+// do popup "Confirmar manutenção". Os botões vêm por `children`. `onFechar` é
+// o clique no overlay (equivale a "Escolher outra data").
+function ModalAvisoPrazo({ titulo, mensagem, detalhe, onFechar, children }) {
+  // Trava a rolagem do fundo enquanto o popup está aberto.
+  useEffect(() => {
+    const anterior = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = anterior;
+    };
+  }, []);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="titulo-aviso-prazo"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
+      onClick={onFechar}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="titulo-aviso-prazo" className="text-lg font-semibold text-on-card">
+          {titulo}
+        </h2>
+        <p className="mt-2 text-sm text-on-card">{mensagem}</p>
+        {detalhe && <p className="mt-2 text-sm font-medium text-on-card">{detalhe}</p>}
+        <div className="mt-6 flex flex-col gap-2">{children}</div>
+      </div>
+    </div>
+  );
 }
 
 // Popup de aviso da dona (o "Atenção" com o triângulo amarelo). Extraído
@@ -1089,6 +1126,14 @@ export default function FormularioAgendamento({
   // abaixo, que chama calcularPrecoManutencao assim que serviço + telefone da
   // cliente estão disponíveis). { centavos, valorCheio } quando pronto.
   const [precoManutencao, setPrecoManutencao] = useState(null);
+  // Aviso ao clicar num dia depois da faixa (ver verificarAvisoPrazo):
+  // { tipo: "troca" | "cheio", iso, dataAnterior, manutencao?, centavos? }.
+  const [avisoPrazo, setAvisoPrazo] = useState(null);
+  // "servicoId|iso" da data cujo aviso a cliente já aceitou ("Continuar") —
+  // evita repetir o aviso ao reclicar no mesmo dia com o mesmo serviço.
+  const [dataAvisoConfirmada, setDataAvisoConfirmada] = useState("");
+  // Contador pra descartar a resposta assíncrona do preço de um clique antigo.
+  const avisoPrazoSeqRef = useRef(0);
   // Data ISO do último atendimento concluído do serviço de origem da
   // manutenção selecionada, pra classificar/colorir o calendário da etapa
   // "Data" — ver buscarUltimoConcluidoManutencao e o efeito abaixo. null
@@ -2190,6 +2235,73 @@ export default function FormularioAgendamento({
     // "dados"; e quando a guarda dele aborta por data diferente, a ref nunca
     // é consumida, deixando `restaurandoParaDados` preso em true.
     pendenteRestaurarRef.current = null;
+    verificarAvisoPrazo(iso, form.data);
+  }
+
+  // Dia depois da faixa da manutenção escolhida (laranja): avisa antes de
+  // seguir. (a) existe a manutenção da faixa seguinte -> oferece trocar;
+  // (b) o salão cobraria valor cheio nessa data -> avisa do valor; (c) nada
+  // disso -> sem aviso. A data já foi gravada por selecionarData; o aviso só
+  // oferece desfazer. Não bloqueia nada, nem no /admin.
+  function verificarAvisoPrazo(iso, dataAnterior) {
+    avisoPrazoSeqRef.current += 1;
+    const seq = avisoPrazoSeqRef.current;
+    const servico = servicoSelecionado;
+    if (!servico?.eh_manutencao || servico.servico_origem_id == null) return;
+    if (classificarDiasManutencao(ultimoConcluidoManutencao, iso, servico) !== "depois") {
+      return;
+    }
+    if (dataAvisoConfirmada === `${servico.id}|${iso}`) return;
+
+    const [ia, im, id] = iso.split("-").map(Number);
+    const [ua, um, ud] = ultimoConcluidoManutencao.split("-").map(Number);
+    const dias = Math.round(
+      (new Date(ia, im - 1, id) - new Date(ua, um - 1, ud)) / 86400000
+    );
+
+    const proxima = acharManutencaoDaFaixa(servicos, servico, dias);
+    if (proxima) {
+      setAvisoPrazo({ tipo: "troca", iso, dataAnterior, manutencao: proxima });
+      return;
+    }
+
+    const telefoneDigitos = (clienteInicial?.telefone ?? form.telefone).replace(/\D/g, "");
+    if (telefoneDigitos.length < 10) return;
+    calcularPrecoManutencao(estabelecimento.id, telefoneDigitos, servico, iso).then(
+      (resultado) => {
+        if (seq !== avisoPrazoSeqRef.current || !resultado?.valorCheio) return;
+        setAvisoPrazo({
+          tipo: "cheio",
+          iso,
+          dataAnterior,
+          centavos: resultado.centavos,
+        });
+      }
+    );
+  }
+
+  // "Escolher outra data": desfaz o clique no dia (volta ao que estava).
+  function escolherOutraDataAviso() {
+    if (!avisoPrazo) return;
+    setForm((anterior) => ({ ...anterior, data: avisoPrazo.dataAnterior ?? "" }));
+    setHorarioSelecionado("");
+    setAvisoPrazo(null);
+  }
+
+  // "Continuar com essa data": mantém a escolha e não repete o aviso nela.
+  function continuarComDataAviso() {
+    if (!avisoPrazo) return;
+    setDataAvisoConfirmada(`${servicoSelecionado.id}|${avisoPrazo.iso}`);
+    setAvisoPrazo(null);
+  }
+
+  // "Trocar para [manutenção]": muda o serviço mantendo a data clicada. A nova
+  // já é manutenção, então não passa pelo popup "Confirmar manutenção".
+  function trocarManutencaoAviso() {
+    if (!avisoPrazo?.manutencao) return;
+    const nova = avisoPrazo.manutencao;
+    setAvisoPrazo(null);
+    confirmarSelecaoServico(nova, { manterData: true });
   }
 
   // Horários oferecidos = chaves do mapa de vagas. No fluxo "cliente escolhe",
@@ -2998,7 +3110,8 @@ export default function FormularioAgendamento({
   // serviço (servico_perguntas); havendo alguma, abre o popup ANTES de
   // avançar (ver avancarAposServico, chamado só depois de confirmarModalPerguntas
   // quando há perguntas, ou direto daqui quando não há).
-  async function confirmarSelecaoServico(servico) {
+  // `manterData` (só a troca do aviso de prazo): não zera form.data.
+  async function confirmarSelecaoServico(servico, { manterData = false } = {}) {
     // Toque no MESMO serviço já selecionado (e com perguntas carregadas): é só
     // uma revisão — mantém as respostas e guarda um snapshot pro "Voltar" do
     // popup restaurar (ver cancelarModalPerguntas).
@@ -3020,12 +3133,17 @@ export default function FormularioAgendamento({
     setEventoGuardado(null);
     // Preço e vencimento da manutenção anterior (se houver) não valem mais
     // pro novo serviço — os efeitos acima recalculam do zero quando o novo
-    // for manutenção.
-    setPrecoManutencao(null);
-    setUltimoConcluidoManutencao(null);
+    // for manutenção. Só zera quando o serviço MUDA de verdade: no toque no
+    // mesmo serviço o objeto é o mesmo, os efeitos (que dependem de
+    // servicoSelecionado) não rodam de novo e o calendário ficaria sem cor
+    // nem bloqueio "antes da faixa".
+    if (servicoSelecionado?.id !== servico.id) {
+      setPrecoManutencao(null);
+      setUltimoConcluidoManutencao(null);
+    }
     // A troca muda os dias/horários válidos: zera a data pra não ficar uma
     // seleção antiga num dia que virou indisponível.
-    setForm((anterior) => ({ ...anterior, data: "" }));
+    if (!manterData) setForm((anterior) => ({ ...anterior, data: "" }));
     if (!revisando) setRespostasPerguntas({});
     setErroModalPerguntas("");
     // Seleção manual de um novo serviço cancela qualquer restauração de
@@ -6234,6 +6352,49 @@ export default function FormularioAgendamento({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Aviso de dia depois da faixa da manutenção (ver verificarAvisoPrazo).
+          "troca": oferece a manutenção da faixa seguinte; "cheio": avisa do
+          valor do serviço completo. Clique no overlay = "Escolher outra data". */}
+      {avisoPrazo && (
+        <ModalAvisoPrazo
+          titulo={avisoPrazo.tipo === "troca" ? "Essa data passa do prazo" : "Valor cheio"}
+          mensagem={
+            avisoPrazo.tipo === "troca"
+              ? `Para o dia ${avisoPrazo.iso.slice(8, 10)}/${avisoPrazo.iso.slice(5, 7)}, o serviço indicado é ${avisoPrazo.manutencao.nome}${
+                  ocultarPreco
+                    ? ""
+                    : ` (${formatarPreco(avisoPrazo.manutencao.preco_centavos)})`
+                }.`
+              : "Essa data passa do prazo de manutenção. Será cobrado o valor do serviço completo."
+          }
+          detalhe={
+            avisoPrazo.tipo === "cheio" && !ocultarPreco
+              ? `Valor: ${formatarPreco(avisoPrazo.centavos)}`
+              : null
+          }
+          onFechar={escolherOutraDataAviso}
+        >
+          <button
+            type="button"
+            onClick={
+              avisoPrazo.tipo === "troca" ? trocarManutencaoAviso : continuarComDataAviso
+            }
+            className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
+          >
+            {avisoPrazo.tipo === "troca"
+              ? `Trocar para ${avisoPrazo.manutencao.nome}`
+              : "Continuar com essa data"}
+          </button>
+          <button
+            type="button"
+            onClick={escolherOutraDataAviso}
+            className="w-full rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
+          >
+            Escolher outra data
+          </button>
+        </ModalAvisoPrazo>
       )}
 
       {/* Alerta do serviço tocado (ver GerenciarServicos): trava o wizard
