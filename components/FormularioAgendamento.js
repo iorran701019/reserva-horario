@@ -1829,10 +1829,10 @@ export default function FormularioAgendamento({
 
   const [hoje] = useState(dataDeHoje);
 
-  // Agrupamento da lista de serviços da etapa "servico": soltos no topo os
-  // sem categoria (ou apontando pra uma categoria que não existe mais), depois
-  // uma seção por categoria (na ordem vinda do banco) só com quem tem >=1
-  // serviço ativo. Serviços de manutenção (servico_origem_id preenchido)
+  // Agrupamento da lista de serviços da etapa "servico": uma seção por
+  // categoria (na ordem vinda do banco) só com quem tem >=1 serviço ativo,
+  // depois, soltos no fim, os sem categoria (ou apontando pra uma categoria
+  // que não existe mais). Serviços de manutenção (servico_origem_id preenchido)
   // entram pela própria categoria_id igual a qualquer outro serviço — ficam
   // lado a lado com o serviço de origem no mesmo acordeão.
   const idsCategorias = new Set(categorias.map((c) => c.id));
@@ -5114,10 +5114,6 @@ export default function FormularioAgendamento({
               (servicosSemCategoria.length > 0 ||
                 categoriasComServicos.length > 0) && (
                 <div className="space-y-2">
-                  {servicosSemCategoria.map((servico) =>
-                    renderBotaoServico(servico)
-                  )}
-
                   {categoriasComServicos.map((categoria) => {
                     const aberta = categoriaAberta === categoria.id;
 
@@ -5205,6 +5201,10 @@ export default function FormularioAgendamento({
                       </div>
                     );
                   })}
+
+                  {servicosSemCategoria.map((servico) =>
+                    renderBotaoServico(servico)
+                  )}
                 </div>
               )}
 
