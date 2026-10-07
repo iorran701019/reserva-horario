@@ -1977,12 +1977,12 @@ export default function FormularioAgendamento({
         onClick={() => selecionarServico(servico)}
         aria-pressed={selecionado}
         className={[
-          "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left ring-1 transition",
+          "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left shadow-sm ring-1 transition active:scale-[0.99]",
           selecionado
             ? tema
               ? ""
               : "bg-primary text-on-primary ring-primary"
-            : "bg-card text-on-card ring-border hover:border-primary hover:ring-primary",
+            : "bg-field text-heading ring-[color:color-mix(in_srgb,var(--color-primary)_35%,var(--color-border))] hover:ring-primary",
         ].join(" ")}
         style={
           temaSelecionado
@@ -1995,12 +1995,12 @@ export default function FormularioAgendamento({
         }
       >
         <span className="min-w-0">
-          <span className="block font-medium">{servico.nome}</span>
+          <span className="block break-words font-medium">{servico.nome}</span>
           {!ocultarDuracao && (
             <span
               className={[
                 "block text-sm",
-                temaSelecionado ? "" : selecionado ? "text-on-primary/90" : "text-on-card",
+                temaSelecionado ? "" : selecionado ? "text-on-primary/90" : "text-heading",
               ].join(" ")}
             >
               {servico.duracao_min} min
@@ -2008,11 +2008,28 @@ export default function FormularioAgendamento({
           )}
         </span>
 
-        {servico.preco_centavos > 0 && !ocultarPreco && (
-          <span className="shrink-0 font-medium">
-            {formatarPreco(servico.preco_centavos)}
-          </span>
-        )}
+        <span className="flex shrink-0 items-center gap-2">
+          {servico.preco_centavos > 0 && !ocultarPreco && (
+            <span className="whitespace-nowrap font-medium">
+              {formatarPreco(servico.preco_centavos)}
+            </span>
+          )}
+          {selecionado && (
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              className="h-4 w-4 shrink-0"
+              style={{ color: temaSelecionado ? "var(--color-primary)" : "currentColor" }}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+        </span>
       </button>
     );
   }
