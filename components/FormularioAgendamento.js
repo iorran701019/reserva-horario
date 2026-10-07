@@ -336,7 +336,7 @@ function ModalAlerta({ tituloId, mensagem, onFechar, children }) {
             <h2 id={tituloId} className="text-lg font-semibold text-on-card">
               Atenção
             </h2>
-            <p className="mt-2 text-sm text-on-card">{mensagem}</p>
+            <p className="mt-2 whitespace-pre-line text-sm text-on-card">{mensagem}</p>
           </div>
         </div>
 
