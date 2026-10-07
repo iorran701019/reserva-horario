@@ -14,6 +14,8 @@ Documento vivo. Atualizar conforme o protocolo evoluir (não é regra fixa e imu
 6. Iorran faz add/commit/push manualmente no VSCode. Claude sempre entrega a sequência completa de comandos (status, add arquivo por arquivo, commit com a mensagem pronta, log de conferência, merge, push, sincronização da `staging`, exclusão da branch).
 7. Só depois do merge da demanda atual (item 5) Claude parte pra próxima — mesmo que várias tenham sido citadas no início da sessão. Ver regra "uma demanda por vez" abaixo.
 
+Quando o Claude Code trabalha direto no repositório, ele cria a branch antes de editar e devolve o diff sem commitar; o commit, o push e o merge continuam sendo do Iorran.
+
 **Antes de reescrever um arquivo grande:** olhar `git diff` ou trechos específicos primeiro, avaliar o impacto isolado, e alterar estritamente o necessário.
 
 **Confirmação de execução:** Iorran sempre traz de volta o output real do que rodou no VSCode (git status, git log, resultado de commit/merge/push etc.) antes de Claude assumir que um passo deu certo. Claude nunca presume sucesso sem ver o output colado. Se a saída colada parar no meio (ex.: termina no merge e não mostra o push nem a exclusão da branch), Claude pede uma conferência curta (`git log origin/main -1 --oneline`, `git branch -a`, `git status`) antes de considerar publicado. "Already up to date" num merge que deveria trazer mudança é alarme, não sucesso.
@@ -37,7 +39,7 @@ Documento vivo. Atualizar conforme o protocolo evoluir (não é regra fixa e imu
 
 ## 3. SQL
 
-- **Autoria e aplicação passam sempre pelo chat.** O Claude Code não tem autorização de tocar no banco. Quando uma mudança exige um arquivo SQL grande (RPCs, por exemplo), o chat pode pedir explicitamente ao Claude Code que escreva a **proposta** em `sql/<nome>.sql`, sem aplicar — o chat revisa linha a linha e só então o Iorran cola no SQL Editor. O arquivo commitado precisa refletir exatamente o que foi aplicado (se algo foi ajustado na hora, o arquivo é corrigido antes do commit).
+- **Autoria e aplicação passam sempre pelo chat.** O Claude Code nunca escreve SQL, nem em arquivo; todo SQL nasce no chat do projeto, que o revisa linha a linha antes de o Iorran colar no SQL Editor. O Claude Code descreve em prosa o que o banco precisa. Se um arquivo em `sql/` for versionado, quem o escreve ou atualiza é o Iorran, à mão, depois de aplicar o SQL; ele precisa refletir exatamente o que foi aplicado.
 - Todo bloco de SQL começa com comentário de ambiente em destaque: `-- STAGING` ou `-- PRODUÇÃO` (sempre maiúsculo).
 - Migrações vão primeiro para staging, confirmadas com `SELECT`, depois replicadas para produção com confirmação explícita entre ambientes.
 - **Merge nunca na mesma resposta que o SQL de produção** (incidente da Sessão 73): quando o código novo depende de schema novo, Claude entrega primeiro o SQL de produção com o `SELECT` de conferência, e os comandos de merge para `main` só na resposta seguinte, depois que o Iorran colar o resultado. Vale também para a `staging` se o banco de staging ainda não tiver o SQL. Sem isso, o push publica código que pede coluna inexistente e derruba o `/admin` (e o `/agendar`, quando a coluna entra em `lib/estabelecimento.js`) com 42703.
@@ -67,7 +69,7 @@ Documento vivo. Atualizar conforme o protocolo evoluir (não é regra fixa e imu
 
 Depois de merges e SQLs do dia, Claude gera:
 - O handoff da sessão, em arquivo `.md`.
-- O conteúdo **completo e limpo** do `PENDENCIAS.md`, pronto para substituir o arquivo inteiro — só as seções "Em aberto" e "Backlog", sem seção "Resolvido" e nunca como diff com marcadores. O que foi resolvido na sessão sai do arquivo e fica registrado no handoff.
+- O conteúdo **completo e limpo** do `PENDENCIAS.md`, pronto para substituir o arquivo inteiro — só as seções "Prioridade máxima", "Fila sugerida", "Em aberto" e "Backlog" (nessa ordem), sem seção "Resolvido" e nunca como diff com marcadores. O que foi resolvido na sessão sai do arquivo e fica registrado no handoff.
 - **Conferência de SQL staging → produção** — o resultado dessa conferência entra no handoff, mesmo quando não há pendência (registrar "nenhum SQL de schema pendente de replicar" é tão válido quanto listar um item em aberto).
 - O `PROTOCOLO_DESENVOLVIMENTO.md` completo, quando a sessão criou regra nova.
 - A sequência completa de comandos para commitar os arquivos de controle numa branch de fechamento e levá-los a `staging` e `main`.
@@ -109,7 +111,7 @@ Handoffs antigos são compactados periodicamente num arquivo único (o mais rece
 - **Nome do profissional só aparece em telas de agendamento com 2+ profissionais ativos** (`qtdProfissionaisAtivos > 1`; `null`/contagem carregando também esconde, nunca mostra por padrão). Regra permanente desde a Sessão 59 — qualquer novo ponto que exiba `profissional_nome` deve seguir essa condição.
 - Toda alteração de status feita por decisão da própria dona dentro do `/admin` (cancelar, resolver conflito de prazo, marcar exceção de conclusão) é tratada como "ação do salão" pra fins de estatística — independente do gatilho que levou a essa decisão (ex: conflito de prazo detectado pelo sistema ainda conta como cancelamento do salão, porque foi ela quem clicou).
 - **Tema do `/admin` pode divergir do público, campo a campo, sempre com fallback pro valor público correspondente:** `bgCardAdmin` (→ `--color-card`, fallback `bgHeader`), `botaoAdmin`/`botaoAdminHover` (→ `--color-primary`/hover, fallback `botao`/`botaoHover`), `bordaAdmin` (→ `--color-border`, fallback `bordaHeader`), `textoBotaoAdmin` (→ `--color-on-primary` quando há `botaoAdmin`, fallback `#fdfcfa`; sem `botaoAdmin`, o admin usa `textoBotao` como o público). Existe porque o admin ignora `textoCard` de propósito (sempre usa `textoPrincipal` como texto) — então um `bgHeader` ou `botao` escolhido pro público escuro/claro pode deixar o admin com texto ilegível, mesmo quando o público está perfeito. Regra prática: **todo tenant com `bgHeader` escuro precisa de `bgCardAdmin`/`botaoAdmin`/`bordaAdmin`**, e todo botão claro precisa de texto escuro (ver `NOVO_TENANT_CHECKLIST.md`).
-- **Decisão de negócio que foge do escopo original do app (ex.: maquiadora em vez de manicure) prefere um flag/config por tenant a uma categoria geral de "tipo de salão"** — até que 2 ou mais features realmente exijam essa distinção. Criar a taxonomia geral antes disso é escopo maior que o necessário (ver "sem catedral"). Caso de origem: agendamento em grupo da Laryssa, resolvido com dois campos novos em `estabelecimentos` (`permite_agendamento_grupo`, `max_pessoas_grupo`) editáveis só no `/painel-global`, em vez de um sistema de segmentos.
+- **Decisão de negócio que foge do escopo original do app (ex.: maquiadora em vez de manicure) prefere um flag/config por tenant a uma categoria geral de "tipo de salão"** — até que 2 ou mais features realmente exijam essa distinção. Criar a taxonomia geral antes disso é escopo maior que o necessário (ver "sem catedral"). Caso de origem: agendamento em grupo da Laryssa, desenho congelado, não implementado (as colunas `permite_agendamento_grupo` e `max_pessoas_grupo` não existem; ver `PENDENCIAS.md`) — a ideia é um flag por tenant editável só no `/painel-global`, em vez de um sistema de segmentos.
 - **Etiqueta de cliente é dado passivo; o que gera fricção são os gates.** Desligar comportamento incômodo se faz pelo popup (bloco "Alertas e avisos"), nunca apagando a estrutura de etiquetas nem as regras que dependem dela (mês restrito, Lista de Bloqueio, filtros). Um interruptor de aviso não muda regra de agenda.
 
 ---
@@ -118,7 +120,7 @@ Handoffs antigos são compactados periodicamente num arquivo único (o mais rece
 
 - **Stack:** Next.js (App Router, JS), Supabase (Postgres + Storage + Auth + pg_cron + pg_net), Tailwind v4, Vercel (Hobby — atenção ao timeout de 60s), Recharts (gráficos, desde a Sessão 59).
 - **Ambientes Supabase:** staging (`reserva-staging` / `yebwkchcrvebvvjvvvyu`) e produção (`pwlvjaenryzdkatmrhul`) — projetos separados, sequências de ID independentes.
-- **Arquivos de controle:** `PENDENCIAS.md`, `PROTOCOLO_DESENVOLVIMENTO.md`, `QA_CHECKLIST.md`, `DEPLOY_CHECKLIST.md`, `NOVO_TENANT_CHECKLIST.md`, `PROTOCOLO_NOVO_TENANT.md`, `THEMING.md`.
+- **Arquivos de controle:** `CLAUDE.md`, `AGENTS.md`, `PENDENCIAS.md`, `INVENTARIO_RECURSOS.md`, `PROTOCOLO_DESENVOLVIMENTO.md`, `QA_CHECKLIST.md`, `DEPLOY_CHECKLIST.md`, `NOVO_TENANT_CHECKLIST.md`, `PROTOCOLO_NOVO_TENANT.md`, `THEMING.md` e `docs/` (handoffs e identidade visual). Os arquivos de `sql/` **não** são fonte de verdade (ver §3): o banco manda.
 - **Libs-chave:** `lib/disponibilidade.js`, `lib/whatsapp.js`, `lib/particao.js`, `lib/cliqueFora.js`, `lib/checagemWhatsapp.js`, `lib/comprimirImagem.js`, `lib/temas.js`, `lib/conclusao.js`, `lib/mes.js` (navegação mensal, `mesDeHoje`/`rotuloMes`), `lib/janelaAgendamento.js`, `lib/sinalRegra.js`, `lib/sinalPix.js`, `lib/googleCalendarSync.js`.
 - **Camada pública de dados (desde a Sessão 71):** `sql/rpcs_agendamento_publico.sql` (cancelar, liberar reserva, declarar sinal, anexar comprovante, status da reserva), `sql/rpc_criacao_agendamento.sql` (`agendamento_criar`, com as respostas das perguntas na mesma transação e erros AG001–AG009), `sql/rpcs_leitura_cliente.sql` (painel da cliente por telefone + helper interno `normalizar_telefone`), rota `app/api/agendamentos/comprovante-upload` (URL assinada do comprovante). Desde a Sessão 73: `agendamento_criar_interno` (sem grant), `agendamento_criar_par`, `agendamento_cancelar_cliente_par`. Toda mudança no fluxo público de agendamento passa por um desses.
 
@@ -140,7 +142,7 @@ Handoffs antigos são compactados periodicamente num arquivo único (o mais rece
 - Reconectar apenas nas sessões em que for necessário teste ao vivo no navegador (Claude Code validando fluxo/staging por conta própria, como feito na Sessão 30).
 - Claude (chat) deve sinalizar quando uma demanda pedir esse tipo de validação, sugerindo reconectar antes do prompt pro Claude Code.
 - **O painel do navegador do Claude Code é um navegador separado do navegador pessoal do Iorran (Chrome/Edge).** Um login feito no Chrome do Iorran não vale nessa aba — qualquer tela protegida por senha (login do `/admin`, por exemplo) precisa ser preenchida por ele diretamente dentro do painel que aparece do lado da conversa. Sempre confirmar em qual navegador a ação precisa acontecer antes de pedir "faça login".
-- **O Claude Code não roda `next build` nem `next dev` com o servidor do Iorran ligado, e não encerra processos dele** (incidente da Sessão 74: `.next` corrompido servindo CSS antigo). Verificação padrão nos prompts: `npx eslint` nos arquivos tocados. Se o cache corromper: parar o servidor, apagar `.next\dev` e `.next\cache`, subir de novo com `npm run staging`.
+- **O Claude Code não roda `next build` nem `next dev` com o servidor do Iorran ligado, e não encerra processos dele** (incidente da Sessão 74: `.next` corrompido servindo CSS antigo). Verificação padrão nos prompts: `npx eslint` nos arquivos tocados. Se o cache corromper: parar o servidor, apagar `.next\dev` e `.next\cache`, subir de novo com `npm run dev` (não existe script `staging`; o banco lido depende do `.env.local`: staging `yebwkchcrvebvvjvvvyu`, produção `pwlvjaenryzdkatmrhul`).
 - Todo prompt de implementação termina com "não commite; me devolva o diff" e a mensagem de commit sugerida. Se o Code falhar por erro da própria ferramenta (ex.: classificador de permissões sem veredito), nada foi alterado — basta pedir "tenta de novo" ou reabrir a sessão com o mesmo prompt.
 - Worktree separado (ex.: `C:\Users\Iorran\BarberShop-laryssa`) aparece com `+` no `git branch`; fechar com `git worktree remove` antes de apagar a branch dele.
 
@@ -302,4 +304,20 @@ empilhado sobre o nome, proporção quase quadrada) — recorte em `laryssa-marc
 `laryssa-marcaTexto.png` (nome+tagline), mesmo padrão que a Laysla já usava antes de virar
 lockup único.
 
-*Última atualização: 28/09 (Sessão 75 — seção 13 de alertas e avisos; seção 12 de tema e cores da Sessão 74; merge nunca junto do SQL de produção e coluna aditiva antes do código; Claude Code sem `next build`/`next dev` com o servidor do usuário ligado; `git add ':(literal)...'`; rotação de segredo inclui triggers do banco; medir uso real antes de decidir sobre funcionalidade).*
+## 14. Recursos órfãos e inventário (regra da Sessão 82)
+
+- Todo recurso novo (coluna, flag, texto padrão, sintaxe dentro de campo, constante por salão) nasce com a resposta para quem edita e onde: dona (conteúdo do negócio), painel global (identidade, cobrança, infraestrutura), código fixo documentado ou remover.
+- A resposta entra no `INVENTARIO_RECURSOS.md` no mesmo fechamento da demanda. Nada novo fica só em SQL ou só em código sem entrada no inventário.
+- Texto padrão visto pela cliente final é neutro. Papel no código é por id, nunca por nome. Sintaxe especial dentro de campo de texto (`---`, `{marcador}`) só nasce com dica na tela ou editor estruturado.
+- Hotfix por SQL para um tenant é aceitável, mas abre linha no inventário com o destino definitivo.
+- Confirmar o deploy em Production antes de rodar SQL de dado que depende do código novo.
+- Fechamento de sessão: revisar o inventário junto do `PENDENCIAS.md`.
+
+**Regras de diagnóstico (Sessões 80 a 82):**
+- Precedência de exceções de horário: bloqueio pontual vence liberação; bloqueio fixo cede a liberação de data específica; liberação recorrente perde para qualquer bloqueio. Toda tela que mostra bloqueio segue a regra do motor.
+- Teste visual de calendário e grade só em aba anônima ou Ctrl+Shift+R.
+- Confirmar o ambiente de cada teste (staging ou produção) antes de ler o resultado; conferir o id da Laysla (5 em produção, 3 em staging).
+- Janela mensal e restrição por período são camadas separadas; consultar as duas ao diagnosticar tudo fora do expediente.
+- Nunca chutar nome de coluna: consultar o schema antes de escrever SQL. SQL sempre rodável, com ids reais, sem placeholder.
+
+*Última atualização: 07/10 (Sessão 82 — seção 14 de recursos órfãos e inventário; AGENTS.md com as regras duras do Code; Code nunca escreve SQL; Sessão 75 — seção 13 de alertas e avisos; seção 12 de tema e cores da Sessão 74; merge nunca junto do SQL de produção e coluna aditiva antes do código; Claude Code sem `next build`/`next dev` com o servidor do usuário ligado; `git add ':(literal)...'`; rotação de segredo inclui triggers do banco; medir uso real antes de decidir sobre funcionalidade).*
