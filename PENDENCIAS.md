@@ -1,7 +1,28 @@
 # Pendências — reserva-horario
 
-## Fila sugerida para a semana (montada na Sessão 79, revisada na Sessão 81)
+## Prioridade máxima — varredura de recursos órfãos (virada de chave da Sessão 82)
+**Princípio.** Recurso órfão é qualquer configuração que existe só por SQL ou só no código, sem tela para a dona e sem tela no painel global. Cada um é um ramo solto: quando o Iorran sai da frente, ninguém consegue mexer; e cada tenant novo vira um conjunto de hotfixes manuais. A varredura sobe para o topo da fila, acima de funcionalidade nova, e o resultado fica em `INVENTARIO_RECURSOS.md` (primeira passada feita pelo raio-x do Code em 07/10, ainda a validar no banco).
+
+**Regra de destino** (vale para todo recurso novo também):
+- **Dona (UI do `/admin`):** conteúdo do negócio dela — textos, valores, avisos e popups de serviço/categoria, preferências, mensagens, etiquetas, rodapé, CNPJ.
+- **Painel global:** identidade, cobrança e infraestrutura — nome, slug, ativo, WhatsApp do salão, tema/logo, cor do Calendar, assinatura, expiração da reserva provisória.
+- **Código fixo, mas documentado e neutro:** regra de produto que não varia por salão; vai para o inventário com o motivo.
+- **Remover:** código morto e coluna sem leitor.
+
+**Ordem de ataque**
+1. **Textos padrão neutros** (risco mais provável de aparecer para cliente final): `"Teste"` como etapa anterior (`lib/agendamentosCliente.js` ~95) → `"Etapa anterior"`; `PADRAO_REATIVACAO` (`lib/whatsapp.js` ~68) sem "barbearia". Conferir antes, por SQL, se algum tenant real mostra o "Teste" (consulta de `nome_etapa_anterior` vazio nos serviços com `exige_segunda_data`).
+2. **Etiquetas por papel, não por nome** (`ConfiguracoesSalao.js` ~193/198, `admin/page.js` ~300/2652): coluna `papel` na etiqueta + SQL de backfill; renomear "Cliente Nova" hoje desliga o gate em silêncio.
+3. **Painel global — "Dados do salão"** (`nome`, `slug`, `ativo`, `whatsapp`, `reserva_provisoria_expira_horas`) e **tela da dona** para o que é conteúdo dela (`cnpj`, `rodape_selo1/2/3`, `mensagem_header`). Decidir `segmento` (remover se ninguém lê). Hoje `ativo=false` é a única forma de suspender um salão e só existe por SQL.
+4. **Editor estruturado de avisos na dona:** lista de popups por serviço e por categoria (título + texto, ordem, botão "inserir preço da manutenção"), substituindo a sintaxe escondida (`---`, primeira linha como título, `{valor_manutencao_30}`). Enquanto não existe, o campo livre precisa de uma dica da sintaxe na tela.
+5. **Tema/identidade por slug** (`lib/temas.js`): decidir entre painel global (upload de logo e paleta) ou código fixo enquanto houver poucos tenants; desfazer os aliases `junior`/`valeria`/`barbearia` (editar a Laysla reskina o Junior). Já ligado ao backlog do tema dinâmico.
+6. **Constantes que são regra de negócio** (corte das 13h, protocolo de 24h, expiração do Pix, atalhos de 45/60/90 dias) e **duplicatas do produto Acolhe** (`plataforma.js` × `acolhe.js` × `home/page.js` × `configurarWebhook.js`): juntar em um arquivo; validar o slug `acolhe-comercial` no deploy.
+7. **Limpeza:** Hero (mapas vazios), `lib/horarios.js` (constantes do original), `prazo_manutencao_dias`, coluna `google_calendar_cor_id` (confirmar no banco quem escreve), `MES_MINIMO`.
+- **Regra de processo (já no Protocolo):** recurso novo nasce com "quem edita e onde" definido e entrada no inventário; nada novo fica "só SQL" sem entrada.
+- **Dívida de fundo:** os dois selects de `estabelecimentos` (`lib/estabelecimento.js` e `lib/perfil.js`) seguem sincronizados à mão; uma coluna esquecida quebra só um papel.
+
+## Fila sugerida para a semana (montada na Sessão 79, revisada nas Sessões 81 e 82)
 Ordem por impacto, apontando para as seções abaixo. Revisar no início de cada sessão.
+0. **Varredura de recursos órfãos** (seção "Prioridade máxima", no topo): passa na frente de tudo; começar pelos textos padrão neutros.
 1. **Segurança:** policy do bucket `comprovantes-pix` sem filtro de salão; revisar o fluxo público com sessão de dona logada; fechar as três conferências das chaves expostas na Sessão 64 ("Segurança (prioridade alta)").
 2. **Testes de produção acumulados:** Vercel promovendo `main` para Production (conferir `ee84a4b`, `ef93b13`, `b6cb2b1` e `264154f`; "Agendamento com segunda data — residuais"); os três testes da etiqueta no wizard do admin que ficaram sem resultado (ficha, cliente sem etiqueta, troca pelo seletor); limpeza do Junior de produção ("Dados de teste a limpar"); grade nova do Agendar do `/admin` em produção; teste final da `/julia` com o login da Laryssa; QR automático da Laysla ("Sinal Pix por regra especial"); cor do Calendar da Laryssa; Julia (novembro fechado, liberações de dezembro); Lilian (janela mensal e teste completo antes de mandar o link).
 3. **Assinaturas:** ativar as donas reais no Financeiro, avisando cada uma antes.
@@ -198,6 +219,30 @@ Mudança da Sessão 74: o `/admin` agora define `--color-on-primary` e todos os 
 - **Catálogo do painel global desatualizado** (`app/painel-global/AbaAuditoria.js`, `CATALOGO_SEM_CONTROLE`): "Reduzir janela de agendamento" não existe mais (UI oculta); faltam "Excluir exclusividade", "Excluir regra especial" de sinal, "Excluir liberação por período" (Sessão 77), alertas de serviço/categoria e perguntas (hoje só implícitos), o aviso de Regras do agendamento no grupo Público, os cards de assinatura em Pendentes (Sessão 78: vencida e recusada fixos = proteção; próxima com "Ciente" = preferência dispensável por fatura) e o aviso "Não conseguimos carregar a agenda" do wizard (Sessão 79, proteção); "Confirmar manutenção" está só em Público mas também aparece no admin. Alinhar numa passada curta e manter o catálogo como inventário de todo popup novo (regra do Protocolo).
 - **Mês restrito com lembrete de etiqueta desligado:** se a dona desligar os lembretes e nunca etiquetar ninguém, um mês "restrito" fica fechado para todas as clientes. Ideia registrada: aviso na grade da Janela de agendamento quando nenhuma cliente tem a etiqueta liberada. Baixa prioridade — nenhuma dona real usa mês restrito hoje (só `junior` e `acolhe`, conferido em 26/09; a Julia passou a ter dezembro restrito, já aberto para todas desde 01/10).
 
+
+### Serviços, alertas e popups — Sessão 82 (Flávia, produção)
+**Resolvido em 07/10** (commits `0027702`, `88b7c00`, `e56cbbd`, `05f9bff`, `760508d`, `fa29867`, `113f2cf`; dados por SQL em produção, estabelecimento 4):
+- "Pendentes sumidos" da Flávia (Thaisa, 23/12) não foram perdidos: estavam cancelados pelo salão. Quem cancelou ainda não foi identificado (não existe carimbo de cancelamento).
+- Serviço sem categoria aparece por último no público (a remoção da Flávia); setas do admin passam a andar só entre ativos e visíveis da mesma categoria (`grupoDaCategoria`).
+- Perguntas do serviço reabrem, com as respostas anteriores, quando a cliente toca de novo no serviço já escolhido (Cancelar restaura o que estava; sem refazer a busca).
+- Alertas de serviço/categoria viram popups em sequência, obrigatórios de ler, com título; `whitespace-pre-line` no texto; `autoFocus` no botão; voltar físico bloqueado só nos popups intermediários.
+- Marcador `{valor_manutencao_30}` no alerta: puxa o preço da manutenção vinculada de maior prazo; sem manutenção ou com preço oculto, a linha some e o popup só abre se sobrar texto.
+- Flávia: alertas dos serviços 19, 30 e 34 no formato final; 53 e 58 com a linha "Só mãos"; alertas de 35 e 405 removidos; serviço 31 renomeado ("incluso esmaltação tradicional"); serviço 194 (Blindagem + Pedicure duplicado) desativado, 406 mantido.
+
+**Em aberto**
+- **Conferir o deploy de `113f2cf` como Production na Vercel** e testar em aba anônima o `/flavia/agendar` nos serviços 19, 30 e 34 (popups em sequência com o preço). Se o texto sair errado, volta rápido trocando o marcador por `R$140,00` no `alerta_mensagem`.
+- **Flávia confirmar R$140 × R$150 para a manutenção +30.** O app mostra R$140 nos serviços 32 e 195; se for R$150, corrigir o preço dos dois. O alerta acompanha sozinho.
+- **Serviços 193 e 404** ("Manutenção … e pedicure", não marcados como `eh_manutencao`): decidir se recebem o aviso dos 30 dias.
+- **Campo mãos/pés** (a Flávia pediu algo estruturado): revisitar em ~15 dias, depois de ver como as clientes reagem aos avisos "Só mãos".
+- **Duplicidade 35 × 58** ("Remoção + cutilagem", ambos só mãos; o 58 tem aviso): renomear para ficarem distintos ou unificar.
+- **Quem cancelou Thaisa, Maria Eduarda e Mônica** e a anomalia de Amanda Verri em 23/10: perguntar à Flávia. Decidir se `agendamentos_log` (quem/quando cancelou) vale criar — SQL de staging proposto, não aplicado.
+- **Fase 2 das perguntas:** guardar a data/horário escolhidos quando a cliente volta ao serviço pelo passo seguinte (hoje a data é refeita).
+- **11 tenants com `msg_reativacao` vazia:** usam o texto padrão (com "barbearia") até a prioridade 1 da varredura sair.
+- **Limpeza:** comentário solto em `GerenciarServicos.js` ~727–731 (dentro do objeto de `validarForm`); `proximaOrdemNoGrupo` (~760) ainda conta inativos e ocultos, enquanto `grupoDaCategoria` já não conta — alinhar.
+- **Staging:** restaurar o alerta do serviço 10 (ficou `yyyyy` nos testes).
+- **Git:** o commit `e56cbbd` foi feito direto na `main` (o Code local não criou branch); conferir `git config user.email` (autor apareceu com e-mail antigo de prefeitura).
+- **Aprendizado de processo:** pedir o `git show` do diff antes de aprovar; o Code local deve criar a branch antes de editar.
+
 ### Acolhe — tenant de demonstração (Sessão 65)
 - **Fotos das categorias:** o catálogo migrado da Laysla foi criado com `foto_url` em branco de propósito (as fotos originais são do salão real dela) — decidir com ela, ou fotografar/gerar fotos próprias, antes de usar o Acolhe amplamente como prospecção.
 - Ainda não testado em produção depois do último deploy (faixa de aviso, fonte, logo centralizada, botão "Acolhe") — conferir isso e o `/admin` do tenant.
@@ -238,6 +283,7 @@ Mudança da Sessão 74: o `/admin` agora define `--color-on-primary` e todos os 
 - **Staging, Laysla (Sessão 81):** bloqueio fixo de quarta, 8 liberações de dezembro (dias 2, 9, 23 e 30, grupo `3a0626a5-…`), bloqueio pontual de dia inteiro em 16/12 (`9eb151eb-…`), restrição por período `cd02403b-…` desativada (`ativa = false`) e janela de dezembro em `restrito` liberando "Cliente Fixo" (`13f1baea-…`); a etiqueta duplicada "Cliente Fixa" (`e9077099-…`) continua lá. Dado de teste, pode ficar.
 - **Produção, Junior (Sessão 81):** o primeiro teste da regra de liberação foi feito ali, com o código antigo; o bloqueio fixo de quarta, a liberação de dezembro e o bloqueio pontual criados podem ter ficado. **Conferir em Exceções de horário do Junior e apagar.**
 - **Staging, assinaturas (Sessão 78):** assinaturas ativadas em `laysla`, `css`, `flavia`, `julia`, `acolhe-comercial` e `teste`, com condições e faturas de teste (inclusive faturas até 2028 geradas antes do teto de 6 meses, pagas, informadas, recusadas e canceladas). A fatura 173 da Laysla foi alterada nos testes de alerta — conferir se voltou a `vencimento = 2027-03-10` sem recusa. Serve de base para testar; limpar quando atrapalhar (apagar as linhas de `assinaturas` em cascata não apaga as faturas — as faturas têm FK só para `estabelecimentos`; apagar por `estabelecimento_id`).
+- Staging, Flávia (Sessão 82): alerta do serviço 10 ficou `yyyyy` nos testes — restaurar. Ver também "Serviços, alertas e popups — Sessão 82".
 - Staging, `ausencias_log` (Sessão 79): quatro linhas do teste do registro (profissional 9). Inofensivas; servem de exemplo.
 - Staging, Flávia: serviços de teste com nomes aleatórios (`teste`, `ffjfdfddjj`, `xzcbxzbcbzbxzbxzc`) vistos na Sessão 74 — confirmar se são lixo e apagar.
 - Produção, tenants de teste `junior` e `acolhe`: agendamentos e comprovantes de teste da Sessão 71.
@@ -313,6 +359,7 @@ Mudança da Sessão 74: o `/admin` agora define `--color-on-primary` e todos os 
 - `gerarSlots`, `estaAberto` e `DIAS_FUNCIONAMENTO` em `lib/horarios.js` são código morto.
 - `dentroDaJanelaAgendamento`/`diasRestantesJanela` (`lib/janelaAgendamento.js`) continuam exportadas sem participar de decisão nenhuma desde a janela mensal.
 - Bloco oculto de `restricoes_agenda` em `ConfiguracoesSalao.js` (`{false && ...}`): se algum dia reativado, depende de state removido do `page.js` na Sessão 41. Mecanismo aposentado em favor da janela mensal — decidir remoção (ver "Agenda do admin — achados da Sessão 81": a leitura da restrição no motor e no calendário ainda existe e afeta o dia).
+- Constantes do original em `lib/horarios.js` (`HORA_ABERTURA`, `HORA_FECHAMENTO`, `DURACAO_MINUTOS`, `DIAS_FUNCIONAMENTO`), mapas vazios `SLUGS_COM_FOTO`/`FOTOS_POR_SLUG` do `Hero.js` e comentário desatualizado em `admin/page.js` ~2878 — ver "Prioridade máxima" (item 7).
 - `remotePattern` de `fotos-perfil` em `next.config.mjs` sem consumidor desde a Sessão 34 (dialog de zoom usa `<img>` nativa).
 - `salvarRespostasPerguntas` agora só é usada pelo `/admin` — conferir se ainda precisa morar em `FormularioAgendamento.js`.
 - `lib/abacatepay/confirmarPagamento.js` passou a selecionar `metodo_cobranca_pix` das regras sem usar o campo (Sessão 77, por uniformidade) — inofensivo.
