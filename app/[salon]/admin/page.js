@@ -1871,6 +1871,23 @@ export default function AdminPage() {
     }
 
     fecharAlterar();
+
+    // Pendente/aguardando sinal: o botão verde também confirma. O modal já
+    // fechou (os popups do gate têm o mesmo z-index e ficariam atrás dele); a
+    // confirmação passa pelo MESMO caminho do card (etiqueta -> janela ->
+    // prazo mínimo -> executarConfirmacao), com os dados NOVOS e sem segundo
+    // WhatsApp (a MENSAGEM_ALTERACAO já abriu acima).
+    if (ag.status === "pendente" || ag.status === "aguardando_sinal") {
+      const itemAtualizado = {
+        ...ag,
+        ...(novo ? { servico_id: novo.id, duracao_min: duracao, servicos: servicosFinal } : {}),
+        data: dataFinal,
+        horario: horarioFinal,
+      };
+      comGateDeEtiqueta(itemAtualizado, "confirmar", () =>
+        handleConfirmar(itemAtualizado, false)
+      );
+    }
   }
 
   // Arquiva uma pendência administrativa (botão "Arquivar" de qualquer tipo em
@@ -6495,7 +6512,11 @@ export default function AdminPage() {
                     className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <IconeWhatsApp />
-                    {salvandoAlterar ? "Salvando..." : "Confirmar alteração"}
+                    {salvandoAlterar
+                      ? "Salvando..."
+                      : ag.status === "pendente" || ag.status === "aguardando_sinal"
+                        ? "Confirmar agendamento"
+                        : "Confirmar alteração"}
                   </button>
                   <button
                     type="button"
