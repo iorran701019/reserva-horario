@@ -84,6 +84,7 @@ import {
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
+import PopupConfirmarSemAviso from "@/components/PopupConfirmarSemAviso";
 import ModalClientePendente from "@/components/ModalClientePendente";
 import ModalPrazoMinimo from "@/components/ModalPrazoMinimo";
 import Hero from "@/components/Hero";
@@ -1048,12 +1049,9 @@ export default function AdminPage() {
   // com excluirAgendamentoId, pra essa mesma reserva não aparecer ocupando o
   // profissional no dia/horário ATUAL dela (ver lib/disponibilidade.js).
   const [agendamentoParaAlterarData, setAgendamentoParaAlterarData] = useState(null);
-  // Botão dividido, mesmo padrão de notificarAoCancelar: zona grande arma
-  // true (handleAlterarData abre o WhatsApp com MENSAGEM_ALTERACAO_DATA
-  // depois do UPDATE), zona pequena arma false (só grava, sem notificar). O
-  // próprio modal de escolher data cumpre o papel de "tem certeza" — sem
-  // popup extra como o de agendamentoParaConfirmar.
-  const [notificarAoAlterarData, setNotificarAoAlterarData] = useState(true);
+  // Popup "Alterar sem avisar a cliente?" (PopupConfirmarSemAviso), aberto
+  // por "Confirmar sem avisar" no modal; só depois dele handleAlterarData(false).
+  const [confirmandoAlterarSemAviso, setConfirmandoAlterarSemAviso] = useState(false);
   const [mesVisivelAlterarData, setMesVisivelAlterarData] = useState(() => new Date());
   const [dataAlterarData, setDataAlterarData] = useState("");
   const [horarioAlterarData, setHorarioAlterarData] = useState("");
@@ -1328,7 +1326,7 @@ export default function AdminPage() {
   // altera. Só arma: quem grava é handleAlterarData. Devolve a mensagem de
   // recusa (string) — a ficha a mostra no próprio lugar, em vez do `erro`
   // global, que desmontaria a aba — ou null quando o modal abriu.
-  async function abrirAlterarDataAgendamento(agendamento, notificar) {
+  async function abrirAlterarDataAgendamento(agendamento) {
     const { data: linha, error } = await supabase
       .from("agendamentos")
       .select("id, nome_cliente, telefone, data, horario, status, servico_id, profissional_id, reserva_grupo_id, papel_reserva, servicos(nome, duracao_min, nome_etapa_anterior), profissionais(nome)")
@@ -1361,7 +1359,6 @@ export default function AdminPage() {
     }
 
     setErro("");
-    setNotificarAoAlterarData(notificar);
     setAgendamentoParaAlterarData({
       ...linha,
       duracao_min: linha.servicos?.duracao_min ?? null,
@@ -1615,13 +1612,13 @@ export default function AdminPage() {
   // agendamentoParaAlterarData) — só limpa o horário escolhido e força um
   // refetch da grade (versaoAlterarData) pra já refletir quem ainda está
   // livre, mesmo padrão de "recarrega as vagas" do wizard público.
-  // Depois do UPDATE bem-sucedido, `notificarAoAlterarData` (zona grande vs.
-  // zona pequena do botão dividido, ver JSX) decide se abre o WhatsApp com
+  // Depois do UPDATE bem-sucedido, `notificar` (botão "Confirmar e avisar" vs.
+  // "Confirmar sem avisar" do modal, ver JSX) decide se abre o WhatsApp com
   // MENSAGEM_ALTERACAO_DATA — mesmo padrão de `notificar` em
   // executarConfirmacao/handleCancelar. A mensagem usa a NOVA data/horario
   // (dataAlterarData/horarioAlterarData), não agendamentoParaAlterarData.data
   // (que ainda é a data ANTIGA nesse ponto).
-  async function handleAlterarData() {
+  async function handleAlterarData(notificar) {
     if (!agendamentoParaAlterarData || !dataAlterarData || !horarioAlterarData) return;
 
     setSalvandoAlterarData(true);
@@ -1667,7 +1664,7 @@ export default function AdminPage() {
     // refaz o resumo por ele, senão o carrossel mostraria a data antiga.
     setUltimaAlteracaoData({ id: agendamentoParaAlterarData.id, em: carimboAgora() });
 
-    if (notificarAoAlterarData) {
+    if (notificar) {
       abrirWhatsApp(
         agendamentoParaAlterarData.telefone,
         MENSAGEM_ALTERACAO_DATA(
@@ -4256,44 +4253,20 @@ export default function AdminPage() {
                             <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
                           </button>
                         </div>
-                        {/* Botão dividido em duas zonas, mesmo padrão de
-                            Confirmar/Cancelar (ver acima): a maior mantém o
-                            comportamento de sempre (update + WhatsApp com
-                            MENSAGEM_ALTERACAO_DATA); a menor arma
-                            notificarAoAlterarData=false e faz o mesmo update
-                            sem notificar. O modal de escolher data (mais
-                            abaixo) é o mesmo pros dois — sem popup extra de
-                            confirmação, já que escolher a nova data e clicar
-                            em "Confirmar nova data" já é o gesto deliberado. */}
+                        {/* "Alterar" abre direto o modal de escolher data (mais
+                            abaixo), que tem os dois desfechos: confirmar e
+                            avisar pelo WhatsApp, ou confirmar sem avisar. */}
                         {/* Par (serviço de duas datas): sem Alterar data aqui — a
                             data do par se altera no detalhe, depois de confirmado. */}
                         {!item.reserva_grupo_id && (
-                        <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-border">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAgendamentoParaAlterarData(item);
-                              setNotificarAoAlterarData(true);
-                            }}
-                            className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-heading transition hover:bg-surface"
-                          >
-                            <Calendar className="h-4 w-4" />
-                            Alterar data
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAgendamentoParaAlterarData(item);
-                              setNotificarAoAlterarData(false);
-                            }}
-                            aria-label="Alterar data sem notificar cliente"
-                            title="Alterar data sem notificar cliente"
-                            className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-border text-heading transition hover:bg-surface"
-                          >
-                            <Calendar className="h-4 w-4" aria-hidden="true" />
-                            <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setAgendamentoParaAlterarData(item)}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading ring-1 ring-border transition hover:bg-surface"
+                        >
+                          <Calendar className="h-4 w-4" />
+                          Alterar
+                        </button>
                         )}
                         <button
                           type="button"
@@ -5534,34 +5507,17 @@ export default function AdminPage() {
                   antes, como o Cancelar. Não vale pra cancelado/concluído. */}
               {selecionado.status !== "cancelado" &&
                 selecionado.status !== "concluido" && (
-                  <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-border">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAgendamentoParaAlterarData(selecionado);
-                        setNotificarAoAlterarData(true);
-                        setIdSelecionado(null);
-                      }}
-                      className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-heading transition hover:bg-surface"
-                    >
-                      <Calendar className="h-4 w-4" />
-                      Alterar data
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAgendamentoParaAlterarData(selecionado);
-                        setNotificarAoAlterarData(false);
-                        setIdSelecionado(null);
-                      }}
-                      aria-label="Alterar data sem notificar cliente"
-                      title="Alterar data sem notificar cliente"
-                      className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-border text-heading transition hover:bg-surface"
-                    >
-                      <Calendar className="h-4 w-4" aria-hidden="true" />
-                      <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAgendamentoParaAlterarData(selecionado);
+                      setIdSelecionado(null);
+                    }}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading ring-1 ring-border transition hover:bg-surface"
+                  >
+                    <Calendar className="h-4 w-4" />
+                    Alterar
+                  </button>
                 )}
               <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
                 <button
@@ -6022,8 +5978,9 @@ export default function AdminPage() {
           CalendarioDias. A grade de horários é uma réplica inline da mesma
           grade do wizard (sem extrair componente ainda, só esse um uso).
           Mesmo modal serve as duas zonas do botão dividido (ver
-          notificarAoAlterarData) — sem popup extra de "tem certeza", já
-          escolher a data e clicar em "Confirmar nova data" é o gesto. */}
+          o parâmetro `notificar` de handleAlterarData): "Confirmar e avisar"
+          grava e abre o WhatsApp; "Confirmar sem avisar" passa antes por
+          PopupConfirmarSemAviso. */}
       {agendamentoParaAlterarData && (
         <div
           role="dialog"
@@ -6154,24 +6111,51 @@ export default function AdminPage() {
               </p>
             )}
 
-            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
-              <button
-                type="button"
-                onClick={handleAlterarData}
-                disabled={!dataAlterarData || !horarioAlterarData || salvandoAlterarData}
-                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {salvandoAlterarData ? "Salvando..." : "Confirmar nova data"}
-              </button>
+            <div className="mt-6 flex flex-col gap-2">
+              {/* Botão dividido, mesmo padrão do Confirmar dos cards de
+                  Pendentes: zona grande avisa pelo WhatsApp; a estreita abre
+                  o popup "Alterar sem avisar a cliente?". */}
+              <div className="flex items-stretch overflow-hidden rounded-lg bg-green-50 ring-1 ring-green-100">
+                <button
+                  type="button"
+                  onClick={() => handleAlterarData(true)}
+                  disabled={!dataAlterarData || !horarioAlterarData || salvandoAlterarData}
+                  className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <IconeWhatsApp />
+                  {salvandoAlterarData ? "Salvando..." : "Confirmar nova data"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmandoAlterarSemAviso(true)}
+                  disabled={!dataAlterarData || !horarioAlterarData || salvandoAlterarData}
+                  aria-label="Confirmar sem avisar a cliente"
+                  title="Confirmar sem avisar a cliente"
+                  className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-green-100 text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Check className="h-4 w-4" aria-hidden="true" />
+                  <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={() => setAgendamentoParaAlterarData(null)}
-                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
-                Voltar
+                Fechar
               </button>
             </div>
           </div>
+          {confirmandoAlterarSemAviso && (
+            <PopupConfirmarSemAviso
+              desabilitado={salvandoAlterarData}
+              onVoltar={() => setConfirmandoAlterarSemAviso(false)}
+              onConfirmar={() => {
+                setConfirmandoAlterarSemAviso(false);
+                handleAlterarData(false);
+              }}
+            />
+          )}
         </div>
       )}
 

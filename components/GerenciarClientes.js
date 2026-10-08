@@ -212,12 +212,13 @@ function DetalheCliente({
   // cada nova tentativa o zera antes de perguntar de novo.
   const [avisoAlterarData, setAvisoAlterarData] = useState(null);
 
-  async function tentarAlterarData(item, notificar) {
+  async function tentarAlterarData(item) {
     setAvisoAlterarData(null);
-    const recusa = await onAlterarDataAgendamento(
-      { ...item, nome_cliente: clienteAtual.nome, telefone: telefoneDigitos },
-      notificar
-    );
+    const recusa = await onAlterarDataAgendamento({
+      ...item,
+      nome_cliente: clienteAtual.nome,
+      telefone: telefoneDigitos,
+    });
     if (recusa) setAvisoAlterarData({ id: item.id, texto: recusa });
   }
 
@@ -678,7 +679,7 @@ function DetalheCliente({
                 <>
                 {/* Alterar data: só ARMA o MESMO modal do detalhe do Painel
                     (ver onAlterarDataAgendamento em page.js), com o mesmo
-                    botão dividido — zona grande notifica, pequena não. A
+                    botão "Alterar" (o aviso ou não à cliente é escolhido no modal). A
                     regra de cancelado/concluído é reaplicada lá, sobre a
                     linha viva. Estilo do Cancelar, só com tokens do tema. */}
                 {avisoAlterarData?.id === item.id && (
@@ -691,30 +692,14 @@ function DetalheCliente({
                     linha viva recusar, o motivo aparece no <p> âmbar acima. */}
                 {onAlterarDataAgendamento &&
                   !(item.reserva_grupo_id && item.status !== "confirmado") && (
-                  <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-border">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        tentarAlterarData(item, true)
-                      }
-                      className="inline-flex flex-1 items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium text-heading transition hover:bg-surface"
-                    >
-                      <Calendar className="h-3.5 w-3.5" />
-                      Alterar data
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        tentarAlterarData(item, false)
-                      }
-                      aria-label="Alterar data sem notificar cliente"
-                      title="Alterar data sem notificar cliente"
-                      className="inline-flex w-12 shrink-0 items-center justify-center gap-1 border-l border-border text-heading transition hover:bg-surface"
-                    >
-                      <Calendar className="h-3.5 w-3.5" aria-hidden="true" />
-                      <MessageCircleOff className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => tentarAlterarData(item)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-2 py-1.5 text-xs font-medium text-heading ring-1 ring-border transition hover:bg-surface"
+                  >
+                    <Calendar className="h-3.5 w-3.5" />
+                    Alterar
+                  </button>
                 )}
                 <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
                   <button
