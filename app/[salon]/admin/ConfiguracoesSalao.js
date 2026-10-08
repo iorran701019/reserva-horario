@@ -231,21 +231,11 @@ const VALORES_EXEMPLO_MENSAGENS = {
   link: "https://agenda.exemplo.com/salao",
   janela_fim: "30/09/2026",
   alteracao: montarTrechoAlteracao({
-    servicoMudou: true,
     servicoNovo: "Manicure completa",
-    dataMudou: false,
     data: "2026-08-15",
     horario: "14:00",
   }),
 };
-
-// Os três casos do trecho {alteracao} (msg_alteracao), pras prévias somente
-// leitura do item expandido.
-const CASOS_PREVIA_ALTERACAO = [
-  { rotulo: "Se mudar só o serviço", servicoMudou: true, dataMudou: false },
-  { rotulo: "Se mudar só data e horário", servicoMudou: false, dataMudou: true },
-  { rotulo: "Se mudar os dois", servicoMudou: true, dataMudou: true },
-];
 
 export default function ConfiguracoesSalao({
   estabelecimento,
@@ -4496,26 +4486,11 @@ export default function ConfiguracoesSalao({
                       )}
 
                       {campo === "msg_alteracao" && (
-                        <div className="space-y-2 rounded-lg bg-surface p-3">
-                          {CASOS_PREVIA_ALTERACAO.map((caso) => (
-                            <div key={caso.rotulo}>
-                              <p className="text-xs font-medium text-heading">{caso.rotulo}</p>
-                              <p className="text-xs text-muted">
-                                {substituirVariaveis(textoVigente, {
-                                  ...VALORES_EXEMPLO_MENSAGENS,
-                                  alteracao: montarTrechoAlteracao({
-                                    servicoMudou: caso.servicoMudou,
-                                    servicoNovo: VALORES_EXEMPLO_MENSAGENS.servico,
-                                    dataMudou: caso.dataMudou,
-                                    data: "2026-08-15",
-                                    horario: "14:00",
-                                  }),
-                                })}
-                              </p>
-                            </div>
-                          ))}
+                        <div className="space-y-1 rounded-lg bg-surface p-3">
+                          <p className="text-xs font-medium text-heading">Exemplo da mensagem</p>
+                          <p className="whitespace-pre-line text-xs text-muted">{preview}</p>
                           <p className="text-xs text-muted">
-                            Escreva uma vez; o trecho {"{alteracao}"} muda sozinho conforme o que foi alterado.
+                            O trecho {"{alteracao}"} mostra sempre o serviço e a data/horário vigentes.
                           </p>
                         </div>
                       )}

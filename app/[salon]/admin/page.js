@@ -1088,9 +1088,8 @@ export default function AdminPage() {
   const [origensAlterarServico, setOrigensAlterarServico] = useState({});
   const [carregandoServicosAlterarServico, setCarregandoServicosAlterarServico] = useState(false);
   const [servicoNovoId, setServicoNovoId] = useState(null);
-  // Âncora logo abaixo da lista de serviços: ao escolher um, o modal rola
-  // até ela para mostrar nova duração e avisos.
-  const resumoAlterarServicoRef = useRef(null);
+  // Contêiner rolável do modal: ao escolher um serviço, rola até o fim.
+  const modalAlterarRef = useRef(null);
 
   // Aplica um patch a um único item no estado local (evita refazer o fetch
   // inteiro). Caminho único de "refresh" otimista usado pelos handlers.
@@ -1749,12 +1748,13 @@ export default function AdminPage() {
     };
   }, [agendamentoParaAlterar, precisaListaServicos, estabelecimento?.id]);
 
-  // Escolheu um serviço: rola o modal até o resumo logo abaixo da lista,
-  // depois do render.
+  // Escolheu um serviço: rola o modal até o fim (resumo e botões), depois do
+  // render.
   useEffect(() => {
     if (!servicoNovoId) return;
     const raf = requestAnimationFrame(() => {
-      resumoAlterarServicoRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      const el = modalAlterarRef.current;
+      el?.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     });
     return () => cancelAnimationFrame(raf);
   }, [servicoNovoId]);
@@ -1861,8 +1861,6 @@ export default function AdminPage() {
             servicoNovo: servicoNome,
             valorCentavos: servicosFinal?.preco_centavos,
             ehManutencao: servicosFinal?.eh_manutencao,
-            servicoMudou: Boolean(novo),
-            dataMudou,
             data: dataFinal,
             horario: horarioFinal,
           },
@@ -6311,6 +6309,7 @@ export default function AdminPage() {
             }}
           >
             <div
+              ref={modalAlterarRef}
               className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
               onClick={(e) => e.stopPropagation()}
             >
@@ -6357,7 +6356,7 @@ export default function AdminPage() {
                       ))}
                     </div>
                   )}
-                  <div ref={resumoAlterarServicoRef}>
+                  <>
                     {novo && (
                       <p className="mt-3 text-sm text-body">
                         Nova duração:{" "}
@@ -6369,7 +6368,7 @@ export default function AdminPage() {
                         Este agendamento tem sinal ou cobrança Pix gerada; o valor não é recalculado.
                       </p>
                     )}
-                  </div>
+                  </>
                 </div>
               )}
 
