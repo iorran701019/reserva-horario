@@ -1754,7 +1754,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (!servicoNovoId) return;
     const raf = requestAnimationFrame(() => {
-      resumoAlterarServicoRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      resumoAlterarServicoRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     });
     return () => cancelAnimationFrame(raf);
   }, [servicoNovoId]);
