@@ -216,13 +216,16 @@ function encontrarEtiquetaPorNome(etiquetas, nome) {
 const ATALHOS_JANELA_DIAS = [45, 60, 90];
 
 // Valores fictícios pra prévia das mensagens de WhatsApp (lista retrátil
-// abaixo) — cobre todas as variáveis usadas por qualquer uma das 8
+// abaixo) — cobre todas as variáveis usadas por qualquer uma das
 // mensagens (ver MENSAGENS_WHATSAPP_CONFIG em lib/whatsapp.js).
 const VALORES_EXEMPLO_MENSAGENS = {
   nome_cliente: "Maria",
   data: "15/08",
   horario: "14:00",
   servico: "Manicure completa",
+  servico_antigo: "Manicure simples",
+  servico_novo: "Manicure completa",
+  valor: "R$ 120,00",
   link: "https://agenda.exemplo.com/salao",
   janela_fim: "30/09/2026",
 };
@@ -634,6 +637,10 @@ export default function ConfiguracoesSalao({
   // Qual das 9 mensagens está expandida — só uma por vez, mesmo padrão do
   // acordeão de blocos acima.
   const [mensagemExpandida, setMensagemExpandida] = useState(null);
+  // true = alguma opção de pergunta de serviço deste salão tem ajuste de preço
+  // != 0; undefined (carregando) ou erro de consulta também escondem {valor}
+  // do autocomplete (ver variaveisVisiveis no bloco de mensagens).
+  const [temAjustePrecoPerguntas, setTemAjustePrecoPerguntas] = useState(undefined);
 
   // Carrega os valores atuais ao abrir.
   useEffect(() => {
@@ -643,7 +650,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, aviso_sinal, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data, conclusao_manual_ativa, confirmado_expira_horas, lembrete_etiqueta_ativo, pular_perguntas_adicionais_admin"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, aviso_sinal, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data, msg_alteracao_servico, conclusao_manual_ativa, confirmado_expira_horas, lembrete_etiqueta_ativo, pular_perguntas_adicionais_admin"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -788,6 +795,57 @@ export default function ConfiguracoesSalao({
     }
 
     carregar();
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento.id]);
+
+  // Existe alguma opção de pergunta de serviço com ajuste de preço != 0? Três
+  // consultas simples (serviços -> perguntas -> opções), mesmo estilo de
+  // GerenciarServicos. Em erro assume true: {valor} some do autocomplete.
+  useEffect(() => {
+    let ativo = true;
+
+    async function verificarAjustes() {
+      let resultado = true;
+      try {
+        const { data: servicos, error: erroServicos } = await supabase
+          .from("servicos")
+          .select("id")
+          .eq("estabelecimento_id", estabelecimento.id);
+        if (erroServicos) throw erroServicos;
+
+        const idsServicos = (servicos ?? []).map((sv) => sv.id);
+        if (idsServicos.length === 0) {
+          resultado = false;
+        } else {
+          const { data: perguntas, error: erroPerguntas } = await supabase
+            .from("servico_perguntas")
+            .select("id")
+            .in("servico_id", idsServicos);
+          if (erroPerguntas) throw erroPerguntas;
+
+          const idsPerguntas = (perguntas ?? []).map((p) => p.id);
+          if (idsPerguntas.length === 0) {
+            resultado = false;
+          } else {
+            const { data: opcoes, error: erroOpcoes } = await supabase
+              .from("servico_pergunta_opcoes")
+              .select("id")
+              .in("pergunta_id", idsPerguntas)
+              .neq("ajuste_preco_centavos", 0)
+              .limit(1);
+            if (erroOpcoes) throw erroOpcoes;
+            resultado = (opcoes ?? []).length > 0;
+          }
+        }
+      } catch {
+        resultado = true;
+      }
+      if (ativo) setTemAjustePrecoPerguntas(resultado);
+    }
+
+    verificarAjustes();
     return () => {
       ativo = false;
     };
@@ -4365,6 +4423,15 @@ export default function ConfiguracoesSalao({
         {blocoAberto === "mensagens" && (
           <div className="border-t border-border divide-y divide-border">
             {MENSAGENS_WHATSAPP_CONFIG.map(({ campo, titulo, gatilho, variaveis, padrao }) => {
+              // {valor} só aparece no autocomplete quando nunca sai vazio por
+              // regra do salão (valor cheio após prazo ou ajuste de preço nas
+              // perguntas). Filtro só de exibição; a trava em runtime está em
+              // valorParaMensagem (lib/whatsapp.js).
+              const ocultarValor =
+                valorCheioAposPrazo !== false || temAjustePrecoPerguntas !== false;
+              const variaveisVisiveis = ocultarValor
+                ? variaveis.filter((v) => v !== "valor")
+                : variaveis;
               const textoVigente = mensagens?.[campo] ?? padrao;
               const preview = substituirVariaveis(textoVigente, VALORES_EXEMPLO_MENSAGENS);
               const aberta = mensagemExpandida === campo;
@@ -4400,8 +4467,16 @@ export default function ConfiguracoesSalao({
                           setMensagens((m) => ({ ...m, [campo]: novo }))
                         }
                         onBlur={() => salvarMensagem(campo)}
-                        variaveisDisponiveis={variaveis}
+                        variaveisDisponiveis={variaveisVisiveis}
                       />
+
+                      {variaveisVisiveis.includes("valor") && (
+                        <p className="text-xs text-muted">
+                          Dica: escreva {"{valor}"} no fim de uma frase que não
+                          faça falta, pois ele pode sair vazio (por exemplo,
+                          quando o preço está oculto).
+                        </p>
+                      )}
 
                       <p className="text-xs text-muted">{gatilho}</p>
 

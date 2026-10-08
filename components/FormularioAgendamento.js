@@ -53,6 +53,7 @@ import {
 import {
   linkWhatsApp,
   MENSAGEM_CONFIRMACAO,
+  opcoesValorMensagem,
   MENSAGEM_DUVIDA_GENERICA,
 } from "@/lib/whatsapp";
 import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
@@ -5172,9 +5173,16 @@ export default function FormularioAgendamento({
               // FORA desta etapa — ver o relatório.
               data: form.data,
               horario: horarioSelecionado,
-              servicos: { nome: servicoSelecionado.nome },
+              servicos: {
+                nome: servicoSelecionado.nome,
+                preco_centavos: servicoSelecionado.preco_centavos,
+                eh_manutencao: servicoSelecionado.eh_manutencao,
+              },
             },
-            estabelecimento.msg_confirmacao
+            estabelecimento.msg_confirmacao,
+            // Respostas ainda estão no state do wizard (não vão ao banco antes
+            // desta mensagem sair): o ajuste vem de calcularAjustePerguntas.
+            opcoesValorMensagem(estabelecimento, calcularAjustePerguntas().itens.length > 0)
           )
         ),
         "_blank",

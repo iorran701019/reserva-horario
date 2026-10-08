@@ -18,6 +18,7 @@ import {
   MENSAGEM_FORA_DA_JANELA,
   MENSAGEM_ALTERACAO_DATA,
   MENSAGEM_ALTERACAO_SERVICO,
+  opcoesValorMensagem,
 } from "@/lib/whatsapp";
 import { WHATSAPP_SUPORTE_ACOLHE, MENSAGEM_SUPORTE_ACOLHE } from "@/lib/acolhe";
 import {
@@ -47,7 +48,10 @@ import {
   buscarUltimoConcluidoQualquer,
   avaliarDesvioDeServico,
 } from "@/lib/manutencaoSugerida";
-import { buscarRespostasPorAgendamento } from "@/lib/agendamentoRespostas";
+import {
+  buscarRespostasPorAgendamento,
+  agendamentoTemAjustePreco,
+} from "@/lib/agendamentoRespostas";
 import { buscarConflitoPrazoMinimo, nomeEtapaAnterior } from "@/lib/agendamentosCliente";
 import { verificarFidelidadeClientes, buscarProgressoFidelidade } from "@/lib/fidelidade";
 import LinkComprovantePix from "@/components/LinkComprovantePix";
@@ -380,7 +384,7 @@ function estaAguardandoConclusao(item, agora) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, reserva_grupo_id, papel_reserva, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, editado_manualmente_em, servicos(nome, duracao_min, preco_centavos, nome_etapa_anterior), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, reserva_grupo_id, papel_reserva, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, editado_manualmente_em, servicos(nome, duracao_min, preco_centavos, eh_manutencao, nome_etapa_anterior), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -1324,9 +1328,14 @@ export default function AdminPage() {
     }
 
     if (notificar) {
+      const temAjuste = await agendamentoTemAjustePreco(agendamento.id);
       abrirWhatsApp(
         agendamento.telefone,
-        MENSAGEM_CONFIRMACAO(agendamento, estabelecimento.msg_confirmacao)
+        MENSAGEM_CONFIRMACAO(
+          agendamento,
+          estabelecimento.msg_confirmacao,
+          opcoesValorMensagem(estabelecimento, temAjuste)
+        )
       );
     }
   }
@@ -1356,7 +1365,7 @@ export default function AdminPage() {
   async function abrirAlterarDataAgendamento(agendamento) {
     const { data: linha, error } = await supabase
       .from("agendamentos")
-      .select("id, nome_cliente, telefone, data, horario, status, servico_id, profissional_id, reserva_grupo_id, papel_reserva, servicos(nome, duracao_min, nome_etapa_anterior), profissionais(nome)")
+      .select("id, nome_cliente, telefone, data, horario, status, servico_id, profissional_id, reserva_grupo_id, papel_reserva, servicos(nome, duracao_min, preco_centavos, eh_manutencao, nome_etapa_anterior), profissionais(nome)")
       .eq("id", agendamento.id)
       .eq("estabelecimento_id", estabelecimento.id)
       .maybeSingle();
@@ -1488,7 +1497,11 @@ export default function AdminPage() {
   // estado local pelo MESMO atualizarItemLocal dos outros handlers — o modal
   // (dados vivos) reflete na hora e o botão vira "Reenviar lembrete".
   async function handleEnviarLembrete(item) {
-    abrirWhatsApp(item.telefone, MENSAGEM_LEMBRETE(item, estabelecimento.msg_lembrete));
+    const temAjuste = await agendamentoTemAjustePreco(item.id);
+    abrirWhatsApp(
+      item.telefone,
+      MENSAGEM_LEMBRETE(item, estabelecimento.msg_lembrete, opcoesValorMensagem(estabelecimento, temAjuste))
+    );
 
     const lembrete_enviado_em = new Date().toISOString();
     const { data, error } = await supabase
@@ -1692,11 +1705,13 @@ export default function AdminPage() {
     setUltimaAlteracaoData({ id: agendamentoParaAlterarData.id, em: carimboAgora() });
 
     if (notificar) {
+      const temAjuste = await agendamentoTemAjustePreco(agendamentoParaAlterarData.id);
       abrirWhatsApp(
         agendamentoParaAlterarData.telefone,
         MENSAGEM_ALTERACAO_DATA(
           { ...agendamentoParaAlterarData, data: dataAlterarData, horario: horarioAlterarData },
-          estabelecimento.msg_alteracao_data
+          estabelecimento.msg_alteracao_data,
+          opcoesValorMensagem(estabelecimento, temAjuste)
         )
       );
     }
@@ -1711,7 +1726,7 @@ export default function AdminPage() {
   async function abrirAlterarServicoAgendamento(agendamento) {
     const { data: linha, error } = await supabase
       .from("agendamentos")
-      .select("id, nome_cliente, telefone, data, horario, status, servico_id, profissional_id, reserva_grupo_id, sinal_declarado_pago, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+      .select("id, nome_cliente, telefone, data, horario, status, servico_id, profissional_id, reserva_grupo_id, sinal_declarado_pago, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, servicos(nome, duracao_min, preco_centavos, eh_manutencao), profissionais(nome)")
       .eq("id", agendamento.id)
       .eq("estabelecimento_id", estabelecimento.id)
       .maybeSingle();
@@ -1888,6 +1903,7 @@ export default function AdminPage() {
         nome: servicoNome,
         duracao_min: duracao,
         preco_centavos: novo.preco_centavos,
+        eh_manutencao: novo.eh_manutencao,
         nome_etapa_anterior: null,
       },
     });
@@ -1907,9 +1923,11 @@ export default function AdminPage() {
           nome: ag.nome_cliente,
           servicoAntigo,
           servicoNovo: servicoNome,
+          valorCentavos: novo.preco_centavos,
+          ehManutencao: novo.eh_manutencao,
           data: ag.data,
           horario: ag.horario,
-        })
+        }, estabelecimento.msg_alteracao_servico, opcoesValorMensagem(estabelecimento, false))
       );
     }
 
@@ -4522,16 +4540,18 @@ export default function AdminPage() {
                         {renderBotaoAlterar(item)}
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={async () => {
+                            const temAjuste = await agendamentoTemAjustePreco(item.id);
                             abrirWhatsApp(
                               item.telefone,
                               MENSAGEM_FORA_DA_JANELA(
                                 item,
                                 estabelecimento.janela_agendamento_fim,
-                                estabelecimento.msg_fora_da_janela
+                                estabelecimento.msg_fora_da_janela,
+                                opcoesValorMensagem(estabelecimento, temAjuste)
                               )
-                            )
-                          }
+                            );
+                          }}
                           className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100"
                         >
                           <IconeWhatsApp />
