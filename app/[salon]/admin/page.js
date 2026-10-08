@@ -38,6 +38,7 @@ import {
 import {
   chaveMesJanela,
   dataAgendavelComMes,
+  fimDaJanelaAbertaAoPublico,
   mesesJanelaIndisponiveis,
   mesesDoAlcance,
   statusDoMes,
@@ -4505,7 +4506,7 @@ export default function AdminPage() {
                               item.telefone,
                               MENSAGEM_FORA_DA_JANELA(
                                 item,
-                                estabelecimento.janela_agendamento_fim,
+                                fimDaJanelaAbertaAoPublico(mesesJanela),
                                 estabelecimento.msg_fora_da_janela,
                                 opcoesValorMensagem(estabelecimento, temAjuste)
                               )
