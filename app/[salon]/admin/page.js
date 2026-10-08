@@ -380,7 +380,7 @@ function estaAguardandoConclusao(item, agora) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, reserva_grupo_id, papel_reserva, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, editado_manualmente_em, servicos(nome, duracao_min, preco_centavos, nome_etapa_anterior), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, reserva_grupo_id, papel_reserva, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, editado_manualmente_em, servicos(nome, duracao_min, preco_centavos, nome_etapa_anterior), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -1066,7 +1066,7 @@ export default function AdminPage() {
 
   // Menu do botão "Alterar" (components/MenuAlterar): { item, origem } com
   // origem "detalhe" (modal de confirmado, que fecha ao escolher) ou "card"
-  // (Fora da janela). null = fechado.
+  // (cards de Pendentes e de Fora da janela). null = fechado.
   const [menuAlterar, setMenuAlterar] = useState(null);
 
   // Alterar serviço (RPC agendamento_alterar_servico): troca só o serviço de
@@ -1711,7 +1711,7 @@ export default function AdminPage() {
   async function abrirAlterarServicoAgendamento(agendamento) {
     const { data: linha, error } = await supabase
       .from("agendamentos")
-      .select("id, nome_cliente, telefone, data, horario, status, servico_id, profissional_id, reserva_grupo_id, sinal_declarado_pago, abacatepay_pago_em, comprovante_pix_url, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+      .select("id, nome_cliente, telefone, data, horario, status, servico_id, profissional_id, reserva_grupo_id, sinal_declarado_pago, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
       .eq("id", agendamento.id)
       .eq("estabelecimento_id", estabelecimento.id)
       .maybeSingle();
@@ -1893,6 +1893,12 @@ export default function AdminPage() {
     });
     // Mesmo sinal de handleAlterarData: a ficha do cliente refaz o resumo.
     setUltimaAlteracaoData({ id: ag.id, em: carimboAgora() });
+    // Serviço novo: o "Ciente" do aviso de desvio vale só para o serviço antigo.
+    setDesviosCientes((atuais) => {
+      const novoSet = new Set(atuais);
+      novoSet.delete(String(ag.id));
+      return novoSet;
+    });
 
     if (notificar) {
       abrirWhatsApp(
@@ -2929,6 +2935,22 @@ export default function AdminPage() {
     return desviosPorAgendamento.has(id) && !desviosCientes.has(id);
   }
 
+  // Botão "Alterar" dos cards de Pendentes e de Fora da janela (e do aviso de
+  // desvio): abre o MenuAlterar. Par de datas não tem Alterar aqui.
+  function renderBotaoAlterar(item) {
+    if (item.reserva_grupo_id) return null;
+    return (
+      <button
+        type="button"
+        onClick={() => setMenuAlterar({ item, origem: "card" })}
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading ring-1 ring-border transition hover:bg-surface"
+      >
+        <Calendar className="h-4 w-4" />
+        Alterar
+      </button>
+    );
+  }
+
   function renderAvisoDesvio(item) {
     const id = String(item.id);
     const desvio = desviosPorAgendamento.get(id);
@@ -2945,13 +2967,16 @@ export default function AdminPage() {
             <p>Serviço solicitado agora: {nomeCurtoServico(item.servicos?.nome)}</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setDesviosCientes((atuais) => new Set(atuais).add(id))}
-          className="self-end rounded-lg bg-card px-3 py-1 text-xs font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
-        >
-          Ciente
-        </button>
+        <div className="flex items-center justify-end gap-2">
+          {renderBotaoAlterar(item)}
+          <button
+            type="button"
+            onClick={() => setDesviosCientes((atuais) => new Set(atuais).add(id))}
+            className="rounded-lg bg-card px-3 py-1 text-xs font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
+          >
+            Ciente
+          </button>
+        </div>
       </div>
     );
   }
@@ -4125,6 +4150,9 @@ export default function AdminPage() {
                       pelo aviso abre em seguida o popup de "sem notificar" que
                       já existia, dois modais em sequência. */}
                   <div className="mt-4 flex flex-col gap-2">
+                    {/* Alterar (data ou serviço): aparece com ou sem o aviso
+                        de desvio abaixo. */}
+                    {renderBotaoAlterar(item)}
                     {/* Aviso de serviço diferente da última visita: enquanto
                         ativo, ocupa o lugar do Confirmar (não há como confirmar
                         sem dar "Ciente"). O Cancelar segue visível abaixo. */}
@@ -4491,16 +4519,7 @@ export default function AdminPage() {
                             avisar pelo WhatsApp, ou confirmar sem avisar. */}
                         {/* Par (serviço de duas datas): sem Alterar data aqui — a
                             data do par se altera no detalhe, depois de confirmado. */}
-                        {!item.reserva_grupo_id && (
-                        <button
-                          type="button"
-                          onClick={() => setMenuAlterar({ item, origem: "card" })}
-                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading ring-1 ring-border transition hover:bg-surface"
-                        >
-                          <Calendar className="h-4 w-4" />
-                          Alterar
-                        </button>
-                        )}
+                        {renderBotaoAlterar(item)}
                         <button
                           type="button"
                           onClick={() =>
@@ -6437,7 +6456,10 @@ export default function AdminPage() {
         const ag = agendamentoParaAlterarServico;
         const novo = servicosAlterarServico.find((sv) => sv.id === servicoNovoId);
         const temSinal = Boolean(
-          ag.sinal_declarado_pago || ag.abacatepay_pago_em || ag.comprovante_pix_url
+          ag.sinal_declarado_pago ||
+            ag.abacatepay_pago_em ||
+            ag.comprovante_pix_url ||
+            ag.abacatepay_cobranca_id
         );
         const travado = !novo || salvandoAlterarServico;
         // Mesma ordem do /agendar: categorias por ordem (só as com serviço),
@@ -6559,7 +6581,7 @@ export default function AdminPage() {
 
               {temSinal && (
                 <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200">
-                  Este agendamento tem sinal; o valor não é recalculado.
+                  Este agendamento tem sinal ou cobrança Pix gerada; o valor não é recalculado.
                 </p>
               )}
 

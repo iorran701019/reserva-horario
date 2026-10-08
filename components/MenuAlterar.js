@@ -2,8 +2,8 @@
 
 import { Calendar, Scissors } from "lucide-react";
 
-// Menu pequeno do botão "Alterar" (card "Fora da janela", detalhe de
-// confirmado e ficha do cliente). Só apresentação: quem chama decide o que
+// Menu pequeno do botão "Alterar" (cards de Pendentes e "Fora da janela",
+// detalhe de confirmado e ficha do cliente). Só apresentação: quem chama decide o que
 // cada opção faz. "Alterar serviço" só aparece quando `podeAlterarServico`
 // (sem par, sem cancelado/concluído); sem ele sobra só data/horário.
 export default function MenuAlterar({
