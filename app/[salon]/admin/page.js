@@ -1085,6 +1085,9 @@ export default function AdminPage() {
   const [salvandoAlterarServico, setSalvandoAlterarServico] = useState(false);
   const [erroAlterarServico, setErroAlterarServico] = useState("");
   const [confirmandoAlterarServicoSemAviso, setConfirmandoAlterarServicoSemAviso] = useState(false);
+  // Contêiner rolável do modal: ao escolher o novo serviço, rola até o fim
+  // para mostrar nova duração, avisos e botões.
+  const modalAlterarServicoRef = useRef(null);
 
   // Aplica um patch a um único item no estado local (evita refazer o fetch
   // inteiro). Caminho único de "refresh" otimista usado pelos handlers.
@@ -1823,6 +1826,16 @@ export default function AdminPage() {
       ativo = false;
     };
   }, [agendamentoParaAlterarServico, estabelecimento?.id]);
+
+  // Escolheu um serviço: rola o modal até o fim, depois do render.
+  useEffect(() => {
+    if (!servicoNovoId) return;
+    const raf = requestAnimationFrame(() => {
+      const el = modalAlterarServicoRef.current;
+      if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [servicoNovoId]);
 
   // Grava o novo serviço pela RPC agendamento_alterar_servico (devolve
   // duracao_min e servico_nome; 23P01 = horário ocupado para a nova duração).
@@ -6355,6 +6368,22 @@ export default function AdminPage() {
                   <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div>
+              {!agendamentoParaAlterarData.reserva_grupo_id &&
+                agendamentoParaAlterarData.status !== "cancelado" &&
+                agendamentoParaAlterarData.status !== "concluido" && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const recusa = await abrirAlterarServicoAgendamento(agendamentoParaAlterarData);
+                      if (typeof recusa === "string") setErroAlterarData(recusa);
+                      else setAgendamentoParaAlterarData(null);
+                    }}
+                    disabled={salvandoAlterarData}
+                    className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Alterar serviço
+                  </button>
+                )}
               <button
                 type="button"
                 onClick={() => setAgendamentoParaAlterarData(null)}
@@ -6481,6 +6510,7 @@ export default function AdminPage() {
             }}
           >
             <div
+              ref={modalAlterarServicoRef}
               className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
               onClick={(e) => e.stopPropagation()}
             >
@@ -6562,6 +6592,18 @@ export default function AdminPage() {
                     <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const recusa = await abrirAlterarDataAgendamento(agendamentoParaAlterarServico);
+                    if (typeof recusa === "string") setErroAlterarServico(recusa);
+                    else setAgendamentoParaAlterarServico(null);
+                  }}
+                  disabled={salvandoAlterarServico}
+                  className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Alterar data/horário
+                </button>
                 <button
                   type="button"
                   onClick={() => setAgendamentoParaAlterarServico(null)}
