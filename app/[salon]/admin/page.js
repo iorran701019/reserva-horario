@@ -16,8 +16,7 @@ import {
   MENSAGEM_CANCELAMENTO,
   MENSAGEM_CONFIRMACAO,
   MENSAGEM_FORA_DA_JANELA,
-  MENSAGEM_ALTERACAO_DATA,
-  MENSAGEM_ALTERACAO_SERVICO,
+  MENSAGEM_ALTERACAO,
   opcoesValorMensagem,
 } from "@/lib/whatsapp";
 import { WHATSAPP_SUPORTE_ACOLHE, MENSAGEM_SUPORTE_ACOLHE } from "@/lib/acolhe";
@@ -743,7 +742,7 @@ export default function AdminPage() {
   // objeto NOVO a cada cancelamento, senão cancelar o mesmo id duas vezes não
   // dispararia o efeito lá. null = nenhum cancelamento nesta sessão.
   const [ultimoCancelamento, setUltimoCancelamento] = useState(null);
-  // Mesmo papel, pra "Alterar data" concluído (ver handleAlterarData).
+  // Mesmo papel, pra "Alterar data" concluído (ver handleAlterar).
   const [ultimaAlteracaoData, setUltimaAlteracaoData] = useState(null);
 
   // Agendamento aguardando confirmação da zona pequena de "Confirmar" (sem
@@ -1047,16 +1046,29 @@ export default function AdminPage() {
   const [carregandoTroca, setCarregandoTroca] = useState(false);
   const [erroTroca, setErroTroca] = useState("");
 
-  // Alterar data (seção "Fora da janela de agendamento"): troca só data/
-  // horário de um agendamento já existente — mesmo cliente/serviço/
-  // profissional. `agendamentoParaAlterarData` arma o modal (null = fechado).
-  // diasSemanaAtivos vem do PRÓPRIO profissional do agendamento (fixo, não
-  // muda aqui) — ver efeito abaixo. horarios vem de calcularVagasPorHorario
-  // com excluirAgendamentoId, pra essa mesma reserva não aparecer ocupando o
-  // profissional no dia/horário ATUAL dela (ver lib/disponibilidade.js).
-  const [agendamentoParaAlterarData, setAgendamentoParaAlterarData] = useState(null);
+  // Alterar (botão "Alterar" de Pendentes, Fora da janela, detalhe e ficha da
+  // cliente): UM modal que troca serviço e/ou data e horário de um agendamento
+  // existente, gravando pela RPC agendamento_alterar. `agendamentoParaAlterar`
+  // arma o modal (null = fechado); vem da linha VIVA (ver
+  // abrirAlterarAgendamento). diasSemanaAtivos vem do PRÓPRIO profissional do
+  // agendamento (fixo, não muda aqui) — ver efeito abaixo. horarios vem de
+  // calcularVagasPorHorario com excluirAgendamentoId, pra essa mesma reserva
+  // não aparecer ocupando o profissional no dia/horário ATUAL dela (ver
+  // lib/disponibilidade.js), e usa a duração do serviço novo, se escolhido.
+  const [agendamentoParaAlterar, setAgendamentoParaAlterar] = useState(null);
+  // O que o modal mostra, escolhido no MenuAlterar: "servico" (só o bloco
+  // Serviço), "data" (só Data e horário) ou "ambos". null = modal fechado.
+  const [modoAlterar, setModoAlterar] = useState(null);
+  // A lista de serviços só é necessária fora do modo "data". Derivado em
+  // booleano pro efeito que a carrega não rodar (e zerar a escolha) ao passar
+  // de "servico" para "ambos".
+  const precisaListaServicos = modoAlterar !== "data";
+  // Menu do botão "Alterar" (components/MenuAlterar): { item, origem } com
+  // origem "detalhe" (modal de confirmado, que fecha ao escolher) ou "card"
+  // (cards de Pendentes e de Fora da janela). null = fechado.
+  const [menuAlterar, setMenuAlterar] = useState(null);
   // Popup "Alterar sem avisar a cliente?" (PopupConfirmarSemAviso), aberto
-  // por "Confirmar sem avisar" no modal; só depois dele handleAlterarData(false).
+  // por "Confirmar sem avisar" no modal; só depois dele handleAlterar(false).
   const [confirmandoAlterarSemAviso, setConfirmandoAlterarSemAviso] = useState(false);
   const [mesVisivelAlterarData, setMesVisivelAlterarData] = useState(() => new Date());
   const [dataAlterarData, setDataAlterarData] = useState("");
@@ -1065,33 +1077,20 @@ export default function AdminPage() {
   const [carregandoDiasAlterarData, setCarregandoDiasAlterarData] = useState(false);
   const [horariosAlterarData, setHorariosAlterarData] = useState([]);
   const [carregandoHorariosAlterarData, setCarregandoHorariosAlterarData] = useState(false);
-  const [salvandoAlterarData, setSalvandoAlterarData] = useState(false);
-  const [erroAlterarData, setErroAlterarData] = useState("");
-
-  // Menu do botão "Alterar" (components/MenuAlterar): { item, origem } com
-  // origem "detalhe" (modal de confirmado, que fecha ao escolher) ou "card"
-  // (cards de Pendentes e de Fora da janela). null = fechado.
-  const [menuAlterar, setMenuAlterar] = useState(null);
-
-  // Alterar serviço (RPC agendamento_alterar_servico): troca só o serviço de
-  // um agendamento existente; data/horário/profissional ficam. Nenhuma
-  // pergunta de serviço é feita aqui. `agendamentoParaAlterarServico` arma o
-  // modal (null = fechado); a lista vem de servico_profissional do
-  // profissional do agendamento.
-  const [agendamentoParaAlterarServico, setAgendamentoParaAlterarServico] = useState(null);
+  const [salvandoAlterar, setSalvandoAlterar] = useState(false);
+  const [erroAlterar, setErroAlterar] = useState("");
+  // Bloco "Serviço" do modal: lista dos serviços que o profissional atende
+  // (menos o atual), agrupada pelas categorias do salão (mesma ordem do
+  // /agendar) e nome do serviço de origem das manutenções
+  // ({ [servico_origem_id]: nome }). servicoNovoId null = serviço não muda.
   const [servicosAlterarServico, setServicosAlterarServico] = useState([]);
-  // Categorias do salão (agrupam a lista, mesma ordem do /agendar) e nome do
-  // serviço de origem das manutenções ({ [servico_origem_id]: nome }).
   const [categoriasAlterarServico, setCategoriasAlterarServico] = useState([]);
   const [origensAlterarServico, setOrigensAlterarServico] = useState({});
   const [carregandoServicosAlterarServico, setCarregandoServicosAlterarServico] = useState(false);
   const [servicoNovoId, setServicoNovoId] = useState(null);
-  const [salvandoAlterarServico, setSalvandoAlterarServico] = useState(false);
-  const [erroAlterarServico, setErroAlterarServico] = useState("");
-  const [confirmandoAlterarServicoSemAviso, setConfirmandoAlterarServicoSemAviso] = useState(false);
-  // Contêiner rolável do modal: ao escolher o novo serviço, rola até o fim
-  // para mostrar nova duração, avisos e botões.
-  const modalAlterarServicoRef = useRef(null);
+  // Âncora logo abaixo da lista de serviços: ao escolher um, o modal rola
+  // até ela para mostrar nova duração e avisos.
+  const resumoAlterarServicoRef = useRef(null);
 
   // Aplica um patch a um único item no estado local (evita refazer o fetch
   // inteiro). Caminho único de "refresh" otimista usado pelos handlers.
@@ -1351,36 +1350,36 @@ export default function AdminPage() {
     setNotificarAoCancelar(notificar);
   }
 
-  // Arma o MESMO modal "Alterar data" do Painel (agendamentoParaAlterarData)
-  // a pedido da ficha do cliente (onAlterarDataAgendamento em
-  // GerenciarClientes.js). Os itens da ficha vêm da RPC de leitura, que não
-  // traz profissional_nome, reserva_grupo_id nem papel_reserva — e o modal
-  // precisa deles (profissional fixo, aviso de inversão do par) —, então relê
-  // a linha VIVA com o mesmo select de buscarAgendamentos. A irmã do par vai
-  // junto em `irmaFicha` porque `agendamentos` (state do Painel) pode não tê-la
-  // carregada. Mesma regra do detalhe do Painel: cancelado/concluído não
-  // altera. Só arma: quem grava é handleAlterarData. Devolve a mensagem de
-  // recusa (string) — a ficha a mostra no próprio lugar, em vez do `erro`
-  // global, que desmontaria a aba — ou null quando o modal abriu.
-  async function abrirAlterarDataAgendamento(agendamento) {
+  // Arma o modal único "Alterar" (agendamentoParaAlterar) a pedido dos cards
+  // de Pendentes e Fora da janela, do detalhe do Painel e da ficha do cliente
+  // (onAlterarAgendamento em GerenciarClientes.js). Os itens da ficha vêm da
+  // RPC de leitura, que não traz profissional_nome, reserva_grupo_id,
+  // papel_reserva nem os campos de sinal — e o modal precisa deles —, então
+  // relê a linha VIVA com o mesmo select de buscarAgendamentos (+ sinal). A
+  // irmã do par vai junto em `irmaFicha` porque `agendamentos` (state do
+  // Painel) pode não tê-la carregada. Cancelado/concluído não altera. Só arma:
+  // quem grava é handleAlterar. Devolve a mensagem de recusa (string) — a
+  // ficha a mostra no próprio lugar, em vez do `erro` global, que desmontaria
+  // a aba — ou null quando o modal abriu.
+  async function abrirAlterarAgendamento(agendamento, modo) {
     const { data: linha, error } = await supabase
       .from("agendamentos")
-      .select("id, nome_cliente, telefone, data, horario, status, servico_id, profissional_id, reserva_grupo_id, papel_reserva, servicos(nome, duracao_min, preco_centavos, eh_manutencao, nome_etapa_anterior), profissionais(nome)")
+      .select("id, nome_cliente, telefone, data, horario, status, servico_id, profissional_id, reserva_grupo_id, papel_reserva, sinal_declarado_pago, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, servicos(nome, duracao_min, preco_centavos, eh_manutencao, nome_etapa_anterior), profissionais(nome)")
       .eq("id", agendamento.id)
       .eq("estabelecimento_id", estabelecimento.id)
       .maybeSingle();
 
     if (error || !linha) {
-      return `Não foi possível abrir a alteração de data${error ? `: ${error.message}` : "."}`;
+      return `Não foi possível abrir a alteração${error ? `: ${error.message}` : "."}`;
     }
     if (linha.status === "cancelado" || linha.status === "concluido") {
-      return "Esse agendamento já foi cancelado ou concluído — não dá para alterar a data.";
+      return "Esse agendamento já foi cancelado ou concluído — não dá para alterá-lo.";
     }
     // Par pendente é aceito ou recusado inteiro; alterar um lado só depois de
     // confirmado. A ficha já esconde o botão; isto cobre a linha viva ter
     // mudado (ou a RPC não ter trazido reserva_grupo_id). Não abre o modal.
     if (linha.reserva_grupo_id && linha.status !== "confirmado") {
-      return "Este agendamento faz parte de um par de datas ainda pendente. Confirme o pedido em Pendentes antes de alterar a data.";
+      return "Este agendamento faz parte de um par de datas ainda pendente. Confirme o pedido em Pendentes antes de alterá-lo.";
     }
 
     let irmaFicha = null;
@@ -1395,13 +1394,30 @@ export default function AdminPage() {
     }
 
     setErro("");
-    setAgendamentoParaAlterarData({
+    // Par não tem bloco de serviço: se a linha viva virou par depois do menu,
+    // só data/horário.
+    setModoAlterar(linha.reserva_grupo_id ? "data" : modo);
+    setAgendamentoParaAlterar({
       ...linha,
       duracao_min: linha.servicos?.duracao_min ?? null,
       profissional_nome: linha.profissionais?.nome ?? null,
       irmaFicha,
     });
     return null;
+  }
+
+  // Fecha o modal único e esquece o modo escolhido no menu.
+  function fecharAlterar() {
+    setAgendamentoParaAlterar(null);
+    setModoAlterar(null);
+  }
+
+  // Ponto de entrada dos botões "Alterar" que ficam no próprio Painel (cards
+  // e detalhe): não há filho para mostrar a recusa, então ela vai pro `erro`
+  // global.
+  async function abrirAlterarDoPainel(item, modo) {
+    const recusa = await abrirAlterarAgendamento(item, modo);
+    if (typeof recusa === "string") setErro(recusa);
   }
 
   // Botão B: só roda DEPOIS que o dono confirma no modal. Grava o status
@@ -1642,127 +1658,18 @@ export default function AdminPage() {
     setAgendamentoParaTrocar(null);
   }
 
-  // Alterar data/horário de um agendamento já existente (seção "Fora da
-  // janela de agendamento"), mantendo cliente/serviço/profissional. Grava só
-  // { data, horario } — `periodo` (coluna GERADA, base da exclusion
-  // constraint) recalcula sozinho no Postgres, não é escrito daqui. Mesmo
-  // cadeado anti-sobreposição de handleTrocarProfissional: 23P01 = outra
-  // reserva ocupou esse profissional nesse horário no meio do caminho. Nesse
-  // caso o modal continua aberto (não fecha, não desarma
-  // agendamentoParaAlterarData) — só limpa o horário escolhido e força um
-  // refetch da grade (versaoAlterarData) pra já refletir quem ainda está
-  // livre, mesmo padrão de "recarrega as vagas" do wizard público.
-  // Depois do UPDATE bem-sucedido, `notificar` (botão "Confirmar e avisar" vs.
-  // "Confirmar sem avisar" do modal, ver JSX) decide se abre o WhatsApp com
-  // MENSAGEM_ALTERACAO_DATA — mesmo padrão de `notificar` em
-  // executarConfirmacao/handleCancelar. A mensagem usa a NOVA data/horario
-  // (dataAlterarData/horarioAlterarData), não agendamentoParaAlterarData.data
-  // (que ainda é a data ANTIGA nesse ponto).
-  async function handleAlterarData(notificar) {
-    if (!agendamentoParaAlterarData || !dataAlterarData || !horarioAlterarData) return;
-
-    setSalvandoAlterarData(true);
-    setErroAlterarData("");
-
-    const { data, error } = await supabase
-      .from("agendamentos")
-      .update({ data: dataAlterarData, horario: horarioAlterarData })
-      .eq("id", agendamentoParaAlterarData.id)
-      .select("id");
-
-    setSalvandoAlterarData(false);
-
-    if (error) {
-      const ehOcupado =
-        error.code === "23P01" ||
-        /agendamentos_sem_sobreposicao|exclusion constraint/i.test(error.message ?? "");
-      setErroAlterarData(
-        ehOcupado ? "Esse horário já está ocupado. Escolha outro." : error.message
-      );
-      if (ehOcupado) {
-        setHorarioAlterarData("");
-        setVersaoAlterarData((v) => v + 1);
-      }
-      return;
-    }
-
-    // Mesmo par de causas do handleTrocarProfissional: conflito real vem como
-    // ERRO 23P01 (tratado acima); zero linha SEM erro é a RLS filtrando — a
-    // exclusion constraint nem chega a ser testada. O modal segue aberto.
-    if (!data?.length) {
-      setErroAlterarData(
-        "Nenhuma linha foi alterada no banco — a nova data não foi salva. Recarregue a página e tente de novo."
-      );
-      return;
-    }
-
-    atualizarItemLocal(agendamentoParaAlterarData.id, {
-      data: dataAlterarData,
-      horario: horarioAlterarData,
-    });
-    // Mesmo sinal de ultimoCancelamento: a ficha do cliente (aba Clientes)
-    // refaz o resumo por ele, senão o carrossel mostraria a data antiga.
-    setUltimaAlteracaoData({ id: agendamentoParaAlterarData.id, em: carimboAgora() });
-
-    if (notificar) {
-      const temAjuste = await agendamentoTemAjustePreco(agendamentoParaAlterarData.id);
-      abrirWhatsApp(
-        agendamentoParaAlterarData.telefone,
-        MENSAGEM_ALTERACAO_DATA(
-          { ...agendamentoParaAlterarData, data: dataAlterarData, horario: horarioAlterarData },
-          estabelecimento.msg_alteracao_data,
-          opcoesValorMensagem(estabelecimento, temAjuste)
-        )
-      );
-    }
-
-    setAgendamentoParaAlterarData(null);
-  }
-
-  // "Alterar serviço" da ficha do cliente (GerenciarClientes): mesma ideia de
-  // abrirAlterarDataAgendamento — relê a linha VIVA (a RPC da ficha não traz
-  // servico_id, profissional_id, reserva_grupo_id nem os campos de sinal) e
-  // arma o modal. Devolve a mensagem de recusa (string) ou null quando abriu.
-  async function abrirAlterarServicoAgendamento(agendamento) {
-    const { data: linha, error } = await supabase
-      .from("agendamentos")
-      .select("id, nome_cliente, telefone, data, horario, status, servico_id, profissional_id, reserva_grupo_id, sinal_declarado_pago, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, servicos(nome, duracao_min, preco_centavos, eh_manutencao), profissionais(nome)")
-      .eq("id", agendamento.id)
-      .eq("estabelecimento_id", estabelecimento.id)
-      .maybeSingle();
-
-    if (error || !linha) {
-      return `Não foi possível abrir a alteração de serviço${error ? `: ${error.message}` : "."}`;
-    }
-    if (linha.status === "cancelado" || linha.status === "concluido") {
-      return "Esse agendamento já foi cancelado ou concluído — não dá para alterar o serviço.";
-    }
-    if (linha.reserva_grupo_id) {
-      return "Este agendamento faz parte de um par de datas — o serviço não pode ser alterado.";
-    }
-
-    setErro("");
-    setAgendamentoParaAlterarServico({
-      ...linha,
-      duracao_min: linha.servicos?.duracao_min ?? null,
-      profissional_nome: linha.profissionais?.nome ?? null,
-    });
-    return null;
-  }
-
   // Lista os serviços ativos que o profissional do agendamento atende,
-  // excluindo o atual. Roda ao armar o modal "Alterar serviço".
+  // excluindo o atual. Roda ao armar o modal "Alterar"; par não tem bloco de
+  // serviço (nem lista).
   useEffect(() => {
-    const ag = agendamentoParaAlterarServico;
+    const ag = agendamentoParaAlterar;
     setServicoNovoId(null);
-    setErroAlterarServico("");
-    setConfirmandoAlterarServicoSemAviso(false);
     setServicosAlterarServico([]);
     setCategoriasAlterarServico([]);
     setOrigensAlterarServico({});
-    if (!ag) return;
+    if (!ag || ag.reserva_grupo_id || !precisaListaServicos) return;
     if (!ag.profissional_id) {
-      setErroAlterarServico("Este agendamento não tem profissional atribuído — não dá para listar serviços.");
+      setErroAlterar("Este agendamento não tem profissional atribuído — não dá para listar serviços.");
       return;
     }
 
@@ -1775,7 +1682,7 @@ export default function AdminPage() {
         .eq("profissional_id", ag.profissional_id);
       if (!ativo) return;
       if (erroVinculos) {
-        setErroAlterarServico(`Não foi possível carregar os serviços: ${erroVinculos.message}`);
+        setErroAlterar(`Não foi possível carregar os serviços: ${erroVinculos.message}`);
         setCarregandoServicosAlterarServico(false);
         return;
       }
@@ -1803,7 +1710,7 @@ export default function AdminPage() {
       ]);
       if (!ativo) return;
       if (resServicos.error) {
-        setErroAlterarServico(`Não foi possível carregar os serviços: ${resServicos.error.message}`);
+        setErroAlterar(`Não foi possível carregar os serviços: ${resServicos.error.message}`);
         setCarregandoServicosAlterarServico(false);
         return;
       }
@@ -1840,98 +1747,132 @@ export default function AdminPage() {
     return () => {
       ativo = false;
     };
-  }, [agendamentoParaAlterarServico, estabelecimento?.id]);
+  }, [agendamentoParaAlterar, precisaListaServicos, estabelecimento?.id]);
 
-  // Escolheu um serviço: rola o modal até o fim, depois do render.
+  // Escolheu um serviço: rola o modal até o resumo logo abaixo da lista,
+  // depois do render.
   useEffect(() => {
     if (!servicoNovoId) return;
     const raf = requestAnimationFrame(() => {
-      const el = modalAlterarServicoRef.current;
-      if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      resumoAlterarServicoRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
     return () => cancelAnimationFrame(raf);
   }, [servicoNovoId]);
 
-  // Grava o novo serviço pela RPC agendamento_alterar_servico (devolve
-  // duracao_min e servico_nome; 23P01 = horário ocupado para a nova duração).
-  // `notificar` decide só o WhatsApp depois do sucesso, como em
-  // handleAlterarData. salvandoAlterarServico trava duplo clique.
-  async function handleAlterarServico(notificar) {
-    const ag = agendamentoParaAlterarServico;
-    const novo = servicosAlterarServico.find((sv) => sv.id === servicoNovoId);
-    if (!ag || !novo || salvandoAlterarServico) return;
+  // Grava pela RPC agendamento_alterar enviando SÓ o que mudou (parâmetro
+  // omitido = null = não muda); devolve duracao_min e servico_nome. O serviço
+  // muda se há servicoNovoId; data/horário mudam se os dois foram escolhidos e
+  // diferem dos atuais. 23P01 = horário ocupado para esta combinação: o modal
+  // continua aberto (não desarma agendamentoParaAlterar) e força um refetch da
+  // grade (versaoAlterarData). salvandoAlterar trava duplo clique. Depois do
+  // sucesso, `notificar` (zona grande vs. "Confirmar sem avisar" do botão
+  // dividido) decide se abre o WhatsApp com MENSAGEM_ALTERACAO — mesmo padrão
+  // de executarConfirmacao/handleCancelar. A mensagem usa o serviço e a data/
+  // horário VIGENTES depois da alteração (agendamentoParaAlterar ainda guarda
+  // os antigos nesse ponto).
+  async function handleAlterar(notificar) {
+    const ag = agendamentoParaAlterar;
+    if (!ag || salvandoAlterar) return;
+    const novo = servicosAlterarServico.find((sv) => sv.id === servicoNovoId) ?? null;
+    const dataMudou =
+      Boolean(dataAlterarData && horarioAlterarData) &&
+      (dataAlterarData !== ag.data ||
+        String(horarioAlterarData).slice(0, 5) !== String(ag.horario).slice(0, 5));
+    if (!novo && !dataMudou) return;
 
-    setSalvandoAlterarServico(true);
-    setErroAlterarServico("");
+    setSalvandoAlterar(true);
+    setErroAlterar("");
 
-    const { data, error } = await supabase.rpc("agendamento_alterar_servico", {
+    const { data, error } = await supabase.rpc("agendamento_alterar", {
       p_agendamento_id: ag.id,
-      p_servico_id: novo.id,
+      p_servico_id: novo ? novo.id : null,
+      p_data: dataMudou ? dataAlterarData : null,
+      p_horario: dataMudou ? horarioAlterarData : null,
     });
 
-    setSalvandoAlterarServico(false);
+    setSalvandoAlterar(false);
 
     if (error) {
       const ehOcupado =
         error.code === "23P01" ||
         /agendamentos_sem_sobreposicao|exclusion constraint/i.test(error.message ?? "");
-      setErroAlterarServico(
+      setErroAlterar(
         ehOcupado
-          ? "Horário ocupado para este serviço mais longo. Escolha outro serviço."
+          ? "Horário ocupado para esta combinação; escolha outro horário"
           : error.message
       );
+      if (ehOcupado) {
+        if (dataMudou) setHorarioAlterarData("");
+        setVersaoAlterarData((v) => v + 1);
+      }
       return;
     }
 
     const resultado = Array.isArray(data) ? data[0] : data;
     if (!resultado) {
-      setErroAlterarServico(
-        "Nenhuma linha foi alterada no banco — o novo serviço não foi salvo. Recarregue a página e tente de novo."
+      setErroAlterar(
+        "Nenhuma linha foi alterada no banco — a alteração não foi salva. Recarregue a página e tente de novo."
       );
       return;
     }
 
-    const servicoAntigo = ag.servicos?.nome ?? "";
-    const servicoNome = resultado.servico_nome ?? novo.nome;
-    const duracao = resultado.duracao_min ?? novo.duracao_min;
+    const servicoNome = novo
+      ? (resultado.servico_nome ?? novo.nome)
+      : (ag.servicos?.nome ?? "serviço");
+    const duracao = resultado.duracao_min ?? novo?.duracao_min ?? ag.duracao_min;
+    const dataFinal = dataMudou ? dataAlterarData : ag.data;
+    const horarioFinal = dataMudou ? horarioAlterarData : ag.horario;
+    const servicosFinal = novo
+      ? {
+          ...(ag.servicos ?? {}),
+          nome: servicoNome,
+          duracao_min: duracao,
+          preco_centavos: novo.preco_centavos,
+          eh_manutencao: novo.eh_manutencao,
+          nome_etapa_anterior: null,
+        }
+      : ag.servicos;
 
     atualizarItemLocal(ag.id, {
-      servico_id: novo.id,
-      duracao_min: duracao,
-      servicos: {
-        ...(ag.servicos ?? {}),
-        nome: servicoNome,
-        duracao_min: duracao,
-        preco_centavos: novo.preco_centavos,
-        eh_manutencao: novo.eh_manutencao,
-        nome_etapa_anterior: null,
-      },
+      ...(novo ? { servico_id: novo.id, duracao_min: duracao, servicos: servicosFinal } : {}),
+      ...(dataMudou ? { data: dataFinal, horario: horarioFinal } : {}),
     });
-    // Mesmo sinal de handleAlterarData: a ficha do cliente refaz o resumo.
+    // Mesmo sinal de ultimoCancelamento: a ficha do cliente (aba Clientes)
+    // refaz o resumo por ele, senão o carrossel mostraria os dados antigos.
     setUltimaAlteracaoData({ id: ag.id, em: carimboAgora() });
-    // Serviço novo: o "Ciente" do aviso de desvio vale só para o serviço antigo.
-    setDesviosCientes((atuais) => {
-      const novoSet = new Set(atuais);
-      novoSet.delete(String(ag.id));
-      return novoSet;
-    });
+    if (novo) {
+      // Serviço novo: o "Ciente" do aviso de desvio vale só para o serviço antigo.
+      setDesviosCientes((atuais) => {
+        const novoSet = new Set(atuais);
+        novoSet.delete(String(ag.id));
+        return novoSet;
+      });
+    }
 
     if (notificar) {
+      // Serviço trocado: as respostas do serviço antigo foram descartadas,
+      // então não há ajuste de preço a considerar.
+      const temAjuste = novo ? false : await agendamentoTemAjustePreco(ag.id);
       abrirWhatsApp(
         ag.telefone,
-        MENSAGEM_ALTERACAO_SERVICO({
-          nome: ag.nome_cliente,
-          servicoAntigo,
-          servicoNovo: servicoNome,
-          valorCentavos: novo.preco_centavos,
-          ehManutencao: novo.eh_manutencao,
-          data: ag.data,
-          horario: ag.horario,
-        }, estabelecimento.msg_alteracao_servico, opcoesValorMensagem(estabelecimento, false))
+        MENSAGEM_ALTERACAO(
+          {
+            nome: ag.nome_cliente,
+            servicoNovo: servicoNome,
+            valorCentavos: servicosFinal?.preco_centavos,
+            ehManutencao: servicosFinal?.eh_manutencao,
+            servicoMudou: Boolean(novo),
+            dataMudou,
+            data: dataFinal,
+            horario: horarioFinal,
+          },
+          estabelecimento.msg_alteracao,
+          opcoesValorMensagem(estabelecimento, temAjuste)
+        )
       );
     }
 
-    setAgendamentoParaAlterarServico(null);
+    fecharAlterar();
   }
 
   // Arquiva uma pendência administrativa (botão "Arquivar" de qualquer tipo em
@@ -2388,13 +2329,14 @@ export default function AdminPage() {
   // dentro do wizard (ver FormularioAgendamento), só que aqui é sempre UM
   // profissional só, não uma união de vários.
   useEffect(() => {
-    if (!agendamentoParaAlterarData) return;
+    setConfirmandoAlterarSemAviso(false);
+    setErroAlterar("");
+    if (!agendamentoParaAlterar) return;
     let ativo = true;
 
     setMesVisivelAlterarData(new Date());
     setDataAlterarData("");
     setHorarioAlterarData("");
-    setErroAlterarData("");
     setDiasSemanaAtivosAlterarData(new Set());
 
     (async () => {
@@ -2402,7 +2344,7 @@ export default function AdminPage() {
       const { data, error } = await supabase
         .from("profissionais")
         .select("modo_horario, horarios_trabalho(dia_semana), horarios_fixos(dia_semana)")
-        .eq("id", agendamentoParaAlterarData.profissional_id)
+        .eq("id", agendamentoParaAlterar.profissional_id)
         .single();
       if (!ativo) return;
       if (!error && data) {
@@ -2416,7 +2358,7 @@ export default function AdminPage() {
     return () => {
       ativo = false;
     };
-  }, [agendamentoParaAlterarData]);
+  }, [agendamentoParaAlterar]);
 
   // Ao escolher um dia no calendário, busca a grade de vagas do dia (mesma
   // lib/disponibilidade do wizard) e filtra só os horários em que o
@@ -2424,10 +2366,10 @@ export default function AdminPage() {
   // própria reserva da checagem de ocupados, senão o profissional apareceria
   // ocupado no horário ATUAL dela mesma (útil quando a dona só quer trocar o
   // horário dentro do mesmo dia). `versaoAlterarData` força um refetch depois
-  // de um 23P01 (ver handleAlterarData), sem precisar trocar de dia.
+  // de um 23P01 (ver handleAlterar), sem precisar trocar de dia.
   const [versaoAlterarData, setVersaoAlterarData] = useState(0);
   useEffect(() => {
-    if (!agendamentoParaAlterarData || !dataAlterarData) {
+    if (!agendamentoParaAlterar || !dataAlterarData) {
       setHorariosAlterarData([]);
       return;
     }
@@ -2438,19 +2380,21 @@ export default function AdminPage() {
       try {
         const vagas = await calcularVagasPorHorario({
           estabelecimentoId: estabelecimento.id,
-          servicoId: agendamentoParaAlterarData.servico_id,
+          servicoId: servicoNovoId ?? agendamentoParaAlterar.servico_id,
           data: dataAlterarData,
-          excluirAgendamentoId: agendamentoParaAlterarData.id,
+          excluirAgendamentoId: agendamentoParaAlterar.id,
         });
         if (!ativo) return;
         const agoraGrade = new Date();
         const livres = Object.keys(vagas)
-          .filter((h) => vagas[h].includes(agendamentoParaAlterarData.profissional_id))
+          .filter((h) => vagas[h].includes(agendamentoParaAlterar.profissional_id))
           .filter((h) => !horarioJaPassou(dataAlterarData, h, agoraGrade))
           .sort();
         setHorariosAlterarData(livres);
+        // Serviço novo (mais longo) pode tirar o horário já escolhido da grade.
+        setHorarioAlterarData((atual) => (livres.includes(atual) ? atual : ""));
       } catch (e) {
-        if (ativo) setErroAlterarData(e.message ?? String(e));
+        if (ativo) setErroAlterar(e.message ?? String(e));
       } finally {
         if (ativo) setCarregandoHorariosAlterarData(false);
       }
@@ -2459,7 +2403,7 @@ export default function AdminPage() {
     return () => {
       ativo = false;
     };
-  }, [agendamentoParaAlterarData, dataAlterarData, estabelecimento, versaoAlterarData]);
+  }, [agendamentoParaAlterar, dataAlterarData, servicoNovoId, estabelecimento, versaoAlterarData]);
 
   // Um único `agora` pra classificar tudo no render (inbox, fora da janela,
   // histórico).
@@ -3138,16 +3082,16 @@ export default function AdminPage() {
   // do par: a anterior tem que acontecer ANTES da principal. Vale nos dois
   // sentidos. Compara "YYYY-MM-DD HH:MM" como texto (ordem lexicográfica).
   const irmaAlterarData =
-    agendamentoParaAlterarData?.irmaFicha ?? irmaDoPar(agendamentoParaAlterarData);
+    agendamentoParaAlterar?.irmaFicha ?? irmaDoPar(agendamentoParaAlterar);
   let avisoParAlterarData = null;
   if (irmaAlterarData && dataAlterarData && horarioAlterarData) {
     const nova = `${dataAlterarData} ${String(horarioAlterarData).slice(0, 5)}`;
     const daIrma = `${irmaAlterarData.data} ${String(irmaAlterarData.horario).slice(0, 5)}`;
-    const nomeEtapa = nomeEtapaAnterior(agendamentoParaAlterarData);
-    if (agendamentoParaAlterarData.papel_reserva === "anterior" && nova >= daIrma) {
+    const nomeEtapa = nomeEtapaAnterior(agendamentoParaAlterar);
+    if (agendamentoParaAlterar.papel_reserva === "anterior" && nova >= daIrma) {
       avisoParAlterarData = `Com essa data, a etapa "${nomeEtapa}" ficaria no mesmo horário ou depois do atendimento principal.`;
     } else if (
-      agendamentoParaAlterarData.papel_reserva === "principal" &&
+      agendamentoParaAlterar.papel_reserva === "principal" &&
       nova <= daIrma
     ) {
       avisoParAlterarData = `Com essa data, o atendimento principal ficaria no mesmo horário ou antes da etapa "${nomeEtapa}".`;
@@ -3183,7 +3127,7 @@ export default function AdminPage() {
   // mesmo padrão dentro do .map() do drawer, logo abaixo, não é sinalizado).
   const IconeAbaAtiva = iconeAba(abaAtiva);
 
-  // Navegação do calendário do modal "Alterar data": não deixa recuar antes
+  // Navegação do calendário do modal "Alterar": não deixa recuar antes
   // do mês atual — mesma regra de podeVoltarMes em FormularioAgendamento.
   const agoraMesAlterarData = new Date();
   const podeVoltarMesAlterarData =
@@ -5225,11 +5169,10 @@ export default function AdminPage() {
             // atualizarStatusLocal de handleCancelar patcha a lista DESTE
             // componente, que a aba Clientes não consome.
             ultimoCancelamento={ultimoCancelamento}
-            // "Alterar data" da ficha: arma o MESMO modal do detalhe do
-            // Painel (abrirAlterarDataAgendamento); ultimaAlteracaoData faz
-            // a ficha refazer o resumo depois de salvar.
-            onAlterarDataAgendamento={abrirAlterarDataAgendamento}
-            onAlterarServicoAgendamento={abrirAlterarServicoAgendamento}
+            // "Alterar" da ficha: arma o MESMO modal do Painel
+            // (abrirAlterarAgendamento); ultimaAlteracaoData faz a ficha
+            // refazer o resumo depois de salvar.
+            onAlterarAgendamento={abrirAlterarAgendamento}
             ultimaAlteracaoData={ultimaAlteracaoData}
             // "Agendar" da ficha do cliente: mesmo atalho do "Novo
             // agendamento" do Histórico (pula o pré-passo de busca por nome e
@@ -5775,9 +5718,9 @@ export default function AdminPage() {
                   Trocar profissional
                 </button>
               )}
-              {/* Alterar data: MESMO modal/handler da seção "Fora da janela"
-                  (handleAlterarData), mesmo botão dividido. Fecha este modal
-                  antes, como o Cancelar. Não vale pra cancelado/concluído. */}
+              {/* Alterar: MESMO modal/handler dos cards de Pendentes e Fora da
+                  janela (handleAlterar). Fecha este modal antes, como o
+                  Cancelar. Não vale pra cancelado/concluído. */}
               {selecionado.status !== "cancelado" &&
                 selecionado.status !== "concluido" && (
                   <button
@@ -6240,213 +6183,9 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* Modal "Alterar data" (seção "Fora da janela de agendamento"): troca
-          só data/horário, mantendo cliente/serviço/profissional. Reaproveita
-          CalendarioDias (exportado de FormularioAgendamento.js) pro
-          calendário — a janela de agendamento já bloqueia dias fora dela
-          automaticamente, via dataAgendavelComMes dentro do próprio
-          CalendarioDias. A grade de horários é uma réplica inline da mesma
-          grade do wizard (sem extrair componente ainda, só esse um uso).
-          Mesmo modal serve as duas zonas do botão dividido (ver
-          o parâmetro `notificar` de handleAlterarData): "Confirmar e avisar"
-          grava e abre o WhatsApp; "Confirmar sem avisar" passa antes por
-          PopupConfirmarSemAviso. */}
-      {agendamentoParaAlterarData && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="titulo-alterar-data"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
-          onClick={() => setAgendamentoParaAlterarData(null)}
-        >
-          <div
-            className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="titulo-alterar-data" className="text-lg font-semibold text-heading">
-              Alterar data
-            </h2>
-            <p className="mt-1 text-sm text-body">
-              Atual: {formatarData(agendamentoParaAlterarData.data)} às{" "}
-              {formatarHorario(agendamentoParaAlterarData.horario)}
-              {agendamentoParaAlterarData.servicos?.nome && (
-                <> · {agendamentoParaAlterarData.servicos.nome}</>
-              )}
-            </p>
-            {Boolean(agendamentoParaAlterarData.profissional_nome) &&
-              qtdProfissionaisAtivos != null &&
-              qtdProfissionaisAtivos > 1 && (
-                <p className="mt-1 text-xs text-muted">
-                  Profissional: {agendamentoParaAlterarData.profissional_nome ?? "—"}
-                </p>
-              )}
-
-            <div className="mt-4">
-              <span className="mb-1 block text-sm font-medium text-body">
-                Nova data
-              </span>
-              {carregandoDiasAlterarData ? (
-                <p className="text-sm text-body">Carregando disponibilidade...</p>
-              ) : (
-                <CalendarioDias
-                  mes={mesVisivelAlterarData}
-                  min={hojeISOLocal()}
-                  diasSemanaAtivos={diasSemanaAtivosAlterarData}
-                  selecionado={dataAlterarData}
-                  onSelecionar={(iso) => {
-                    setDataAlterarData(iso);
-                    setHorarioAlterarData("");
-                    setErroAlterarData("");
-                  }}
-                  onPrev={() =>
-                    setMesVisivelAlterarData(
-                      (m) => new Date(m.getFullYear(), m.getMonth() - 1, 1)
-                    )
-                  }
-                  onNext={() =>
-                    setMesVisivelAlterarData(
-                      (m) => new Date(m.getFullYear(), m.getMonth() + 1, 1)
-                    )
-                  }
-                  podeVoltar={podeVoltarMesAlterarData}
-                  estabelecimento={estabelecimento}
-                  // Este modal é sempre admin — modo livre sempre ligado (ver
-                  // CalendarioDias/modoLivre em FormularioAgendamento.js). A
-                  // grade de horários abaixo NÃO foi estendida (fora do
-                  // escopo pedido): dias fora da janela/expediente ficam
-                  // clicáveis aqui, mas ainda podem mostrar "nenhum horário
-                  // disponível" até essa segunda parte ser implementada.
-                  modoLivre
-                />
-              )}
-            </div>
-
-            {dataAlterarData && (
-              <div className="mt-4">
-                <span className="mb-1 block text-sm font-medium text-body">
-                  Horário
-                </span>
-                {carregandoHorariosAlterarData ? (
-                  <p className="text-sm text-body">Carregando horários...</p>
-                ) : horariosAlterarData.length === 0 ? (
-                  <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
-                    Nenhum horário disponível neste dia.
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                    {horariosAlterarData.map((slot) => {
-                      const sel = horarioAlterarData === slot;
-                      const dentroAntecedencia = horarioDentroDaAntecedencia(
-                        dataAlterarData,
-                        slot,
-                        estabelecimento
-                      );
-                      return (
-                        <button
-                          key={slot}
-                          type="button"
-                          onClick={() => setHorarioAlterarData(slot)}
-                          disabled={salvandoAlterarData}
-                          aria-pressed={sel}
-                          className={[
-                            "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
-                            sel
-                              ? "bg-primary text-on-primary ring-primary"
-                              : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
-                          ].join(" ")}
-                        >
-                          {slot}
-                          {dentroAntecedencia && (
-                            <span className="block text-[10px] font-normal leading-tight opacity-80">
-                              Antecedência
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {avisoParAlterarData && (
-              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200">
-                {avisoParAlterarData}
-              </p>
-            )}
-
-            {erroAlterarData && (
-              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-                {erroAlterarData}
-              </p>
-            )}
-
-            <div className="mt-6 flex flex-col gap-2">
-              {/* Botão dividido, mesmo padrão do Confirmar dos cards de
-                  Pendentes: zona grande avisa pelo WhatsApp; a estreita abre
-                  o popup "Alterar sem avisar a cliente?". */}
-              <div className="flex items-stretch overflow-hidden rounded-lg bg-green-50 ring-1 ring-green-100">
-                <button
-                  type="button"
-                  onClick={() => handleAlterarData(true)}
-                  disabled={!dataAlterarData || !horarioAlterarData || salvandoAlterarData}
-                  className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <IconeWhatsApp />
-                  {salvandoAlterarData ? "Salvando..." : "Confirmar nova data"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmandoAlterarSemAviso(true)}
-                  disabled={!dataAlterarData || !horarioAlterarData || salvandoAlterarData}
-                  aria-label="Confirmar sem avisar a cliente"
-                  title="Confirmar sem avisar a cliente"
-                  className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-green-100 text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Check className="h-4 w-4" aria-hidden="true" />
-                  <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
-                </button>
-              </div>
-              {!agendamentoParaAlterarData.reserva_grupo_id &&
-                agendamentoParaAlterarData.status !== "cancelado" &&
-                agendamentoParaAlterarData.status !== "concluido" && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const recusa = await abrirAlterarServicoAgendamento(agendamentoParaAlterarData);
-                      if (typeof recusa === "string") setErroAlterarData(recusa);
-                      else setAgendamentoParaAlterarData(null);
-                    }}
-                    disabled={salvandoAlterarData}
-                    className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    Alterar serviço
-                  </button>
-                )}
-              <button
-                type="button"
-                onClick={() => setAgendamentoParaAlterarData(null)}
-                className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
-              >
-                Fechar
-              </button>
-            </div>
-          </div>
-          {confirmandoAlterarSemAviso && (
-            <PopupConfirmarSemAviso
-              desabilitado={salvandoAlterarData}
-              onVoltar={() => setConfirmandoAlterarSemAviso(false)}
-              onConfirmar={() => {
-                setConfirmandoAlterarSemAviso(false);
-                handleAlterarData(false);
-              }}
-            />
-          )}
-        </div>
-      )}
-
-      {/* Menu do botão "Alterar": data/horário (modal acima) ou serviço (modal
-          abaixo). "Alterar serviço" não aparece em par, cancelado ou concluído. */}
+      {/* Menu do botão "Alterar": escolhe o que o modal único mostra (serviço,
+          data/horário ou os dois). "Alterar serviço" e "Alterar os dois" não
+          aparecem em par, cancelado ou concluído. */}
       {menuAlterar && (
         <MenuAlterar
           podeAlterarServico={
@@ -6454,34 +6193,53 @@ export default function AdminPage() {
             menuAlterar.item.status !== "cancelado" &&
             menuAlterar.item.status !== "concluido"
           }
-          onAlterarServico={() => {
-            setAgendamentoParaAlterarServico(menuAlterar.item);
-            if (menuAlterar.origem === "detalhe") setIdSelecionado(null);
+          onEscolher={(modo) => {
+            const { item, origem } = menuAlterar;
+            if (origem === "detalhe") setIdSelecionado(null);
             setMenuAlterar(null);
-          }}
-          onAlterarData={() => {
-            setAgendamentoParaAlterarData(menuAlterar.item);
-            if (menuAlterar.origem === "detalhe") setIdSelecionado(null);
-            setMenuAlterar(null);
+            abrirAlterarDoPainel(item, modo);
           }}
           onFechar={() => setMenuAlterar(null)}
         />
       )}
 
-      {/* Modal "Alterar serviço": mostra serviço e data/horário atuais (não
-          editáveis) e a lista de serviços ativos do profissional. Mesmo botão
-          dividido do modal de data: zona grande avisa pelo WhatsApp; a
-          estreita passa por PopupConfirmarSemAviso. Nunca faz perguntas. */}
-      {agendamentoParaAlterarServico && (() => {
-        const ag = agendamentoParaAlterarServico;
+      {/* Modal único "Alterar" (Pendentes, Fora da janela, detalhe e ficha da
+          cliente): mostra serviço e data/horário atuais, o bloco "Serviço"
+          (só se não for par) e o bloco "Data e horário". Reaproveita
+          CalendarioDias (exportado de FormularioAgendamento.js) pro calendário
+          — a janela de agendamento já bloqueia dias fora dela automaticamente,
+          via dataAgendavelComMes dentro do próprio CalendarioDias. A grade de
+          horários é uma réplica inline da mesma grade do wizard. O botão
+          dividido só habilita se o serviço OU a data/horário mudou: a zona
+          grande grava e avisa pelo WhatsApp (parâmetro `notificar` de
+          handleAlterar); "Confirmar sem avisar" passa antes por
+          PopupConfirmarSemAviso. Nunca faz perguntas de serviço. */}
+      {agendamentoParaAlterar && (() => {
+        const ag = agendamentoParaAlterar;
         const novo = servicosAlterarServico.find((sv) => sv.id === servicoNovoId);
+        // Blocos conforme o modo escolhido no MenuAlterar. O de serviço também
+        // não vale pra par, cancelado ou concluído. O botão verde só considera
+        // o que está visível: bloco oculto nunca deixa estado (servicoNovoId /
+        // data / horário ficam vazios).
+        const mostrarBlocoServico =
+          (modoAlterar === "servico" || modoAlterar === "ambos") &&
+          !ag.reserva_grupo_id &&
+          ag.status !== "cancelado" &&
+          ag.status !== "concluido";
+        const mostrarBlocoData = modoAlterar === "data" || modoAlterar === "ambos";
         const temSinal = Boolean(
           ag.sinal_declarado_pago ||
             ag.abacatepay_pago_em ||
             ag.comprovante_pix_url ||
             ag.abacatepay_cobranca_id
         );
-        const travado = !novo || salvandoAlterarServico;
+        const dataMudou =
+          Boolean(dataAlterarData && horarioAlterarData) &&
+          (dataAlterarData !== ag.data ||
+            String(horarioAlterarData).slice(0, 5) !== String(ag.horario).slice(0, 5));
+        // Dia escolhido sem horário: ainda não dá pra gravar.
+        const dataIncompleta = Boolean(dataAlterarData) && !horarioAlterarData;
+        const travado = salvandoAlterar || dataIncompleta || !(Boolean(novo) || dataMudou);
         // Mesma ordem do /agendar: categorias por ordem (só as com serviço),
         // serviços por ordem dentro delas, sem categoria por último.
         const idsCategorias = new Set(categoriasAlterarServico.map((c) => c.id));
@@ -6514,10 +6272,11 @@ export default function AdminPage() {
               key={sv.id}
               type="button"
               onClick={() => {
-                setServicoNovoId(sv.id);
-                setErroAlterarServico("");
+                // Clicar de novo no escolhido desfaz (serviço não muda).
+                setServicoNovoId(sel ? null : sv.id);
+                setErroAlterar("");
               }}
-              disabled={salvandoAlterarServico}
+              disabled={salvandoAlterar}
               aria-pressed={sel}
               className={[
                 "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
@@ -6545,19 +6304,18 @@ export default function AdminPage() {
           <div
             role="dialog"
             aria-modal="true"
-            aria-labelledby="titulo-alterar-servico"
+            aria-labelledby="titulo-alterar"
             className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
             onClick={() => {
-              if (!salvandoAlterarServico) setAgendamentoParaAlterarServico(null);
+              if (!salvandoAlterar) fecharAlterar();
             }}
           >
             <div
-              ref={modalAlterarServicoRef}
               className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
               onClick={(e) => e.stopPropagation()}
             >
-              <h2 id="titulo-alterar-servico" className="text-lg font-semibold text-heading">
-                Alterar serviço
+              <h2 id="titulo-alterar" className="text-lg font-semibold text-heading">
+                Alterar agendamento
               </h2>
               <div className="mt-3 rounded-lg bg-surface px-3 py-2 text-sm text-body">
                 <p className="font-medium text-heading">
@@ -6567,64 +6325,182 @@ export default function AdminPage() {
                 <p className="mt-0.5">
                   {formatarData(ag.data)} às {formatarHorario(ag.horario)}
                 </p>
+                {Boolean(ag.profissional_nome) &&
+                  qtdProfissionaisAtivos != null &&
+                  qtdProfissionaisAtivos > 1 && (
+                    <p className="mt-0.5 text-xs text-muted">
+                      Profissional: {ag.profissional_nome}
+                    </p>
+                  )}
               </div>
 
-              <div className="mt-4">
-                <span className="mb-1 block text-sm font-medium text-body">Novo serviço</span>
-                {carregandoServicosAlterarServico ? (
-                  <p className="text-sm text-body">Carregando serviços...</p>
-                ) : servicosAlterarServico.length === 0 ? (
-                  <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
-                    Nenhum outro serviço ativo para este profissional.
-                  </p>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    {gruposServicos.map((grupo) => (
-                      <div key={grupo.id ?? "sem-categoria"} className="flex flex-col gap-2">
-                        {grupo.nome && (
-                          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
-                            {grupo.nome}
-                          </h3>
-                        )}
-                        {grupo.servicos.map(renderServicoAlterar)}
+              {mostrarBlocoServico && (
+                <div className="mt-4">
+                  <span className="mb-1 block text-sm font-medium text-body">Serviço</span>
+                  {carregandoServicosAlterarServico ? (
+                    <p className="text-sm text-body">Carregando serviços...</p>
+                  ) : servicosAlterarServico.length === 0 ? (
+                    <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
+                      Nenhum outro serviço ativo para este profissional.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {gruposServicos.map((grupo) => (
+                        <div key={grupo.id ?? "sem-categoria"} className="flex flex-col gap-2">
+                          {grupo.nome && (
+                            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                              {grupo.nome}
+                            </h3>
+                          )}
+                          {grupo.servicos.map(renderServicoAlterar)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div ref={resumoAlterarServicoRef}>
+                    {novo && (
+                      <p className="mt-3 text-sm text-body">
+                        Nova duração:{" "}
+                        <span className="font-medium text-heading">{novo.duracao_min} min</span>
+                      </p>
+                    )}
+                    {novo && temSinal && (
+                      <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200">
+                        Este agendamento tem sinal ou cobrança Pix gerada; o valor não é recalculado.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {mostrarBlocoData && (
+                <>
+                <div className="mt-4">
+                  <span className="mb-1 block text-sm font-medium text-body">
+                    Data e horário
+                  </span>
+                  {carregandoDiasAlterarData ? (
+                    <p className="text-sm text-body">Carregando disponibilidade...</p>
+                  ) : (
+                    <CalendarioDias
+                      mes={mesVisivelAlterarData}
+                      min={hojeISOLocal()}
+                      diasSemanaAtivos={diasSemanaAtivosAlterarData}
+                      selecionado={dataAlterarData}
+                      onSelecionar={(iso) => {
+                        setDataAlterarData(iso);
+                        setHorarioAlterarData("");
+                        setErroAlterar("");
+                      }}
+                      onPrev={() =>
+                        setMesVisivelAlterarData(
+                          (m) => new Date(m.getFullYear(), m.getMonth() - 1, 1)
+                        )
+                      }
+                      onNext={() =>
+                        setMesVisivelAlterarData(
+                          (m) => new Date(m.getFullYear(), m.getMonth() + 1, 1)
+                        )
+                      }
+                      podeVoltar={podeVoltarMesAlterarData}
+                      estabelecimento={estabelecimento}
+                      // Este modal é sempre admin — modo livre sempre ligado (ver
+                      // CalendarioDias/modoLivre em FormularioAgendamento.js). A
+                      // grade de horários abaixo NÃO foi estendida (fora do
+                      // escopo pedido): dias fora da janela/expediente ficam
+                      // clicáveis aqui, mas ainda podem mostrar "nenhum horário
+                      // disponível" até essa segunda parte ser implementada.
+                      modoLivre
+                    />
+                  )}
+                </div>
+
+                {dataAlterarData && (
+                  <div className="mt-4">
+                    <span className="mb-1 block text-sm font-medium text-body">
+                      Horário
+                    </span>
+                    {carregandoHorariosAlterarData ? (
+                      <p className="text-sm text-body">Carregando horários...</p>
+                    ) : horariosAlterarData.length === 0 ? (
+                      <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
+                        Nenhum horário disponível neste dia.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                        {horariosAlterarData.map((slot) => {
+                          const sel = horarioAlterarData === slot;
+                          const dentroAntecedencia = horarioDentroDaAntecedencia(
+                            dataAlterarData,
+                            slot,
+                            estabelecimento
+                          );
+                          return (
+                            <button
+                              key={slot}
+                              type="button"
+                              onClick={() => setHorarioAlterarData(slot)}
+                              disabled={salvandoAlterar}
+                              aria-pressed={sel}
+                              className={[
+                                "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
+                                sel
+                                  ? "bg-primary text-on-primary ring-primary"
+                                  : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+                              ].join(" ")}
+                            >
+                              {slot}
+                              {dentroAntecedencia && (
+                                <span className="block text-[10px] font-normal leading-tight opacity-80">
+                                  Antecedência
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
-              </div>
 
-              {novo && (
-                <p className="mt-3 text-sm text-body">
-                  Nova duração: <span className="font-medium text-heading">{novo.duracao_min} min</span>
-                </p>
+                {dataIncompleta && (
+                  <p className="mt-3 text-xs text-muted">
+                    Escolha também o horário para trocar a data.
+                  </p>
+                )}
+
+                </>
               )}
 
-              {temSinal && (
+              {avisoParAlterarData && (
                 <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200">
-                  Este agendamento tem sinal ou cobrança Pix gerada; o valor não é recalculado.
+                  {avisoParAlterarData}
                 </p>
               )}
 
-              {erroAlterarServico && (
+              {erroAlterar && (
                 <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-                  {erroAlterarServico}
+                  {erroAlterar}
                 </p>
               )}
 
               <div className="mt-6 flex flex-col gap-2">
+                {/* Botão dividido, mesmo padrão do Confirmar dos cards de
+                    Pendentes: zona grande avisa pelo WhatsApp; a estreita abre
+                    o popup "Alterar sem avisar a cliente?". */}
                 <div className="flex items-stretch overflow-hidden rounded-lg bg-green-50 ring-1 ring-green-100">
                   <button
                     type="button"
-                    onClick={() => handleAlterarServico(true)}
+                    onClick={() => handleAlterar(true)}
                     disabled={travado}
                     className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <IconeWhatsApp />
-                    {salvandoAlterarServico ? "Salvando..." : "Confirmar novo serviço"}
+                    {salvandoAlterar ? "Salvando..." : "Confirmar alteração"}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setConfirmandoAlterarServicoSemAviso(true)}
+                    onClick={() => setConfirmandoAlterarSemAviso(true)}
                     disabled={travado}
                     aria-label="Confirmar sem avisar a cliente"
                     title="Confirmar sem avisar a cliente"
@@ -6634,34 +6510,44 @@ export default function AdminPage() {
                     <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </div>
+                {/* Troca de bloco no mesmo modal: nada é fechado nem zerado. */}
+                {modoAlterar === "servico" && (
+                  <button
+                    type="button"
+                    onClick={() => setModoAlterar("ambos")}
+                    disabled={salvandoAlterar}
+                    className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Alterar data/horário
+                  </button>
+                )}
+                {modoAlterar === "data" && !ag.reserva_grupo_id && (
+                  <button
+                    type="button"
+                    onClick={() => setModoAlterar("ambos")}
+                    disabled={salvandoAlterar}
+                    className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Alterar serviço
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={async () => {
-                    const recusa = await abrirAlterarDataAgendamento(agendamentoParaAlterarServico);
-                    if (typeof recusa === "string") setErroAlterarServico(recusa);
-                    else setAgendamentoParaAlterarServico(null);
-                  }}
-                  disabled={salvandoAlterarServico}
+                  onClick={fecharAlterar}
+                  disabled={salvandoAlterar}
                   className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Alterar data/horário
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAgendamentoParaAlterarServico(null)}
-                  className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
                 >
                   Fechar
                 </button>
               </div>
             </div>
-            {confirmandoAlterarServicoSemAviso && (
+            {confirmandoAlterarSemAviso && (
               <PopupConfirmarSemAviso
-                desabilitado={salvandoAlterarServico}
-                onVoltar={() => setConfirmandoAlterarServicoSemAviso(false)}
+                desabilitado={salvandoAlterar}
+                onVoltar={() => setConfirmandoAlterarSemAviso(false)}
                 onConfirmar={() => {
-                  setConfirmandoAlterarServicoSemAviso(false);
-                  handleAlterarServico(false);
+                  setConfirmandoAlterarSemAviso(false);
+                  handleAlterar(false);
                 }}
               />
             )}
