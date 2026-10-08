@@ -1334,7 +1334,7 @@ export default function GerenciarClientes({
         ordem: proximaOrdem,
         ativa: true,
       })
-      .select("id, nome, emoji, cor, ordem, ativa")
+      .select("id, nome, cor, ordem, ativa")
       .single();
 
     setSalvandoEtiqueta(false);

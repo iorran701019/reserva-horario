@@ -93,7 +93,7 @@ export default function IdentificacaoClienteAdmin({
         // etiqueta_id + o embed alimentam o badge do dropdown (ver JSX): a
         // dona reconhece a cliente certa pela etiqueta quando dois nomes
         // parecidos aparecem juntos na busca.
-        .select("id, nome, whatsapp, etiqueta_id, etiquetas_cliente(id, nome, emoji, cor)")
+        .select("id, nome, whatsapp, etiqueta_id, etiquetas_cliente(id, nome, cor)")
         .eq("estabelecimento_id", estabelecimentoId)
         .ilike("nome", `%${termo}%`)
         .order("nome", { ascending: true })

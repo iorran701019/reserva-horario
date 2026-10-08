@@ -2443,30 +2443,6 @@ export default function GerenciarServicos({
     );
   }
 
-{/* Categoria (opcional). Não existe pra manutenção — ela herda a
-              categoria_id do serviço vinculado (servico_origem_id) na hora
-              de salvar. "Sem categoria" grava categoria_id null. */}
-          {!form.ehManutencao && (
-            <div>
-              <label htmlFor="categoria_id" className="mb-1 block text-sm font-medium text-body">
-                Categoria
-              </label>
-              <select
-                id="categoria_id"
-                name="categoria_id"
-                value={form.categoria_id}
-                onChange={handleChange}
-                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-              >
-                <option value="">Sem categoria</option>
-                {categorias.map((categoria) => (
-                  <option key={categoria.id} value={String(categoria.id)}>
-                    {categoria.nome}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
   const idsCategorias = new Set(categorias.map((c) => c.id));
   const servicosSemCategoria = servicos.filter(
     (s) =>
