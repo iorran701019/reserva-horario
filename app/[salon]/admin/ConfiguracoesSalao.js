@@ -451,6 +451,9 @@ export default function ConfiguracoesSalao({
   const [avisoRegrasAgendamento, setAvisoRegrasAgendamento] = useState(undefined);
   const [erroRegrasAgendamento, setErroRegrasAgendamento] = useState("");
   const [statusRegrasAgendamento, setStatusRegrasAgendamento] = useState("");
+  const [avisoSinal, setAvisoSinal] = useState(undefined);
+  const [erroAvisoSinal, setErroAvisoSinal] = useState("");
+  const [statusAvisoSinal, setStatusAvisoSinal] = useState("");
 
   // Dias pra manter a manutenção vencida em destaque. String vazia = nunca
   // caduca (grava null). undefined = ainda carregando o estado atual do banco.
@@ -640,7 +643,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data, conclusao_manual_ativa, confirmado_expira_horas, lembrete_etiqueta_ativo, pular_perguntas_adicionais_admin"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, aviso_sinal, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data, conclusao_manual_ativa, confirmado_expira_horas, lembrete_etiqueta_ativo, pular_perguntas_adicionais_admin"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -676,6 +679,8 @@ export default function ConfiguracoesSalao({
 
       setErroRegrasAgendamento("");
       setAvisoRegrasAgendamento(data?.aviso_regras_agendamento ?? "");
+      setErroAvisoSinal("");
+      setAvisoSinal(data?.aviso_sinal ?? "");
 
       setErroCaducidade("");
       setCaducidadeDias(
@@ -925,6 +930,12 @@ export default function ConfiguracoesSalao({
     const t = setTimeout(() => setStatusRegrasAgendamento(""), 2500);
     return () => clearTimeout(t);
   }, [statusRegrasAgendamento]);
+
+  useEffect(() => {
+    if (statusAvisoSinal !== "salvo") return;
+    const t = setTimeout(() => setStatusAvisoSinal(""), 2500);
+    return () => clearTimeout(t);
+  }, [statusAvisoSinal]);
 
   useEffect(() => {
     if (statusCaducidade !== "salvo") return;
@@ -1203,6 +1214,26 @@ export default function ConfiguracoesSalao({
     }
 
     setStatusRegrasAgendamento("salvo");
+  }
+
+  // Vazio grava null (nenhum texto extra no bloco do Pix).
+  async function salvarAvisoSinal() {
+    setStatusAvisoSinal("salvando");
+    setErroAvisoSinal("");
+
+    const { data: linhas, error } = await supabase
+      .from("estabelecimentos")
+      .update({ aviso_sinal: avisoSinal || null })
+      .eq("id", estabelecimento.id)
+      .select("id");
+
+    if (error || !linhas?.length) {
+      setStatusAvisoSinal("");
+      setErroAvisoSinal(`Não foi possível salvar: ${mensagemFalhaSalvar(error)}`);
+      return;
+    }
+
+    setStatusAvisoSinal("salvo");
   }
 
   // Vazio grava null (nunca caduca); caso contrário grava o inteiro digitado.
@@ -4274,6 +4305,38 @@ export default function ConfiguracoesSalao({
             {erroRegrasAgendamento && (
               <p className="mt-2 text-xs text-red-600">{erroRegrasAgendamento}</p>
             )}
+
+            <div className="mt-4">
+              <label
+                htmlFor="aviso-sinal"
+                className="mb-1 block text-sm font-medium text-body"
+              >
+                Texto do sinal Pix
+              </label>
+              <textarea
+                id="aviso-sinal"
+                rows={3}
+                value={avisoSinal ?? ""}
+                onChange={(e) => setAvisoSinal(e.target.value)}
+                onBlur={salvarAvisoSinal}
+                disabled={avisoSinal === undefined}
+                placeholder="Deixe em branco para não mostrar nenhum texto"
+                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <p className="mt-1 text-xs text-muted">
+                Texto curto, aparece junto do Pix, só para quem paga sinal. Use
+                *asterisco* para negrito.
+              </p>
+              {statusAvisoSinal === "salvando" && (
+                <p className="mt-2 text-xs text-muted">Salvando…</p>
+              )}
+              {statusAvisoSinal === "salvo" && !erroAvisoSinal && (
+                <p className="mt-2 text-xs font-medium text-green-600">Salvo ✓</p>
+              )}
+              {erroAvisoSinal && (
+                <p className="mt-2 text-xs text-red-600">{erroAvisoSinal}</p>
+              )}
+            </div>
           </div>
         )}
       </div>

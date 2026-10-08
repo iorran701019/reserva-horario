@@ -6200,6 +6200,7 @@ export default function FormularioAgendamento({
                 ) : (
                   <BlocoConfirmacaoPix
                     estabelecimento={estabelecimento}
+                    avisoSinal={estabelecimento.aviso_sinal}
                     valorCentavos={sinalValorCentavos}
                     agendamentoId={reservaId}
                     nomeCliente={form.nome}

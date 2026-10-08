@@ -33,6 +33,7 @@ Criado na Sessão 82 (07/10/2026), a partir do raio-x somente leitura do Claude 
 | 18 | Alertas de serviço e categoria (`alerta_mensagem`): conteúdo e ordem dos popups | `servicos.alerta_mensagem`, `categorias_servico.alerta_mensagem` | Dona (campo livre) e SQL nos hotfixes da Flávia | Dona, editor estruturado (ver 5 e 6) | Alto enquanto o editor não existe | A fazer (varredura 4) |
 | 19 | Pergunta de pés nas manutenções e aviso "só mãos" nos serviços só de mãos | Perguntas/opções e alertas por serviço, hoje montados por SQL por tenant | SQL | Dona (perguntas já têm tela; alerta ganha o editor de 5) | Médio — onboarding repete o trabalho | Entra no `NOVO_TENANT.md` |
 | 20 | Quem cancelou e quando (`agendamentos` sem carimbo de cancelamento) | Não existe | — | Código: tabela `agendamentos_log` (decidir) | Médio — impede explicar "sumiu" | Decidir |
+| 21 | Texto do sinal Pix (`estabelecimentos.aviso_sinal`) | `ConfiguracoesSalao.js`, bloco "Texto com regras de agendamento"; exibido em `BlocoConfirmacaoPix.js` (wizard e `ConfirmacaoSinal.js`); `*negrito*` via `formatarAviso` | Dona, em Regras de negócio | Dona (correto) | Baixo — vazio não mostra nada; só aparece a quem paga sinal por Pix manual | OK |
 
 ## Pontos de atenção cruzados
 1. Os dois selects de `estabelecimentos` (`lib/estabelecimento.js` e `lib/perfil.js`) são sincronizados à mão; coluna esquecida em um quebra só um papel.

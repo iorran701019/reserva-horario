@@ -21,7 +21,7 @@ import { useEffect } from "react";
 // "algo *em negrito* aqui" -> partes alternando texto normal e o conteúdo
 // entre asteriscos, que vira <strong>. Não lida com *aninhado* nem escaping —
 // só o caso comum de destaque simples.
-function formatarAviso(texto) {
+export function formatarAviso(texto) {
   return texto.split(/(\*[^*]+\*)/g).map((parte, i) =>
     parte.startsWith("*") && parte.endsWith("*") && parte.length > 1 ? (
       <strong key={i}>{parte.slice(1, -1)}</strong>

@@ -158,6 +158,7 @@ export default function ConfirmacaoSinal({
       ) : (
         <BlocoConfirmacaoPix
           estabelecimento={estabelecimento}
+          avisoSinal={estabelecimento.aviso_sinal}
           valorCentavos={valorCentavos}
           agendamentoId={agendamentoId}
           nomeCliente={nomeCliente}
