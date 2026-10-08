@@ -4150,9 +4150,9 @@ export default function AdminPage() {
                       pelo aviso abre em seguida o popup de "sem notificar" que
                       já existia, dois modais em sequência. */}
                   <div className="mt-4 flex flex-col gap-2">
-                    {/* Alterar (data ou serviço): aparece com ou sem o aviso
-                        de desvio abaixo. */}
-                    {renderBotaoAlterar(item)}
+                    {/* Alterar (data ou serviço): com o aviso de desvio ativo,
+                        o Alterar fica dentro do sub-card (renderAvisoDesvio). */}
+                    {!avisoDesvioAtivo(item) && renderBotaoAlterar(item)}
                     {/* Aviso de serviço diferente da última visita: enquanto
                         ativo, ocupa o lugar do Confirmar (não há como confirmar
                         sem dar "Ciente"). O Cancelar segue visível abaixo. */}
