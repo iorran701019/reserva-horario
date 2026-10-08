@@ -17,6 +17,7 @@ import {
   MENSAGEM_CONFIRMACAO,
   MENSAGEM_FORA_DA_JANELA,
   MENSAGEM_ALTERACAO_DATA,
+  MENSAGEM_ALTERACAO_SERVICO,
 } from "@/lib/whatsapp";
 import { WHATSAPP_SUPORTE_ACOLHE, MENSAGEM_SUPORTE_ACOLHE } from "@/lib/acolhe";
 import {
@@ -85,6 +86,7 @@ import BadgeFidelidade from "@/components/BadgeFidelidade";
 import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
 import PopupConfirmarSemAviso from "@/components/PopupConfirmarSemAviso";
+import MenuAlterar from "@/components/MenuAlterar";
 import ModalClientePendente from "@/components/ModalClientePendente";
 import ModalPrazoMinimo from "@/components/ModalPrazoMinimo";
 import Hero from "@/components/Hero";
@@ -1062,6 +1064,24 @@ export default function AdminPage() {
   const [salvandoAlterarData, setSalvandoAlterarData] = useState(false);
   const [erroAlterarData, setErroAlterarData] = useState("");
 
+  // Menu do botão "Alterar" (components/MenuAlterar): { item, origem } com
+  // origem "detalhe" (modal de confirmado, que fecha ao escolher) ou "card"
+  // (Fora da janela). null = fechado.
+  const [menuAlterar, setMenuAlterar] = useState(null);
+
+  // Alterar serviço (RPC agendamento_alterar_servico): troca só o serviço de
+  // um agendamento existente; data/horário/profissional ficam. Nenhuma
+  // pergunta de serviço é feita aqui. `agendamentoParaAlterarServico` arma o
+  // modal (null = fechado); a lista vem de servico_profissional do
+  // profissional do agendamento.
+  const [agendamentoParaAlterarServico, setAgendamentoParaAlterarServico] = useState(null);
+  const [servicosAlterarServico, setServicosAlterarServico] = useState([]);
+  const [carregandoServicosAlterarServico, setCarregandoServicosAlterarServico] = useState(false);
+  const [servicoNovoId, setServicoNovoId] = useState(null);
+  const [salvandoAlterarServico, setSalvandoAlterarServico] = useState(false);
+  const [erroAlterarServico, setErroAlterarServico] = useState("");
+  const [confirmandoAlterarServicoSemAviso, setConfirmandoAlterarServicoSemAviso] = useState(false);
+
   // Aplica um patch a um único item no estado local (evita refazer o fetch
   // inteiro). Caminho único de "refresh" otimista usado pelos handlers.
   function atualizarItemLocal(id, patch) {
@@ -1675,6 +1695,165 @@ export default function AdminPage() {
     }
 
     setAgendamentoParaAlterarData(null);
+  }
+
+  // "Alterar serviço" da ficha do cliente (GerenciarClientes): mesma ideia de
+  // abrirAlterarDataAgendamento — relê a linha VIVA (a RPC da ficha não traz
+  // servico_id, profissional_id, reserva_grupo_id nem os campos de sinal) e
+  // arma o modal. Devolve a mensagem de recusa (string) ou null quando abriu.
+  async function abrirAlterarServicoAgendamento(agendamento) {
+    const { data: linha, error } = await supabase
+      .from("agendamentos")
+      .select("id, nome_cliente, telefone, data, horario, status, servico_id, profissional_id, reserva_grupo_id, sinal_declarado_pago, abacatepay_pago_em, comprovante_pix_url, servicos(nome, duracao_min, preco_centavos), profissionais(nome)")
+      .eq("id", agendamento.id)
+      .eq("estabelecimento_id", estabelecimento.id)
+      .maybeSingle();
+
+    if (error || !linha) {
+      return `Não foi possível abrir a alteração de serviço${error ? `: ${error.message}` : "."}`;
+    }
+    if (linha.status === "cancelado" || linha.status === "concluido") {
+      return "Esse agendamento já foi cancelado ou concluído — não dá para alterar o serviço.";
+    }
+    if (linha.reserva_grupo_id) {
+      return "Este agendamento faz parte de um par de datas — o serviço não pode ser alterado.";
+    }
+
+    setErro("");
+    setAgendamentoParaAlterarServico({
+      ...linha,
+      duracao_min: linha.servicos?.duracao_min ?? null,
+      profissional_nome: linha.profissionais?.nome ?? null,
+    });
+    return null;
+  }
+
+  // Lista os serviços ativos que o profissional do agendamento atende,
+  // excluindo o atual. Roda ao armar o modal "Alterar serviço".
+  useEffect(() => {
+    const ag = agendamentoParaAlterarServico;
+    setServicoNovoId(null);
+    setErroAlterarServico("");
+    setConfirmandoAlterarServicoSemAviso(false);
+    setServicosAlterarServico([]);
+    if (!ag) return;
+    if (!ag.profissional_id) {
+      setErroAlterarServico("Este agendamento não tem profissional atribuído — não dá para listar serviços.");
+      return;
+    }
+
+    let ativo = true;
+    setCarregandoServicosAlterarServico(true);
+    (async () => {
+      const { data: vinculos, error: erroVinculos } = await supabase
+        .from("servico_profissional")
+        .select("servico_id")
+        .eq("profissional_id", ag.profissional_id);
+      if (!ativo) return;
+      if (erroVinculos) {
+        setErroAlterarServico(`Não foi possível carregar os serviços: ${erroVinculos.message}`);
+        setCarregandoServicosAlterarServico(false);
+        return;
+      }
+      const ids = (vinculos ?? [])
+        .map((v) => v.servico_id)
+        .filter((id) => id !== ag.servico_id);
+      if (ids.length === 0) {
+        setCarregandoServicosAlterarServico(false);
+        return;
+      }
+      const { data: servicos, error: erroServicos } = await supabase
+        .from("servicos")
+        .select("id, nome, duracao_min, preco_centavos")
+        .eq("estabelecimento_id", estabelecimento.id)
+        .eq("ativo", true)
+        .in("id", ids)
+        .order("nome", { ascending: true });
+      if (!ativo) return;
+      if (erroServicos) {
+        setErroAlterarServico(`Não foi possível carregar os serviços: ${erroServicos.message}`);
+      } else {
+        setServicosAlterarServico(servicos ?? []);
+      }
+      setCarregandoServicosAlterarServico(false);
+    })();
+
+    return () => {
+      ativo = false;
+    };
+  }, [agendamentoParaAlterarServico, estabelecimento?.id]);
+
+  // Grava o novo serviço pela RPC agendamento_alterar_servico (devolve
+  // duracao_min e servico_nome; 23P01 = horário ocupado para a nova duração).
+  // `notificar` decide só o WhatsApp depois do sucesso, como em
+  // handleAlterarData. salvandoAlterarServico trava duplo clique.
+  async function handleAlterarServico(notificar) {
+    const ag = agendamentoParaAlterarServico;
+    const novo = servicosAlterarServico.find((sv) => sv.id === servicoNovoId);
+    if (!ag || !novo || salvandoAlterarServico) return;
+
+    setSalvandoAlterarServico(true);
+    setErroAlterarServico("");
+
+    const { data, error } = await supabase.rpc("agendamento_alterar_servico", {
+      p_agendamento_id: ag.id,
+      p_servico_id: novo.id,
+    });
+
+    setSalvandoAlterarServico(false);
+
+    if (error) {
+      const ehOcupado =
+        error.code === "23P01" ||
+        /agendamentos_sem_sobreposicao|exclusion constraint/i.test(error.message ?? "");
+      setErroAlterarServico(
+        ehOcupado
+          ? "Horário ocupado para este serviço mais longo. Escolha outro serviço."
+          : error.message
+      );
+      return;
+    }
+
+    const resultado = Array.isArray(data) ? data[0] : data;
+    if (!resultado) {
+      setErroAlterarServico(
+        "Nenhuma linha foi alterada no banco — o novo serviço não foi salvo. Recarregue a página e tente de novo."
+      );
+      return;
+    }
+
+    const servicoAntigo = ag.servicos?.nome ?? "";
+    const servicoNome = resultado.servico_nome ?? novo.nome;
+    const duracao = resultado.duracao_min ?? novo.duracao_min;
+
+    atualizarItemLocal(ag.id, {
+      servico_id: novo.id,
+      duracao_min: duracao,
+      servicos: {
+        ...(ag.servicos ?? {}),
+        nome: servicoNome,
+        duracao_min: duracao,
+        preco_centavos: novo.preco_centavos,
+        nome_etapa_anterior: null,
+      },
+    });
+    // Mesmo sinal de handleAlterarData: a ficha do cliente refaz o resumo.
+    setUltimaAlteracaoData({ id: ag.id, em: carimboAgora() });
+
+    if (notificar) {
+      abrirWhatsApp(
+        ag.telefone,
+        MENSAGEM_ALTERACAO_SERVICO({
+          nome: ag.nome_cliente,
+          servicoAntigo,
+          servicoNovo: servicoNome,
+          data: ag.data,
+          horario: ag.horario,
+        })
+      );
+    }
+
+    setAgendamentoParaAlterarServico(null);
   }
 
   // Arquiva uma pendência administrativa (botão "Arquivar" de qualquer tipo em
@@ -4261,7 +4440,7 @@ export default function AdminPage() {
                         {!item.reserva_grupo_id && (
                         <button
                           type="button"
-                          onClick={() => setAgendamentoParaAlterarData(item)}
+                          onClick={() => setMenuAlterar({ item, origem: "card" })}
                           className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading ring-1 ring-border transition hover:bg-surface"
                         >
                           <Calendar className="h-4 w-4" />
@@ -4957,6 +5136,7 @@ export default function AdminPage() {
             // Painel (abrirAlterarDataAgendamento); ultimaAlteracaoData faz
             // a ficha refazer o resumo depois de salvar.
             onAlterarDataAgendamento={abrirAlterarDataAgendamento}
+            onAlterarServicoAgendamento={abrirAlterarServicoAgendamento}
             ultimaAlteracaoData={ultimaAlteracaoData}
             // "Agendar" da ficha do cliente: mesmo atalho do "Novo
             // agendamento" do Histórico (pula o pré-passo de busca por nome e
@@ -5509,10 +5689,7 @@ export default function AdminPage() {
                 selecionado.status !== "concluido" && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setAgendamentoParaAlterarData(selecionado);
-                      setIdSelecionado(null);
-                    }}
+                    onClick={() => setMenuAlterar({ item: selecionado, origem: "detalhe" })}
                     className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading ring-1 ring-border transition hover:bg-surface"
                   >
                     <Calendar className="h-4 w-4" />
@@ -6158,6 +6335,172 @@ export default function AdminPage() {
           )}
         </div>
       )}
+
+      {/* Menu do botão "Alterar": data/horário (modal acima) ou serviço (modal
+          abaixo). "Alterar serviço" não aparece em par, cancelado ou concluído. */}
+      {menuAlterar && (
+        <MenuAlterar
+          podeAlterarServico={
+            !menuAlterar.item.reserva_grupo_id &&
+            menuAlterar.item.status !== "cancelado" &&
+            menuAlterar.item.status !== "concluido"
+          }
+          onAlterarServico={() => {
+            setAgendamentoParaAlterarServico(menuAlterar.item);
+            if (menuAlterar.origem === "detalhe") setIdSelecionado(null);
+            setMenuAlterar(null);
+          }}
+          onAlterarData={() => {
+            setAgendamentoParaAlterarData(menuAlterar.item);
+            if (menuAlterar.origem === "detalhe") setIdSelecionado(null);
+            setMenuAlterar(null);
+          }}
+          onFechar={() => setMenuAlterar(null)}
+        />
+      )}
+
+      {/* Modal "Alterar serviço": mostra serviço e data/horário atuais (não
+          editáveis) e a lista de serviços ativos do profissional. Mesmo botão
+          dividido do modal de data: zona grande avisa pelo WhatsApp; a
+          estreita passa por PopupConfirmarSemAviso. Nunca faz perguntas. */}
+      {agendamentoParaAlterarServico && (() => {
+        const ag = agendamentoParaAlterarServico;
+        const novo = servicosAlterarServico.find((sv) => sv.id === servicoNovoId);
+        const temSinal = Boolean(
+          ag.sinal_declarado_pago || ag.abacatepay_pago_em || ag.comprovante_pix_url
+        );
+        const travado = !novo || salvandoAlterarServico;
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="titulo-alterar-servico"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
+            onClick={() => {
+              if (!salvandoAlterarServico) setAgendamentoParaAlterarServico(null);
+            }}
+          >
+            <div
+              className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="titulo-alterar-servico" className="text-lg font-semibold text-heading">
+                Alterar serviço
+              </h2>
+              <div className="mt-3 rounded-lg bg-surface px-3 py-2 text-sm text-body">
+                <p className="font-medium text-heading">
+                  {ag.servicos?.nome ?? "Serviço"}
+                  {ag.duracao_min != null && <> · {ag.duracao_min} min</>}
+                </p>
+                <p className="mt-0.5">
+                  {formatarData(ag.data)} às {formatarHorario(ag.horario)}
+                </p>
+              </div>
+
+              <div className="mt-4">
+                <span className="mb-1 block text-sm font-medium text-body">Novo serviço</span>
+                {carregandoServicosAlterarServico ? (
+                  <p className="text-sm text-body">Carregando serviços...</p>
+                ) : servicosAlterarServico.length === 0 ? (
+                  <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
+                    Nenhum outro serviço ativo para este profissional.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {servicosAlterarServico.map((sv) => {
+                      const sel = sv.id === servicoNovoId;
+                      return (
+                        <button
+                          key={sv.id}
+                          type="button"
+                          onClick={() => {
+                            setServicoNovoId(sv.id);
+                            setErroAlterarServico("");
+                          }}
+                          disabled={salvandoAlterarServico}
+                          aria-pressed={sel}
+                          className={[
+                            "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
+                            sel
+                              ? "bg-primary text-on-primary ring-primary"
+                              : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+                          ].join(" ")}
+                        >
+                          <span>{sv.nome}</span>
+                          <span className="shrink-0 text-xs font-normal opacity-80">
+                            {sv.duracao_min} min
+                            {sv.preco_centavos != null && <> · {formatarPreco(sv.preco_centavos)}</>}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {novo && (
+                <p className="mt-3 text-sm text-body">
+                  Nova duração: <span className="font-medium text-heading">{novo.duracao_min} min</span>
+                </p>
+              )}
+
+              {temSinal && (
+                <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200">
+                  Este agendamento tem sinal; o valor não é recalculado.
+                </p>
+              )}
+
+              {erroAlterarServico && (
+                <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
+                  {erroAlterarServico}
+                </p>
+              )}
+
+              <div className="mt-6 flex flex-col gap-2">
+                <div className="flex items-stretch overflow-hidden rounded-lg bg-green-50 ring-1 ring-green-100">
+                  <button
+                    type="button"
+                    onClick={() => handleAlterarServico(true)}
+                    disabled={travado}
+                    className="inline-flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <IconeWhatsApp />
+                    {salvandoAlterarServico ? "Salvando..." : "Confirmar novo serviço"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmandoAlterarServicoSemAviso(true)}
+                    disabled={travado}
+                    aria-label="Confirmar sem avisar a cliente"
+                    title="Confirmar sem avisar a cliente"
+                    className="inline-flex w-16 shrink-0 items-center justify-center gap-1 border-l border-green-100 text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Check className="h-4 w-4" aria-hidden="true" />
+                    <MessageCircleOff className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAgendamentoParaAlterarServico(null)}
+                  className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+            {confirmandoAlterarServicoSemAviso && (
+              <PopupConfirmarSemAviso
+                desabilitado={salvandoAlterarServico}
+                onVoltar={() => setConfirmandoAlterarServicoSemAviso(false)}
+                onConfirmar={() => {
+                  setConfirmandoAlterarServicoSemAviso(false);
+                  handleAlterarServico(false);
+                }}
+              />
+            )}
+          </div>
+        );
+      })()}
 
       {/* Modal "Vincular cliente" (bloco âmbar do Painel — evento importado
           do Google Calendar ainda sem telefone). Ao confirmar, patcha o

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Calendar, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MessageCircleOff, Pencil, UserRound, X } from "lucide-react";
 import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
+import MenuAlterar from "@/components/MenuAlterar";
 import { formatarPreco } from "@/lib/preco";
 import NavegacaoMes from "@/components/NavegacaoMes";
 import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
@@ -189,6 +190,7 @@ function DetalheCliente({
   onCancelarAgendamento,
   ultimoCancelamento,
   onAlterarDataAgendamento,
+  onAlterarServicoAgendamento,
   ultimaAlteracaoData,
   onEtiquetaAlterada,
 }) {
@@ -221,6 +223,20 @@ function DetalheCliente({
     });
     if (recusa) setAvisoAlterarData({ id: item.id, texto: recusa });
   }
+
+  // Mesma recusa/aviso de tentarAlterarData, pro modal "Alterar serviço".
+  async function tentarAlterarServico(item) {
+    setAvisoAlterarData(null);
+    const recusa = await onAlterarServicoAgendamento({
+      ...item,
+      nome_cliente: clienteAtual.nome,
+      telefone: telefoneDigitos,
+    });
+    if (recusa) setAvisoAlterarData({ id: item.id, texto: recusa });
+  }
+
+  // Item com o menu "Alterar" aberto (null = fechado).
+  const [menuAlterarItem, setMenuAlterarItem] = useState(null);
 
   // Existe modelo de anamnese ATIVO pro estabelecimento (ver lib/anamnese.js
   // existeModeloAtivo)? Decide se a seção "Anamnese" abaixo aparece —
@@ -694,12 +710,31 @@ function DetalheCliente({
                   !(item.reserva_grupo_id && item.status !== "confirmado") && (
                   <button
                     type="button"
-                    onClick={() => tentarAlterarData(item)}
+                    onClick={() => setMenuAlterarItem(item)}
                     className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-2 py-1.5 text-xs font-medium text-heading ring-1 ring-border transition hover:bg-surface"
                   >
                     <Calendar className="h-3.5 w-3.5" />
                     Alterar
                   </button>
+                )}
+                {menuAlterarItem?.id === item.id && (
+                  <MenuAlterar
+                    podeAlterarServico={
+                      Boolean(onAlterarServicoAgendamento) &&
+                      !item.reserva_grupo_id &&
+                      item.status !== "cancelado" &&
+                      item.status !== "concluido"
+                    }
+                    onAlterarServico={() => {
+                      setMenuAlterarItem(null);
+                      tentarAlterarServico(item);
+                    }}
+                    onAlterarData={() => {
+                      setMenuAlterarItem(null);
+                      tentarAlterarData(item);
+                    }}
+                    onFechar={() => setMenuAlterarItem(null)}
+                  />
                 )}
                 <div className="flex items-stretch overflow-hidden rounded-lg bg-card ring-1 ring-red-200">
                   <button
@@ -1140,6 +1175,7 @@ export default function GerenciarClientes({
   onCancelarAgendamento,
   ultimoCancelamento,
   onAlterarDataAgendamento,
+  onAlterarServicoAgendamento,
   ultimaAlteracaoData,
 }) {
   const [clientes, setClientes] = useState([]);
@@ -1543,6 +1579,7 @@ export default function GerenciarClientes({
         onCancelarAgendamento={onCancelarAgendamento}
         ultimoCancelamento={ultimoCancelamento}
         onAlterarDataAgendamento={onAlterarDataAgendamento}
+        onAlterarServicoAgendamento={onAlterarServicoAgendamento}
         ultimaAlteracaoData={ultimaAlteracaoData}
       />
     );
