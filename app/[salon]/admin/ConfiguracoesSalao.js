@@ -5,7 +5,11 @@ import { supabase } from "@/lib/supabaseClient";
 import FotoPerfilCircular, { ZOOM_MINIMO } from "@/components/FotoPerfilCircular";
 import CampoMensagemWhatsapp from "@/components/CampoMensagemWhatsapp";
 import ModalImportarGoogleCalendar from "@/components/ModalImportarGoogleCalendar";
-import { MENSAGENS_WHATSAPP_CONFIG, substituirVariaveis } from "@/lib/whatsapp";
+import {
+  MENSAGENS_WHATSAPP_CONFIG,
+  montarTrechoAlteracao,
+  substituirVariaveis,
+} from "@/lib/whatsapp";
 import { mensagemFalhaSalvar, mensagemFalhaDelete } from "@/lib/erroSalvar";
 import { calcularStatusSinalPix } from "@/lib/sinalPix";
 import { formatarPreco } from "@/lib/preco";
@@ -223,12 +227,25 @@ const VALORES_EXEMPLO_MENSAGENS = {
   data: "15/08",
   horario: "14:00",
   servico: "Manicure completa",
-  servico_antigo: "Manicure simples",
-  servico_novo: "Manicure completa",
   valor: "R$ 120,00",
   link: "https://agenda.exemplo.com/salao",
   janela_fim: "30/09/2026",
+  alteracao: montarTrechoAlteracao({
+    servicoMudou: true,
+    servicoNovo: "Manicure completa",
+    dataMudou: false,
+    data: "2026-08-15",
+    horario: "14:00",
+  }),
 };
+
+// Os três casos do trecho {alteracao} (msg_alteracao), pras prévias somente
+// leitura do item expandido.
+const CASOS_PREVIA_ALTERACAO = [
+  { rotulo: "Se mudar só o serviço", servicoMudou: true, dataMudou: false },
+  { rotulo: "Se mudar só data e horário", servicoMudou: false, dataMudou: true },
+  { rotulo: "Se mudar os dois", servicoMudou: true, dataMudou: true },
+];
 
 export default function ConfiguracoesSalao({
   estabelecimento,
@@ -650,7 +667,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, aviso_sinal, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao_data, msg_alteracao_servico, conclusao_manual_ativa, confirmado_expira_horas, lembrete_etiqueta_ativo, pular_perguntas_adicionais_admin"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, aviso_sinal, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao, conclusao_manual_ativa, confirmado_expira_horas, lembrete_etiqueta_ativo, pular_perguntas_adicionais_admin"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -4476,6 +4493,31 @@ export default function ConfiguracoesSalao({
                           faça falta, pois ele pode sair vazio (por exemplo,
                           quando o preço está oculto).
                         </p>
+                      )}
+
+                      {campo === "msg_alteracao" && (
+                        <div className="space-y-2 rounded-lg bg-surface p-3">
+                          {CASOS_PREVIA_ALTERACAO.map((caso) => (
+                            <div key={caso.rotulo}>
+                              <p className="text-xs font-medium text-heading">{caso.rotulo}</p>
+                              <p className="text-xs text-muted">
+                                {substituirVariaveis(textoVigente, {
+                                  ...VALORES_EXEMPLO_MENSAGENS,
+                                  alteracao: montarTrechoAlteracao({
+                                    servicoMudou: caso.servicoMudou,
+                                    servicoNovo: VALORES_EXEMPLO_MENSAGENS.servico,
+                                    dataMudou: caso.dataMudou,
+                                    data: "2026-08-15",
+                                    horario: "14:00",
+                                  }),
+                                })}
+                              </p>
+                            </div>
+                          ))}
+                          <p className="text-xs text-muted">
+                            Escreva uma vez; o trecho {"{alteracao}"} muda sozinho conforme o que foi alterado.
+                          </p>
+                        </div>
                       )}
 
                       <p className="text-xs text-muted">{gatilho}</p>

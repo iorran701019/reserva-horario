@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Calendar, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MessageCircleOff, Pencil, UserRound, X } from "lucide-react";
 import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
-import MenuAlterar from "@/components/MenuAlterar";
 import { formatarPreco } from "@/lib/preco";
 import NavegacaoMes from "@/components/NavegacaoMes";
 import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
@@ -34,6 +33,7 @@ import IconeWhatsApp from "@/components/IconeWhatsApp";
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import AtualizarDadosCliente from "@/components/AtualizarDadosCliente";
 import FormularioAnamnese from "@/components/FormularioAnamnese";
+import MenuAlterar from "@/components/MenuAlterar";
 import ModalAlterarWhatsapp from "@/components/ModalAlterarWhatsapp";
 import CarrosselAgendamentos from "@/components/CarrosselAgendamentos";
 import SeletorEtiquetaRapido, {
@@ -189,8 +189,7 @@ function DetalheCliente({
   onAgendarPara,
   onCancelarAgendamento,
   ultimoCancelamento,
-  onAlterarDataAgendamento,
-  onAlterarServicoAgendamento,
+  onAlterarAgendamento,
   ultimaAlteracaoData,
   onEtiquetaAlterada,
 }) {
@@ -209,29 +208,21 @@ function DetalheCliente({
   const [resumo, setResumo] = useState(null);
   const [carregando, setCarregando] = useState(true);
 
-  // Recusa do "Alterar data" (ver abrirAlterarDataAgendamento em page.js),
-  // presa ao id do agendamento: trocar de item no carrossel esconde o aviso, e
-  // cada nova tentativa o zera antes de perguntar de novo.
+  // Recusa do "Alterar" (ver abrirAlterarAgendamento em page.js), presa ao id
+  // do agendamento: trocar de item no carrossel esconde o aviso, e cada nova
+  // tentativa o zera antes de perguntar de novo.
   const [avisoAlterarData, setAvisoAlterarData] = useState(null);
 
-  async function tentarAlterarData(item) {
+  async function tentarAlterar(item, modo) {
     setAvisoAlterarData(null);
-    const recusa = await onAlterarDataAgendamento({
-      ...item,
-      nome_cliente: clienteAtual.nome,
-      telefone: telefoneDigitos,
-    });
-    if (recusa) setAvisoAlterarData({ id: item.id, texto: recusa });
-  }
-
-  // Mesma recusa/aviso de tentarAlterarData, pro modal "Alterar serviço".
-  async function tentarAlterarServico(item) {
-    setAvisoAlterarData(null);
-    const recusa = await onAlterarServicoAgendamento({
-      ...item,
-      nome_cliente: clienteAtual.nome,
-      telefone: telefoneDigitos,
-    });
+    const recusa = await onAlterarAgendamento(
+      {
+        ...item,
+        nome_cliente: clienteAtual.nome,
+        telefone: telefoneDigitos,
+      },
+      modo
+    );
     if (recusa) setAvisoAlterarData({ id: item.id, texto: recusa });
   }
 
@@ -693,9 +684,9 @@ function DetalheCliente({
               onCancelarAgendamento &&
               item && (
                 <>
-                {/* Alterar data: só ARMA o MESMO modal do detalhe do Painel
-                    (ver onAlterarDataAgendamento em page.js), com o mesmo
-                    botão "Alterar" (o aviso ou não à cliente é escolhido no modal). A
+                {/* Alterar: só ARMA o MESMO modal único do Painel (ver
+                    onAlterarAgendamento em page.js), com o mesmo botão
+                    "Alterar" (abre o MenuAlterar; o aviso ou não à cliente é escolhido no modal). A
                     regra de cancelado/concluído é reaplicada lá, sobre a
                     linha viva. Estilo do Cancelar, só com tokens do tema. */}
                 {avisoAlterarData?.id === item.id && (
@@ -706,7 +697,7 @@ function DetalheCliente({
                 {/* Par vinculado só altera depois de confirmado (par pendente é
                     aceito/recusado inteiro): sem o botão. Se o botão vier e a
                     linha viva recusar, o motivo aparece no <p> âmbar acima. */}
-                {onAlterarDataAgendamento &&
+                {onAlterarAgendamento &&
                   !(item.reserva_grupo_id && item.status !== "confirmado") && (
                   <button
                     type="button"
@@ -720,18 +711,13 @@ function DetalheCliente({
                 {menuAlterarItem?.id === item.id && (
                   <MenuAlterar
                     podeAlterarServico={
-                      Boolean(onAlterarServicoAgendamento) &&
                       !item.reserva_grupo_id &&
                       item.status !== "cancelado" &&
                       item.status !== "concluido"
                     }
-                    onAlterarServico={() => {
+                    onEscolher={(modo) => {
                       setMenuAlterarItem(null);
-                      tentarAlterarServico(item);
-                    }}
-                    onAlterarData={() => {
-                      setMenuAlterarItem(null);
-                      tentarAlterarData(item);
+                      tentarAlterar(item, modo);
                     }}
                     onFechar={() => setMenuAlterarItem(null)}
                   />
@@ -1174,8 +1160,7 @@ export default function GerenciarClientes({
   onAgendarPara,
   onCancelarAgendamento,
   ultimoCancelamento,
-  onAlterarDataAgendamento,
-  onAlterarServicoAgendamento,
+  onAlterarAgendamento,
   ultimaAlteracaoData,
 }) {
   const [clientes, setClientes] = useState([]);
@@ -1578,8 +1563,7 @@ export default function GerenciarClientes({
         onAgendarPara={onAgendarPara}
         onCancelarAgendamento={onCancelarAgendamento}
         ultimoCancelamento={ultimoCancelamento}
-        onAlterarDataAgendamento={onAlterarDataAgendamento}
-        onAlterarServicoAgendamento={onAlterarServicoAgendamento}
+        onAlterarAgendamento={onAlterarAgendamento}
         ultimaAlteracaoData={ultimaAlteracaoData}
       />
     );
