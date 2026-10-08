@@ -1076,6 +1076,10 @@ export default function AdminPage() {
   // profissional do agendamento.
   const [agendamentoParaAlterarServico, setAgendamentoParaAlterarServico] = useState(null);
   const [servicosAlterarServico, setServicosAlterarServico] = useState([]);
+  // Categorias do salão (agrupam a lista, mesma ordem do /agendar) e nome do
+  // serviço de origem das manutenções ({ [servico_origem_id]: nome }).
+  const [categoriasAlterarServico, setCategoriasAlterarServico] = useState([]);
+  const [origensAlterarServico, setOrigensAlterarServico] = useState({});
   const [carregandoServicosAlterarServico, setCarregandoServicosAlterarServico] = useState(false);
   const [servicoNovoId, setServicoNovoId] = useState(null);
   const [salvandoAlterarServico, setSalvandoAlterarServico] = useState(false);
@@ -1736,6 +1740,8 @@ export default function AdminPage() {
     setErroAlterarServico("");
     setConfirmandoAlterarServicoSemAviso(false);
     setServicosAlterarServico([]);
+    setCategoriasAlterarServico([]);
+    setOrigensAlterarServico({});
     if (!ag) return;
     if (!ag.profissional_id) {
       setErroAlterarServico("Este agendamento não tem profissional atribuído — não dá para listar serviços.");
@@ -1762,19 +1768,54 @@ export default function AdminPage() {
         setCarregandoServicosAlterarServico(false);
         return;
       }
-      const { data: servicos, error: erroServicos } = await supabase
-        .from("servicos")
-        .select("id, nome, duracao_min, preco_centavos")
-        .eq("estabelecimento_id", estabelecimento.id)
-        .eq("ativo", true)
-        .in("id", ids)
-        .order("nome", { ascending: true });
+      const [resServicos, resCategorias] = await Promise.all([
+        supabase
+          .from("servicos")
+          .select("id, nome, duracao_min, preco_centavos, categoria_id, ordem, eh_manutencao, servico_origem_id")
+          .eq("estabelecimento_id", estabelecimento.id)
+          .eq("ativo", true)
+          .in("id", ids)
+          .order("ordem", { ascending: true }),
+        supabase
+          .from("categorias_servico")
+          .select("id, nome, ordem")
+          .eq("estabelecimento_id", estabelecimento.id)
+          .order("ordem", { ascending: true })
+          .order("nome", { ascending: true }),
+      ]);
       if (!ativo) return;
-      if (erroServicos) {
-        setErroAlterarServico(`Não foi possível carregar os serviços: ${erroServicos.message}`);
-      } else {
-        setServicosAlterarServico(servicos ?? []);
+      if (resServicos.error) {
+        setErroAlterarServico(`Não foi possível carregar os serviços: ${resServicos.error.message}`);
+        setCarregandoServicosAlterarServico(false);
+        return;
       }
+      const servicos = resServicos.data ?? [];
+      // Sem categorias (ou erro na consulta) tudo cai em "sem categoria",
+      // como no /agendar.
+      const categorias = resCategorias.error ? [] : resCategorias.data ?? [];
+
+      // Nome do serviço de origem das manutenções (a origem pode não estar na
+      // lista: inativa ou não atendida pelo profissional).
+      const idsOrigem = [
+        ...new Set(
+          servicos
+            .filter((sv) => sv.eh_manutencao && sv.servico_origem_id != null)
+            .map((sv) => sv.servico_origem_id)
+        ),
+      ];
+      let origens = {};
+      if (idsOrigem.length > 0) {
+        const { data: linhasOrigem } = await supabase
+          .from("servicos")
+          .select("id, nome")
+          .eq("estabelecimento_id", estabelecimento.id)
+          .in("id", idsOrigem);
+        origens = Object.fromEntries((linhasOrigem ?? []).map((o) => [o.id, o.nome]));
+      }
+      if (!ativo) return;
+      setCategoriasAlterarServico(categorias);
+      setOrigensAlterarServico(origens);
+      setServicosAlterarServico(servicos);
       setCarregandoServicosAlterarServico(false);
     })();
 
@@ -6370,6 +6411,65 @@ export default function AdminPage() {
           ag.sinal_declarado_pago || ag.abacatepay_pago_em || ag.comprovante_pix_url
         );
         const travado = !novo || salvandoAlterarServico;
+        // Mesma ordem do /agendar: categorias por ordem (só as com serviço),
+        // serviços por ordem dentro delas, sem categoria por último.
+        const idsCategorias = new Set(categoriasAlterarServico.map((c) => c.id));
+        const gruposServicos = [
+          ...categoriasAlterarServico
+            .map((c) => ({
+              ...c,
+              servicos: servicosAlterarServico.filter((sv) => sv.categoria_id === c.id),
+            }))
+            .filter((c) => c.servicos.length > 0),
+          {
+            id: null,
+            nome: null,
+            servicos: servicosAlterarServico.filter(
+              (sv) => sv.categoria_id == null || !idsCategorias.has(sv.categoria_id)
+            ),
+          },
+        ].filter((g) => g.servicos.length > 0);
+        // Com mais de um grupo, o bloco "sem categoria" ganha cabeçalho
+        // neutro pra não ficar solto sob a última categoria.
+        if (gruposServicos.length > 1) {
+          const semCat = gruposServicos.find((g) => g.id === null);
+          if (semCat) semCat.nome = "Outros";
+        }
+        const renderServicoAlterar = (sv) => {
+          const sel = sv.id === servicoNovoId;
+          const origem = sv.eh_manutencao ? origensAlterarServico[sv.servico_origem_id] : null;
+          return (
+            <button
+              key={sv.id}
+              type="button"
+              onClick={() => {
+                setServicoNovoId(sv.id);
+                setErroAlterarServico("");
+              }}
+              disabled={salvandoAlterarServico}
+              aria-pressed={sel}
+              className={[
+                "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
+                sel
+                  ? "bg-primary text-on-primary ring-primary"
+                  : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+              ].join(" ")}
+            >
+              <span>
+                {sv.nome}
+                {origem && (
+                  <span className="block text-xs font-normal opacity-80">
+                    Manutenção de: {origem}
+                  </span>
+                )}
+              </span>
+              <span className="shrink-0 text-xs font-normal opacity-80">
+                {sv.duracao_min} min
+                {sv.preco_centavos != null && <> · {formatarPreco(sv.preco_centavos)}</>}
+              </span>
+            </button>
+          );
+        };
         return (
           <div
             role="dialog"
@@ -6406,34 +6506,17 @@ export default function AdminPage() {
                     Nenhum outro serviço ativo para este profissional.
                   </p>
                 ) : (
-                  <div className="flex flex-col gap-2">
-                    {servicosAlterarServico.map((sv) => {
-                      const sel = sv.id === servicoNovoId;
-                      return (
-                        <button
-                          key={sv.id}
-                          type="button"
-                          onClick={() => {
-                            setServicoNovoId(sv.id);
-                            setErroAlterarServico("");
-                          }}
-                          disabled={salvandoAlterarServico}
-                          aria-pressed={sel}
-                          className={[
-                            "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
-                            sel
-                              ? "bg-primary text-on-primary ring-primary"
-                              : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
-                          ].join(" ")}
-                        >
-                          <span>{sv.nome}</span>
-                          <span className="shrink-0 text-xs font-normal opacity-80">
-                            {sv.duracao_min} min
-                            {sv.preco_centavos != null && <> · {formatarPreco(sv.preco_centavos)}</>}
-                          </span>
-                        </button>
-                      );
-                    })}
+                  <div className="flex flex-col gap-3">
+                    {gruposServicos.map((grupo) => (
+                      <div key={grupo.id ?? "sem-categoria"} className="flex flex-col gap-2">
+                        {grupo.nome && (
+                          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                            {grupo.nome}
+                          </h3>
+                        )}
+                        {grupo.servicos.map(renderServicoAlterar)}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
