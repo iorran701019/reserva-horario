@@ -1617,10 +1617,11 @@ export default function FormularioAgendamento({
   // depois do pagamento: aviso mostrado depois do dinheiro pago é pior que
   // aviso nenhum — a cliente já não tem como recuar.
   //
-  // Restrito ao método automático de propósito. No manual o botão de submit
-  // existe e o popup continua saindo exatamente onde sempre saiu, na
-  // confirmação final (ver handleSubmit) — mover os dois mudaria um fluxo que
-  // não está quebrado.
+  // Vale também no Pix manual: o aviso (e o texto do sinal, que só aparece
+  // para quem paga) precisa ser lido ANTES de a cliente ver a chave e pagar.
+  // No manual o submit continua existindo; depois da confirmação o bloco do
+  // Pix e o submit voltam e o gate do handleSubmit não repete o popup
+  // (avisoRegrasConfirmado).
   const avisoRegrasPendente =
     !status &&
     precisaSinal &&
@@ -1629,7 +1630,6 @@ export default function FormularioAgendamento({
     // esconderia o submit de uma tela que não tem outra saída, prendendo a
     // cliente. Nesse caso o popup volta a sair no submit, como no manual.
     !sinalJaPago &&
-    metodoSinal === "abacatepay" &&
     Boolean(estabelecimento.aviso_regras_agendamento) &&
     !avisoRegrasConfirmado;
 
@@ -6200,7 +6200,6 @@ export default function FormularioAgendamento({
                 ) : (
                   <BlocoConfirmacaoPix
                     estabelecimento={estabelecimento}
-                    avisoSinal={estabelecimento.aviso_sinal}
                     valorCentavos={sinalValorCentavos}
                     agendamentoId={reservaId}
                     nomeCliente={form.nome}
@@ -6633,7 +6632,11 @@ export default function FormularioAgendamento({
           três é confirmarAvisoRegras, pelos flags de cada origem. */}
       {(mostrarPopupAvisoRegras || avisoRegrasPreGate || horarioAguardandoRegras) && (
         <PopupRegrasAgendamento
-          texto={estabelecimento.aviso_regras_agendamento}
+          texto={
+            precisaSinal && !sinalJaPago && estabelecimento.aviso_sinal
+              ? estabelecimento.aviso_regras_agendamento + "\n\n" + estabelecimento.aviso_sinal
+              : estabelecimento.aviso_regras_agendamento
+          }
           onConfirmar={confirmarAvisoRegras}
         />
       )}

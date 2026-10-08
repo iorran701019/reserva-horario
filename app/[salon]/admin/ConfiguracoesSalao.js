@@ -4324,8 +4324,8 @@ export default function ConfiguracoesSalao({
                 className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
               />
               <p className="mt-1 text-xs text-muted">
-                Texto curto, aparece junto do Pix, só para quem paga sinal. Use
-                *asterisco* para negrito.
+                Aparece como um segundo parágrafo no aviso de regras, só para quem
+                paga sinal. Use *asterisco* para negrito.
               </p>
               {statusAvisoSinal === "salvando" && (
                 <p className="mt-2 text-xs text-muted">Salvando…</p>

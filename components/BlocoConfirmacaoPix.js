@@ -5,7 +5,6 @@ import { supabase } from "@/lib/supabaseClient";
 import { formatarPreco } from "@/lib/preco";
 import { montarResumoAgendamento } from "@/lib/data";
 import { comprimirImagem } from "@/lib/comprimirImagem";
-import { formatarAviso } from "@/components/PopupRegrasAgendamento";
 
 // Bucket PRIVADO (anon só faz INSERT; leitura é só do lado autenticado, no
 // /admin). Por isso o que gravamos em agendamentos.comprovante_pix_url é o
@@ -79,7 +78,6 @@ export default function BlocoConfirmacaoPix({
   data = "",
   horario = "",
   nomeProfissionalContato = "a equipe",
-  avisoSinal = "",
   valorCentavos = undefined,
   sinalDeclarado,
   onSinalDeclaradoChange,
@@ -369,12 +367,6 @@ export default function BlocoConfirmacaoPix({
             {chavePixCopiada ? "Copiado!" : "Copiar chave"}
           </button>
         </div>
-
-        {avisoSinal && (
-          <p className="whitespace-pre-wrap text-sm text-amber-800">
-            {formatarAviso(avisoSinal)}
-          </p>
-        )}
 
         {/* Upload do comprovante. Dois botões, um por tipo de arquivo, cada um
             disparando o SEU input escondido (ver inputImagemRef/inputPdfRef):
