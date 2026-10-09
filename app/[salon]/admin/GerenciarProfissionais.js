@@ -1853,6 +1853,18 @@ function SecaoAusencias({
   const [confirmarExclusaoExclusividade, setConfirmarExclusaoExclusividade] =
     useState(null);
 
+  // Modo edição de um card de bloqueio (dia único, vários dias, datas
+  // avulsas): { tipo: "umdia" | "varios" | "avulsas", ids, grupoId, rotulo }.
+  // `ids` são só as linhas com data >= hoje (as passadas ficam intactas);
+  // null fora da edição. Nada é gravado até "Salvar alterações" (ver gravar /
+  // trocarRegistros).
+  const [edicao, setEdicao] = useState(null);
+  const formRef = useRef(null);
+
+  // Lista que as conferências do formulário enxergam: sem as linhas em
+  // edição, pra o registro não conflitar com ele mesmo.
+  const listaForm = edicao ? lista.filter((a) => !edicao.ids.includes(a.id)) : lista;
+
   // Carga inicial: todas as ausências do profissional.
   useEffect(() => {
     let vivo = true;
@@ -2010,7 +2022,7 @@ function SecaoAusencias({
         // num dia já todo bloqueado. Checado de novo aqui (além do grid
         // desabilitado) pra cobrir o submit em si.
         const diaSemana = diaSemanaDeISO(diaData);
-        if (statusGradeDoDia(lista, diaData, diaSemana).diaTodoBloqueado) {
+        if (statusGradeDoDia(listaForm, diaData, diaSemana).diaTodoBloqueado) {
           return {
             erro:
               "Este dia está totalmente bloqueado. Exclua o bloqueio antes de liberar horários específicos.",
@@ -2178,7 +2190,9 @@ function SecaoAusencias({
     }
 
     const datasOrdenadas = [...avulsasDatas].sort();
-    const grupoId = crypto.randomUUID();
+    // Na edição mantém o grupo_id, pra as linhas passadas do mesmo grupo
+    // continuarem no mesmo card.
+    const grupoId = edicao?.grupoId ?? crypto.randomUUID();
     const motivo = avulsasMotivo.trim() || null;
 
     const linhas = avulsasDiaInteiro
@@ -2227,7 +2241,7 @@ function SecaoAusencias({
     // coexistir no banco é um estado morto e visualmente contraditório (ver
     // agruparPeriodosPorDia). Confirma com o usuário antes de excluí-las.
     if (tipoRegistro === "ausencia" && modo === "umdia" && diaInteiro) {
-      const liberacoesConflitantes = lista.filter(
+      const liberacoesConflitantes = listaForm.filter(
         (a) =>
           a.tipo === "periodo" &&
           (a.tipo_registro ?? "ausencia") === "liberacao" &&
@@ -2268,6 +2282,33 @@ function SecaoAusencias({
       }
     }
 
+    const idsExcluidos = new Set(liberacoesParaExcluir.map((a) => a.id));
+
+    if (edicao) {
+      const troca = await trocarRegistros(edicao.ids, linhas);
+      setSalvando(false);
+      if (troca.erro) {
+        const idsApagados = new Set(troca.idsApagados ?? []);
+        setLista((atual) =>
+          atual.filter((a) => !idsExcluidos.has(a.id) && !idsApagados.has(a.id))
+        );
+        setFormErro(troca.erro);
+        return;
+      }
+      for (const id of edicao.ids) idsExcluidos.add(id);
+      setLista((atual) => [
+        ...atual.filter((a) => !idsExcluidos.has(a.id)),
+        ...troca.inseridas,
+      ]);
+      setEdicao(null);
+      limparCampos();
+      // Leva a lista ao mês da primeira data nova, pra o card editado não
+      // sumir da vista se a data mudou de mês.
+      const primeiraData = troca.inseridas.map((l) => l.data_inicio).sort()[0];
+      if (primeiraData) navMes.irParaMes(chaveMes(primeiraData));
+      return;
+    }
+
     const { data, error } = await supabase
       .from("ausencias")
       .insert(linhas)
@@ -2279,11 +2320,134 @@ function SecaoAusencias({
       return;
     }
 
-    const idsExcluidos = new Set(liberacoesParaExcluir.map((a) => a.id));
     setLista((atual) => [
       ...atual.filter((a) => !idsExcluidos.has(a.id)),
       ...(data ?? []),
     ]);
+    limparCampos();
+  }
+
+  // Troca as linhas antigas (idsAntigos) pelas novas: insere primeiro e só
+  // então apaga as antigas — se algo falha no meio, o pior caso é duplicata
+  // visível (nunca perda). Devolve { inseridas } ou { erro, idsApagados }.
+  async function trocarRegistros(idsAntigos, novas) {
+    const { data: inseridas, error: erroInsert } = await supabase
+      .from("ausencias")
+      .insert(novas)
+      .select();
+    if (erroInsert || !inseridas?.length) {
+      return { erro: mensagemFalhaSalvar(erroInsert) };
+    }
+
+    const { data: apagadas, error: erroDelete } = await supabase
+      .from("ausencias")
+      .delete()
+      .in("id", idsAntigos)
+      .select("id");
+    const idsApagados = (apagadas ?? []).map((l) => l.id);
+    if (erroDelete || idsApagados.length !== idsAntigos.length) {
+      const { data: desfeitas, error: erroDesfazer } = await supabase
+        .from("ausencias")
+        .delete()
+        .in(
+          "id",
+          inseridas.map((l) => l.id)
+        )
+        .select("id");
+      if (erroDesfazer || (desfeitas ?? []).length !== inseridas.length) {
+        return {
+          erro: "Não foi possível concluir a edição. Confira o card, pode haver registro duplicado.",
+          idsApagados,
+        };
+      }
+      return {
+        erro: "Este registro mudou em outra tela. Recarregue e tente de novo.",
+        idsApagados,
+      };
+    }
+
+    return { inseridas };
+  }
+
+  function rolarAoFormulario() {
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // "YYYY-MM-DD" -> Date local do dia 1 do mês (mini-calendário das avulsas).
+  function primeiroDiaDoMes(iso) {
+    const [ano, mes] = iso.split("-").map(Number);
+    return new Date(ano, mes - 1, 1);
+  }
+
+  // Os três iniciarEdicao* preenchem o MESMO formulário do cadastro com o
+  // estado do card (só bloqueio, só linhas com data >= hoje).
+  function iniciarEdicaoDiaUnico(a) {
+    limparCampos();
+    setFormErro("");
+    setConfirmarBloqueio(null);
+    setTipoRegistro("ausencia");
+    setModo("umdia");
+    setDiaData(a.data_inicio);
+    setDiaInteiro(Boolean(a.dia_inteiro));
+    setDiaHoraInicio(a.dia_inteiro ? "" : paraHHMM(a.hora_inicio));
+    setDiaHoraFim(a.dia_inteiro ? "" : paraHHMM(a.hora_fim));
+    setDiaMotivo(a.motivo ?? "");
+    setEdicao({
+      tipo: "umdia",
+      ids: [a.id],
+      grupoId: null,
+      rotulo: `Editando bloqueio de ${formatarDataBR(a.data_inicio)}`,
+    });
+    rolarAoFormulario();
+  }
+
+  function iniciarEdicaoVariosDias(a) {
+    limparCampos();
+    setFormErro("");
+    setConfirmarBloqueio(null);
+    setTipoRegistro("ausencia");
+    setModo("varios");
+    setVarInicio(a.data_inicio);
+    setVarFim(a.data_fim);
+    setVarMotivo(a.motivo ?? "");
+    setEdicao({
+      tipo: "varios",
+      ids: [a.id],
+      grupoId: null,
+      rotulo: `Editando bloqueio de ${formatarDataBR(a.data_inicio)} até ${formatarDataBR(a.data_fim)}`,
+    });
+    rolarAoFormulario();
+  }
+
+  function iniciarEdicaoAvulsas(grupo) {
+    const futuras = grupo.itens.filter((a) => a.data_inicio >= hoje);
+    if (futuras.length === 0) return;
+    const datas = [...new Set(futuras.map((a) => a.data_inicio))].sort();
+    const inteiro = futuras.every((a) => a.dia_inteiro);
+    limparCampos();
+    setFormErro("");
+    setConfirmarBloqueio(null);
+    setTipoRegistro("ausencia");
+    setModo("avulsas");
+    setAvulsasDatas(datas);
+    setAvulsasMes(primeiroDiaDoMes(datas[0]));
+    setAvulsasDiaInteiro(inteiro);
+    setAvulsasHorarios(
+      inteiro ? [] : [...new Set(futuras.map((a) => paraHHMM(a.hora_inicio)))].sort()
+    );
+    setAvulsasMotivo(grupo.motivo ?? "");
+    setEdicao({
+      tipo: "avulsas",
+      ids: futuras.map((a) => a.id),
+      grupoId: grupo.grupoId,
+      rotulo: `Editando bloqueio de ${datas.length === 1 ? "1 data" : `${datas.length} datas`}`,
+    });
+    rolarAoFormulario();
+  }
+
+  function cancelarEdicao() {
+    setEdicao(null);
+    setFormErro("");
     limparCampos();
   }
 
@@ -2410,7 +2574,7 @@ function SecaoAusencias({
   // que já existe cadastrado nesse dia (bloqueio/liberação), pra colorir a
   // grade antes de qualquer clique novo.
   const horariosPassados = horariosPassadosHoje(diaData);
-  const statusGrade = statusGradeDoDia(lista, diaData, diaSemanaEscolhido);
+  const statusGrade = statusGradeDoDia(listaForm, diaData, diaSemanaEscolhido);
   const hoje = hojeISOLocal();
 
   // Exclusividades de serviço ficam FORA dos grupos de bloqueio/liberação
@@ -2490,7 +2654,12 @@ function SecaoAusencias({
   return (
     <div className="space-y-4">
       {/* FORM único: a lista suspensa escolhe o formato; os campos seguem. */}
-      <div className="rounded-xl bg-surface p-3 ring-1 ring-border">
+      <div ref={formRef} className="rounded-xl bg-surface p-3 ring-1 ring-border">
+        {edicao && (
+          <p className="mb-2 rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading ring-1 ring-border">
+            {edicao.rotulo}
+          </p>
+        )}
         {/* Natureza do registro: bloqueia ou libera um horário. Mesmo
             formulário abaixo pros dois — só muda o que é gravado. */}
         <div className="flex gap-2">
@@ -2505,6 +2674,7 @@ function SecaoAusencias({
                 key={opcao.valor}
                 type="button"
                 aria-pressed={selecionado}
+                disabled={Boolean(edicao)}
                 onClick={() => {
                   setTipoRegistro(opcao.valor);
                   setFormErro("");
@@ -2517,7 +2687,7 @@ function SecaoAusencias({
                   )
                     setModo("");
                 }}
-                className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium ring-1 transition ${
+                className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60 ${
                   selecionado
                     ? opcao.valor === "liberacao"
                       ? "bg-green-600 text-white ring-green-600"
@@ -2553,6 +2723,7 @@ function SecaoAusencias({
           {tipoRegistro === "liberacao" ? "Tipo de liberação" : "Tipo de ausência"}
           <select
             value={modo}
+            disabled={Boolean(edicao)}
             onChange={(e) => {
               setModo(e.target.value);
               setFormErro("");
@@ -3087,10 +3258,24 @@ function SecaoAusencias({
             }`}
           >
             {salvando
-              ? "Adicionando..."
-              : tipoRegistro === "liberacao"
-                ? "Adicionar liberação"
-                : "Adicionar bloqueio"}
+              ? edicao
+                ? "Salvando..."
+                : "Adicionando..."
+              : edicao
+                ? "Salvar alterações"
+                : tipoRegistro === "liberacao"
+                  ? "Adicionar liberação"
+                  : "Adicionar bloqueio"}
+          </button>
+        )}
+        {edicao && (
+          <button
+            type="button"
+            onClick={cancelarEdicao}
+            disabled={salvando}
+            className="ml-2 mt-3 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-card disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancelar edição
           </button>
         )}
           </>
@@ -3328,13 +3513,24 @@ function SecaoAusencias({
                           <span className="text-muted"> · {a.motivo}</span>
                         )}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => excluir(a.id)}
-                        className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-                      >
-                        Excluir
-                      </button>
+                      <div className="flex shrink-0 gap-1.5">
+                        {ehBloqueio(a) && a.data_inicio >= hoje && (
+                          <button
+                            type="button"
+                            onClick={() => iniciarEdicaoDiaUnico(a)}
+                            className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                          >
+                            Editar
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => excluir(a.id)}
+                          className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                        >
+                          Excluir
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -3359,13 +3555,24 @@ function SecaoAusencias({
                   {a.motivo && <> · {a.motivo}</>}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => excluir(a.id)}
-                className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-              >
-                Excluir
-              </button>
+              <div className="flex shrink-0 gap-1.5">
+                {ehBloqueio(a) && a.data_inicio >= hoje && (
+                  <button
+                    type="button"
+                    onClick={() => iniciarEdicaoVariosDias(a)}
+                    className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                  >
+                    Editar
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => excluir(a.id)}
+                  className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                >
+                  Excluir
+                </button>
+              </div>
             </div>
           ))}
 
@@ -3392,13 +3599,24 @@ function SecaoAusencias({
                   {grupo.datas.map(formatarDataBR).join(" · ")}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setConfirmarExclusaoGrupo(grupo)}
-                className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-              >
-                Excluir
-              </button>
+              <div className="flex shrink-0 gap-1.5">
+                {grupo.datas.some((d) => d >= hoje) && (
+                  <button
+                    type="button"
+                    onClick={() => iniciarEdicaoAvulsas(grupo)}
+                    className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                  >
+                    Editar
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setConfirmarExclusaoGrupo(grupo)}
+                  className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                >
+                  Excluir
+                </button>
+              </div>
             </div>
           ))}
             </>
