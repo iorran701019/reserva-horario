@@ -953,6 +953,27 @@ function statusGradeDoDia(lista, diaData, diaSemana) {
   return { bloqueados, liberados, diaTodoBloqueado };
 }
 
+// PURA. Horários "HH:MM" liberados por data (liberação de 'periodo', inclusive
+// as de "Vários dias num período") que caem num dia da semana dentro de
+// ini..fim (e nunca antes de `hoje`). Alimenta os chips da restrição de
+// serviço: o motor já restringe um horário que só existe por liberação, só
+// faltava a dona poder escolhê-lo. Sem ini/fim devolve vazio. Datas são
+// strings ISO, comparadas lexicograficamente (nunca new Date de string).
+function horariosLiberadosNoDia(lista, dia, ini, fim, hoje) {
+  const horarios = new Set();
+  if (!ini || !fim || fim < ini) return horarios;
+
+  for (const a of lista ?? []) {
+    if (a.tipo_registro !== "liberacao" || a.tipo !== "periodo") continue;
+    if (a.dia_inteiro || !a.hora_inicio) continue;
+    if (a.data_inicio < ini || a.data_inicio > fim) continue;
+    if (hoje && a.data_inicio < hoje) continue;
+    if (diaSemanaDeISO(a.data_inicio) !== dia) continue;
+    horarios.add(String(a.hora_inicio).slice(0, 5));
+  }
+  return horarios;
+}
+
 // Agrupa os períodos de UM ÚNICO DIA (data_inicio === data_fim) pela mesma
 // data — um card por dia, listando dentro cada bloqueio/liberação daquele
 // dia. Períodos de VÁRIOS dias (férias/viagem) ficam de fora do agrupamento e
@@ -1238,6 +1259,7 @@ function SecaoExclusividade({
   estabelecimentoId,
   servicos,
   servicosSalao,
+  lista,
   modoHorario,
   horariosFixosPorDia,
   dias,
@@ -1280,7 +1302,7 @@ function SecaoExclusividade({
     return Number(s?.duracao_min) > 0 ? Number(s.duracao_min) : DURACAO_MINUTOS;
   }
 
-  function horariosNoDia(dia, s) {
+  function horariosAgendaNoDia(dia, s) {
     return horariosDaAgendaNoDia({
       modoHorario,
       dia,
@@ -1288,6 +1310,36 @@ function SecaoExclusividade({
       dias,
       duracaoMin: duracaoEfetiva(s),
       granularidadeMin,
+    });
+  }
+
+  // Liberados por data dentro de De/Até; permanente ou sem datas = nenhum.
+  function liberadosNoDia(dia, p = permanente, ini = dataInicio, fim = dataFim) {
+    if (p) return new Set();
+    return horariosLiberadosNoDia(lista, dia, ini, fim, hoje);
+  }
+
+  // Agenda + liberados do período, sem duplicata e ordenados.
+  function horariosNoDia(dia, s, p, ini, fim) {
+    return [
+      ...new Set([...horariosAgendaNoDia(dia, s), ...liberadosNoDia(dia, p, ini, fim)]),
+    ].sort();
+  }
+
+  // Ao mudar o período ou o permanente, solta da seleção o horário que deixou
+  // de existir (ex.: era um liberado de outras datas).
+  function atualizarPeriodo({ p = permanente, ini = dataInicio, fim = dataFim }) {
+    setPermanente(p);
+    setDataInicio(ini);
+    setDataFim(fim);
+    if (!servico) return;
+    setHorariosPorDia((atual) => {
+      const novo = {};
+      for (const [dia, marcados] of Object.entries(atual)) {
+        const validos = new Set(horariosNoDia(Number(dia), servico, p, ini, fim));
+        novo[dia] = marcados.filter((h) => validos.has(h));
+      }
+      return novo;
     });
   }
 
@@ -1352,8 +1404,14 @@ function SecaoExclusividade({
     if (!servico) return { erro: "Escolha o serviço." };
     if (diasSel.length === 0) return { erro: "Selecione ao menos um dia." };
     const diasOrdenados = [...diasSel].sort((a, b) => a - b);
+    // Ignora horário marcado que não existe mais no período escolhido.
+    const horariosValidos = {};
     for (const dia of diasOrdenados) {
-      if ((horariosPorDia[dia] ?? []).length === 0) {
+      const existentes = new Set(horariosNoDia(dia, servico));
+      horariosValidos[dia] = (horariosPorDia[dia] ?? []).filter((h) => existentes.has(h));
+    }
+    for (const dia of diasOrdenados) {
+      if (horariosValidos[dia].length === 0) {
         const rotulo = DIAS.find((d) => d.n === dia)?.rotulo;
         return { erro: `Selecione ao menos um horário em ${rotulo}.` };
       }
@@ -1372,7 +1430,7 @@ function SecaoExclusividade({
     const alvos = [servico, ...(incluirManutencoes ? manutencoes : [])];
     const linhasNovas = alvos.flatMap((alvo) =>
       diasOrdenados.flatMap((dia) =>
-        [...horariosPorDia[dia]].sort().map((hora_inicio) => ({
+        [...horariosValidos[dia]].sort().map((hora_inicio) => ({
           servicoId: alvo.id,
           dia,
           hora_inicio,
@@ -1426,6 +1484,27 @@ function SecaoExclusividade({
     setDataInicio("");
     setDataFim("");
   }
+
+  // Algum chip verde (horário só de liberação) nos dias marcados? E, sem
+  // período preenchido, existe liberação futura que a dona ainda não vê?
+  const temChipLiberado =
+    Boolean(servico) &&
+    diasSel.some((dia) => {
+      const agenda = new Set(horariosAgendaNoDia(dia, servico));
+      return [...liberadosNoDia(dia)].some((h) => !agenda.has(h));
+    });
+  const dicaPreencherPeriodo =
+    Boolean(servico) &&
+    !permanente &&
+    (!dataInicio || !dataFim) &&
+    (lista ?? []).some(
+      (a) =>
+        a.tipo_registro === "liberacao" &&
+        a.tipo === "periodo" &&
+        !a.dia_inteiro &&
+        a.hora_inicio &&
+        a.data_inicio >= hoje
+    );
 
   if (servicosBase.length === 0) {
     return (
@@ -1521,6 +1600,7 @@ function SecaoExclusividade({
             .sort((a, b) => a - b)
             .map((dia) => {
               const selecionados = horariosPorDia[dia] ?? [];
+              const agendaDoDia = new Set(horariosAgendaNoDia(dia, servico));
               return (
                 <div key={dia} className="mt-3">
                   <span className="block text-xs font-medium text-body">
@@ -1529,6 +1609,7 @@ function SecaoExclusividade({
                   <div className="mt-1 flex flex-wrap gap-2">
                     {horariosDoDia(dia).map((h) => {
                       const selecionado = selecionados.includes(h);
+                      const soLiberado = !agendaDoDia.has(h);
                       return (
                         <button
                           key={h}
@@ -1539,7 +1620,9 @@ function SecaoExclusividade({
                           className={`rounded-full px-2.5 py-1.5 text-xs font-medium ring-1 transition ${
                             selecionado
                               ? "bg-blue-600 text-white ring-blue-600"
-                              : "bg-card text-body ring-border hover:bg-surface"
+                              : soLiberado
+                                ? "bg-card text-green-700 ring-green-300 hover:bg-surface"
+                                : "bg-card text-body ring-border hover:bg-surface"
                           }`}
                         >
                           {h}
@@ -1551,11 +1634,25 @@ function SecaoExclusividade({
               );
             })}
 
+          {temChipLiberado && (
+            <p className="mt-2 text-xs text-muted">
+              Horários em verde existem só nas datas em que foram liberados. Nos
+              outros dias do período, o serviço só aparece nos horários marcados
+              que existirem naquele dia. Marque também um horário normal para ele
+              não sumir.
+            </p>
+          )}
+          {dicaPreencherPeriodo && (
+            <p className="mt-2 text-xs text-muted">
+              Preencha De e Até para ver os horários liberados no período.
+            </p>
+          )}
+
           <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm font-medium text-heading">
             <input
               type="checkbox"
               checked={permanente}
-              onChange={(e) => setPermanente(e.target.checked)}
+              onChange={(e) => atualizarPeriodo({ p: e.target.checked })}
               className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
             />
             Manter essa regra permanentemente
@@ -1582,7 +1679,7 @@ function SecaoExclusividade({
                   aria-label="Início da restrição"
                   min={hoje}
                   value={dataInicio}
-                  onChange={(e) => setDataInicio(e.target.value)}
+                  onChange={(e) => atualizarPeriodo({ ini: e.target.value })}
                   className={`mt-1 block ${classeCampo}`}
                 />
               </label>
@@ -1593,7 +1690,7 @@ function SecaoExclusividade({
                   aria-label="Fim da restrição"
                   min={dataInicio || hoje}
                   value={dataFim}
-                  onChange={(e) => setDataFim(e.target.value)}
+                  onChange={(e) => atualizarPeriodo({ fim: e.target.value })}
                   className={`mt-1 block ${classeCampo}`}
                 />
               </label>
@@ -2425,6 +2522,7 @@ function SecaoAusencias({
             estabelecimentoId={estabelecimentoId}
             servicos={servicosProfissional ?? []}
             servicosSalao={servicosSalao}
+            lista={lista}
             modoHorario={modoHorario}
             horariosFixosPorDia={horariosFixosPorDia}
             dias={dias}
