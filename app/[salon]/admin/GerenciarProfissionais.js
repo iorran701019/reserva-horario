@@ -1305,14 +1305,23 @@ function SecaoExclusividade({
   granularidadeMin,
   classeCampo,
   onAdicionadas,
+  edicaoInicial = null,
+  onSalvarEdicao,
+  onCancelarEdicao,
 }) {
-  const [servicoId, setServicoId] = useState("");
-  const [incluirManutencoes, setIncluirManutencoes] = useState(false);
-  const [diasSel, setDiasSel] = useState([]); // dia_semana 0..6
-  const [horariosPorDia, setHorariosPorDia] = useState({}); // dia -> ["HH:MM"]
-  const [permanente, setPermanente] = useState(false);
-  const [dataInicio, setDataInicio] = useState("");
-  const [dataFim, setDataFim] = useState("");
+  // Em edição o pai remonta o componente (key) com os valores do card em
+  // `edicaoInicial`; fora dela tudo começa vazio.
+  const [servicoId, setServicoId] = useState(edicaoInicial?.servicoId ?? "");
+  const [incluirManutencoes, setIncluirManutencoes] = useState(
+    edicaoInicial?.incluirManutencoes ?? false
+  );
+  const [diasSel, setDiasSel] = useState(edicaoInicial?.dias ?? []); // dia_semana 0..6
+  const [horariosPorDia, setHorariosPorDia] = useState(
+    edicaoInicial?.horariosPorDia ?? {}
+  ); // dia -> ["HH:MM"]
+  const [permanente, setPermanente] = useState(edicaoInicial?.permanente ?? false);
+  const [dataInicio, setDataInicio] = useState(edicaoInicial?.dataInicio ?? "");
+  const [dataFim, setDataFim] = useState(edicaoInicial?.dataFim ?? "");
   const [formErro, setFormErro] = useState("");
   const [salvando, setSalvando] = useState(false);
 
@@ -1507,6 +1516,16 @@ function SecaoExclusividade({
     }
 
     setSalvando(true);
+    if (edicaoInicial) {
+      // O pai troca as linhas antigas pelas novas e encerra a edição (o que
+      // remonta este formulário, limpo). Só volta aqui se falhar.
+      const erroTroca = await onSalvarEdicao(linhas);
+      if (erroTroca) {
+        setSalvando(false);
+        setFormErro(erroTroca);
+      }
+      return;
+    }
     const { data, error } = await supabase.from("ausencias").insert(linhas).select();
     setSalvando(false);
     if (error) {
@@ -1753,8 +1772,24 @@ function SecaoExclusividade({
         disabled={salvando}
         className="mt-3 inline-flex items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {salvando ? "Adicionando..." : "Adicionar restrição de serviço"}
+        {salvando
+          ? edicaoInicial
+            ? "Salvando..."
+            : "Adicionando..."
+          : edicaoInicial
+            ? "Salvar alterações"
+            : "Adicionar restrição de serviço"}
       </button>
+      {edicaoInicial && (
+        <button
+          type="button"
+          onClick={onCancelarEdicao}
+          disabled={salvando}
+          className="ml-2 mt-3 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-card disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Cancelar edição
+        </button>
+      )}
     </>
   );
 }
@@ -2563,6 +2598,107 @@ function SecaoAusencias({
     rolarAoFormulario();
   }
 
+  // D. Restrição de serviço (card por grupo_id, todas as linhas): monta os
+  // valores iniciais do MESMO formulário da criação (SecaoExclusividade, que
+  // o pai remonta por key). Horário do grupo que não existe mais entre os
+  // chips (agenda + liberados do período) sai da seleção e é listado no
+  // aviso do rótulo — nunca descartado em silêncio.
+  function iniciarEdicaoRestricao(grupo) {
+    const base = (servicosProfissional ?? []).filter((s) => !s.eh_manutencao);
+    const servicoBase = base.find((s) =>
+      grupo.servicoIds.some((id) => String(id) === String(s.id))
+    );
+    if (!servicoBase) {
+      setErro(
+        "Não foi possível editar: o serviço desta restrição não está mais disponível para este profissional."
+      );
+      return;
+    }
+    const duracaoMin =
+      Number(servicoBase.duracao_min) > 0 ? Number(servicoBase.duracao_min) : DURACAO_MINUTOS;
+    const ini = grupo.permanente ? "" : grupo.dataInicio < hoje ? hoje : grupo.dataInicio;
+    const fim = grupo.permanente ? "" : grupo.dataFim;
+    const outras = lista.filter((a) => !grupo.ids.includes(a.id));
+
+    const diasValidos = [];
+    const horariosPorDia = {};
+    const removidos = [];
+    for (const { dia, horarios } of grupo.dias) {
+      const existentes = new Set([
+        ...horariosDaAgendaNoDia({
+          modoHorario,
+          dia,
+          horariosFixosPorDia,
+          dias,
+          duracaoMin,
+          granularidadeMin,
+        }),
+        ...(grupo.permanente ? [] : horariosLiberadosNoDia(outras, dia, ini, fim, hoje)),
+      ]);
+      const mantidos = horarios.filter((h) => existentes.has(h));
+      const curto = DIAS.find((d) => d.n === dia)?.curto;
+      for (const h of horarios) if (!existentes.has(h)) removidos.push(`${curto} ${h}`);
+      if (mantidos.length > 0) {
+        diasValidos.push(dia);
+        horariosPorDia[dia] = mantidos;
+      }
+    }
+
+    const avisos = [];
+    if (removidos.length > 0) {
+      avisos.push(
+        `Estes horários não existem mais na agenda e serão removidos ao salvar: ${removidos.join(", ")}.`
+      );
+    }
+    if (!grupo.permanente && grupo.dataInicio < hoje) {
+      avisos.push("O início já passou e foi ajustado para hoje.");
+    }
+
+    limparCampos();
+    setFormErro("");
+    setConfirmarBloqueio(null);
+    setErro("");
+    setTipoRegistro("exclusividade_servico");
+    setEdicao({
+      tipo: "restricao",
+      ids: grupo.ids,
+      grupoId: null,
+      rotulo: `Editando restrição de ${servicoBase.nome}`,
+      aviso: avisos.length > 0 ? avisos.join(" ") : null,
+      inicial: {
+        servicoId: servicoBase.id,
+        incluirManutencoes: grupo.servicoIds.length > 1,
+        dias: diasValidos,
+        horariosPorDia,
+        permanente: grupo.permanente,
+        dataInicio: ini,
+        dataFim: fim,
+      },
+    });
+    rolarAoFormulario();
+  }
+
+  // Grava a edição da restrição (chamada pelo formulário filho): troca as
+  // linhas antigas pelas novas. Devolve a mensagem de erro, ou null se deu
+  // certo — nesse caso a edição encerra e o filho é remontado limpo.
+  async function salvarEdicaoRestricao(linhas) {
+    if (!edicao) return "Não foi possível salvar: a edição foi encerrada.";
+    const troca = await trocarRegistros(edicao.ids, linhas);
+    if (troca.erro) {
+      const idsApagados = new Set(troca.idsApagados ?? []);
+      if (idsApagados.size > 0) {
+        setLista((atual) => atual.filter((a) => !idsApagados.has(a.id)));
+      }
+      return troca.erro;
+    }
+    const idsAntigos = new Set(edicao.ids);
+    setLista((atual) => [...atual.filter((a) => !idsAntigos.has(a.id)), ...troca.inseridas]);
+    setEdicao(null);
+    setFormErro("");
+    limparCampos();
+    return null;
+  }
+
   function cancelarEdicao() {
     setEdicao(null);
     setFormErro("");
@@ -2832,13 +2968,17 @@ function SecaoAusencias({
             estabelecimentoId={estabelecimentoId}
             servicos={servicosProfissional ?? []}
             servicosSalao={servicosSalao}
-            lista={lista}
+            key={edicao?.tipo === "restricao" ? `edicao-${edicao.ids.join("-")}` : "novo"}
+            lista={listaForm}
             modoHorario={modoHorario}
             horariosFixosPorDia={horariosFixosPorDia}
             dias={dias}
             granularidadeMin={granularidadeMin}
             classeCampo={classeCampo}
             onAdicionadas={(linhas) => setLista((atual) => [...atual, ...linhas])}
+            edicaoInicial={edicao?.tipo === "restricao" ? edicao.inicial : null}
+            onSalvarEdicao={salvarEdicaoRestricao}
+            onCancelarEdicao={cancelarEdicao}
           />
         ) : (
           <>
@@ -3455,6 +3595,14 @@ function SecaoAusencias({
               >
                 <div className="min-w-0">
                   <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-heading">
+                    {grupo.permanente
+                      ? "Vale sempre"
+                      : `De ${formatarDataBR(grupo.dataInicio)} a ${formatarDataBR(grupo.dataFim)}`}
+                    {encerrada && (
+                      <span className="text-xs font-normal text-muted">encerrada</span>
+                    )}
+                  </p>
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-sm font-medium text-heading">
                     <SeloTipoRegistro tipoRegistro="exclusividade_servico" />
                     {rotuloServicoComPrazo(servicoPorId.get(String(principal)))}
                   </p>
@@ -3476,21 +3624,25 @@ function SecaoAusencias({
                       </li>
                     ))}
                   </ul>
-                  <p className="mt-1 text-xs text-muted">
-                    Só nestes horários ·{" "}
-                    {grupo.permanente
-                      ? "Permanente"
-                      : `${formatarDataBR(grupo.dataInicio)} até ${formatarDataBR(grupo.dataFim)}`}
-                    {encerrada && " · encerrada"}
-                  </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setConfirmarExclusaoExclusividade(grupo)}
-                  className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-                >
-                  Excluir
-                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  {!encerrada && (
+                    <button
+                      type="button"
+                      onClick={() => iniciarEdicaoRestricao(grupo)}
+                      className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                    >
+                      Editar
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setConfirmarExclusaoExclusividade(grupo)}
+                    className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                  >
+                    Excluir
+                  </button>
+                </div>
               </div>
             );
           })}
