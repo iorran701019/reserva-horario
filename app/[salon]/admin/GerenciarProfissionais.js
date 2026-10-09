@@ -810,6 +810,45 @@ function paraISOLocal(date) {
   return `${ano}-${mes}-${dia}`;
 }
 
+// Atalhos de mês inteiro (mês atual + os dois seguintes, rótulo capitalizado)
+// abaixo de De/Até. Compartilhado por Liberar, Bloquear e Restrição de
+// serviço: onAplicar recebe (inicioISO, fimISO). Início nunca fica no
+// passado (mês atual começa em hoje), igual ao `min` dos campos de data.
+function AtalhosMes({ onAplicar }) {
+  const base = new Date();
+  const chips = [0, 1, 2].map((offset) => {
+    const data = new Date(base.getFullYear(), base.getMonth() + offset, 1);
+    const nomeMes = data.toLocaleDateString("pt-BR", { month: "long" });
+    return {
+      ano: data.getFullYear(),
+      mesIdx: data.getMonth(),
+      rotulo: nomeMes.charAt(0).toUpperCase() + nomeMes.slice(1),
+    };
+  });
+
+  function aplicar(ano, mesIdx) {
+    const inicioISO = paraISOLocal(new Date(ano, mesIdx, 1));
+    const fimISO = paraISOLocal(new Date(ano, mesIdx + 1, 0));
+    const hojeISO = hojeISOLocal();
+    onAplicar(inicioISO < hojeISO ? hojeISO : inicioISO, fimISO);
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {chips.map((chip) => (
+        <button
+          key={`${chip.ano}-${chip.mesIdx}`}
+          type="button"
+          onClick={() => aplicar(chip.ano, chip.mesIdx)}
+          className="rounded-lg bg-surface px-2.5 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-card"
+        >
+          {chip.rotulo}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // PURA. Datas "YYYY-MM-DD" entre `inicioISO` e `fimISO` (inclusive) cujo dia
 // da semana está em `diasSemana`, nunca antes de hoje (mesmo que `inicioISO`
 // peça uma data passada — o min dos campos de data já impede isso na UI, mas
@@ -1568,6 +1607,46 @@ function SecaoExclusividade({
 
       {servico && (
         <>
+          <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm font-medium text-heading">
+            <input
+              type="checkbox"
+              checked={permanente}
+              onChange={(e) => atualizarPeriodo({ p: e.target.checked })}
+              className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
+            />
+            Manter essa regra permanentemente
+          </label>
+
+          {!permanente && (
+            <>
+              <div className="mt-3 flex flex-wrap items-end gap-2">
+                <label className="text-xs font-medium text-body">
+                  De
+                  <input
+                    type="date"
+                    aria-label="Início da restrição"
+                    min={hoje}
+                    value={dataInicio}
+                    onChange={(e) => atualizarPeriodo({ ini: e.target.value })}
+                    className={`mt-1 block ${classeCampo}`}
+                  />
+                </label>
+                <label className="text-xs font-medium text-body">
+                  Até
+                  <input
+                    type="date"
+                    aria-label="Fim da restrição"
+                    min={dataInicio || hoje}
+                    value={dataFim}
+                    onChange={(e) => atualizarPeriodo({ fim: e.target.value })}
+                    className={`mt-1 block ${classeCampo}`}
+                  />
+                </label>
+              </div>
+              <AtalhosMes onAplicar={(ini, fim) => atualizarPeriodo({ ini, fim })} />
+            </>
+          )}
+
           <span className="mt-3 block text-xs font-medium text-body">
             Dias da semana
           </span>
@@ -1648,16 +1727,6 @@ function SecaoExclusividade({
             </p>
           )}
 
-          <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm font-medium text-heading">
-            <input
-              type="checkbox"
-              checked={permanente}
-              onChange={(e) => atualizarPeriodo({ p: e.target.checked })}
-              className="h-4 w-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20"
-            />
-            Manter essa regra permanentemente
-          </label>
-
           {avisosManutencao.length > 0 && (
             <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-100">
               Por ter duração maior, estas manutenções não têm na agenda alguns
@@ -1667,33 +1736,6 @@ function SecaoExclusividade({
                   <li key={t}>{t}</li>
                 ))}
               </ul>
-            </div>
-          )}
-
-          {!permanente && (
-            <div className="mt-3 flex flex-wrap items-end gap-2">
-              <label className="text-xs font-medium text-body">
-                De
-                <input
-                  type="date"
-                  aria-label="Início da restrição"
-                  min={hoje}
-                  value={dataInicio}
-                  onChange={(e) => atualizarPeriodo({ ini: e.target.value })}
-                  className={`mt-1 block ${classeCampo}`}
-                />
-              </label>
-              <label className="text-xs font-medium text-body">
-                Até
-                <input
-                  type="date"
-                  aria-label="Fim da restrição"
-                  min={dataInicio || hoje}
-                  value={dataFim}
-                  onChange={(e) => atualizarPeriodo({ fim: e.target.value })}
-                  className={`mt-1 block ${classeCampo}`}
-                />
-              </label>
             </div>
           )}
         </>
@@ -1878,18 +1920,6 @@ function SecaoAusencias({
     setLibPerHorarios((atual) =>
       atual.includes(h) ? atual.filter((x) => x !== h) : [...atual, h]
     );
-  }
-
-  // Preenche início/fim do período com o mês inteiro de (ano, mesIdx 0-based) —
-  // atalho dos chips de mês. Início nunca fica no passado (mesmo pedindo o mês
-  // atual): usa hoje nesse caso, igual ao `min` dos campos de data.
-  function aplicarLibPerChipMes(ano, mesIdx) {
-    const ultimoDia = new Date(ano, mesIdx + 1, 0).getDate();
-    const inicioISO = paraISOLocal(new Date(ano, mesIdx, 1));
-    const fimISO = paraISOLocal(new Date(ano, mesIdx, ultimoDia));
-    const hojeISO = hojeISOLocal();
-    setLibPerInicio(inicioISO < hojeISO ? hojeISO : inicioISO);
-    setLibPerFim(fimISO);
   }
 
   function avulsasMesAnterior() {
@@ -2367,19 +2397,6 @@ function SecaoAusencias({
           ? "Selecione ao menos um horário."
           : null;
 
-  // Atalhos de mês: mês atual + os dois seguintes, rótulo capitalizado
-  // ("Outubro", não "outubro").
-  const libPerChipsMes = [0, 1, 2].map((offset) => {
-    const base = new Date();
-    const data = new Date(base.getFullYear(), base.getMonth() + offset, 1);
-    const nomeMes = data.toLocaleDateString("pt-BR", { month: "long" });
-    return {
-      ano: data.getFullYear(),
-      mesIdx: data.getMonth(),
-      rotulo: nomeMes.charAt(0).toUpperCase() + nomeMes.slice(1),
-    };
-  });
-
   // Marcadores já "normais" pro dia da semana da data escolhida — desabilitados
   // no grid de liberação.
   const diaSemanaEscolhido = diaSemanaDeISO(diaData);
@@ -2506,7 +2523,7 @@ function SecaoAusencias({
                       ? "bg-green-600 text-white ring-green-600"
                       : opcao.valor === "exclusividade_servico"
                         ? "bg-blue-600 text-white ring-blue-600"
-                        : "bg-primary text-on-primary ring-primary"
+                        : "bg-red-600 text-white ring-red-600"
                     : "bg-card text-body ring-border hover:bg-surface"
                 }`}
               >
@@ -2807,18 +2824,12 @@ function SecaoAusencias({
               </label>
             </div>
 
-            <div className="mt-2 flex flex-wrap gap-2">
-              {libPerChipsMes.map((chip) => (
-                <button
-                  key={`${chip.ano}-${chip.mesIdx}`}
-                  type="button"
-                  onClick={() => aplicarLibPerChipMes(chip.ano, chip.mesIdx)}
-                  className="rounded-lg bg-surface px-2.5 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-card"
-                >
-                  {chip.rotulo}
-                </button>
-              ))}
-            </div>
+            <AtalhosMes
+              onAplicar={(ini, fim) => {
+                setLibPerInicio(ini);
+                setLibPerFim(fim);
+              }}
+            />
 
             <div className="mt-3">
               <span className="block text-xs font-medium text-body">
@@ -2937,6 +2948,12 @@ function SecaoAusencias({
                 />
               </label>
             </div>
+            <AtalhosMes
+              onAplicar={(ini, fim) => {
+                setVarInicio(ini);
+                setVarFim(fim);
+              }}
+            />
             <p className="mt-2 text-xs text-muted">
               O intervalo inteiro fica bloqueado (dias completos).
             </p>
@@ -3066,7 +3083,7 @@ function SecaoAusencias({
             className={`mt-3 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
               tipoRegistro === "liberacao"
                 ? "bg-green-600 text-white hover:bg-green-700"
-                : "bg-primary text-on-primary hover:bg-primary-hover"
+                : "bg-red-600 text-white hover:bg-red-700"
             }`}
           >
             {salvando
