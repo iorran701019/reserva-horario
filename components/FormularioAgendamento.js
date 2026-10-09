@@ -29,7 +29,8 @@ import {
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import {
   calcularPrecoManutencao,
-  buscarUltimoConcluidoManutencao,
+  buscarReservasBaseManutencao,
+  escolherBaseManutencao,
   classificarDiasManutencao,
   acharManutencaoDaFaixa,
   buscarUltimoConcluidoQualquer,
@@ -1142,9 +1143,10 @@ export default function FormularioAgendamento({
   const avisoPrazoSeqRef = useRef(0);
   // Data ISO do último atendimento concluído do serviço de origem da
   // manutenção selecionada, pra classificar/colorir o calendário da etapa
-  // "Data" — ver buscarUltimoConcluidoManutencao e o efeito abaixo. null
+  // "Data" — ver buscarReservasBaseManutencao e o efeito abaixo. null
   // enquanto não se aplica (serviço normal) ou sem atendimento de referência
   // (cliente nova pro serviço de origem).
+  // Lista de datas-base (reservas da família); a base de cada dia sai de escolherBaseManutencao.
   const [ultimoConcluidoManutencao, setUltimoConcluidoManutencao] = useState(null);
   const [carregandoServicos, setCarregandoServicos] = useState(true);
   const [erroServicos, setErroServicos] = useState("");
@@ -1962,7 +1964,9 @@ export default function FormularioAgendamento({
       estabelecimento.id,
       telefoneDigitos,
       servicoSelecionado,
-      form.data
+      form.data,
+      ultimoConcluidoManutencao,
+      agendamentoEmEdicao?.id ?? null
     ).then((resultado) => {
       if (ativo) setPrecoManutencao(resultado);
     });
@@ -1974,6 +1978,8 @@ export default function FormularioAgendamento({
     clienteInicial?.telefone,
     form.telefone,
     form.data,
+    ultimoConcluidoManutencao,
+    agendamentoEmEdicao?.id,
     estabelecimento.id,
   ]);
 
@@ -1993,10 +1999,11 @@ export default function FormularioAgendamento({
     }
 
     let ativo = true;
-    buscarUltimoConcluidoManutencao(
+    buscarReservasBaseManutencao(
       estabelecimento.id,
       telefoneDigitos,
-      servicoSelecionado
+      servicoSelecionado,
+      agendamentoEmEdicao?.id ?? null
     ).then((resultado) => {
       if (ativo) setUltimoConcluidoManutencao(resultado);
     });
@@ -2007,6 +2014,7 @@ export default function FormularioAgendamento({
     servicoSelecionado,
     clienteInicial?.telefone,
     form.telefone,
+    agendamentoEmEdicao?.id,
     estabelecimento.id,
   ]);
 
@@ -2289,7 +2297,9 @@ export default function FormularioAgendamento({
     if (dataAvisoConfirmada === `${servico.id}|${iso}`) return;
 
     const [ia, im, id] = iso.split("-").map(Number);
-    const [ua, um, ud] = ultimoConcluidoManutencao.split("-").map(Number);
+    const baseISO = escolherBaseManutencao(ultimoConcluidoManutencao, iso);
+    if (!baseISO) return;
+    const [ua, um, ud] = baseISO.split("-").map(Number);
     const dias = Math.round(
       (new Date(ia, im - 1, id) - new Date(ua, um - 1, ud)) / 86400000
     );
@@ -2302,7 +2312,14 @@ export default function FormularioAgendamento({
 
     const telefoneDigitos = (clienteInicial?.telefone ?? form.telefone).replace(/\D/g, "");
     if (telefoneDigitos.length < 10) return;
-    calcularPrecoManutencao(estabelecimento.id, telefoneDigitos, servico, iso).then(
+    calcularPrecoManutencao(
+      estabelecimento.id,
+      telefoneDigitos,
+      servico,
+      iso,
+      ultimoConcluidoManutencao,
+      agendamentoEmEdicao?.id ?? null
+    ).then(
       (resultado) => {
         if (seq !== avisoPrazoSeqRef.current || !resultado?.valorCheio) return;
         setAvisoPrazo({
