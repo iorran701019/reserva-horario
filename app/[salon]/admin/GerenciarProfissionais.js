@@ -1859,6 +1859,8 @@ function SecaoAusencias({
   // null fora da edição. Nada é gravado até "Salvar alterações" (ver gravar /
   // trocarRegistros).
   const [edicao, setEdicao] = useState(null);
+  // (tipos também: "recorrente", "liberacaoDia", "liberacaoPeriodo"; `aviso`
+  // é uma linha extra opcional no rótulo.)
   const formRef = useRef(null);
 
   // Lista que as conferências do formulário enxergam: sem as linhas em
@@ -2125,7 +2127,9 @@ function SecaoAusencias({
         };
       }
 
-      const grupoId = crypto.randomUUID();
+      // Na edição reaproveita o grupo_id, pra as linhas passadas (intactas)
+      // continuarem no mesmo card.
+      const grupoId = edicao?.grupoId ?? crypto.randomUUID();
       const motivo = libPerMotivo.trim() || null;
 
       return {
@@ -2303,9 +2307,12 @@ function SecaoAusencias({
       setEdicao(null);
       limparCampos();
       // Leva a lista ao mês da primeira data nova, pra o card editado não
-      // sumir da vista se a data mudou de mês.
+      // sumir da vista se a data mudou de mês. Só vale pros cards paginados
+      // por mês: Recorrentes e Liberações por período ficam fora da paginação.
       const primeiraData = troca.inseridas.map((l) => l.data_inicio).sort()[0];
-      if (primeiraData) navMes.irParaMes(chaveMes(primeiraData));
+      const paginadoPorMes =
+        edicao.tipo !== "recorrente" && edicao.tipo !== "liberacaoPeriodo";
+      if (paginadoPorMes && primeiraData) navMes.irParaMes(chaveMes(primeiraData));
       return;
     }
 
@@ -2441,6 +2448,117 @@ function SecaoAusencias({
       ids: futuras.map((a) => a.id),
       grupoId: grupo.grupoId,
       rotulo: `Editando bloqueio de ${datas.length === 1 ? "1 data" : `${datas.length} datas`}`,
+    });
+    rolarAoFormulario();
+  }
+
+  // Separa horários "HH:MM" entre os marcadores da grade e os fora dela. O
+  // formulário só tem UM campo de outro horário, então mais de um fora da
+  // grade não cabe: quem chama avisa e não abre a edição.
+  function separarHorariosGrade(horarios) {
+    return {
+      daGrade: horarios.filter((h) => MARCADORES_HORARIO.includes(h)),
+      foraDaGrade: horarios.filter((h) => !MARCADORES_HORARIO.includes(h)),
+    };
+  }
+
+  // A. Ausência fixa (card Recorrentes): um Editar por card, todas as linhas.
+  function iniciarEdicaoRecorrente(grupo) {
+    const motivos = grupo.itens.map((a) => a.motivo ?? "");
+    const primeiroMotivo = motivos.find((m) => m !== "") ?? "";
+    const divergem = new Set(motivos).size > 1;
+    limparCampos();
+    setFormErro("");
+    setConfirmarBloqueio(null);
+    setTipoRegistro("ausencia");
+    setModo("recorrente");
+    setRecDias(grupo.itens.map((a) => a.dia_semana));
+    setRecInicio(paraHHMM(grupo.inicio));
+    setRecFim(paraHHMM(grupo.fim));
+    setRecMotivo(primeiroMotivo);
+    setEdicao({
+      tipo: "recorrente",
+      ids: grupo.itens.map((a) => a.id),
+      grupoId: null,
+      rotulo: `Editando ausência fixa de ${faixaHora(grupo.inicio, grupo.fim)}`,
+      aviso: divergem
+        ? "Os dias tinham motivos diferentes; o motivo abaixo vale para todos."
+        : null,
+    });
+    rolarAoFormulario();
+  }
+
+  // B. Dia único com liberação: cuida de TODAS as liberações daquela data
+  // (periodo, sem grupo_id, data >= hoje).
+  function iniciarEdicaoLiberacoesDia(grupo) {
+    const linhas = grupo.itens.filter(
+      (a) =>
+        a.tipo === "periodo" &&
+        a.tipo_registro === "liberacao" &&
+        !a.grupo_id &&
+        a.data_inicio >= hoje
+    );
+    if (linhas.length === 0) return;
+    const horarios = [...new Set(linhas.map((a) => paraHHMM(a.hora_inicio)))].sort();
+    const { daGrade, foraDaGrade } = separarHorariosGrade(horarios);
+    if (foraDaGrade.length > 1) {
+      setErro(
+        `Não foi possível editar: há ${foraDaGrade.length} horários fora da grade (${foraDaGrade.join(", ")}) e o formulário aceita só um. Exclua e cadastre de novo.`
+      );
+      return;
+    }
+    setErro("");
+    limparCampos();
+    setFormErro("");
+    setConfirmarBloqueio(null);
+    setTipoRegistro("liberacao");
+    setModo("umdia");
+    setDiaData(grupo.data);
+    setDiaHorarios(daGrade);
+    setDiaOutroHorario(foraDaGrade[0] ?? "");
+    setDiaMotivo(linhas.find((a) => a.motivo)?.motivo ?? "");
+    setEdicao({
+      tipo: "liberacaoDia",
+      ids: linhas.map((a) => a.id),
+      grupoId: null,
+      rotulo: `Editando liberações de ${formatarDataBR(grupo.data)}`,
+      aviso: null,
+    });
+    rolarAoFormulario();
+  }
+
+  // C. Liberação por período (card por grupo_id): só as linhas com data >=
+  // hoje entram na edição; as passadas ficam intactas, no mesmo grupo_id.
+  function iniciarEdicaoLiberacaoPeriodo(grupo) {
+    const futuras = grupo.itens.filter((a) => a.data_inicio >= hoje);
+    if (futuras.length === 0) return;
+    const datas = [...new Set(futuras.map((a) => a.data_inicio))].sort();
+    const horarios = [...new Set(futuras.map((a) => paraHHMM(a.hora_inicio)))].sort();
+    const { daGrade, foraDaGrade } = separarHorariosGrade(horarios);
+    if (foraDaGrade.length > 1) {
+      setErro(
+        `Não foi possível editar: há ${foraDaGrade.length} horários fora da grade (${foraDaGrade.join(", ")}) e o formulário aceita só um. Exclua e cadastre de novo.`
+      );
+      return;
+    }
+    setErro("");
+    limparCampos();
+    setFormErro("");
+    setConfirmarBloqueio(null);
+    setTipoRegistro("liberacao");
+    setModo("liberacao_periodo");
+    setLibPerInicio(datas[0]);
+    setLibPerFim(grupo.dataFim);
+    setLibPerDias([...new Set(datas.map(diaSemanaDeISO))].sort((a, b) => a - b));
+    setLibPerHorarios(daGrade);
+    setLibPerOutroHorario(foraDaGrade[0] ?? "");
+    setLibPerMotivo(grupo.motivo ?? "");
+    setEdicao({
+      tipo: "liberacaoPeriodo",
+      ids: futuras.map((a) => a.id),
+      grupoId: grupo.grupoId,
+      rotulo: `Editando liberações de ${formatarDataBR(datas[0])} a ${formatarDataBR(grupo.dataFim)}`,
+      aviso: "As datas que já passaram não são alteradas.",
     });
     rolarAoFormulario();
   }
@@ -2658,6 +2776,11 @@ function SecaoAusencias({
         {edicao && (
           <p className="mb-2 rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading ring-1 ring-border">
             {edicao.rotulo}
+            {edicao.aviso && (
+              <span className="mt-1 block text-xs font-normal text-body">
+                {edicao.aviso}
+              </span>
+            )}
           </p>
         )}
         {/* Natureza do registro: bloqueia ou libera um horário. Mesmo
@@ -3386,10 +3509,21 @@ function SecaoAusencias({
                   : "border-l-red-400"
               }`}
             >
-              <p className="flex items-center gap-2 text-xs font-medium text-muted">
-                <SeloTipoRegistro tipoRegistro={grupo.tipoRegistro} />
-                Toda semana · {faixaHora(grupo.inicio, grupo.fim)}
-              </p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="flex items-center gap-2 text-xs font-medium text-muted">
+                  <SeloTipoRegistro tipoRegistro={grupo.tipoRegistro} />
+                  Toda semana · {faixaHora(grupo.inicio, grupo.fim)}
+                </p>
+                {grupo.tipoRegistro === "ausencia" && (
+                  <button
+                    type="button"
+                    onClick={() => iniciarEdicaoRecorrente(grupo)}
+                    className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                  >
+                    Editar
+                  </button>
+                )}
+              </div>
               <ul className="mt-2 space-y-1.5">
                 {grupo.itens.map((a) => (
                   <li
@@ -3448,13 +3582,24 @@ function SecaoAusencias({
                   <p className="mt-0.5 text-xs text-muted">{grupo.motivo}</p>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => setConfirmarExclusaoLiberacaoPeriodo(grupo)}
-                className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
-              >
-                Excluir
-              </button>
+              <div className="flex shrink-0 gap-1.5">
+                {grupo.datas.some((d) => d >= hoje) && (
+                  <button
+                    type="button"
+                    onClick={() => iniciarEdicaoLiberacaoPeriodo(grupo)}
+                    className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                  >
+                    Editar
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setConfirmarExclusaoLiberacaoPeriodo(grupo)}
+                  className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                >
+                  Excluir
+                </button>
+              </div>
             </div>
           ))}
 
@@ -3495,9 +3640,23 @@ function SecaoAusencias({
                   temBloqueio ? "border-l-red-400" : "border-l-green-500"
                 }`}
               >
-                <p className="text-sm font-medium text-heading">
-                  {formatarDataBR(grupo.data)}
-                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium text-heading">
+                    {formatarDataBR(grupo.data)}
+                  </p>
+                  {grupo.data >= hoje &&
+                    grupo.itens.some(
+                      (a) => a.tipo_registro === "liberacao" && !a.grupo_id
+                    ) && (
+                      <button
+                        type="button"
+                        onClick={() => iniciarEdicaoLiberacoesDia(grupo)}
+                        className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                      >
+                        Editar liberações
+                      </button>
+                    )}
+                </div>
                 <ul className="mt-2 space-y-1.5">
                   {grupo.itens.map((a) => (
                     <li
