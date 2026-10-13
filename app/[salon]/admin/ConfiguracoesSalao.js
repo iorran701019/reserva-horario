@@ -585,6 +585,7 @@ export default function ConfiguracoesSalao({
   // em alternarAviso/no JSX, o valor gravado é sempre o da coluna.
   const [lembreteEtiquetaAtivo, setLembreteEtiquetaAtivo] = useState(undefined);
   const [pularPerguntasAdmin, setPularPerguntasAdmin] = useState(undefined);
+  const [avisoDuplicidadeAtivo, setAvisoDuplicidadeAtivo] = useState(undefined);
   const [erroAvisos, setErroAvisos] = useState("");
   const [statusAvisos, setStatusAvisos] = useState("");
 
@@ -657,7 +658,7 @@ export default function ConfiguracoesSalao({
       const { data, error } = await supabase
         .from("estabelecimentos")
         .select(
-          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, aviso_sinal, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao, conclusao_manual_ativa, confirmado_expira_horas, lembrete_etiqueta_ativo, pular_perguntas_adicionais_admin"
+          "escolha_profissional, sinal_regra, sinal_valor_centavos, sinal_chave_pix, metodo_cobranca_pix, etiqueta_bloqueio_sinal_id, aviso_regras_agendamento, aviso_sinal, manutencao_caducidade_dias, manutencao_valor_cheio_apos_prazo, servico_manutencao_externa_id, cancelamento_prazo_horas, prazo_minimo_entre_agendamentos_dias, link_localizacao, fidelidade_ativa, fidelidade_meta_servicos, fidelidade_conta_manutencao, fidelidade_descricao_brinde, foto_perfil_url, foto_perfil_posicao, foto_perfil_zoom, google_calendar_ativo, google_calendar_email, janela_agendamento_fim, meses_alcance_edicao_agenda, antecedencia_minima_horas, cutoff_dia_seguinte_ativo, cutoff_dia_seguinte_hora, msg_confirmacao, msg_lembrete, msg_cancelamento, msg_reativacao, msg_solicitacao_enviada, msg_duvida_generica, msg_cancelamento_cliente, msg_ajuda_prazo_expirado, msg_falha_cadastro, msg_contato_admin, msg_fora_da_janela, msg_alteracao, conclusao_manual_ativa, confirmado_expira_horas, lembrete_etiqueta_ativo, pular_perguntas_adicionais_admin, aviso_possivel_duplicidade_ativo"
         )
         .eq("id", estabelecimento.id)
         .single();
@@ -744,6 +745,7 @@ export default function ConfiguracoesSalao({
       // Só `false` desliga o lembrete (coluna ausente conta como ligada).
       setLembreteEtiquetaAtivo(data?.lembrete_etiqueta_ativo !== false);
       setPularPerguntasAdmin(Boolean(data?.pular_perguntas_adicionais_admin));
+      setAvisoDuplicidadeAtivo(data?.aviso_possivel_duplicidade_ativo !== false);
 
       setErroFoto("");
       setFotoPerfilUrl(data?.foto_perfil_url ?? null);
@@ -1553,8 +1555,11 @@ export default function ConfiguracoesSalao({
   // banco (a inversão do interruptor de perguntas já vem resolvida por quem
   // chama).
   async function alternarAviso(coluna, valorColuna, setEstado) {
-    const anterior =
-      coluna === "lembrete_etiqueta_ativo" ? lembreteEtiquetaAtivo : pularPerguntasAdmin;
+    const anterior = {
+      lembrete_etiqueta_ativo: lembreteEtiquetaAtivo,
+      pular_perguntas_adicionais_admin: pularPerguntasAdmin,
+      aviso_possivel_duplicidade_ativo: avisoDuplicidadeAtivo,
+    }[coluna];
     setEstado(valorColuna);
     setStatusAvisos("salvando");
     setErroAvisos("");
@@ -2488,7 +2493,9 @@ export default function ConfiguracoesSalao({
   const carregandoFidelidade = fidelidadeAtiva === undefined;
   const carregandoConclusaoManual = conclusaoManualAtiva === undefined;
   const carregandoAvisos =
-    lembreteEtiquetaAtivo === undefined || pularPerguntasAdmin === undefined;
+    lembreteEtiquetaAtivo === undefined ||
+    pularPerguntasAdmin === undefined ||
+    avisoDuplicidadeAtivo === undefined;
   const carregandoFoto = fotoPerfilUrl === undefined;
   const carregandoGoogleCalendar = googleCalendarAtivo === undefined;
   const carregandoJanela = janelaAgendamentoFim === undefined;
@@ -3559,6 +3566,44 @@ export default function ConfiguracoesSalao({
                 <span
                   className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
                     pularPerguntasAdmin === false ? "translate-x-5" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <label
+                  htmlFor="toggle-aviso-duplicidade"
+                  className="block text-sm font-medium text-heading"
+                >
+                  Mostrar aviso de possível cadastro duplicado em Pendentes
+                </label>
+                <p className="mt-1 text-xs text-muted">
+                  Ligado: o card pendente mostra uma caixa quando a cliente
+                  parece já ter outro cadastro, com o nome e o WhatsApp dele.
+                </p>
+              </div>
+              <button
+                id="toggle-aviso-duplicidade"
+                type="button"
+                role="switch"
+                aria-checked={Boolean(avisoDuplicidadeAtivo)}
+                onClick={() =>
+                  alternarAviso(
+                    "aviso_possivel_duplicidade_ativo",
+                    !avisoDuplicidadeAtivo,
+                    setAvisoDuplicidadeAtivo
+                  )
+                }
+                disabled={carregandoAvisos}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                  avisoDuplicidadeAtivo ? "bg-primary" : "bg-border"
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                    avisoDuplicidadeAtivo ? "translate-x-5" : "translate-x-0.5"
                   }`}
                 />
               </button>

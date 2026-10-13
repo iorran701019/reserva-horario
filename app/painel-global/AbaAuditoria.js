@@ -46,6 +46,12 @@ const FLAGS_ALERTAS = [
     coluna: "lembrete_etiqueta_ativo",
     rotulo: "Lembrete de etiqueta (Pendentes)",
   },
+  {
+    // Default true no banco: ligado = a caixa de possível cadastro duplicado
+    // aparece nos cards pendentes (ver duplicidadePorTelefone em page.js).
+    coluna: "aviso_possivel_duplicidade_ativo",
+    rotulo: "Aviso de possível duplicidade (Pendentes)",
+  },
   { coluna: "ocultar_preco_servicos", rotulo: "Ocultar preço" },
   { coluna: "ocultar_duracao_servicos", rotulo: "Ocultar duração" },
 ];
@@ -324,7 +330,7 @@ export default function AbaAuditoria() {
         supabase
           .from("estabelecimentos")
           .select(
-            "id, nome, slug, pular_perguntas_adicionais_admin, lembrete_etiqueta_ativo, ocultar_preco_servicos, ocultar_duracao_servicos, aviso_regras_agendamento"
+            "id, nome, slug, pular_perguntas_adicionais_admin, lembrete_etiqueta_ativo, aviso_possivel_duplicidade_ativo, ocultar_preco_servicos, ocultar_duracao_servicos, aviso_regras_agendamento"
           )
           .eq("ativo", true)
           .order("nome"),
@@ -359,6 +365,7 @@ export default function AbaAuditoria() {
           pular_perguntas_adicionais_admin: Boolean(salao.pular_perguntas_adicionais_admin),
           // Só `false` desliga (default true no banco).
           lembrete_etiqueta_ativo: salao.lembrete_etiqueta_ativo !== false,
+          aviso_possivel_duplicidade_ativo: salao.aviso_possivel_duplicidade_ativo !== false,
           ocultar_preco_servicos: Boolean(salao.ocultar_preco_servicos),
           ocultar_duracao_servicos: Boolean(salao.ocultar_duracao_servicos),
           // Só o preenchido/vazio interessa na tabela — o texto em si é

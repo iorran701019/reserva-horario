@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
@@ -11,8 +11,10 @@ import { buscarTema } from "@/lib/temas";
 import {
   linkWhatsApp,
   linkWhatsAppSemMensagem,
+  formatarWhatsappExibicao,
   MENSAGEM_LEMBRETE,
   MENSAGEM_CONTATO,
+  MENSAGEM_CONTATO_CLIENTE_ADMIN,
   MENSAGEM_CANCELAMENTO,
   MENSAGEM_CONFIRMACAO,
   MENSAGEM_FORA_DA_JANELA,
@@ -100,9 +102,14 @@ import GerenciarProfissionais, { Interruptor } from "./GerenciarProfissionais";
 import GerenciarClientes from "@/components/GerenciarClientes";
 import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 import {
+  buscarClientesParaDuplicidade,
   buscarEtiquetasPorTelefones,
   contarAgendamentosConfirmados,
 } from "@/lib/clientesAdmin";
+import {
+  acharPossiveisDuplicados,
+  normalizarTelefoneComparacao,
+} from "@/lib/duplicidadeCliente";
 import ConfiguracoesSalao from "./ConfiguracoesSalao";
 import Relatorios from "./Relatorios";
 import AbaAssinatura from "./AbaAssinatura";
@@ -652,6 +659,16 @@ export default function AdminPage() {
   // difere da carregada no MESMO render, antes de o efeito rodar.
   // null = nada carregado ainda.
   const [chaveEtiquetasCarregada, setChaveEtiquetasCarregada] = useState(null);
+
+  // Aviso "Possível cadastro duplicado" (só leitura, nada é gravado): lista de
+  // { id, nome, whatsapp } do salão, carregada uma vez (ver o efeito junto do
+  // de etiquetas).
+  const [clientesDuplicidade, setClientesDuplicidade] = useState([]);
+  // Qual salão a lista acima é e quais telefones pendentes já estavam na tela
+  // quando ela foi buscada. Telefone pendente fora deste conjunto = cliente
+  // possivelmente cadastrada depois da busca, então recarrega; dentro dele, não
+  // (cliente sem linha em `clientes` não pode virar um refetch a cada render).
+  const duplicidadeCarregadaRef = useRef({ estabelecimentoId: null, telefones: new Set() });
 
   // Etiqueta por telefone pros cards da aba "Aguardando Conclusão" (mesmo
   // formato do Map acima). State PRÓPRIO de propósito: juntar esses telefones
@@ -2683,6 +2700,85 @@ export default function AdminPage() {
     };
   }, [estabelecimento?.id, chaveTelefonesPendentes]);
 
+  // Interruptor da dona (aviso_possivel_duplicidade_ativo, default true): só
+  // `false` desliga, ausente conta como ligado.
+  const avisoDuplicidadeAtivo = estabelecimento?.aviso_possivel_duplicidade_ativo !== false;
+
+  // Lista de clientes pro aviso de possível cadastro duplicado. Só busca se
+  // houver pendente e se algum telefone pendente ainda não estava coberto pela
+  // última busca (ver duplicidadeCarregadaRef). Falha vira lista vazia: o
+  // aviso some, o resto da aba segue igual.
+  useEffect(() => {
+    if (!estabelecimento?.id || !chaveTelefonesPendentes) return;
+    if (!avisoDuplicidadeAtivo) return;
+
+    const telefones = chaveTelefonesPendentes.split(",");
+    const carregada = duplicidadeCarregadaRef.current;
+    if (
+      carregada.estabelecimentoId === estabelecimento.id &&
+      telefones.every((telefone) => carregada.telefones.has(telefone))
+    ) {
+      return;
+    }
+
+    let ativo = true;
+    buscarClientesParaDuplicidade(estabelecimento.id).then((lista) => {
+      if (!ativo) return;
+      duplicidadeCarregadaRef.current = {
+        estabelecimentoId: estabelecimento.id,
+        telefones: new Set(telefones),
+      };
+      setClientesDuplicidade(lista);
+    });
+
+    return () => {
+      ativo = false;
+    };
+  }, [estabelecimento?.id, chaveTelefonesPendentes, avisoDuplicidadeAtivo]);
+
+  // Map<telefone do pendente (só dígitos, a mesma chave de etiquetasPorTelefone),
+  // { proprio: { nome, telefone }, candidatos }>, só com quem tem possível
+  // duplicata (no máximo 3 candidatos, os de telefone parecido primeiro; a
+  // regra completa está em lib/duplicidadeCliente.js). O nome da cliente é o da
+  // linha em `clientes`; item.nome_cliente só quando ela não tem linha na lista.
+  const duplicidadePorTelefone = useMemo(() => {
+    const mapa = new Map();
+    if (!avisoDuplicidadeAtivo || clientesDuplicidade.length === 0) return mapa;
+
+    const porTelefone = new Map(
+      clientesDuplicidade.map((c) => [normalizarTelefoneComparacao(c.whatsapp), c])
+    );
+
+    for (const item of agendamentos) {
+      if (
+        !item.finalizado ||
+        !item.telefone ||
+        (item.status !== "pendente" && item.status !== "aguardando_sinal")
+      ) {
+        continue;
+      }
+      const chave = String(item.telefone).replace(/\D/g, "");
+      if (!chave || mapa.has(chave)) continue;
+
+      const linha = porTelefone.get(normalizarTelefoneComparacao(item.telefone));
+      const nome = linha?.nome ?? item.nome_cliente;
+      const candidatos = acharPossiveisDuplicados({
+        id: linha?.id,
+        nome,
+        telefone: item.telefone,
+        clientes: clientesDuplicidade,
+      });
+      if (candidatos.length > 0) {
+        mapa.set(chave, {
+          proprio: { nome: nome || item.nome_cliente, telefone: item.telefone },
+          candidatos: candidatos.slice(0, 3),
+          total: candidatos.length,
+        });
+      }
+    }
+    return mapa;
+  }, [avisoDuplicidadeAtivo, clientesDuplicidade, agendamentos]);
+
   // O Map em mãos corresponde à lista de pendentes que está na tela? Enquanto
   // for false, Confirmar/Cancelar do inbox ficam desabilitados: sem o Map,
   // comGateDeEtiqueta leria `entrada === undefined` e deixaria a ação passar
@@ -2953,6 +3049,49 @@ export default function AdminPage() {
         <Calendar className="h-4 w-4" />
         Alterar
       </button>
+    );
+  }
+
+  // Caixa de possível cadastro duplicado (mesmo visual do "ATENÇÃO!" abaixo).
+  // Só avisa: não esconde nem desabilita Confirmar/Cancelar/Alterar e não cria
+  // gate. `telefone` é o do card (ou do grupo, na bandeja); null se não há
+  // duplicidade pra ele.
+  function renderAvisoDuplicidade(telefone) {
+    const duplicidade = duplicidadePorTelefone.get(
+      String(telefone ?? "").replace(/\D/g, "")
+    );
+    if (!duplicidade) return null;
+    const primeiro = duplicidade.candidatos[0];
+    const demais = duplicidade.total - 1;
+    return (
+      <div className="flex flex-col gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-300">
+        <div className="flex items-start gap-1.5">
+          <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <p className="font-bold">Possível cadastro duplicado</p>
+            <p>Também cadastrada como:</p>
+            <p className="break-words font-medium">{primeiro.nome}</p>
+            <button
+              type="button"
+              onClick={() =>
+                abrirWhatsApp(
+                  primeiro.whatsapp,
+                  MENSAGEM_CONTATO_CLIENTE_ADMIN(
+                    { nome: primeiro.nome },
+                    estabelecimento?.msg_contato_admin
+                  )
+                )
+              }
+              disabled={!primeiro.whatsapp}
+              className="mt-1 inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 ring-1 ring-green-200 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-green-50"
+            >
+              <IconeWhatsApp className="h-3.5 w-3.5" />
+              {formatarWhatsappExibicao(primeiro.whatsapp) ?? primeiro.whatsapp}
+            </button>
+            {demais > 0 && <p className="mt-0.5 text-xs">e mais {demais}</p>}
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -4155,6 +4294,10 @@ export default function AdminPage() {
                       pelo aviso abre em seguida o popup de "sem notificar" que
                       já existia, dois modais em sequência. */}
                   <div className="mt-4 flex flex-col gap-2">
+                    {/* Possível cadastro duplicado: só avisa, vem antes do
+                        "ATENÇÃO!" e não mexe nos botões. Em grupo vive na
+                        bandeja. */}
+                    {!emGrupo && renderAvisoDuplicidade(item.telefone)}
                     {/* Alterar (data ou serviço): com o aviso de desvio ativo,
                         o Alterar fica dentro do sub-card (renderAvisoDesvio). */}
                     {!avisoDesvioAtivo(item) && renderBotaoAlterar(item)}
@@ -4323,6 +4466,16 @@ export default function AdminPage() {
                           Entrar em contato
                         </button>
                       </div>
+                      {/* Possível cadastro duplicado do grupo: uma caixa só,
+                          pelo telefone do grupo (os cards de dentro não a
+                          repetem — ver `emGrupo`). */}
+                      {duplicidadePorTelefone.has(
+                        String(grupo.telefone ?? "").replace(/\D/g, "")
+                      ) && (
+                        <div className="mt-1.5 basis-full">
+                          {renderAvisoDuplicidade(grupo.telefone)}
+                        </div>
+                      )}
                     </div>
                     <ul className="space-y-3 p-3">{cards}</ul>
                   </li>
@@ -4420,6 +4573,9 @@ export default function AdminPage() {
                         )}
 
                       <div className="mt-4 flex flex-wrap gap-2">
+                        {duplicidadePorTelefone.has(
+                          String(item.telefone ?? "").replace(/\D/g, "")
+                        ) && <div className="w-full">{renderAvisoDuplicidade(item.telefone)}</div>}
                         {avisoDesvioAtivo(item) ? (
                           <div className="w-full">{renderAvisoDesvio(item)}</div>
                         ) : (<>
