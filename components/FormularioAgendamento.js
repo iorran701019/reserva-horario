@@ -1389,8 +1389,9 @@ export default function FormularioAgendamento({
   // (SÓ o id trafega: nenhuma tela pública mostra nome/emoji de etiqueta). No
   // /admin, clienteInicial pode trazer `etiqueta_id` direto (busca por nome e
   // ficha do cliente) e/ou o objeto `etiqueta` (com `id` quando vem do
-  // embed ou do SeletorEtiquetaRapido; sem id nos atalhos de Pendentes/
-  // Histórico, que não conhecem a etiqueta) — os dois formatos são aceitos
+  // embed ou do SeletorEtiquetaRapido; o atalho do Histórico manda
+  // `etiqueta_id` lido do Map de etiquetas por telefone, ou null quando o
+  // telefone não está nele) — os dois formatos são aceitos
   // aqui pra este componente não depender de qual consumidor o montou.
   // Declarada AQUI, antes de precisaSinal, que
   // a lê (const em TDZ: mais abaixo daria ReferenceError no render).

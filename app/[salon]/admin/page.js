@@ -1119,6 +1119,14 @@ export default function AdminPage() {
     }
   }
 
+  // clientes.etiqueta_id de quem tem esse telefone, ou null (sem cliente no
+  // Map, ou cliente sem etiqueta). Lê etiquetasPorTelefone; só cobre os
+  // telefones da aba Pendentes (ver chaveTelefonesPendentes).
+  function etiquetaIdDoTelefone(telefone) {
+    const chave = String(telefone ?? "").replace(/\D/g, "");
+    return etiquetasPorTelefone.get(chave)?.etiquetaId ?? null;
+  }
+
   // Botão A: gatekeeper. São DOIS gates em sequência, ambos adiando a
   // gravação até a dona decidir no popup correspondente; só depois de passar
   // pelos dois é que executarConfirmacao grava.
@@ -1149,9 +1157,19 @@ export default function AdminPage() {
     const irmaAnterior = irmaParaConfirmar(agendamento);
     const alvos = irmaAnterior ? [irmaAnterior, agendamento] : [agendamento];
 
+    // A janela mensal pode ser restrita a uma etiqueta: a da cliente vem do
+    // mesmo Map dos badges (os alvos de um par têm o mesmo telefone).
     if (
       !ignorarJanela &&
-      alvos.some((alvo) => !dataAgendavelComMes(alvo.data, estabelecimento, mesesJanela))
+      alvos.some(
+        (alvo) =>
+          !dataAgendavelComMes(
+            alvo.data,
+            estabelecimento,
+            mesesJanela,
+            etiquetaIdDoTelefone(alvo.telefone)
+          )
+      )
     ) {
       setConfirmacaoForaDaJanela({ agendamento, notificar });
       return;
@@ -2693,6 +2711,7 @@ export default function AdminPage() {
       const proximo = new Map(atual);
       proximo.set(chave, {
         ...anterior,
+        etiquetaId: nova?.id ?? null,
         etiqueta: nova ? { nome: nova.nome, cor: nova.cor } : null,
       });
       return proximo;
@@ -2881,7 +2900,15 @@ export default function AdminPage() {
           item.finalizado &&
           item.telefone &&
           (item.status === "pendente" || item.status === "aguardando_sinal") &&
-          !dataAgendavelComMes(item.data, estabelecimento, mesesJanela)
+          // Só decide depois que as etiquetas chegaram: sem o Map, toda
+          // cliente de mês restrito apareceria aqui por um instante.
+          etiquetasProntas &&
+          !dataAgendavelComMes(
+            item.data,
+            estabelecimento,
+            mesesJanela,
+            etiquetaIdDoTelefone(item.telefone)
+          )
       )
       .sort((a, b) => {
         const chaveA = `${a.data ?? ""} ${a.horario ?? ""}`;
@@ -4886,8 +4913,10 @@ export default function AdminPage() {
                             aba Agendar abaixo) e troca de aba — pula o
                             pré-passo. `id: null` porque `agendamentos` não
                             guarda cliente_id (ver progressoFidelidadeModal
-                            acima); inofensivo, FormularioAgendamento só lê
-                            .nome/.telefone de clienteInicial. Não pré-preenche
+                            acima). `etiqueta_id` vem do Map de etiquetas por
+                            telefone: o wizard usa pra liberar os meses
+                            restritos à etiqueta (null = sem etiqueta ou
+                            telefone fora do Map). Não pré-preenche
                             serviço/profissional — reagendamento é do zero.
                             Pular o pré-passo pularia junto o aviso de cliente
                             com pendente, então o gate vem junto no atalho (ver
@@ -4900,6 +4929,7 @@ export default function AdminPage() {
                               id: null,
                               nome: item.nome_cliente,
                               telefone: item.telefone,
+                              etiqueta_id: etiquetaIdDoTelefone(item.telefone),
                             })
                           }
                           className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-blue-200 transition hover:bg-blue-50"
