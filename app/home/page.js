@@ -24,6 +24,8 @@ export const metadata = {
 };
 
 const CNPJ_ACOLHE = "69.166.081/0001-09";
+// Oculto por enquanto; para voltar a exibir no rodapé, troque para true.
+const MOSTRAR_CNPJ = false;
 
 // Âncoras do menu. Fonte única — a ordem aqui é a ordem na tela.
 const SECOES = [
@@ -82,9 +84,11 @@ export default function HomePage() {
             © 2026 Acolhe. Todos os direitos reservados.
           </p>
         </div>
-        <p className="mt-2 text-center text-[10px] text-muted sm:text-xs">
-          CNPJ {CNPJ_ACOLHE}
-        </p>
+        {MOSTRAR_CNPJ && (
+          <p className="mt-2 text-center text-[10px] text-muted sm:text-xs">
+            CNPJ {CNPJ_ACOLHE}
+          </p>
+        )}
         <p className="mt-2 text-center text-[10px] text-muted sm:text-xs">
           <Link href="/termos" className="underline underline-offset-2 hover:text-heading">
             Termos de uso
