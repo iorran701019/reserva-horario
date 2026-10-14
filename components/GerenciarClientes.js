@@ -36,6 +36,7 @@ import FormularioAnamnese from "@/components/FormularioAnamnese";
 import MenuAlterar from "@/components/MenuAlterar";
 import ModalAlterarWhatsapp from "@/components/ModalAlterarWhatsapp";
 import CarrosselAgendamentos from "@/components/CarrosselAgendamentos";
+import CadastrosDuplicadosFicha from "@/components/CadastrosDuplicadosFicha";
 import SeletorEtiquetaRapido, {
   CORES_ETIQUETA,
   COR_ETIQUETA_PADRAO,
@@ -192,6 +193,7 @@ function DetalheCliente({
   onAlterarAgendamento,
   ultimaAlteracaoData,
   onEtiquetaAlterada,
+  onUniaoDesfeita,
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -1107,6 +1109,26 @@ function DetalheCliente({
               </div>
             )}
           </div>
+
+          <CadastrosDuplicadosFicha
+            estabelecimento={estabelecimento}
+            cliente={clienteAtual}
+            anamneseAtiva={temModeloAtivo}
+            msgContatoAdmin={msgContatoAdmin}
+            onSaiuDaLista={onVoltar}
+            onAlterado={() => {
+              // Juntar ou desfazer uma junção mexe em atendimentos e
+              // pendências pelo telefone: refaz o resumo e descarta o que foi
+              // carregado sob o estado anterior (mesmo tratamento da troca de
+              // WhatsApp).
+              setHistorico(null);
+              setHistoricoAberto(false);
+              setObservacoes(null);
+              setObservacoesAbertas(false);
+              recarregarResumo();
+              onUniaoDesfeita?.();
+            }}
+          />
         </div>
       )}
 
@@ -1162,6 +1184,7 @@ export default function GerenciarClientes({
   ultimoCancelamento,
   onAlterarAgendamento,
   ultimaAlteracaoData,
+  onUniaoDesfeita,
 }) {
   const [clientes, setClientes] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -1238,31 +1261,43 @@ export default function GerenciarClientes({
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   }, [searchParams, clientes]);
 
+  // Lê (ou relê) a lista e os telefones agendados. Não liga `carregando` de
+  // novo: a releitura depois de desfazer uma junção acontece com o modal
+  // aberto, e trocar a tela por "Carregando..." o desmontaria.
+  // `aindaAtivo` é o guarda de unmount/troca de salão do efeito abaixo.
+  async function recarregarClientes(aindaAtivo = () => true) {
+    const dadosClientes = await buscarClientes(estabelecimento.id);
+    if (!aindaAtivo()) return;
+    setClientes(dadosClientes);
+    setCarregando(false);
+
+    // Fora do Promise.all de propósito: a lista de telefones SÓ existe
+    // depois que buscarClientes volta. Encadeada aqui, sem segurar o
+    // setCarregando acima — a lista aparece na hora e a tag chega um
+    // instante depois, em vez de a tela inteira esperar mais uma ida ao
+    // banco.
+    buscarConfirmadosPorTelefones(
+      estabelecimento.id,
+      dadosClientes.map((cli) => cli.whatsapp).filter(Boolean)
+    ).then((telefones) => {
+      if (aindaAtivo()) setTelefonesAgendados(telefones);
+    });
+  }
+
   useEffect(() => {
     let ativo = true;
-
-    buscarClientes(estabelecimento.id).then((dadosClientes) => {
-      if (!ativo) return;
-      setClientes(dadosClientes);
-      setCarregando(false);
-
-      // Fora do Promise.all de propósito: a lista de telefones SÓ existe
-      // depois que buscarClientes volta. Encadeada aqui, sem segurar o
-      // setCarregando acima — a lista aparece na hora e a tag chega um
-      // instante depois, em vez de a tela inteira esperar mais uma ida ao
-      // banco.
-      buscarConfirmadosPorTelefones(
-        estabelecimento.id,
-        dadosClientes.map((cli) => cli.whatsapp).filter(Boolean)
-      ).then((telefones) => {
-        if (ativo) setTelefonesAgendados(telefones);
-      });
-    });
-
+    recarregarClientes(() => ativo);
     return () => {
       ativo = false;
     };
   }, [estabelecimento.id]);
+
+  // Depois de desfazer uma junção: o cadastro que estava na lixeira volta à
+  // lista, e a página refaz agendamentos/pendências (ligação por telefone).
+  function aoDesfazerUniao() {
+    recarregarClientes();
+    onUniaoDesfeita?.();
+  }
 
   // Carrega a lista de etiquetas do salão. Independente do carregamento dos
   // clientes: uma falha aqui não segura a lista principal (e vice-versa).
@@ -1565,6 +1600,7 @@ export default function GerenciarClientes({
         ultimoCancelamento={ultimoCancelamento}
         onAlterarAgendamento={onAlterarAgendamento}
         ultimaAlteracaoData={ultimaAlteracaoData}
+        onUniaoDesfeita={aoDesfazerUniao}
       />
     );
   }

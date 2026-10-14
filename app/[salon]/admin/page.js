@@ -5439,6 +5439,10 @@ export default function AdminPage() {
             // refazer o resumo depois de salvar.
             onAlterarAgendamento={abrirAlterarAgendamento}
             ultimaAlteracaoData={ultimaAlteracaoData}
+            // Desfazer uma junção devolve atendimentos pelo telefone: mesma
+            // releitura de agendamentos/pendências/duplicidade de depois de
+            // juntar (aposResolverDuplicidade).
+            onUniaoDesfeita={aposResolverDuplicidade}
             // "Agendar" da ficha do cliente: mesmo atalho do "Novo
             // agendamento" do Histórico (pula o pré-passo de busca por nome e
             // passa pelo aviso de pendente), só que aqui o cliente vem da

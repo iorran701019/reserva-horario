@@ -154,6 +154,11 @@ const CATALOGO_SEM_CONTROLE = [
           "Popup \"É o mesmo cliente?\" e tela de confirmação antes de juntar (ModalResolverDuplicidade). Proteção fixa; o botão Resolver some com a caixa de duplicidade.",
       },
       {
+        nome: "Desfazer junção de cadastros",
+        descricao:
+          "Confirmação antes de restaurar o cadastro juntado e devolver atendimentos, anamneses, anotações, resgates e pendências (ListaUnioes, seção \"Cadastros duplicados\" da ficha do cliente). Proteção fixa, sem interruptor.",
+      },
+      {
         nome: "Cancelar agendamento (admin)",
         descricao:
           "Confirmação com o nome do cliente antes de cancelar e disparar a mensagem de WhatsApp.",
