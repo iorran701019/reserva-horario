@@ -6856,7 +6856,7 @@ export default function FormularioAgendamento({
             {agregadoPopup.etapa === "pergunta" ? (
               <>
                 <h2 id="titulo-modal-agregado" className="text-lg font-semibold text-on-card">
-                  Deseja agregar um serviço junto com {agregadoPopup.servico.nome}?
+                  Deseja adicionar mais um serviço junto com {agregadoPopup.servico.nome}?
                 </h2>
                 <div className="mt-6 flex flex-col gap-2">
                   <button
@@ -6872,9 +6872,9 @@ export default function FormularioAgendamento({
                   <button
                     type="button"
                     onClick={() => encerrarOfertaAgregado(null)}
-                    className="rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
+                    className="break-words rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
                   >
-                    Não, só o serviço
+                    Não, somente {agregadoPopup.servico.nome}
                   </button>
                 </div>
               </>
@@ -6955,9 +6955,9 @@ export default function FormularioAgendamento({
                 <button
                   type="button"
                   onClick={() => encerrarOfertaAgregado(null)}
-                  className="mt-4 w-full rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
+                  className="mt-4 w-full break-words rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
                 >
-                  Não, só o serviço
+                  Não, somente {agregadoPopup.servico.nome}
                 </button>
               </>
             )}

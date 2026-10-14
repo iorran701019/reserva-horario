@@ -22,6 +22,9 @@ import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 //   servicos        – todos os serviços do salão (nomes e opções da lista)
 //   agendaFixa      – true quando TODOS os profissionais ativos são
 //                     modo_horario 'fixo' (o tempo vira só informativo)
+//   ehManutencao,
+//   exigeSegundaData – o que está MARCADO no formulário de edição (não o
+//                     serviço salvo): qualquer um dos dois esconde a seção
 
 const classeCampo =
   "w-full rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10";
@@ -35,6 +38,12 @@ const FORM_VAZIO = {
   ativo: true,
 };
 
+// A seção mora dentro do <form> de edição do serviço: Enter num campo das
+// janelas faria o envio implícito desse formulário e salvaria o serviço.
+function impedirEnvioDoFormulario(e) {
+  if (e.key === "Enter" && e.target.tagName === "INPUT") e.preventDefault();
+}
+
 function reaisParaCentavos(reais) {
   const numero = Number(String(reais).replace(",", "."));
   if (Number.isNaN(numero)) return NaN;
@@ -45,7 +54,13 @@ function centavosParaReais(centavos) {
   return (centavos / 100).toFixed(2);
 }
 
-export default function SecaoServicoAgregado({ servico, servicos, agendaFixa }) {
+export default function SecaoServicoAgregado({
+  servico,
+  servicos,
+  agendaFixa,
+  ehManutencao = false,
+  exigeSegundaData = false,
+}) {
   const [lista, setLista] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
@@ -223,10 +238,10 @@ export default function SecaoServicoAgregado({ servico, servicos, agendaFixa }) 
   // Manutenção e serviço de duas datas não oferecem agregado no wizard (ver
   // confirmarSelecaoServico em FormularioAgendamento.js), então configurar um
   // aqui não teria efeito: a seção some. Depois dos hooks, de propósito.
-  if (servico.eh_manutencao || servico.exige_segunda_data) return null;
+  if (ehManutencao || exigeSegundaData) return null;
 
   return (
-    <div className="mt-4 border-t border-border pt-4">
+    <div>
       <label className="flex items-center gap-2 text-sm font-medium text-heading">
         <input
           type="checkbox"
@@ -237,6 +252,9 @@ export default function SecaoServicoAgregado({ servico, servicos, agendaFixa }) 
         />
         Permitir agregar outro serviço
       </label>
+      <p className="mt-1 text-xs text-muted">
+        Os agregados são salvos na hora, sem precisar do botão Salvar.
+      </p>
       {temAtivo && (
         <p className="mt-1 text-xs text-muted">
           Desative ou exclua os agregados para desligar.
@@ -322,6 +340,7 @@ export default function SecaoServicoAgregado({ servico, servicos, agendaFixa }) 
           aria-labelledby={`titulo-agregado-${servico.id}`}
           className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={fecharJanela}
+          onKeyDown={impedirEnvioDoFormulario}
         >
           <div
             className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
@@ -446,6 +465,7 @@ export default function SecaoServicoAgregado({ servico, servicos, agendaFixa }) 
           aria-labelledby={`titulo-excluir-agregado-${servico.id}`}
           className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
           onClick={() => !excluindo && setParaExcluir(null)}
+          onKeyDown={impedirEnvioDoFormulario}
         >
           <div
             className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
