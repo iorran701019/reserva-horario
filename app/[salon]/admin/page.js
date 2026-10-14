@@ -95,6 +95,8 @@ import PopupConfirmarSemAviso from "@/components/PopupConfirmarSemAviso";
 import MenuAlterar from "@/components/MenuAlterar";
 import ModalClientePendente from "@/components/ModalClientePendente";
 import ModalPrazoMinimo from "@/components/ModalPrazoMinimo";
+import ModalResolverDuplicidade from "@/components/ModalResolverDuplicidade";
+import { existeModeloAtivo } from "@/lib/anamnese";
 import Hero from "@/components/Hero";
 import PainelCalendario from "./PainelCalendario";
 import GerenciarServicos from "./GerenciarServicos";
@@ -103,6 +105,7 @@ import GerenciarClientes from "@/components/GerenciarClientes";
 import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 import {
   buscarClientesParaDuplicidade,
+  buscarDispensadasDuplicidade,
   buscarEtiquetasPorTelefones,
   contarAgendamentosConfirmados,
 } from "@/lib/clientesAdmin";
@@ -664,6 +667,31 @@ export default function AdminPage() {
   // { id, nome, whatsapp } do salão, carregada uma vez (ver o efeito junto do
   // de etiquetas).
   const [clientesDuplicidade, setClientesDuplicidade] = useState([]);
+  // Pares que a dona marcou "manter os dois" (Set de chaveParDuplicidade);
+  // saem do aviso. Carregados junto de clientesDuplicidade.
+  const [dispensadasDuplicidade, setDispensadasDuplicidade] = useState(() => new Set());
+  // Par aberto no popup "É o mesmo cliente?": { idA, idB } ou null.
+  const [resolverDuplicidade, setResolverDuplicidade] = useState(null);
+  // O salão usa anamnese (modelo ativo)? Buscado ao abrir o popup, que só
+  // monta depois da resposta (null = ainda não voltou). Mesma regra da aba
+  // Clientes (existeModeloAtivo).
+  const [anamneseAtivaResolver, setAnamneseAtivaResolver] = useState(null);
+  useEffect(() => {
+    if (!resolverDuplicidade || !estabelecimento?.id) {
+      setAnamneseAtivaResolver(null);
+      return;
+    }
+    let ativo = true;
+    existeModeloAtivo(estabelecimento.id).then((existe) => {
+      if (ativo) setAnamneseAtivaResolver(existe);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [resolverDuplicidade, estabelecimento?.id]);
+  // Sobe a cada juntar/manter dois: força o efeito de etiquetas e o de
+  // duplicidade a buscar de novo mesmo com a mesma chave de telefones.
+  const [versaoResolver, setVersaoResolver] = useState(0);
   // Qual salão a lista acima é e quais telefones pendentes já estavam na tela
   // quando ela foi buscada. Telefone pendente fora deste conjunto = cliente
   // possivelmente cadastrada depois da busca, então recarrega; dentro dele, não
@@ -1134,6 +1162,18 @@ export default function AdminPage() {
         await buscarRespostasPorAgendamento(dados.map((item) => item.id))
       );
     }
+  }
+
+  // Depois de juntar ou manter dois cadastros: os atendimentos do absorvido
+  // mudam de telefone, então refaz agendamentos e pendências, e a versão
+  // nova refaz o mapa de etiquetas e a lista/dispensadas de duplicidade.
+  async function aposResolverDuplicidade() {
+    setResolverDuplicidade(null);
+    duplicidadeCarregadaRef.current = { estabelecimentoId: null, telefones: new Set() };
+    await recarregarAgendamentos();
+    const { dados: dadosPendencias } = await buscarPendenciasAdmin(estabelecimento.id);
+    setPendenciasAdmin(dadosPendencias);
+    setVersaoResolver((v) => v + 1);
   }
 
   // clientes.etiqueta_id de quem tem esse telefone, ou null (sem cliente no
@@ -2699,7 +2739,7 @@ export default function AdminPage() {
     return () => {
       ativo = false;
     };
-  }, [estabelecimento?.id, chaveTelefonesPendentes]);
+  }, [estabelecimento?.id, chaveTelefonesPendentes, versaoResolver]);
 
   // Interruptor da dona (aviso_possivel_duplicidade_ativo, default true): só
   // `false` desliga, ausente conta como ligado.
@@ -2723,19 +2763,23 @@ export default function AdminPage() {
     }
 
     let ativo = true;
-    buscarClientesParaDuplicidade(estabelecimento.id).then((lista) => {
+    Promise.all([
+      buscarClientesParaDuplicidade(estabelecimento.id),
+      buscarDispensadasDuplicidade(estabelecimento.id),
+    ]).then(([lista, dispensadas]) => {
       if (!ativo) return;
       duplicidadeCarregadaRef.current = {
         estabelecimentoId: estabelecimento.id,
         telefones: new Set(telefones),
       };
       setClientesDuplicidade(lista);
+      setDispensadasDuplicidade(dispensadas);
     });
 
     return () => {
       ativo = false;
     };
-  }, [estabelecimento?.id, chaveTelefonesPendentes, avisoDuplicidadeAtivo]);
+  }, [estabelecimento?.id, chaveTelefonesPendentes, avisoDuplicidadeAtivo, versaoResolver]);
 
   // Map<telefone do pendente (só dígitos, a mesma chave de etiquetasPorTelefone),
   // { proprio: { nome, telefone }, candidatos }>, só com quem tem possível
@@ -2768,17 +2812,22 @@ export default function AdminPage() {
         nome,
         telefone: item.telefone,
         clientes: clientesDuplicidade,
+        dispensadas: dispensadasDuplicidade,
       });
       if (candidatos.length > 0) {
         mapa.set(chave, {
-          proprio: { nome: nome || item.nome_cliente, telefone: item.telefone },
+          proprio: {
+            id: linha?.id ?? null,
+            nome: nome || item.nome_cliente,
+            telefone: item.telefone,
+          },
           candidatos: candidatos.slice(0, 3),
           total: candidatos.length,
         });
       }
     }
     return mapa;
-  }, [avisoDuplicidadeAtivo, clientesDuplicidade, agendamentos]);
+  }, [avisoDuplicidadeAtivo, clientesDuplicidade, dispensadasDuplicidade, agendamentos]);
 
   // O Map em mãos corresponde à lista de pendentes que está na tela? Enquanto
   // for false, Confirmar/Cancelar do inbox ficam desabilitados: sem o Map,
@@ -3070,7 +3119,7 @@ export default function AdminPage() {
           <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <div className="flex min-w-0 flex-col gap-0.5">
             <p className="font-bold">Possível cadastro duplicado</p>
-            <p>Também cadastrada como:</p>
+            <p>Também cadastrado como:</p>
             <p className="break-words font-medium">{primeiro.nome}</p>
             <button
               type="button"
@@ -3092,6 +3141,19 @@ export default function AdminPage() {
             {demais > 0 && <p className="mt-0.5 text-xs">e mais {demais}</p>}
           </div>
         </div>
+        {duplicidade.proprio.id != null && primeiro.id != null && (
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() =>
+                setResolverDuplicidade({ idA: duplicidade.proprio.id, idB: primeiro.id })
+              }
+              className="rounded-lg bg-card px-3 py-1 text-xs font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
+            >
+              Resolver
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -6204,6 +6266,24 @@ export default function AdminPage() {
           IdentificacaoClienteAdmin pro caminho da busca por nome — só o estado
           que o abre é local a cada um, já que os dois caminhos nunca estão na
           tela ao mesmo tempo. */}
+      {resolverDuplicidade && anamneseAtivaResolver !== null && (
+        <ModalResolverDuplicidade
+          estabelecimentoId={estabelecimento.id}
+          fidelidadeAtiva={estabelecimento.fidelidade_ativa === true}
+          anamneseAtiva={anamneseAtivaResolver}
+          idA={resolverDuplicidade.idA}
+          idB={resolverDuplicidade.idB}
+          onConcluido={aposResolverDuplicidade}
+          onFechar={() => setResolverDuplicidade(null)}
+          onWhatsapp={(nome, telefone) =>
+            abrirWhatsApp(
+              telefone,
+              MENSAGEM_CONTATO_CLIENTE_ADMIN({ nome }, estabelecimento?.msg_contato_admin)
+            )
+          }
+        />
+      )}
+
       <ModalClientePendente
         cliente={clientePendenteParaAgendar}
         onIrParaPendentes={() => {

@@ -149,6 +149,11 @@ const CATALOGO_SEM_CONTROLE = [
           "Zona pequena do botão dividido; texto também duplicado entre a aba Agendar e a aba Pendentes.",
       },
       {
+        nome: "Juntar cadastros duplicados",
+        descricao:
+          "Popup \"É o mesmo cliente?\" e tela de confirmação antes de juntar (ModalResolverDuplicidade). Proteção fixa; o botão Resolver some com a caixa de duplicidade.",
+      },
+      {
         nome: "Cancelar agendamento (admin)",
         descricao:
           "Confirmação com o nome do cliente antes de cancelar e disparar a mensagem de WhatsApp.",
