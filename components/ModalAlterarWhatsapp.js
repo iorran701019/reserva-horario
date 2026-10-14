@@ -9,6 +9,8 @@ import {
 } from "@/lib/checagemWhatsapp";
 import { useCliqueForaBackdrop } from "@/lib/cliqueFora";
 import { normalizarWhatsapp, validarWhatsapp } from "@/lib/whatsappValidacao";
+import { buscarNumerosAnteriores } from "@/lib/clientesAdmin";
+import { formatarWhatsappExibicao } from "@/lib/whatsapp";
 
 // Popup "Alterar WhatsApp" do detalhe do cliente (GerenciarClientes.js), em
 // dois passos: 1) novo número com a mesma dupla digitação já usada em
@@ -51,6 +53,24 @@ export default function ModalAlterarWhatsapp({
   // termina fora, não (ver lib/cliqueFora.js). Antes do `return null` abaixo
   // porque é hook — tem que rodar em toda renderização.
   const cliqueFora = useCliqueForaBackdrop(onFechar);
+
+  // "Números anteriores": atalho de consulta (só admin). Vazio enquanto
+  // carrega e quando a leitura falha — o modal fica igual ao sem histórico.
+  const [anteriores, setAnteriores] = useState([]);
+
+  useEffect(() => {
+    setAnteriores([]);
+    if (!cliente?.id || !estabelecimentoId) return;
+    let ativo = true;
+    buscarNumerosAnteriores(estabelecimentoId, cliente.id, cliente.whatsapp).then(
+      ({ dados, erro }) => {
+        if (ativo && !erro) setAnteriores(dados);
+      }
+    );
+    return () => {
+      ativo = false;
+    };
+  }, [cliente, estabelecimentoId]);
 
   useEffect(() => {
     setPasso("numero");
@@ -99,6 +119,18 @@ export default function ModalAlterarWhatsapp({
     setWhatsappValidado(digitosNovo);
     setErro("");
     setPasso("confirmar");
+  }
+
+  // O número vem do histórico, não de digitação: preenche os dois campos e a
+  // dona segue pelo "Continuar" normal (mesma confirmação e checagem).
+  function usarNumeroAnterior(digitos) {
+    const texto = formatarWhatsappExibicao(digitos) ?? digitos;
+    setNovoWhatsapp(texto);
+    setConfirmacao(texto);
+    setMostrarReconfirmacao(false);
+    setReconfirmacao("");
+    setErro("");
+    setErroFormatoNovoWhatsapp("");
   }
 
   async function handleConfirmar() {
@@ -238,6 +270,31 @@ export default function ModalAlterarWhatsapp({
                   placeholder="(24) 99999-9999"
                   className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
                 />
+              </div>
+            )}
+
+            {anteriores.length > 0 && (
+              <div className="mt-4">
+                <p className="mb-1 text-xs font-medium text-body">Números anteriores</p>
+                <ul className="divide-y divide-border rounded-lg ring-1 ring-border">
+                  {anteriores.map((digitos) => (
+                    <li
+                      key={digitos}
+                      className="flex items-center justify-between gap-2 px-3 py-2"
+                    >
+                      <span className="text-sm text-heading">
+                        {formatarWhatsappExibicao(digitos) ?? digitos}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => usarNumeroAnterior(digitos)}
+                        className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+                      >
+                        Usar este número
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 
