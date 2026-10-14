@@ -130,8 +130,16 @@ async function gravarRespostas(supabaseAdmin, agendamentoId, servicoId, resposta
 
 export async function POST(request) {
   const corpo = await request.json().catch(() => null);
-  const { agendamentoId, data, horario, servicoId, duracaoMin, profissionalId, respostas } =
-    corpo ?? {};
+  const {
+    agendamentoId,
+    data,
+    horario,
+    servicoId,
+    duracaoMin,
+    profissionalId,
+    respostas,
+    servicoAgregadoId = null,
+  } = corpo ?? {};
 
   if (!agendamentoId || !data || !horario || !servicoId) {
     return new Response("Dados da remarcação incompletos.", { status: 400 });
@@ -142,7 +150,7 @@ export async function POST(request) {
   const { data: atual, error: erroAtual } = await supabaseAdmin
     .from("agendamentos")
     .select(
-      "id, estabelecimento_id, nome_cliente, telefone, status, pendente_desde, sinal_valor_centavos, abacatepay_pago_em, abacatepay_expira_em, abacatepay_br_code, abacatepay_br_code_base64"
+      "id, estabelecimento_id, servico_id, servico_agregado_id, agregado_nome, agregado_preco_centavos, agregado_duracao_min, nome_cliente, telefone, status, pendente_desde, sinal_valor_centavos, abacatepay_pago_em, abacatepay_expira_em, abacatepay_br_code, abacatepay_br_code_base64"
     )
     .eq("id", agendamentoId)
     .maybeSingle();
@@ -198,6 +206,34 @@ export async function POST(request) {
     return Response.json({ erro: "Não foi possível trocar o horário agora." }, { status: 500 });
   }
 
+  // Serviço agregado: a linha nova o herda SÓ quando o serviço continua o
+  // mesmo E o wizard confirma o mesmo agregado (`servicoAgregadoId` do corpo,
+  // o id do SERVIÇO agregado que ele terminou escolhendo; null = nenhum ou
+  // descartado por indisponível). Em qualquer outro caso as quatro colunas vão
+  // nulas. Os valores copiados são os da linha atual (nunca do corpo), e
+  // `duracaoMin` do corpo não decide nada sobre o agregado — o gatilho do
+  // banco recalcula `duracao_min`. Comparação por String: o id é bigint e pode
+  // chegar como number ou string.
+  const mesmoServico = String(atual.servico_id) === String(servicoId);
+  const mesmoAgregado =
+    atual.servico_agregado_id != null &&
+    servicoAgregadoId != null &&
+    String(atual.servico_agregado_id) === String(servicoAgregadoId);
+  const agregadoHerdado =
+    mesmoServico && mesmoAgregado
+      ? {
+          servico_agregado_id: atual.servico_agregado_id,
+          agregado_nome: atual.agregado_nome,
+          agregado_preco_centavos: atual.agregado_preco_centavos,
+          agregado_duracao_min: atual.agregado_duracao_min,
+        }
+      : {
+          servico_agregado_id: null,
+          agregado_nome: null,
+          agregado_preco_centavos: null,
+          agregado_duracao_min: null,
+        };
+
   const { data: nova, error: erroInsert } = await supabaseAdmin
     .from("agendamentos")
     .insert({
@@ -206,6 +242,7 @@ export async function POST(request) {
       data,
       horario,
       servico_id: servicoId,
+      ...agregadoHerdado,
       duracao_min: duracaoMin ?? null,
       estabelecimento_id: atual.estabelecimento_id,
       profissional_id: profissionalId ?? null,

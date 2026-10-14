@@ -309,6 +309,7 @@ export default function PainelCliente({
                     horario: String(itemSinal.horario).slice(0, 5),
                     profissionalId: itemSinal.profissional_id ?? null,
                     reservaGrupoId: itemSinal.reserva_grupo_id ?? null,
+                    servicoAgregadoId: itemSinal.servico_agregado_id ?? null,
                   })
               : null
           }

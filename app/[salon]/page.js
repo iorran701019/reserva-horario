@@ -424,6 +424,7 @@ export default function AgendarPage() {
     horario,
     profissionalId,
     reservaGrupoId = null,
+    servicoAgregadoId = null,
   }) {
     setResumo(null);
     setAgendamentoEditando({
@@ -433,6 +434,9 @@ export default function AgendarPage() {
       horario,
       profissionalId,
       reservaGrupoId,
+      // Id do SERVIÇO agregado da reserva (servico_agregados.servico_agregado_id):
+      // o wizard o reencontra na configuração ao editar. Nulo = sem agregado.
+      servicoAgregadoId,
     });
   }
 
@@ -610,6 +614,7 @@ export default function AgendarPage() {
                       data: form.data,
                       horario,
                       profissionalId: resumo.profissional?.id ?? null,
+                      servicoAgregadoId: servico?.servico_agregado_id ?? null,
                     })
             }
             onCancelado={aposCancelamento}
@@ -743,6 +748,7 @@ export default function AgendarPage() {
                           horario: String(agendamentoSinal.horario).slice(0, 5),
                           profissionalId: agendamentoSinal.profissional_id ?? null,
                           reservaGrupoId: agendamentoSinal.reserva_grupo_id ?? null,
+                          servicoAgregadoId: agendamentoSinal.servico_agregado_id ?? null,
                         })
                 }
                 onCancelado={aposCancelamento}
@@ -783,6 +789,7 @@ export default function AgendarPage() {
                         horario: String(agendamentoProtocolo.horario).slice(0, 5),
                         profissionalId: agendamentoProtocolo.profissional_id ?? null,
                         reservaGrupoId: agendamentoProtocolo.reserva_grupo_id ?? null,
+                        servicoAgregadoId: agendamentoProtocolo.servico_agregado_id ?? null,
                       })
               }
               onCancelado={aposCancelamento}

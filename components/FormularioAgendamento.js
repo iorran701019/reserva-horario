@@ -22,6 +22,7 @@ import { formatarPreco } from "@/lib/preco";
 import { metodoDisponivelSinalPixComRegra } from "@/lib/sinalPix";
 import { resolverSinal } from "@/lib/sinalRegra";
 import {
+  DURACAO_MAXIMA_MIN,
   agregadoSomaTempo,
   nomeComAgregado,
   resumoPreco,
@@ -1285,9 +1286,17 @@ export default function FormularioAgendamento({
   // O tempo do agregado só entra na duração com a lista de profissionais do
   // serviço JÁ carregada e nenhum ativo de agenda fixa. Booleano derivado (e
   // não a lista) pros efeitos de vagas só re-rodarem quando isso muda.
+  //
+  // `servicoIdDosProfissionais` diz PRA QUAL serviço a lista foi carregada:
+  // logo depois de trocar o serviço a lista ainda é a do anterior, e só conta
+  // quando o id bate com o servicoSelecionado ATUAL (null = erro ou sem
+  // serviço: nunca soma, na dúvida mantém a duração do serviço).
+  const [servicoIdDosProfissionais, setServicoIdDosProfissionais] = useState(null);
   const somaTempoAgregado =
     Boolean(agregadoSelecionado) &&
     !carregandoProfissionais &&
+    servicoIdDosProfissionais != null &&
+    servicoIdDosProfissionais === servicoSelecionado?.id &&
     agregadoSomaTempo(profissionaisDoServico);
   // Falha na consulta de profissionais/liberações do serviço (≠ lista vazia
   // real). `tentativaCarga` só existe pra "Tentar de novo" re-disparar o efeito.
@@ -1908,6 +1917,7 @@ export default function FormularioAgendamento({
     async function carregarProfissionais() {
       if (!servicoSelecionado) {
         setProfissionaisDoServico([]);
+        setServicoIdDosProfissionais(null);
         setLiberacoesPeriodo([]);
         setErroCargaAgenda(false);
         return;
@@ -1931,6 +1941,7 @@ export default function FormularioAgendamento({
       if (error) {
         console.error("Erro ao carregar profissionais do serviço:", error);
         setProfissionaisDoServico([]);
+        setServicoIdDosProfissionais(null);
         setLiberacoesPeriodo([]);
         setErroCargaAgenda(true);
         setCarregandoProfissionais(false);
@@ -1942,6 +1953,7 @@ export default function FormularioAgendamento({
         .filter(Boolean)
         .sort((a, b) => a.nome.localeCompare(b.nome));
       setProfissionaisDoServico(lista);
+      setServicoIdDosProfissionais(servicoSelecionado.id);
 
       // Liberações (tipo_registro='liberacao', tipo='periodo') dos
       // profissionais candidatos — só pra abrir o dia certo no calendário
@@ -3424,11 +3436,12 @@ export default function FormularioAgendamento({
       !Number.isFinite(preco) ||
       preco < 0 ||
       !Number.isInteger(duracao) ||
-      duracao < 0
+      duracao < 0 ||
+      duracao > DURACAO_MAXIMA_MIN
     ) {
       setAgregadoPopup((atual) => ({
         ...atual,
-        erro: "Informe um valor válido e um tempo em minutos inteiros.",
+        erro: `Informe um valor válido e um tempo inteiro de 0 a ${DURACAO_MAXIMA_MIN} minutos.`,
       }));
       return;
     }
@@ -4307,6 +4320,9 @@ export default function FormularioAgendamento({
             horario: slot,
             servicoId: servicoSelecionado.id,
             duracaoMin: duracaoEfetivaServico(),
+            // Agregado que o wizard terminou escolhendo (id do SERVIÇO
+            // agregado) ou null: a rota só copia o da linha atual se bater.
+            servicoAgregadoId: agregadoSelecionado?.servico_agregado_id ?? null,
             profissionalId: profissionalRemarcado,
             // Respostas do estado ATUAL do wizard, não as da linha antiga: a
             // cliente pode ter trocado o serviço junto com o horário, e aí as
@@ -5500,6 +5516,8 @@ export default function FormularioAgendamento({
           servicoSelecionado.preco_centavos,
           agregadoSelecionado.preco_centavos
         ),
+        // Pro "Editar" logo depois da criação (app/[salon]/page.js).
+        servico_agregado_id: agregadoSelecionado.servico_agregado_id,
       }
     : servicoSelecionado;
 
