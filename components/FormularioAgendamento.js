@@ -25,6 +25,7 @@ import {
   DURACAO_MAXIMA_MIN,
   agregadoSomaTempo,
   nomeComAgregado,
+  servicoAceitaAgregado,
   resumoPreco,
   somarPreco,
   somarTempo,
@@ -496,7 +497,7 @@ function iniciais(nome) {
 // `servicosLista` (a lista de serviços ativos já carregada pelo wizard).
 // Devolve { ...linha, nome } ordenadas por `ordem`. Erro de consulta = lista
 // vazia: sem oferta, o fluxo segue como antes do agregado existir.
-async function buscarAgregadosDoServico(servicoId, servicosLista) {
+async function buscarAgregadosDoServico(servicoId, servicosLista, estabelecimento) {
   const { data, error } = await supabase
     .from("servico_agregados")
     .select("id, servico_id, servico_agregado_id, preco_centavos, duracao_min, ordem")
@@ -509,7 +510,11 @@ async function buscarAgregadosDoServico(servicoId, servicosLista) {
   return (data ?? [])
     .map((linha) => {
       const agregado = servicosLista.find((s) => s.id === linha.servico_agregado_id);
-      return agregado ? { ...linha, nome: agregado.nome } : null;
+      // Destino que não aceita agregado (manutenção, duas datas, manutenção de
+      // outro salão — servicoAceitaAgregado) simplesmente não é oferecido.
+      return agregado && servicoAceitaAgregado(agregado, estabelecimento)
+        ? { ...linha, nome: agregado.nome }
+        : null;
     })
     .filter(Boolean);
 }
@@ -1863,7 +1868,7 @@ export default function FormularioAgendamento({
         supabase
           .from("servicos")
           .select(
-            "id, nome, duracao_min, preco_centavos, categoria_id, alerta_mensagem, servico_origem_id, eh_manutencao, oculto, prazo_inicio_dias, prazo_fim_dias, exige_segunda_data, nome_etapa_anterior"
+            "id, nome, duracao_min, preco_centavos, categoria_id, alerta_mensagem, servico_origem_id, eh_manutencao, manutencao_externa, oculto, prazo_inicio_dias, prazo_fim_dias, exige_segunda_data, nome_etapa_anterior"
           )
           .eq("estabelecimento_id", estabelecimento.id)
           .eq("ativo", true)
@@ -2908,8 +2913,8 @@ export default function FormularioAgendamento({
       // do serviço, serviço agregado ainda ativo). Falhou = segue sem ele; na
       // edição, com aviso claro, porque a cliente tinha um agregado.
       const querAgregado = pendente.agregadoId != null || pendente.servicoAgregadoId != null;
-      if (querAgregado && !servico.eh_manutencao && !servico.exige_segunda_data) {
-        const opcoes = await buscarAgregadosDoServico(servico.id, servicos);
+      if (querAgregado && servicoAceitaAgregado(servico, estabelecimento)) {
+        const opcoes = await buscarAgregadosDoServico(servico.id, servicos, estabelecimento);
         if (!ativo) return;
         const achado = opcoes.find((o) =>
           pendente.agregadoId != null
@@ -3339,8 +3344,8 @@ export default function FormularioAgendamento({
     // Oferta de serviço agregado, DEPOIS do alerta e ANTES das perguntas. Não
     // vale pra manutenção nem pra serviço de duas datas, e NÃO é pulada por
     // pular_perguntas_adicionais_admin (a flag pula perguntas, não esta oferta).
-    if (!servico.eh_manutencao && !servico.exige_segunda_data) {
-      const opcoes = await buscarAgregadosDoServico(servico.id, servicos);
+    if (servicoAceitaAgregado(servico, estabelecimento)) {
+      const opcoes = await buscarAgregadosDoServico(servico.id, servicos, estabelecimento);
       if (opcoes.length > 0) {
         const somaTempo = await buscarSomaTempoAgregado(servico.id, estabelecimento.id);
         setAgregadoPopup({ servico, etapa: "pergunta", opcoes, somaTempo, escolhido: null });

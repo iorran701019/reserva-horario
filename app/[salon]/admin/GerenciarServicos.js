@@ -2922,6 +2922,8 @@ export default function GerenciarServicos({
               }
               ehManutencao={form.ehManutencao}
               exigeSegundaData={form.exigeSegundaData}
+              manutencaoExterna={form.manutencaoExterna}
+              estabelecimento={estabelecimento}
             />
           ) : (
             <p className="text-xs text-muted">Salve o serviço para configurar agregados.</p>

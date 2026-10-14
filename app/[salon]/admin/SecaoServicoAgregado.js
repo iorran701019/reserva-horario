@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { formatarPreco } from "@/lib/preco";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
+import { servicoAceitaAgregado } from "@/lib/servicoAgregado";
 
 // Seção "Permitir agregar outro serviço" do card de serviço em
 // GerenciarServicos (tabela `servico_agregados`). SÓ CONFIGURAÇÃO: nada aqui é
@@ -23,8 +24,12 @@ import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 //   agendaFixa      – true quando TODOS os profissionais ativos são
 //                     modo_horario 'fixo' (o tempo vira só informativo)
 //   ehManutencao,
-//   exigeSegundaData – o que está MARCADO no formulário de edição (não o
-//                     serviço salvo): qualquer um dos dois esconde a seção
+//   exigeSegundaData,
+//   manutencaoExterna – o que está MARCADO no formulário de edição (não o
+//                     serviço salvo): qualquer um esconde a seção
+//   estabelecimento – de onde vem servico_manutencao_externa_id (o serviço
+//                     apontado também não aceita agregado). Regra única em
+//                     servicoAceitaAgregado (lib/servicoAgregado.js)
 
 const classeCampo =
   "w-full rounded-lg border border-border px-2 py-1.5 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10";
@@ -60,6 +65,8 @@ export default function SecaoServicoAgregado({
   agendaFixa,
   ehManutencao = false,
   exigeSegundaData = false,
+  manutencaoExterna = false,
+  estabelecimento = null,
 }) {
   const [lista, setLista] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -106,18 +113,24 @@ export default function SecaoServicoAgregado({
     };
   }, [servico.id]);
 
+  // Agregado configurado cujo serviço de destino virou manutenção, segunda
+  // data ou manutenção de outro salão: o wizard o filtra, então aqui só avisa.
+  function agregadoOferecivel(item) {
+    const destino = servicos.find((s) => s.id === item.servico_agregado_id);
+    return destino ? servicoAceitaAgregado(destino, estabelecimento) : true;
+  }
+
   function nomeDoServico(id) {
     return servicos.find((s) => s.id === id)?.nome ?? "Serviço removido";
   }
 
-  // Serviços ativos do salão, menos o próprio, os já adicionados, as
-  // manutenções e os de segunda data (não fazem sentido como agregado).
+  // Serviços ativos do salão, menos o próprio, os já adicionados e os que não
+  // aceitam agregado (manutenção, segunda data, manutenção de outro salão).
   const jaAdicionados = new Set(lista.map((a) => a.servico_agregado_id));
   const opcoes = servicos.filter(
     (s) =>
       s.ativo &&
-      !s.eh_manutencao &&
-      !s.exige_segunda_data &&
+      servicoAceitaAgregado(s, estabelecimento) &&
       s.id !== servico.id &&
       !jaAdicionados.has(s.id)
   );
@@ -238,7 +251,16 @@ export default function SecaoServicoAgregado({
   // Manutenção e serviço de duas datas não oferecem agregado no wizard (ver
   // confirmarSelecaoServico em FormularioAgendamento.js), então configurar um
   // aqui não teria efeito: a seção some. Depois dos hooks, de propósito.
-  if (ehManutencao || exigeSegundaData) return null;
+  const principalAceita = servicoAceitaAgregado(
+    {
+      id: servico.id,
+      eh_manutencao: ehManutencao,
+      exige_segunda_data: exigeSegundaData,
+      manutencao_externa: manutencaoExterna,
+    },
+    estabelecimento
+  );
+  if (!principalAceita) return null;
 
   return (
     <div>
@@ -291,6 +313,11 @@ export default function SecaoServicoAgregado({
                         {!a.ativo && (
                           <span className="ml-2 rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-muted ring-1 ring-border">
                             Inativo
+                          </span>
+                        )}
+                        {a.ativo && !agregadoOferecivel(a) && (
+                          <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200">
+                            Não é mais oferecido ao cliente
                           </span>
                         )}
                       </p>
