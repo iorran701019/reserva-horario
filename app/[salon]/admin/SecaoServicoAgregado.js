@@ -220,6 +220,11 @@ export default function SecaoServicoAgregado({ servico, servicos, agendaFixa }) 
     setParaExcluir(null);
   }
 
+  // Manutenção e serviço de duas datas não oferecem agregado no wizard (ver
+  // confirmarSelecaoServico em FormularioAgendamento.js), então configurar um
+  // aqui não teria efeito: a seção some. Depois dos hooks, de propósito.
+  if (servico.eh_manutencao || servico.exige_segunda_data) return null;
+
   return (
     <div className="mt-4 border-t border-border pt-4">
       <label className="flex items-center gap-2 text-sm font-medium text-heading">
