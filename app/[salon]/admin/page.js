@@ -4,7 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
-import { nomeComAgregado, somarPrecoOuNulo } from "@/lib/servicoAgregado";
+import {
+  nomeComAgregado,
+  reservaPodeAlterarAgregado,
+  resumoPreco,
+  somarPrecoOuNulo,
+} from "@/lib/servicoAgregado";
 import { buscarPerfil } from "@/lib/perfil";
 import { sinalPixRebaixado } from "@/lib/sinalPix";
 import { salaoPodeCobrarSinal } from "@/lib/sinalRegra";
@@ -94,6 +99,7 @@ import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
 import PopupConfirmarSemAviso from "@/components/PopupConfirmarSemAviso";
 import MenuAlterar from "@/components/MenuAlterar";
+import ModalAlterarAgregado from "@/components/ModalAlterarAgregado";
 import ModalClientePendente from "@/components/ModalClientePendente";
 import ModalPrazoMinimo from "@/components/ModalPrazoMinimo";
 import ModalResolverDuplicidade from "@/components/ModalResolverDuplicidade";
@@ -1109,6 +1115,9 @@ export default function AdminPage() {
   // O que o modal mostra, escolhido no MenuAlterar: "servico" (só o bloco
   // Serviço), "data" (só Data e horário) ou "ambos". null = modal fechado.
   const [modoAlterar, setModoAlterar] = useState(null);
+  // Modo "agregado" do MenuAlterar (components/ModalAlterarAgregado): linha
+  // viva da reserva cujo agregado está sendo editado; null = fechado.
+  const [agendamentoParaAgregado, setAgendamentoParaAgregado] = useState(null);
   // A lista de serviços só é necessária fora do modo "data". Derivado em
   // booleano pro efeito que a carrega não rodar (e zerar a escolha) ao passar
   // de "servico" para "ambos".
@@ -1443,7 +1452,7 @@ export default function AdminPage() {
   async function abrirAlterarAgendamento(agendamento, modo) {
     const { data: linha, error } = await supabase
       .from("agendamentos")
-      .select("id, nome_cliente, telefone, data, horario, status, servico_id, servico_agregado_id, agregado_nome, agregado_preco_centavos, agregado_duracao_min, profissional_id, reserva_grupo_id, papel_reserva, sinal_declarado_pago, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, servicos(nome, duracao_min, preco_centavos, eh_manutencao, nome_etapa_anterior), profissionais(nome)")
+      .select("id, nome_cliente, telefone, data, horario, status, duracao_min, servico_id, servico_agregado_id, agregado_nome, agregado_preco_centavos, agregado_duracao_min, profissional_id, reserva_grupo_id, papel_reserva, sinal_declarado_pago, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, servicos(nome, duracao_min, preco_centavos, eh_manutencao, exige_segunda_data, manutencao_externa, nome_etapa_anterior), profissionais(nome)")
       .eq("id", agendamento.id)
       .eq("estabelecimento_id", estabelecimento.id)
       .maybeSingle();
@@ -1472,13 +1481,31 @@ export default function AdminPage() {
       irmaFicha = irma ?? null;
     }
 
+    // Modo isolado "agregado": modal próprio, sem tocar no estado do modal
+    // único. A elegibilidade é rechecada na linha VIVA (o menu usa a da lista).
+    if (modo === "agregado") {
+      if (linha.reserva_grupo_id) {
+        return "Reserva de duas datas não aceita serviço agregado.";
+      }
+      if (!reservaPodeAlterarAgregado(linha, estabelecimento)) {
+        return "Este serviço não aceita serviço agregado.";
+      }
+      setErro("");
+      setAgendamentoParaAgregado({
+        ...linha,
+        duracao_min: linha.duracao_min ?? linha.servicos?.duracao_min ?? null,
+        profissional_nome: linha.profissionais?.nome ?? null,
+      });
+      return null;
+    }
+
     setErro("");
     // Par não tem bloco de serviço: se a linha viva virou par depois do menu,
     // só data/horário.
     setModoAlterar(linha.reserva_grupo_id ? "data" : modo);
     setAgendamentoParaAlterar({
       ...linha,
-      duracao_min: linha.servicos?.duracao_min ?? null,
+      duracao_min: linha.duracao_min ?? linha.servicos?.duracao_min ?? null,
       profissional_nome: linha.profissionais?.nome ?? null,
       irmaFicha,
     });
@@ -1489,6 +1516,47 @@ export default function AdminPage() {
   function fecharAlterar() {
     setAgendamentoParaAlterar(null);
     setModoAlterar(null);
+  }
+
+  // Sucesso da RPC agendamento_alterar_agregado: espelha no estado local as
+  // quatro colunas do agregado e a duração devolvida (servicos não muda; cards
+  // e detalhe leem as colunas) e, se `notificar`, abre o WhatsApp com o NOVO
+  // nome combinado e o NOVO preço somado. Remover o agregado volta ao serviço.
+  async function aoAlterarAgregado(linha, notificar) {
+    const ag = agendamentoParaAgregado;
+    if (!ag) return;
+    const patch = {
+      servico_agregado_id: linha.servico_agregado_id ?? null,
+      agregado_nome: linha.agregado_nome ?? null,
+      agregado_preco_centavos: linha.agregado_preco_centavos ?? null,
+      agregado_duracao_min: linha.agregado_duracao_min ?? null,
+      duracao_min: linha.duracao_min ?? ag.duracao_min,
+    };
+    atualizarItemLocal(ag.id, patch);
+    setUltimaAlteracaoData({ id: ag.id, em: carimboAgora() });
+    setAgendamentoParaAgregado(null);
+
+    if (notificar) {
+      const temAjuste = await agendamentoTemAjustePreco(ag.id);
+      abrirWhatsApp(
+        ag.telefone,
+        MENSAGEM_ALTERACAO(
+          {
+            nome: ag.nome_cliente,
+            servicoNovo: nomeComAgregado(ag.servicos?.nome ?? "serviço", patch.agregado_nome),
+            valorCentavos: somarPrecoOuNulo(
+              ag.servicos?.preco_centavos,
+              patch.agregado_preco_centavos
+            ),
+            ehManutencao: ag.servicos?.eh_manutencao,
+            data: ag.data,
+            horario: ag.horario,
+          },
+          estabelecimento.msg_alteracao,
+          opcoesValorMensagem(estabelecimento, temAjuste)
+        )
+      );
+    }
   }
 
   // Ponto de entrada dos botões "Alterar" que ficam no próprio Painel (cards
@@ -5786,17 +5854,13 @@ export default function AdminPage() {
                   {nomeComAgregado(selecionado.servicos?.nome, selecionado.agregado_nome) ??
                     selecionado.servico_livre ??
                     "—"}
-                  {selecionado.servicos?.duracao_min != null && (
-                    <> · {selecionado.servicos.duracao_min} min</>
-                  )}
+                  {selecionado.duracao_min != null && <> · {selecionado.duracao_min} min</>}
                   {selecionado.servicos?.preco_centavos != null && (
                     <>
                       {" "}
-                      · {formatarPreco(
-                        somarPrecoOuNulo(
-                          selecionado.servicos.preco_centavos,
-                          selecionado.agregado_preco_centavos
-                        )
+                      · {resumoPreco(
+                        selecionado.servicos.preco_centavos,
+                        selecionado.agregado_preco_centavos
                       )}
                     </>
                   )}
@@ -6520,6 +6584,7 @@ export default function AdminPage() {
             menuAlterar.item.status !== "cancelado" &&
             menuAlterar.item.status !== "concluido"
           }
+          podeAlterarAgregado={reservaPodeAlterarAgregado(menuAlterar.item, estabelecimento)}
           onEscolher={(modo) => {
             const { item, origem } = menuAlterar;
             if (origem === "detalhe") setIdSelecionado(null);
@@ -6527,6 +6592,15 @@ export default function AdminPage() {
             abrirAlterarDoPainel(item, modo);
           }}
           onFechar={() => setMenuAlterar(null)}
+        />
+      )}
+
+      {agendamentoParaAgregado && (
+        <ModalAlterarAgregado
+          agendamento={agendamentoParaAgregado}
+          estabelecimento={estabelecimento}
+          onSalvo={aoAlterarAgregado}
+          onFechar={() => setAgendamentoParaAgregado(null)}
         />
       )}
 
@@ -6649,6 +6723,12 @@ export default function AdminPage() {
                 <p className="font-medium text-heading">
                   {nomeComAgregado(ag.servicos?.nome, ag.agregado_nome) ?? "Serviço"}
                   {ag.duracao_min != null && <> · {ag.duracao_min} min</>}
+                  {ag.servicos?.preco_centavos != null && (
+                    <>
+                      {" "}
+                      · {resumoPreco(ag.servicos.preco_centavos, ag.agregado_preco_centavos)}
+                    </>
+                  )}
                 </p>
                 <p className="mt-0.5">
                   {formatarData(ag.data)} às {formatarHorario(ag.horario)}

@@ -49,7 +49,7 @@ async function buscarAgendamentos(estabelecimentoId) {
   // sairia com a duração padrão da loja.
   const dados = (data ?? []).map((item) => ({
     ...item,
-    duracao_min: item.servicos?.duracao_min ?? item.duracao_min ?? null,
+    duracao_min: item.duracao_min ?? item.servicos?.duracao_min ?? null,
     profissional_nome: item.profissionais?.nome ?? null,
   }));
 

@@ -37,7 +37,7 @@ import MenuAlterar from "@/components/MenuAlterar";
 import ModalAlterarWhatsapp from "@/components/ModalAlterarWhatsapp";
 import CarrosselAgendamentos from "@/components/CarrosselAgendamentos";
 import CadastrosDuplicadosFicha from "@/components/CadastrosDuplicadosFicha";
-import { nomeComAgregado } from "@/lib/servicoAgregado";
+import { nomeComAgregado, reservaPodeAlterarAgregado } from "@/lib/servicoAgregado";
 import SeletorEtiquetaRapido, {
   CORES_ETIQUETA,
   COR_ETIQUETA_PADRAO,
@@ -718,6 +718,7 @@ function DetalheCliente({
                       item.status !== "cancelado" &&
                       item.status !== "concluido"
                     }
+                    podeAlterarAgregado={reservaPodeAlterarAgregado(item, estabelecimento)}
                     onEscolher={(modo) => {
                       setMenuAlterarItem(null);
                       tentarAlterar(item, modo);
