@@ -152,6 +152,7 @@ export default function ModalVincularCliente({
         .from("clientes")
         .select("id, nome, whatsapp")
         .eq("estabelecimento_id", estabelecimentoId)
+        .is("excluido_em", null)
         .ilike("nome", `%${termo}%`)
         .order("nome", { ascending: true })
         .limit(8);

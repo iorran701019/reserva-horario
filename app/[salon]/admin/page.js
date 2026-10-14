@@ -2200,6 +2200,7 @@ export default function AdminPage() {
         .select("id")
         .eq("estabelecimento_id", estabelecimento.id)
         .eq("whatsapp", item.telefone)
+        .is("excluido_em", null)
         .maybeSingle();
 
       if (!ativo) return;

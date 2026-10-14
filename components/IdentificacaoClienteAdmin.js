@@ -95,6 +95,7 @@ export default function IdentificacaoClienteAdmin({
         // parecidos aparecem juntos na busca.
         .select("id, nome, whatsapp, etiqueta_id, etiquetas_cliente(id, nome, cor)")
         .eq("estabelecimento_id", estabelecimentoId)
+        .is("excluido_em", null)
         .ilike("nome", `%${termo}%`)
         .order("nome", { ascending: true })
         .limit(8);
@@ -212,6 +213,7 @@ export default function IdentificacaoClienteAdmin({
       .select("id, nome")
       .eq("estabelecimento_id", estabelecimentoId)
       .eq("whatsapp", digitos)
+      .is("excluido_em", null)
       .maybeSingle();
     setEnviando(false);
 
