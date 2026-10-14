@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { formatarPreco } from "@/components/FormularioAgendamento";
 import FotoPerfilCircular, { ZOOM_MINIMO } from "@/components/FotoPerfilCircular";
 import { mensagemFalhaSalvar, mensagemFalhaDelete } from "@/lib/erroSalvar";
+import SecaoServicoAgregado from "./SecaoServicoAgregado";
 
 // Aba "Serviços" do /admin: CRUD dos serviços do salão (tabela `servicos`),
 // sempre particionado por estabelecimento_id (o consumidor já resolveu o salão
@@ -426,7 +427,7 @@ export default function GerenciarServicos({
     async function carregar() {
       const { data, error } = await supabase
         .from("profissionais")
-        .select("id, nome")
+        .select("id, nome, modo_horario")
         .eq("estabelecimento_id", estabelecimento.id)
         .eq("ativo", true)
         .order("nome", { ascending: true });
@@ -2033,6 +2034,15 @@ export default function GerenciarServicos({
             )}
 
             {perguntasAberto[servico.id] && renderSecaoPerguntas(servico)}
+
+            <SecaoServicoAgregado
+              servico={servico}
+              servicos={servicos}
+              agendaFixa={
+                profissionaisSalao.length > 0 &&
+                profissionaisSalao.every((p) => p.modo_horario === "fixo")
+              }
+            />
           </div>
         </div>
       </li>
