@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { servicoAceitaAgregado } from "@/lib/servicoAgregado";
 
 // Remarca um agendamento cujo sinal JÁ foi pago via AbacatePay: cancela a
 // linha atual e cria a do horário novo carregando o pagamento junto.
@@ -183,6 +184,103 @@ export async function POST(request) {
     );
   }
 
+  // Serviço agregado da linha nova. Resolvido ANTES de cancelar a linha
+  // antiga: qualquer recusa daqui sai com 409 sem ter tocado em nada, então a
+  // reserva paga nunca fica cancelada por causa do agregado.
+  //   - serviço mudou ou sem agregado no corpo -> quatro colunas nulas;
+  //   - mesmo agregado da linha atual          -> herda os valores GRAVADOS
+  //     nela (preço/tempo negociados), nunca os do corpo;
+  //   - OUTRO agregado do mesmo serviço        -> lê a configuração em
+  //     servico_agregados e o serviço destino em servicos (ativos, do mesmo
+  //     estabelecimento, servicoAceitaAgregado) e grava a partir DELA. Se não
+  //     valer, 409 "agregado_invalido": nunca grava sem agregado em silêncio,
+  //     porque o wizard já mostrou "A + B" e a grade somou o tempo.
+  // `duracaoMin` do corpo não decide nada sobre o agregado — o gatilho do
+  // banco recalcula `duracao_min`. Comparação por String: o id é bigint e pode
+  // chegar como number ou string.
+  const semAgregado = {
+    servico_agregado_id: null,
+    agregado_nome: null,
+    agregado_preco_centavos: null,
+    agregado_duracao_min: null,
+  };
+  const mesmoServico = String(atual.servico_id) === String(servicoId);
+  let agregadoHerdado = semAgregado;
+
+  if (mesmoServico && servicoAgregadoId != null) {
+    if (
+      atual.servico_agregado_id != null &&
+      String(atual.servico_agregado_id) === String(servicoAgregadoId)
+    ) {
+      agregadoHerdado = {
+        servico_agregado_id: atual.servico_agregado_id,
+        agregado_nome: atual.agregado_nome,
+        agregado_preco_centavos: atual.agregado_preco_centavos,
+        agregado_duracao_min: atual.agregado_duracao_min,
+      };
+    } else {
+      const agregadoInvalido = () =>
+        Response.json(
+          {
+            erro: "O serviço adicional escolhido não está mais disponível. Escolha o serviço de novo.",
+            codigo: "agregado_invalido",
+          },
+          { status: 409 }
+        );
+
+      const [
+        { data: config, error: erroConfig },
+        { data: destino, error: erroDestino },
+        { data: salao, error: erroSalao },
+      ] = await Promise.all([
+        supabaseAdmin
+          .from("servico_agregados")
+          .select("preco_centavos, duracao_min")
+          .eq("servico_id", servicoId)
+          .eq("servico_agregado_id", servicoAgregadoId)
+          .eq("ativo", true)
+          .maybeSingle(),
+        supabaseAdmin
+          .from("servicos")
+          .select("id, nome, eh_manutencao, exige_segunda_data, manutencao_externa")
+          .eq("id", servicoAgregadoId)
+          .eq("estabelecimento_id", atual.estabelecimento_id)
+          .eq("ativo", true)
+          .maybeSingle(),
+        supabaseAdmin
+          .from("estabelecimentos")
+          .select("servico_manutencao_externa_id")
+          .eq("id", atual.estabelecimento_id)
+          .maybeSingle(),
+      ]);
+
+      if (erroConfig || erroDestino || erroSalao) {
+        console.error(
+          "Falha ao validar agregado na remarcação",
+          agendamentoId,
+          erroConfig,
+          erroDestino,
+          erroSalao
+        );
+        return Response.json(
+          { erro: "Não foi possível trocar o horário agora." },
+          { status: 500 }
+        );
+      }
+
+      if (!config || !destino || !servicoAceitaAgregado(destino, salao)) {
+        return agregadoInvalido();
+      }
+
+      agregadoHerdado = {
+        servico_agregado_id: destino.id,
+        agregado_nome: destino.nome,
+        agregado_preco_centavos: config.preco_centavos,
+        agregado_duracao_min: config.duracao_min,
+      };
+    }
+  }
+
   // MESMA ordem do fluxo público (ver selecionarHorario): cancela ANTES de
   // inserir. Não é preferência de estilo — a linha antiga e a nova são da
   // mesma cliente e podem se sobrepor no tempo (trocar 14h por 14h30 num
@@ -205,34 +303,6 @@ export async function POST(request) {
     );
     return Response.json({ erro: "Não foi possível trocar o horário agora." }, { status: 500 });
   }
-
-  // Serviço agregado: a linha nova o herda SÓ quando o serviço continua o
-  // mesmo E o wizard confirma o mesmo agregado (`servicoAgregadoId` do corpo,
-  // o id do SERVIÇO agregado que ele terminou escolhendo; null = nenhum ou
-  // descartado por indisponível). Em qualquer outro caso as quatro colunas vão
-  // nulas. Os valores copiados são os da linha atual (nunca do corpo), e
-  // `duracaoMin` do corpo não decide nada sobre o agregado — o gatilho do
-  // banco recalcula `duracao_min`. Comparação por String: o id é bigint e pode
-  // chegar como number ou string.
-  const mesmoServico = String(atual.servico_id) === String(servicoId);
-  const mesmoAgregado =
-    atual.servico_agregado_id != null &&
-    servicoAgregadoId != null &&
-    String(atual.servico_agregado_id) === String(servicoAgregadoId);
-  const agregadoHerdado =
-    mesmoServico && mesmoAgregado
-      ? {
-          servico_agregado_id: atual.servico_agregado_id,
-          agregado_nome: atual.agregado_nome,
-          agregado_preco_centavos: atual.agregado_preco_centavos,
-          agregado_duracao_min: atual.agregado_duracao_min,
-        }
-      : {
-          servico_agregado_id: null,
-          agregado_nome: null,
-          agregado_preco_centavos: null,
-          agregado_duracao_min: null,
-        };
 
   const { data: nova, error: erroInsert } = await supabaseAdmin
     .from("agendamentos")
