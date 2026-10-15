@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { formatarPreco } from "@/lib/preco";
 import { temSinal } from "@/lib/particao";
+import { precoPadraoConclusao } from "@/lib/servicoAgregado";
 import {
   concluirAgendamento,
   marcarNaoCompareceu,
@@ -102,10 +103,9 @@ function centavosParaTexto(centavos) {
 export default function CardConclusaoAtendimento({ agendamento, onSalvo, onFechar }) {
   // Etapa anterior de um par (serviço de duas datas) não cobra: o valor é do
   // atendimento principal. "Substituir valor" continua valendo.
-  const valorPadrao =
-    agendamento.papel_reserva === "anterior"
-      ? 0
-      : agendamento.valor_cobrado_centavos ?? agendamento.servicos?.preco_centavos ?? null;
+  // Com serviço agregado o padrão é serviço + agregado (precoPadraoConclusao);
+  // `agendamento` precisa trazer agregado_preco_centavos.
+  const valorPadrao = precoPadraoConclusao(agendamento);
 
   // Total escolhido pelo "Salvar valor" (centavos, já com o sinal somado no
   // estado 2). null = a dona não substituiu, vale o valor padrão.

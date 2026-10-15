@@ -1,15 +1,17 @@
 "use client";
 
-import { Calendar, Scissors } from "lucide-react";
+import { Calendar, Plus, Scissors } from "lucide-react";
 
 // Menu pequeno do botão "Alterar" (cards de Pendentes e "Fora da janela",
 // detalhe de confirmado e ficha do cliente): porta de entrada do modal único
 // de alteração. Só apresentação: quem chama decide o que cada opção faz, via
-// onEscolher(modo) com modo = "servico" | "data". "Alterar serviço" só aparece
+// onEscolher(modo) com modo = "servico" | "data" | "agregado". "Alterar serviço" só aparece
 // quando `podeAlterarServico` (sem par, sem cancelado/concluído); sem ele
-// sobra só data/horário.
+// sobra só data/horário. "Alterar serviço agregado" (modo "agregado", isolado)
+// só aparece com `podeAlterarAgregado`.
 export default function MenuAlterar({
   podeAlterarServico = false,
+  podeAlterarAgregado = false,
   onEscolher,
   onFechar,
 }) {
@@ -44,6 +46,16 @@ export default function MenuAlterar({
             <Calendar className="h-4 w-4" aria-hidden="true" />
             Alterar data/horário
           </button>
+          {podeAlterarAgregado && (
+            <button
+              type="button"
+              onClick={() => onEscolher("agregado")}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading ring-1 ring-border transition hover:bg-surface"
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Alterar serviço agregado
+            </button>
+          )}
           <button
             type="button"
             onClick={onFechar}

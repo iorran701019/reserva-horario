@@ -37,6 +37,7 @@ import MenuAlterar from "@/components/MenuAlterar";
 import ModalAlterarWhatsapp from "@/components/ModalAlterarWhatsapp";
 import CarrosselAgendamentos from "@/components/CarrosselAgendamentos";
 import CadastrosDuplicadosFicha from "@/components/CadastrosDuplicadosFicha";
+import { nomeComAgregado, reservaPodeAlterarAgregado } from "@/lib/servicoAgregado";
 import SeletorEtiquetaRapido, {
   CORES_ETIQUETA,
   COR_ETIQUETA_PADRAO,
@@ -717,6 +718,7 @@ function DetalheCliente({
                       item.status !== "cancelado" &&
                       item.status !== "concluido"
                     }
+                    podeAlterarAgregado={reservaPodeAlterarAgregado(item, estabelecimento)}
                     onEscolher={(modo) => {
                       setMenuAlterarItem(null);
                       tentarAlterar(item, modo);
@@ -809,7 +811,7 @@ function DetalheCliente({
                             <span className="font-medium text-heading">
                               {formatarDataBR(item.data)} · {formatarHorario(item.horario)}
                             </span>
-                            <span>{item.servicos?.nome ?? "Serviço"}</span>
+                            <span>{nomeComAgregado(item.servicos?.nome, item.agregado_nome) ?? "Serviço"}</span>
                             {item.papel_reserva === "anterior" && (
                               <span
                                 className="rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700"

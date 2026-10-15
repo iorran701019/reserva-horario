@@ -8,6 +8,7 @@ import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import { linkWhatsAppSemMensagem } from "@/lib/whatsapp";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
 import PainelCalendario from "@/app/[salon]/admin/PainelCalendario";
+import { nomeComAgregado } from "@/lib/servicoAgregado";
 
 // Aba "Agenda" do hub (ver HubPainelGlobal): o MESMO calendário do /admin de
 // salão, apontado pro tenant comercial. É a tela onde os atendimentos criados
@@ -34,7 +35,7 @@ async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
     .select(
-      "id, nome_cliente, telefone, data, horario, status, finalizado, observacao, servico_id, servico_livre, duracao_min, profissional_id, origem, reserva_grupo_id, papel_reserva, servicos(nome, duracao_min, nome_etapa_anterior), profissionais(nome)"
+      "id, nome_cliente, telefone, data, horario, status, finalizado, observacao, servico_id, servico_livre, agregado_nome, duracao_min, profissional_id, origem, reserva_grupo_id, papel_reserva, servicos(nome, duracao_min, nome_etapa_anterior), profissionais(nome)"
     )
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
@@ -48,7 +49,7 @@ async function buscarAgendamentos(estabelecimentoId) {
   // sairia com a duração padrão da loja.
   const dados = (data ?? []).map((item) => ({
     ...item,
-    duracao_min: item.servicos?.duracao_min ?? item.duracao_min ?? null,
+    duracao_min: item.duracao_min ?? item.servicos?.duracao_min ?? null,
     profissional_nome: item.profissionais?.nome ?? null,
   }));
 
@@ -245,7 +246,7 @@ export default function AbaAgenda() {
               <div className="flex justify-between gap-3">
                 <dt className="text-muted">Atendimento</dt>
                 <dd className="text-right font-medium text-heading">
-                  {selecionado.servicos?.nome || selecionado.servico_livre || "—"}
+                  {nomeComAgregado(selecionado.servicos?.nome, selecionado.agregado_nome) || selecionado.servico_livre || "—"}
                 </dd>
               </div>
               <div className="flex justify-between gap-3">

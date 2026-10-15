@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { formatarPreco } from "@/components/FormularioAgendamento";
 import FotoPerfilCircular, { ZOOM_MINIMO } from "@/components/FotoPerfilCircular";
 import { mensagemFalhaSalvar, mensagemFalhaDelete } from "@/lib/erroSalvar";
+import SecaoServicoAgregado from "./SecaoServicoAgregado";
 
 // Aba "Serviços" do /admin: CRUD dos serviços do salão (tabela `servicos`),
 // sempre particionado por estabelecimento_id (o consumidor já resolveu o salão
@@ -426,7 +427,7 @@ export default function GerenciarServicos({
     async function carregar() {
       const { data, error } = await supabase
         .from("profissionais")
-        .select("id, nome")
+        .select("id, nome, modo_horario")
         .eq("estabelecimento_id", estabelecimento.id)
         .eq("ativo", true)
         .order("nome", { ascending: true });
@@ -2903,6 +2904,29 @@ export default function GerenciarServicos({
                 Este item é uma manutenção
               </label>
             </div>
+          )}
+
+          {/* Serviço agregado (servico_agregados). Só com o serviço já salvo
+              (precisa do id); no cadastro novo, só o aviso. A seção some sozinha
+              quando, NESTE formulário, "manutenção" ou "segunda data" está
+              marcado (props, não o serviço salvo). `key` pelo id: abrir outro
+              serviço remonta e recarrega a lista dele. */}
+          {editando !== "novo" && editando?.id != null ? (
+            <SecaoServicoAgregado
+              key={editando.id}
+              servico={editando}
+              servicos={servicos}
+              agendaFixa={
+                profissionaisSalao.length > 0 &&
+                profissionaisSalao.every((p) => p.modo_horario === "fixo")
+              }
+              ehManutencao={form.ehManutencao}
+              exigeSegundaData={form.exigeSegundaData}
+              manutencaoExterna={form.manutencaoExterna}
+              estabelecimento={estabelecimento}
+            />
+          ) : (
+            <p className="text-xs text-muted">Salve o serviço para configurar agregados.</p>
           )}
 
           {erroForm && (

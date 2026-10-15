@@ -68,7 +68,14 @@ export async function POST(request) {
       nomeServico = servico?.nome ?? nomeServico;
     }
     titulo = `Pendente: ${record.nome_cliente}`;
-    corpo = `${record.nome_cliente} · ${nomeServico ?? "serviço"} · ${quando}`;
+    // `agregado_nome` já vem no record do webhook (o gatilho do banco o grava
+    // no insert): sem select novo. Só o nome entra aqui — o push não mostra preço.
+    const servicoTexto = nomeServico
+      ? record.agregado_nome
+        ? `${nomeServico} + ${record.agregado_nome}`
+        : nomeServico
+      : "serviço";
+    corpo = `${record.nome_cliente} · ${servicoTexto} · ${quando}`;
   } else {
     titulo = `Cancelado: ${record.nome_cliente}`;
     corpo = `${record.nome_cliente} · ${quando}`;

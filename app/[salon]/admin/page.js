@@ -4,6 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { buscarEstabelecimento } from "@/lib/estabelecimento";
+import {
+  nomeComAgregado,
+  reservaPodeAlterarAgregado,
+  resumoPreco,
+  somarPrecoOuNulo,
+} from "@/lib/servicoAgregado";
 import { buscarPerfil } from "@/lib/perfil";
 import { sinalPixRebaixado } from "@/lib/sinalPix";
 import { salaoPodeCobrarSinal } from "@/lib/sinalRegra";
@@ -93,6 +99,7 @@ import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
 import PopupConfirmarSemAviso from "@/components/PopupConfirmarSemAviso";
 import MenuAlterar from "@/components/MenuAlterar";
+import ModalAlterarAgregado from "@/components/ModalAlterarAgregado";
 import ModalClientePendente from "@/components/ModalClientePendente";
 import ModalPrazoMinimo from "@/components/ModalPrazoMinimo";
 import ModalResolverDuplicidade from "@/components/ModalResolverDuplicidade";
@@ -394,19 +401,22 @@ function estaAguardandoConclusao(item, agora) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, servico_id, servico_livre, profissional_id, reserva_grupo_id, papel_reserva, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, editado_manualmente_em, servicos(nome, duracao_min, preco_centavos, eh_manutencao, nome_etapa_anterior), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, duracao_min, servico_id, servico_agregado_id, agregado_nome, agregado_preco_centavos, agregado_duracao_min, servico_livre, profissional_id, reserva_grupo_id, papel_reserva, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, editado_manualmente_em, servicos(nome, duracao_min, preco_centavos, eh_manutencao, nome_etapa_anterior), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
 
-  // Eleva a duração do serviço ao topo do item (item.duracao_min), preservando
-  // o objeto servicos aninhado (usado em nome do serviço, calendário etc.).
+  // item.duracao_min: a COLUNA do agendamento primeiro (é o que o banco gravou:
+  // serviço + ajustes das perguntas + agregado, e o que alimenta `periodo` e o
+  // cron), com a duração do serviço como segunda opção pras linhas em que ela é
+  // nula — mesma ordem de Relatorios.js e PainelCalendario. O objeto servicos
+  // aninhado segue intacto (nome do serviço, calendário etc.).
   // Assim classificarAgendamento (lib/particao) lê item.duracao_min direto.
   // Também eleva o nome do profissional (join por profissional_id); null quando
   // o agendamento não tem profissional atribuído (reservas antigas).
   const dados = (data ?? []).map((item) => ({
     ...item,
-    duracao_min: item.servicos?.duracao_min ?? null,
+    duracao_min: item.duracao_min ?? item.servicos?.duracao_min ?? null,
     profissional_nome: item.profissionais?.nome ?? null,
   }));
 
@@ -427,7 +437,7 @@ async function buscarPendenciasAdmin(estabelecimentoId) {
   const { data, error } = await supabase
     .from("pendencias_admin")
     .select(
-      "id, tipo, titulo, descricao, agendamento_id, cliente_id, created_at, agendamentos(telefone, data, horario, servico_livre, nome_cliente, servicos(nome)), clientes(whatsapp)"
+      "id, tipo, titulo, descricao, agendamento_id, cliente_id, created_at, agendamentos(telefone, data, horario, servico_livre, nome_cliente, agregado_nome, servicos(nome)), clientes(whatsapp)"
     )
     .eq("estabelecimento_id", estabelecimentoId)
     .eq("resolvido", false)
@@ -1105,6 +1115,9 @@ export default function AdminPage() {
   // O que o modal mostra, escolhido no MenuAlterar: "servico" (só o bloco
   // Serviço), "data" (só Data e horário) ou "ambos". null = modal fechado.
   const [modoAlterar, setModoAlterar] = useState(null);
+  // Modo "agregado" do MenuAlterar (components/ModalAlterarAgregado): linha
+  // viva da reserva cujo agregado está sendo editado; null = fechado.
+  const [agendamentoParaAgregado, setAgendamentoParaAgregado] = useState(null);
   // A lista de serviços só é necessária fora do modo "data". Derivado em
   // booleano pro efeito que a carrega não rodar (e zerar a escolha) ao passar
   // de "servico" para "ambos".
@@ -1439,7 +1452,7 @@ export default function AdminPage() {
   async function abrirAlterarAgendamento(agendamento, modo) {
     const { data: linha, error } = await supabase
       .from("agendamentos")
-      .select("id, nome_cliente, telefone, data, horario, status, servico_id, profissional_id, reserva_grupo_id, papel_reserva, sinal_declarado_pago, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, servicos(nome, duracao_min, preco_centavos, eh_manutencao, nome_etapa_anterior), profissionais(nome)")
+      .select("id, nome_cliente, telefone, data, horario, status, duracao_min, servico_id, servico_agregado_id, agregado_nome, agregado_preco_centavos, agregado_duracao_min, profissional_id, reserva_grupo_id, papel_reserva, sinal_declarado_pago, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, servicos(nome, duracao_min, preco_centavos, eh_manutencao, exige_segunda_data, manutencao_externa, nome_etapa_anterior), profissionais(nome)")
       .eq("id", agendamento.id)
       .eq("estabelecimento_id", estabelecimento.id)
       .maybeSingle();
@@ -1468,13 +1481,31 @@ export default function AdminPage() {
       irmaFicha = irma ?? null;
     }
 
+    // Modo isolado "agregado": modal próprio, sem tocar no estado do modal
+    // único. A elegibilidade é rechecada na linha VIVA (o menu usa a da lista).
+    if (modo === "agregado") {
+      if (linha.reserva_grupo_id) {
+        return "Reserva de duas datas não aceita serviço agregado.";
+      }
+      if (!reservaPodeAlterarAgregado(linha, estabelecimento)) {
+        return "Este serviço não aceita serviço agregado.";
+      }
+      setErro("");
+      setAgendamentoParaAgregado({
+        ...linha,
+        duracao_min: linha.duracao_min ?? linha.servicos?.duracao_min ?? null,
+        profissional_nome: linha.profissionais?.nome ?? null,
+      });
+      return null;
+    }
+
     setErro("");
     // Par não tem bloco de serviço: se a linha viva virou par depois do menu,
     // só data/horário.
     setModoAlterar(linha.reserva_grupo_id ? "data" : modo);
     setAgendamentoParaAlterar({
       ...linha,
-      duracao_min: linha.servicos?.duracao_min ?? null,
+      duracao_min: linha.duracao_min ?? linha.servicos?.duracao_min ?? null,
       profissional_nome: linha.profissionais?.nome ?? null,
       irmaFicha,
     });
@@ -1485,6 +1516,47 @@ export default function AdminPage() {
   function fecharAlterar() {
     setAgendamentoParaAlterar(null);
     setModoAlterar(null);
+  }
+
+  // Sucesso da RPC agendamento_alterar_agregado: espelha no estado local as
+  // quatro colunas do agregado e a duração devolvida (servicos não muda; cards
+  // e detalhe leem as colunas) e, se `notificar`, abre o WhatsApp com o NOVO
+  // nome combinado e o NOVO preço somado. Remover o agregado volta ao serviço.
+  async function aoAlterarAgregado(linha, notificar) {
+    const ag = agendamentoParaAgregado;
+    if (!ag) return;
+    const patch = {
+      servico_agregado_id: linha.servico_agregado_id ?? null,
+      agregado_nome: linha.agregado_nome ?? null,
+      agregado_preco_centavos: linha.agregado_preco_centavos ?? null,
+      agregado_duracao_min: linha.agregado_duracao_min ?? null,
+      duracao_min: linha.duracao_min ?? ag.duracao_min,
+    };
+    atualizarItemLocal(ag.id, patch);
+    setUltimaAlteracaoData({ id: ag.id, em: carimboAgora() });
+    setAgendamentoParaAgregado(null);
+
+    if (notificar) {
+      const temAjuste = await agendamentoTemAjustePreco(ag.id);
+      abrirWhatsApp(
+        ag.telefone,
+        MENSAGEM_ALTERACAO(
+          {
+            nome: ag.nome_cliente,
+            servicoNovo: nomeComAgregado(ag.servicos?.nome ?? "serviço", patch.agregado_nome),
+            valorCentavos: somarPrecoOuNulo(
+              ag.servicos?.preco_centavos,
+              patch.agregado_preco_centavos
+            ),
+            ehManutencao: ag.servicos?.eh_manutencao,
+            data: ag.data,
+            horario: ag.horario,
+          },
+          estabelecimento.msg_alteracao,
+          opcoesValorMensagem(estabelecimento, temAjuste)
+        )
+      );
+    }
   }
 
   // Ponto de entrada dos botões "Alterar" que ficam no próprio Painel (cards
@@ -1892,9 +1964,18 @@ export default function AdminPage() {
       return;
     }
 
+    // Trocar o serviço remove o agregado (ele pertence ao serviço antigo): o
+    // estado local zera as quatro colunas. Sem troca, o agregado persiste e
+    // nome e valor da mensagem saem somados.
+    const semAgregado = {
+      servico_agregado_id: null,
+      agregado_nome: null,
+      agregado_preco_centavos: null,
+      agregado_duracao_min: null,
+    };
     const servicoNome = novo
       ? (resultado.servico_nome ?? novo.nome)
-      : (ag.servicos?.nome ?? "serviço");
+      : nomeComAgregado(ag.servicos?.nome ?? "serviço", ag.agregado_nome);
     const duracao = resultado.duracao_min ?? novo?.duracao_min ?? ag.duracao_min;
     const dataFinal = dataMudou ? dataAlterarData : ag.data;
     const horarioFinal = dataMudou ? horarioAlterarData : ag.horario;
@@ -1910,7 +1991,9 @@ export default function AdminPage() {
       : ag.servicos;
 
     atualizarItemLocal(ag.id, {
-      ...(novo ? { servico_id: novo.id, duracao_min: duracao, servicos: servicosFinal } : {}),
+      ...(novo
+        ? { servico_id: novo.id, duracao_min: duracao, servicos: servicosFinal, ...semAgregado }
+        : {}),
       ...(dataMudou ? { data: dataFinal, horario: horarioFinal } : {}),
     });
     // Mesmo sinal de ultimoCancelamento: a ficha do cliente (aba Clientes)
@@ -1935,7 +2018,10 @@ export default function AdminPage() {
           {
             nome: ag.nome_cliente,
             servicoNovo: servicoNome,
-            valorCentavos: servicosFinal?.preco_centavos,
+            valorCentavos: somarPrecoOuNulo(
+              servicosFinal?.preco_centavos,
+              novo ? null : ag.agregado_preco_centavos
+            ),
             ehManutencao: servicosFinal?.eh_manutencao,
             data: dataFinal,
             horario: horarioFinal,
@@ -1956,7 +2042,9 @@ export default function AdminPage() {
     if (ag.status === "pendente" || ag.status === "aguardando_sinal") {
       const itemAtualizado = {
         ...ag,
-        ...(novo ? { servico_id: novo.id, duracao_min: duracao, servicos: servicosFinal } : {}),
+        ...(novo
+          ? { servico_id: novo.id, duracao_min: duracao, servicos: servicosFinal, ...semAgregado }
+          : {}),
         data: dataFinal,
         horario: horarioFinal,
       };
@@ -3171,7 +3259,7 @@ export default function AdminPage() {
               Serviço anterior ({desvio.feitoEm.slice(8, 10)}/{desvio.feitoEm.slice(5, 7)}):{" "}
               {nomeCurtoServico(desvio.feitoNome)}
             </p>
-            <p>Serviço solicitado agora: {nomeCurtoServico(item.servicos?.nome)}</p>
+            <p>Serviço solicitado agora: {nomeComAgregado(nomeCurtoServico(item.servicos?.nome), item.agregado_nome)}</p>
           </div>
         </div>
         <div className="flex items-center justify-end gap-2">
@@ -3783,7 +3871,10 @@ export default function AdminPage() {
                                 </span>
                               </div>
                               <p className="mt-0.5 min-w-0 break-words text-sm text-body">
-                                {agendamentoCancelado.servicos?.nome ??
+                                {nomeComAgregado(
+                                  agendamentoCancelado.servicos?.nome,
+                                  agendamentoCancelado.agregado_nome
+                                ) ??
                                   agendamentoCancelado.servico_livre ??
                                   "—"}
                               </p>
@@ -4023,7 +4114,7 @@ export default function AdminPage() {
                       {/* min-w-0 + break-words deixam nome de serviço longo
                           quebrar dentro do card em vez de estourar a borda. */}
                       <span className="min-w-0 basis-full break-words text-sm text-body sm:basis-auto">
-                        {item.servicos?.nome ?? "—"}
+                        {nomeComAgregado(item.servicos?.nome, item.agregado_nome) ?? "—"}
                         {item.papel_reserva === "anterior" && (
                           <span className="ml-2 rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
                             {nomeEtapaAnterior(item)}
@@ -4604,7 +4695,7 @@ export default function AdminPage() {
                         <span className="flex min-w-0 basis-full flex-col items-start gap-0.5 sm:basis-auto sm:flex-row sm:items-center sm:gap-1.5">
                           <span className="text-body">Serviço</span>
                           <span className="min-w-0 break-words font-medium">
-                            {item.servicos?.nome ?? "—"}
+                            {nomeComAgregado(item.servicos?.nome, item.agregado_nome) ?? "—"}
                             {item.papel_reserva === "anterior" && (
                               <span className="ml-2 rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
                                 {nomeEtapaAnterior(item)}
@@ -4850,7 +4941,7 @@ export default function AdminPage() {
                           importado do Google Calendar pode chegar aqui sem
                           servico_id. */}
                       <span className="min-w-0 basis-full break-words text-sm text-body sm:basis-auto">
-                        {item.servicos?.nome ?? item.servico_livre ?? "—"}
+                        {nomeComAgregado(item.servicos?.nome, item.agregado_nome) ?? item.servico_livre ?? "—"}
                         {item.papel_reserva === "anterior" && (
                           <span className="ml-2 rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
                             {nomeEtapaAnterior(item)}
@@ -5082,7 +5173,7 @@ export default function AdminPage() {
                         <span className="flex min-w-0 basis-full flex-col items-start gap-0.5 sm:basis-auto sm:flex-row sm:items-center sm:gap-1.5">
                           <span className="text-body">Serviço</span>
                           <span className="min-w-0 break-words font-medium">
-                            {item.servicos?.nome ?? "—"}
+                            {nomeComAgregado(item.servicos?.nome, item.agregado_nome) ?? "—"}
                             {item.papel_reserva === "anterior" && (
                               <span className="ml-2 rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700">
                                 {nomeEtapaAnterior(item)}
@@ -5760,12 +5851,18 @@ export default function AdminPage() {
               <div className="flex justify-between gap-3">
                 <dt className="text-body">Serviço</dt>
                 <dd className="text-right font-medium text-heading">
-                  {selecionado.servicos?.nome ?? selecionado.servico_livre ?? "—"}
-                  {selecionado.servicos?.duracao_min != null && (
-                    <> · {selecionado.servicos.duracao_min} min</>
-                  )}
+                  {nomeComAgregado(selecionado.servicos?.nome, selecionado.agregado_nome) ??
+                    selecionado.servico_livre ??
+                    "—"}
+                  {selecionado.duracao_min != null && <> · {selecionado.duracao_min} min</>}
                   {selecionado.servicos?.preco_centavos != null && (
-                    <> · {formatarPreco(selecionado.servicos.preco_centavos)}</>
+                    <>
+                      {" "}
+                      · {resumoPreco(
+                        selecionado.servicos.preco_centavos,
+                        selecionado.agregado_preco_centavos
+                      )}
+                    </>
                   )}
                 </dd>
               </div>
@@ -6422,7 +6519,14 @@ export default function AdminPage() {
               {formatarData(agendamentoParaTrocar.data)} às{" "}
               {formatarHorario(agendamentoParaTrocar.horario)}
               {agendamentoParaTrocar.servicos?.nome && (
-                <> · {agendamentoParaTrocar.servicos.nome}</>
+                <>
+                  {" "}
+                  ·{" "}
+                  {nomeComAgregado(
+                    agendamentoParaTrocar.servicos.nome,
+                    agendamentoParaTrocar.agregado_nome
+                  )}
+                </>
               )}
             </p>
             <p className="mt-1 text-xs text-muted">
@@ -6480,6 +6584,7 @@ export default function AdminPage() {
             menuAlterar.item.status !== "cancelado" &&
             menuAlterar.item.status !== "concluido"
           }
+          podeAlterarAgregado={reservaPodeAlterarAgregado(menuAlterar.item, estabelecimento)}
           onEscolher={(modo) => {
             const { item, origem } = menuAlterar;
             if (origem === "detalhe") setIdSelecionado(null);
@@ -6487,6 +6592,15 @@ export default function AdminPage() {
             abrirAlterarDoPainel(item, modo);
           }}
           onFechar={() => setMenuAlterar(null)}
+        />
+      )}
+
+      {agendamentoParaAgregado && (
+        <ModalAlterarAgregado
+          agendamento={agendamentoParaAgregado}
+          estabelecimento={estabelecimento}
+          onSalvo={aoAlterarAgregado}
+          onFechar={() => setAgendamentoParaAgregado(null)}
         />
       )}
 
@@ -6607,8 +6721,14 @@ export default function AdminPage() {
               </h2>
               <div className="mt-3 rounded-lg bg-surface px-3 py-2 text-sm text-body">
                 <p className="font-medium text-heading">
-                  {ag.servicos?.nome ?? "Serviço"}
+                  {nomeComAgregado(ag.servicos?.nome, ag.agregado_nome) ?? "Serviço"}
                   {ag.duracao_min != null && <> · {ag.duracao_min} min</>}
+                  {ag.servicos?.preco_centavos != null && (
+                    <>
+                      {" "}
+                      · {resumoPreco(ag.servicos.preco_centavos, ag.agregado_preco_centavos)}
+                    </>
+                  )}
                 </p>
                 <p className="mt-0.5">
                   {formatarData(ag.data)} às {formatarHorario(ag.horario)}

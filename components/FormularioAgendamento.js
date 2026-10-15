@@ -22,11 +22,21 @@ import { formatarPreco } from "@/lib/preco";
 import { metodoDisponivelSinalPixComRegra } from "@/lib/sinalPix";
 import { resolverSinal } from "@/lib/sinalRegra";
 import {
+  DURACAO_MAXIMA_MIN,
+  agregadoSomaTempo,
+  nomeComAgregado,
+  servicoAceitaAgregado,
+  resumoPreco,
+  somarPreco,
+  somarTempo,
+} from "@/lib/servicoAgregado";
+import {
   formatarData,
   formatarHorario,
   montarResumoAgendamento,
 } from "@/lib/data";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
+import { buscarAgregadosDoServico, buscarSomaTempoAgregado } from "@/lib/agregadosServico";
 import {
   calcularPrecoManutencao,
   buscarReservasBaseManutencao,
@@ -1089,6 +1099,10 @@ export default function FormularioAgendamento({
           horario: agendamentoEmEdicao.horario,
           respostasPerguntas: {},
           reservaId: agendamentoEmEdicao.id,
+          // Serviço agregado da reserva original (id do SERVIÇO agregado, não
+          // da linha de configuração): reencontrado em servico_agregados por
+          // (servico_id, servico_agregado_id) na restauração. Ausente = sem.
+          servicoAgregadoId: agendamentoEmEdicao.servicoAgregadoId ?? null,
         }
       : status || servicoInicial
         ? null
@@ -1120,6 +1134,16 @@ export default function FormularioAgendamento({
   // no acordeão, aguardando confirmação de que já fez o serviço de origem
   // antes (ver selecionarServico). Intercepta ANTES do alerta_mensagem.
   const [manutencaoPendente, setManutencaoPendente] = useState(null);
+  // Serviço agregado (servico_agregados). `agregadoSelecionado` é a linha de
+  // configuração ESCOLHIDA ({ id, servico_agregado_id, nome, preco_centavos,
+  // duracao_min }) — só pra exibição e pra duração da grade; o banco é quem
+  // grava nome/preço/tempo na criação pública. `agregadoPopup` é a oferta em
+  // curso ({ servico, etapa: "pergunta" | "lista", opcoes, escolhido,
+  // precoTexto, duracaoTexto }). `avisoAgregadoIndisponivel` = o agregado da
+  // reserva em edição não existe mais.
+  const [agregadoSelecionado, setAgregadoSelecionado] = useState(null);
+  const [agregadoPopup, setAgregadoPopup] = useState(null);
+  const [avisoAgregadoIndisponivel, setAvisoAgregadoIndisponivel] = useState(false);
   // Aviso (só orienta) de que a manutenção tocada é de outra família que a do
   // último atendimento concluído; ver avaliarDesvioDeServico. Null = sem aviso.
   const [desvioManutencao, setDesvioManutencao] = useState(null);
@@ -1221,6 +1245,21 @@ export default function FormularioAgendamento({
   const [profissionaisDoServico, setProfissionaisDoServico] = useState([]);
   const [profissionalSelecionado, setProfissionalSelecionado] = useState(null);
   const [carregandoProfissionais, setCarregandoProfissionais] = useState(false);
+  // O tempo do agregado só entra na duração com a lista de profissionais do
+  // serviço JÁ carregada e nenhum ativo de agenda fixa. Booleano derivado (e
+  // não a lista) pros efeitos de vagas só re-rodarem quando isso muda.
+  //
+  // `servicoIdDosProfissionais` diz PRA QUAL serviço a lista foi carregada:
+  // logo depois de trocar o serviço a lista ainda é a do anterior, e só conta
+  // quando o id bate com o servicoSelecionado ATUAL (null = erro ou sem
+  // serviço: nunca soma, na dúvida mantém a duração do serviço).
+  const [servicoIdDosProfissionais, setServicoIdDosProfissionais] = useState(null);
+  const somaTempoAgregado =
+    Boolean(agregadoSelecionado) &&
+    !carregandoProfissionais &&
+    servicoIdDosProfissionais != null &&
+    servicoIdDosProfissionais === servicoSelecionado?.id &&
+    agregadoSomaTempo(profissionaisDoServico);
   // Falha na consulta de profissionais/liberações do serviço (≠ lista vazia
   // real). `tentativaCarga` só existe pra "Tentar de novo" re-disparar o efeito.
   const [erroCargaAgenda, setErroCargaAgenda] = useState(false);
@@ -1786,7 +1825,7 @@ export default function FormularioAgendamento({
         supabase
           .from("servicos")
           .select(
-            "id, nome, duracao_min, preco_centavos, categoria_id, alerta_mensagem, servico_origem_id, eh_manutencao, oculto, prazo_inicio_dias, prazo_fim_dias, exige_segunda_data, nome_etapa_anterior"
+            "id, nome, duracao_min, preco_centavos, categoria_id, alerta_mensagem, servico_origem_id, eh_manutencao, manutencao_externa, oculto, prazo_inicio_dias, prazo_fim_dias, exige_segunda_data, nome_etapa_anterior"
           )
           .eq("estabelecimento_id", estabelecimento.id)
           .eq("ativo", true)
@@ -1840,6 +1879,7 @@ export default function FormularioAgendamento({
     async function carregarProfissionais() {
       if (!servicoSelecionado) {
         setProfissionaisDoServico([]);
+        setServicoIdDosProfissionais(null);
         setLiberacoesPeriodo([]);
         setErroCargaAgenda(false);
         return;
@@ -1863,6 +1903,7 @@ export default function FormularioAgendamento({
       if (error) {
         console.error("Erro ao carregar profissionais do serviço:", error);
         setProfissionaisDoServico([]);
+        setServicoIdDosProfissionais(null);
         setLiberacoesPeriodo([]);
         setErroCargaAgenda(true);
         setCarregandoProfissionais(false);
@@ -1874,6 +1915,7 @@ export default function FormularioAgendamento({
         .filter(Boolean)
         .sort((a, b) => a.nome.localeCompare(b.nome));
       setProfissionaisDoServico(lista);
+      setServicoIdDosProfissionais(servicoSelecionado.id);
 
       // Liberações (tipo_registro='liberacao', tipo='periodo') dos
       // profissionais candidatos — só pra abrir o dia certo no calendário
@@ -2078,8 +2120,15 @@ export default function FormularioAgendamento({
 
   // Botão de serviço reaproveitado tanto pelos soltos (sem categoria) quanto
   // pelos agrupados dentro de cada categoria aberta.
-  function renderBotaoServico(servico, esmaecer = false) {
-    const selecionado = servicoSelecionado?.id === servico.id;
+  //
+  // `adaptador` (opcional) reaproveita o mesmo botão na segunda tela do
+  // serviço agregado: { selecionado, onClick, duracaoTexto } — `servico` aí é
+  // { id, nome, preco_centavos } com o nome do serviço agregado e o preço do
+  // ACRÉSCIMO; `duracaoTexto` null esconde o tempo.
+  function renderBotaoServico(servico, esmaecer = false, adaptador = null) {
+    const selecionado = adaptador
+      ? Boolean(adaptador.selecionado)
+      : servicoSelecionado?.id === servico.id;
     // Tema (laysla) selecionado: fundo é um TOM CLARO derivado de
     // var(--color-primary) (não mais preenchimento sólido) — texto continua
     // escuro (var(--color-heading)), não branco. A cor em si já vem do
@@ -2091,7 +2140,7 @@ export default function FormularioAgendamento({
       <button
         key={servico.id}
         type="button"
-        onClick={() => selecionarServico(servico)}
+        onClick={adaptador ? adaptador.onClick : () => selecionarServico(servico)}
         aria-pressed={selecionado}
         className={[
           "flex w-full items-center justify-between gap-3 rounded-lg border-l-4 border-l-primary py-3 pl-2 pr-3 text-left shadow-sm ring-1 transition active:scale-[0.99]",
@@ -2116,14 +2165,14 @@ export default function FormularioAgendamento({
       >
         <span className="min-w-0">
           <span className="block break-words font-medium">{servico.nome}</span>
-          {!ocultarDuracao && (
+          {!ocultarDuracao && (adaptador ? adaptador.duracaoTexto : true) && (
             <span
               className={[
                 "block text-sm",
                 temaSelecionado ? "" : selecionado ? "text-on-primary/90" : "text-heading",
               ].join(" ")}
             >
-              {servico.duracao_min} min
+              {adaptador ? adaptador.duracaoTexto : `${servico.duracao_min} min`}
             </span>
           )}
         </span>
@@ -2131,6 +2180,7 @@ export default function FormularioAgendamento({
         <span className="flex shrink-0 items-center gap-2">
           {servico.preco_centavos > 0 && !ocultarPreco && (
             <span className="whitespace-nowrap font-medium">
+              {adaptador ? "+ " : ""}
               {formatarPreco(servico.preco_centavos)}
             </span>
           )}
@@ -2605,6 +2655,8 @@ export default function FormularioAgendamento({
     perguntasServico,
     respostasPerguntas,
     assinaturaAgendamentosDoDia,
+    agregadoSelecionado,
+    somaTempoAgregado,
   ]);
 
   // Mantém `vagasDoMes` sincronizado com o MÊS VISÍVEL do calendário — uma
@@ -2688,6 +2740,8 @@ export default function FormularioAgendamento({
     etiquetaClienteId,
     perguntasServico,
     respostasPerguntas,
+    agregadoSelecionado,
+    somaTempoAgregado,
   ]);
 
   // Abre a etapa "Data" já no primeiro mês que tem pelo menos um dia
@@ -2788,6 +2842,8 @@ export default function FormularioAgendamento({
     perguntasServico,
     respostasPerguntas,
     form.data,
+    agregadoSelecionado,
+    somaTempoAgregado,
   ]);
 
   // 1) Restaura o SERVIÇO só depois que a lista de serviços ATIVOS carrega —
@@ -2809,6 +2865,33 @@ export default function FormularioAgendamento({
     let ativo = true;
     (async () => {
       setServicoSelecionado(servico);
+      // Agregado: id da linha de configuração (sessão) ou id do serviço
+      // agregado da reserva em edição. Relido do banco e validado (ativo,
+      // do serviço, serviço agregado ainda ativo). Falhou = segue sem ele; na
+      // edição, com aviso claro, porque a cliente tinha um agregado.
+      const querAgregado = pendente.agregadoId != null || pendente.servicoAgregadoId != null;
+      if (querAgregado && servicoAceitaAgregado(servico, estabelecimento)) {
+        const opcoes = await buscarAgregadosDoServico(servico.id, servicos, estabelecimento);
+        if (!ativo) return;
+        const achado = opcoes.find((o) =>
+          pendente.agregadoId != null
+            ? o.id === pendente.agregadoId
+            : o.servico_agregado_id === pendente.servicoAgregadoId
+        );
+        if (achado) {
+          setAgregadoSelecionado({
+            id: achado.id,
+            servico_agregado_id: achado.servico_agregado_id,
+            nome: achado.nome,
+            preco_centavos: achado.preco_centavos ?? 0,
+            duracao_min: achado.duracao_min ?? 0,
+          });
+        } else if (pendente.servicoAgregadoId != null) {
+          setAvisoAgregadoIndisponivel(true);
+        }
+      } else if (pendente.servicoAgregadoId != null) {
+        setAvisoAgregadoIndisponivel(true);
+      }
       const perguntas = await buscarPerguntasServico(servico.id);
       if (!ativo) return;
       setPerguntasServico(perguntas);
@@ -2991,6 +3074,9 @@ export default function FormularioAgendamento({
       data: form.data,
       horario: horarioSelecionado,
       respostasPerguntas,
+      // Só o id da linha de servico_agregados: nome, preço e tempo são relidos
+      // do banco na restauração (e a linha pode ter sido desativada).
+      agregadoId: agregadoSelecionado?.id ?? null,
       // Id da reserva já gravada (insert antecipado ao entrar em "dados") —
       // ver reservaId/reservaChave e selecionarHorario. Permite ao efeito de
       // restauração reidratá-la em vez de gravar de novo (ver efeitos 2 e 3
@@ -3010,6 +3096,7 @@ export default function FormularioAgendamento({
     agendamentoEmEdicao,
     estabelecimento.slug,
     servicoSelecionado,
+    agregadoSelecionado,
     profissionalSelecionado,
     form.data,
     horarioSelecionado,
@@ -3207,6 +3294,27 @@ export default function FormularioAgendamento({
       setModalPerguntasAberto(true);
       return;
     }
+    // Troca/retoque de serviço: o agregado do anterior não vale mais. (Na
+    // revisão acima ele fica: é o mesmo serviço.)
+    setAgregadoSelecionado(null);
+    setAvisoAgregadoIndisponivel(false);
+    // Oferta de serviço agregado, DEPOIS do alerta e ANTES das perguntas. Não
+    // vale pra manutenção nem pra serviço de duas datas, e NÃO é pulada por
+    // pular_perguntas_adicionais_admin (a flag pula perguntas, não esta oferta).
+    if (servicoAceitaAgregado(servico, estabelecimento)) {
+      const opcoes = await buscarAgregadosDoServico(servico.id, servicos, estabelecimento);
+      if (opcoes.length > 0) {
+        const somaTempo = await buscarSomaTempoAgregado(servico.id, estabelecimento.id);
+        setAgregadoPopup({ servico, etapa: "pergunta", opcoes, somaTempo, escolhido: null });
+        return;
+      }
+    }
+    await seguirAposAgregado(servico);
+  }
+
+  // Resto da seleção de serviço (perguntas e avanço), depois da oferta de
+  // agregado — chamado direto quando não há oferta, ou ao fechá-la.
+  async function seguirAposAgregado(servico) {
     // /admin com pular_perguntas_adicionais_admin ligado: nem busca as
     // perguntas — zera perguntasServico (sem sobra de uma seleção anterior) e
     // avança com preço/duração base. modoLivre garante que /agendar nunca pula.
@@ -3247,6 +3355,63 @@ export default function FormularioAgendamento({
     confirmarSelecaoServico(alertaPendente);
     setAlertaPendente(null);
     setIndiceAlerta(0);
+  }
+
+  // Oferta de serviço agregado: fecha o popup, guarda a escolha (null = só o
+  // serviço) e segue pro popup de perguntas/avanço. Clicar fora = "Não".
+  function encerrarOfertaAgregado(agregado) {
+    const servico = agregadoPopup?.servico;
+    setAgregadoPopup(null);
+    if (!servico) return;
+    setAgregadoSelecionado(agregado);
+    seguirAposAgregado(servico);
+  }
+
+  // Segunda tela: no /agendar a escolha confirma direto; no /admin (modoLivre)
+  // abre preço e tempo pré-preenchidos e editáveis antes de confirmar.
+  function escolherAgregado(opcao) {
+    const escolhido = {
+      id: opcao.id,
+      servico_agregado_id: opcao.servico_agregado_id,
+      nome: opcao.nome,
+      preco_centavos: opcao.preco_centavos ?? 0,
+      duracao_min: opcao.duracao_min ?? 0,
+    };
+    if (!modoLivre) {
+      encerrarOfertaAgregado(escolhido);
+      return;
+    }
+    setAgregadoPopup((atual) => ({
+      ...atual,
+      escolhido,
+      precoTexto: ((escolhido.preco_centavos ?? 0) / 100).toFixed(2).replace(".", ","),
+      duracaoTexto: String(escolhido.duracao_min ?? 0),
+      erro: "",
+    }));
+  }
+
+  function confirmarAgregadoAdmin() {
+    const preco = Math.round(Number(String(agregadoPopup.precoTexto).replace(",", ".")) * 100);
+    const duracao = Number(agregadoPopup.duracaoTexto);
+    if (
+      agregadoPopup.precoTexto.trim() === "" ||
+      !Number.isFinite(preco) ||
+      preco < 0 ||
+      !Number.isInteger(duracao) ||
+      duracao < 0 ||
+      duracao > DURACAO_MAXIMA_MIN
+    ) {
+      setAgregadoPopup((atual) => ({
+        ...atual,
+        erro: `Informe um valor válido e um tempo inteiro de 0 a ${DURACAO_MAXIMA_MIN} minutos.`,
+      }));
+      return;
+    }
+    encerrarOfertaAgregado({
+      ...agregadoPopup.escolhido,
+      preco_centavos: preco,
+      duracao_min: duracao,
+    });
   }
 
   // Modal do alerta — "Voltar": fecha sem selecionar nada, deixando o cliente
@@ -3362,12 +3527,19 @@ export default function FormularioAgendamento({
   // travar o fluxo por isso, só nunca gravar um valor sem sentido no banco).
   // servicoSelecionado pode ainda não existir quando chamada (guarda-se antes,
   // nos call sites).
+  //
+  // Com serviço agregado, soma o tempo dele (somarTempo, lib/servicoAgregado.js,
+  // que também guarda o piso de 5 min e o teto de 720) — só quando nenhum
+  // profissional ativo do serviço é de agenda fixa. A lista de profissionais
+  // chega depois do serviço; até lá o tempo NÃO soma (a grade se recalcula
+  // quando ela carrega, ver as dependências dos efeitos de vagas).
   function duracaoEfetivaServico() {
-    const DURACAO_MINIMA_MIN = 5;
-    return Math.max(
-      servicoSelecionado.duracao_min + calcularAjusteDuracao(),
-      DURACAO_MINIMA_MIN
-    );
+    return somarTempo({
+      duracaoServico: servicoSelecionado.duracao_min,
+      ajusteDuracao: calcularAjusteDuracao(),
+      tempoAgregado: agregadoSelecionado?.duracao_min ?? 0,
+      somaTempo: somaTempoAgregado,
+    });
   }
 
   // Monta as linhas prontas pra inserir em agendamento_respostas (uma por
@@ -3697,6 +3869,7 @@ export default function FormularioAgendamento({
       a.data === b.data &&
       a.horario === b.horario &&
       a.profissionalId === b.profissionalId &&
+      (a.agregadoId ?? null) === (b.agregadoId ?? null) &&
       // Coordenadas da etapa anterior (serviço de duas datas). Numa chave de
       // serviço normal os dois lados são `undefined`: mesma comparação de
       // antes, sem ramo novo.
@@ -3721,7 +3894,7 @@ export default function FormularioAgendamento({
     limparFatia(estabelecimento.slug, "agendamento");
     onSucesso?.({
       ...resumoSucessoDoPar({ horario, anteriorDoPar }),
-      servico: servicoSelecionado,
+      servico: servicoParaSucesso,
       profissional: escolherProfissional ? profissionalSelecionado : null,
       agendamentoId,
     });
@@ -3966,6 +4139,9 @@ export default function FormularioAgendamento({
       data: form.data,
       horario: slot,
       profissionalId: escolherProfissional ? profissionalSelecionado?.id ?? null : null,
+      // Trocar o agregado muda o que a reserva é (nome, preço, tempo): não
+      // reaproveita a linha já gravada.
+      agregadoId: agregadoSelecionado?.id ?? null,
       // Só existem no par: num serviço normal a chave é a de sempre.
       ...(ehPar
         ? { dataAnterior: testeEscolhido.data, horarioAnterior: testeEscolhido.horario }
@@ -4106,6 +4282,9 @@ export default function FormularioAgendamento({
             horario: slot,
             servicoId: servicoSelecionado.id,
             duracaoMin: duracaoEfetivaServico(),
+            // Agregado que o wizard terminou escolhendo (id do SERVIÇO
+            // agregado) ou null: a rota só copia o da linha atual se bater.
+            servicoAgregadoId: agregadoSelecionado?.servico_agregado_id ?? null,
             profissionalId: profissionalRemarcado,
             // Respostas do estado ATUAL do wizard, não as da linha antiga: a
             // cliente pode ter trocado o serviço junto com o horário, e aí as
@@ -4276,11 +4455,21 @@ export default function FormularioAgendamento({
           p_data_anterior: testeEscolhido.data,
           p_horario_anterior: testeEscolhido.horario,
         })
-      : await supabase.rpc("agendamento_criar", {
-          ...payloadComum,
-          p_data: form.data,
-          p_horario: slot,
-        });
+      : agregadoSelecionado
+        ? // Com agregado: só o ID da linha de configuração viaja. Nome, preço
+          // e tempo do agregado são gravados pelo banco a partir de
+          // servico_agregados — nunca vêm do navegador.
+          await supabase.rpc("agendamento_criar_com_agregado", {
+            ...payloadComum,
+            p_data: form.data,
+            p_horario: slot,
+            p_agregado_id: agregadoSelecionado.id,
+          })
+        : await supabase.rpc("agendamento_criar", {
+            ...payloadComum,
+            p_data: form.data,
+            p_horario: slot,
+          });
 
     // `agendamento_criar` devolve o uuid cru; `agendamento_criar_par` devolve
     // { evento_id, anterior_id, reserva_grupo_id }. `reservaId` continua
@@ -4465,7 +4654,7 @@ export default function FormularioAgendamento({
 
     onSucesso?.({
       form,
-      servico: servicoSelecionado,
+      servico: servicoParaSucesso,
       horario: horarioSelecionado,
       profissional: escolherProfissional ? profissionalSelecionado : null,
       agendamentoId: reservaId,
@@ -4882,7 +5071,7 @@ export default function FormularioAgendamento({
                 }
               : null,
         }),
-        servico: servicoSelecionado,
+        servico: servicoParaSucesso,
         profissional: escolherProfissional ? profissionalSelecionado : null,
         // Id da linha gravada — a tela de protocolo do consumidor precisa
         // dele pros botões Editar/Cancelar (ver TelaSolicitacaoEnviada).
@@ -5079,6 +5268,20 @@ export default function FormularioAgendamento({
       sinal_valor_centavos: sinalDeclarado ? sinalValorCentavos ?? null : null,
     };
 
+    // Serviço agregado (nunca num par: serviço de duas datas não oferece). Aqui
+    // quem insere é a dona, autenticada, então os valores viajam — pré-
+    // preenchidos pela configuração e editáveis na oferta (ver
+    // confirmarAgregadoAdmin). Sem agregado, nenhuma chave nova no insert.
+    const agregadoDoEvento =
+      agregadoSelecionado && !ehPar
+        ? {
+            servico_agregado_id: agregadoSelecionado.servico_agregado_id,
+            agregado_nome: agregadoSelecionado.nome,
+            agregado_preco_centavos: agregadoSelecionado.preco_centavos,
+            agregado_duracao_min: agregadoSelecionado.duracao_min,
+          }
+        : {};
+
     // UM insert com as duas linhas: o PostgREST manda o array numa única
     // instrução, então ou as duas entram ou nenhuma entra — a mesma garantia
     // que a RPC dá ao público, sem precisar de uma função nova aqui.
@@ -5112,6 +5315,7 @@ export default function FormularioAgendamento({
           {
             ...payloadComum,
             ...sinalDoEvento,
+            ...agregadoDoEvento,
             data: form.data,
             horario: horarioSelecionado,
           },
@@ -5192,8 +5396,11 @@ export default function FormularioAgendamento({
               data: form.data,
               horario: horarioSelecionado,
               servicos: {
-                nome: servicoSelecionado.nome,
-                preco_centavos: servicoSelecionado.preco_centavos,
+                nome: nomeServicoComAgregado,
+                preco_centavos: somarPreco(
+                  servicoSelecionado.preco_centavos,
+                  agregadoSelecionado?.preco_centavos
+                ),
                 eh_manutencao: servicoSelecionado.eh_manutencao,
               },
             },
@@ -5223,7 +5430,7 @@ export default function FormularioAgendamento({
             }
           : null,
       }),
-      servico: servicoSelecionado,
+      servico: servicoParaSucesso,
       profissional: escolherProfissional ? profissionalSelecionado : null,
     });
   }
@@ -5249,6 +5456,33 @@ export default function FormularioAgendamento({
       ? precoManutencao.centavos
       : (servicoSelecionado?.preco_centavos ?? 0);
 
+  // Serviço + agregado: o nome composto ("A + B") vale pro resumo, pras telas
+  // de Pix que o wizard renderiza e pra mensagem de confirmação do /admin;
+  // `servicoParaSucesso` é o mesmo serviço com nome e preço já somados, que é
+  // o que o consumidor (tela de solicitação enviada) mostra. Sem agregado são
+  // exatamente servicoSelecionado?.nome e servicoSelecionado.
+  const nomeServicoComAgregado = nomeComAgregado(
+    servicoSelecionado?.nome ?? "",
+    agregadoSelecionado?.nome
+  );
+  const precoTotalCentavos = somarPreco(
+    precoBaseCentavos,
+    agregadoSelecionado?.preco_centavos,
+    ajusteCentavosPerguntas
+  );
+  const servicoParaSucesso = agregadoSelecionado
+    ? {
+        ...servicoSelecionado,
+        nome: nomeServicoComAgregado,
+        preco_centavos: somarPreco(
+          servicoSelecionado.preco_centavos,
+          agregadoSelecionado.preco_centavos
+        ),
+        // Pro "Editar" logo depois da criação (app/[salon]/page.js).
+        servico_agregado_id: agregadoSelecionado.servico_agregado_id,
+      }
+    : servicoSelecionado;
+
   // Resumo de uma linha da etapa "dados" (ver JSX) — mesma função que monta o
   // resumo do topo do BlocoConfirmacaoPix, pra as duas telas nunca divergirem
   // de formato.
@@ -5267,7 +5501,7 @@ export default function FormularioAgendamento({
   // form.data/horarioSelecionado e a string sai idêntica à de antes.
   const resumoAgendamento = montarResumoAgendamento({
     nomeCliente: form.nome,
-    servicoNome: servicoSelecionado?.nome ?? "",
+    servicoNome: nomeServicoComAgregado,
     data: dataEvento,
     horario: horarioEvento,
     profissionalNome: mostrarProfissionalNoResumo
@@ -5811,6 +6045,13 @@ export default function FormularioAgendamento({
                   </p>
                 )}
 
+                {avisoAgregadoIndisponivel && (
+                  <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200">
+                    O serviço agregado que estava neste agendamento não está
+                    mais disponível. Seguiremos só com o serviço principal.
+                  </p>
+                )}
+
                 {carregandoSlots && (
                   <p className="text-sm text-on-card">Carregando horários...</p>
                 )}
@@ -6173,10 +6414,17 @@ export default function FormularioAgendamento({
                 != 0, com transparência sobre o que compõe o total. Respeita
                 ocultarPreco: o salão escondeu o preço dos serviços, então o
                 total também fica escondido. */}
-            {!ocultarPreco && itensAjustePerguntas.length > 0 && (
+            {!ocultarPreco && (itensAjustePerguntas.length > 0 || agregadoSelecionado) && (
               <div className="rounded-lg bg-surface px-3 py-2">
                 <p className="text-sm font-medium text-heading">
-                  Valor total: {formatarPreco(precoBaseCentavos + ajusteCentavosPerguntas)}
+                  Valor total:{" "}
+                  {agregadoSelecionado
+                    ? resumoPreco(
+                        precoBaseCentavos,
+                        agregadoSelecionado.preco_centavos,
+                        ajusteCentavosPerguntas
+                      )
+                    : formatarPreco(precoTotalCentavos)}
                 </p>
                 <ul className="mt-1 space-y-0.5">
                   {itensAjustePerguntas.map((item, i) => (
@@ -6214,7 +6462,7 @@ export default function FormularioAgendamento({
                     valorCentavos={sinalValorCentavos}
                     agendamentoId={reservaId}
                     nomeCliente={form.nome}
-                    servicoNome={servicoSelecionado?.nome}
+                    servicoNome={nomeServicoComAgregado}
                     // Num par, `reservaId` é a linha do EVENTO — o resumo do
                     // bloco tem que falar dela, não da etapa anterior. Fora
                     // do par isto é form.data/horarioSelecionado.
@@ -6229,7 +6477,7 @@ export default function FormularioAgendamento({
                     valorCentavos={sinalValorCentavos}
                     agendamentoId={reservaId}
                     nomeCliente={form.nome}
-                    servicoNome={servicoSelecionado?.nome}
+                    servicoNome={nomeServicoComAgregado}
                     // Mesma razão do bloco do Abacate acima: o resumo é o do
                     // evento, que é a linha em que o sinal está preso.
                     data={dataEvento}
@@ -6551,6 +6799,134 @@ export default function FormularioAgendamento({
           cadastrada. Reaproveita o padrão visual dos modais acima (mesmo
           overlay, mesmo card, mesmo par Continuar/Voltar); "Continuar" só
           fecha com todas as perguntas respondidas (ver confirmarModalPerguntas). */}
+      {/* Oferta de serviço agregado (servico_agregados), logo depois do alerta
+          do serviço e antes das perguntas (ver confirmarSelecaoServico). Duas
+          telas: a pergunta e a lista. Clicar fora equivale a "Não". No /admin
+          a escolha abre preço e tempo editáveis antes de confirmar. */}
+      {agregadoPopup && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-modal-agregado"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
+          onClick={() => encerrarOfertaAgregado(null)}
+        >
+          <div
+            className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {agregadoPopup.etapa === "pergunta" ? (
+              <>
+                <h2 id="titulo-modal-agregado" className="text-lg font-semibold text-on-card">
+                  Deseja adicionar mais um serviço junto com {agregadoPopup.servico.nome}?
+                </h2>
+                <div className="mt-6 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    autoFocus
+                    onClick={() =>
+                      setAgregadoPopup((atual) => ({ ...atual, etapa: "lista" }))
+                    }
+                    className="rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
+                  >
+                    Sim
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => encerrarOfertaAgregado(null)}
+                    className="break-words rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
+                  >
+                    Não, somente {agregadoPopup.servico.nome}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 id="titulo-modal-agregado" className="text-lg font-semibold text-on-card">
+                  Escolha o serviço a agregar
+                </h2>
+                <div className="mt-4 space-y-2">
+                  {agregadoPopup.opcoes.map((opcao) =>
+                    renderBotaoServico(
+                      { id: opcao.id, nome: opcao.nome, preco_centavos: opcao.preco_centavos },
+                      false,
+                      {
+                        selecionado: agregadoPopup.escolhido?.id === opcao.id,
+                        onClick: () => escolherAgregado(opcao),
+                        // Tempo só quando a lista de profissionais já foi lida
+                        // e nenhum é de agenda fixa; senão, só o preço.
+                        duracaoTexto:
+                          agregadoPopup.somaTempo === true && opcao.duracao_min > 0
+                            ? `+ ${opcao.duracao_min} min`
+                            : null,
+                      }
+                    )
+                  )}
+                </div>
+
+                {modoLivre && agregadoPopup.escolhido && (
+                  <div className="mt-4 space-y-3">
+                    <p className="text-sm font-medium text-on-card">
+                      {agregadoPopup.escolhido.nome}
+                    </p>
+                    <label className="block text-sm text-on-card">
+                      Preço do agregado (R$)
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={agregadoPopup.precoTexto}
+                        onChange={(e) =>
+                          setAgregadoPopup((atual) => ({
+                            ...atual,
+                            precoTexto: e.target.value,
+                            erro: "",
+                          }))
+                        }
+                        className="mt-1 w-full rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                      />
+                    </label>
+                    <label className="block text-sm text-on-card">
+                      Tempo do agregado (min)
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={agregadoPopup.duracaoTexto}
+                        onChange={(e) =>
+                          setAgregadoPopup((atual) => ({
+                            ...atual,
+                            duracaoTexto: e.target.value,
+                            erro: "",
+                          }))
+                        }
+                        className="mt-1 w-full rounded-lg border border-border px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
+                      />
+                    </label>
+                    {agregadoPopup.erro && (
+                      <p className="text-sm text-red-700">{agregadoPopup.erro}</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={confirmarAgregadoAdmin}
+                      className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-on-primary transition hover:bg-primary-hover"
+                    >
+                      Confirmar
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => encerrarOfertaAgregado(null)}
+                  className="mt-4 w-full break-words rounded-lg bg-card px-4 py-2.5 font-medium text-on-card ring-1 ring-border transition hover:bg-surface"
+                >
+                  Não, somente {agregadoPopup.servico.nome}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {modalPerguntasAberto && (
         <div
           role="dialog"

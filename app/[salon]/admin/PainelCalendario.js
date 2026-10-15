@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { HORA_ABERTURA, HORA_FECHAMENTO } from "@/lib/horarios";
 import { classificarAgendamento } from "@/lib/particao";
 import { nomeEtapaAnterior } from "@/lib/agendamentosCliente";
+import { nomeComAgregado } from "@/lib/servicoAgregado";
 
 // Abas próprias do Painel (substituem a toolbar nativa do FullCalendar).
 const ABAS_CALENDARIO = [
@@ -435,7 +436,7 @@ export default function PainelCalendario({
             a.papel_reserva === "anterior" && !inbox && !crm && !naoVinculado;
           const servico = crm
             ? tipoAtendimentoCrm(a.servico_livre)
-            : a.servicos?.nome ?? a.servico_livre ?? "serviço";
+            : nomeComAgregado(a.servicos?.nome, a.agregado_nome) ?? a.servico_livre ?? "serviço";
           const cor = crm
             ? CORES_EVENTO.confirmado
             : pendente
