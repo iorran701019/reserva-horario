@@ -226,12 +226,12 @@ const VALORES_EXEMPLO_MENSAGENS = {
   nome_cliente: "Maria",
   data: "15/08",
   horario: "14:00",
-  servico: "Manicure completa",
-  valor: "R$ 120,00",
+  servico: "Manicure completa + Esmaltação em gel",
+  valor: "R$ 170,00",
   link: "https://agenda.exemplo.com/salao",
   janela_fim: "30/09/2026",
   alteracao: montarTrechoAlteracao({
-    servicoNovo: "Manicure completa",
+    servicoNovo: "Manicure completa + Esmaltação em gel",
     data: "2026-08-15",
     horario: "14:00",
   }),
@@ -4524,9 +4524,10 @@ export default function ConfiguracoesSalao({
 
                       {variaveisVisiveis.includes("valor") && (
                         <p className="text-xs text-muted">
-                          Dica: escreva {"{valor}"} no fim de uma frase que não
-                          faça falta, pois ele pode sair vazio (por exemplo,
-                          quando o preço está oculto).
+                          Escreva {"{valor}"} no fim de uma frase que não faça
+                          falta: ele é o total do atendimento, já somado ao
+                          serviço agregado quando houver, e pode sair vazio
+                          (por exemplo, quando o preço está oculto).
                         </p>
                       )}
 
