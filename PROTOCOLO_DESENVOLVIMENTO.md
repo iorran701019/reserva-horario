@@ -22,6 +22,14 @@ Quando o Claude Code trabalha direto no repositório, ele cria a branch antes de
 
 **Ida pra `main`/produção:** por padrão, o fluxo termina em `staging`. Subir pra `main` exige decisão explícita do Iorran na própria sessão, mesmo quando o trabalho já está validado em staging há várias sessões — não é assumido automaticamente.
 
+**Um passo por vez (regra de 14/10, Sessão 88):** cada mensagem do Claude traz só o que o Iorran precisa rodar antes de responder. Nada de prompt ou comando que dependa de aprovação ou resultado posterior (por exemplo, merge junto do teste). Cada bloco de código vem rotulado "para o Code" ou "para você (PowerShell/SQL)".
+
+**Teste antes de commit/merge:** os comandos de commit e merge só saem depois de o Iorran relatar o teste da demanda; "sem merge" vale até o teste geral (Sessões 84 e 86 mergearam antes do teste e foi sorte).
+
+**Branches empilhadas:** quando as demandas se dependem e ainda não foram mergeadas, a branch nova sai da anterior (não da `main`), para não dar conflito em arquivos comuns; no fim, um único merge da última carrega todas (Sessões 88 e 89).
+
+**Deploy:** depois do push na `main`, conferir na Vercel que o deploy do commit está como Production e Ready. Se o build quebrar, reverter só o commit suspeito.
+
 ---
 
 ## 2. Regras de commit message e terminal
@@ -34,6 +42,9 @@ Quando o Claude Code trabalha direto no repositório, ele cria a branch antes de
 - Nunca `git add .`; sempre arquivo por arquivo, com `git status` antes do commit para conferir que só os arquivos esperados entraram.
 - `curl` no PowerShell é alias de `Invoke-WebRequest`: usar `curl.exe`. Git com `core.pager cat` para não travar em `less`.
 - Liberar a porta 3000 presa: `Get-NetTCPConnection -LocalPort 3000 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`.
+- **Diff por arquivo na Área de Trabalho (Sessão 87):** todo diff chega ao chat por arquivo: `git diff -- arquivos | Out-File -Encoding utf8 "$env:USERPROFILE\Desktop\diff-nome.txt"` (alternativa `| clip` e Ctrl+V). Arquivo novo ainda sem commit aparece com `git add -N arquivo` antes. Acento quebrado no `.txt` é só da codificação. No fechamento, depois do merge: `Remove-Item "$env:USERPROFILE\Desktop\diff-*.txt"` (e qualquer arquivo temporário da Área de Trabalho).
+- Avisos de LF/CRLF do Git são inofensivos. `Get-Content | Measure-Object -Line` não conta linhas em branco: para contar linhas de verdade, usar `(Get-Content arquivo).Count`.
+- Para trocar uma linha de arquivo de controle sem substituir o arquivo, usar `Get-Content -Encoding utf8`, trocar o índice e `Set-Content -Encoding utf8`; conferir com `git diff --stat` (esperado: só as linhas trocadas).
 
 ---
 
@@ -55,6 +66,12 @@ Quando o Claude Code trabalha direto no repositório, ele cria a branch antes de
 - Coluna nova: `notify pgrst, 'reload schema';` depois do `alter table`.
 - Colunas do catálogo do Postgres com tipo `"char"` (ex.: `attgenerated`) precisam de `::text` antes de concatenar.
 - Para provar o que um visitante anônimo enxerga, simular o papel direto no SQL Editor: `set role anon;` seguido da consulta. Tabela fechada devolve "permission denied".
+- **Banco de destino na primeira linha de todo SQL (pedido de 14/10):** `-- BANCO: PRODUÇÃO | Passo N de M | ...` (ou `STAGING`, ou `STAGING e PRODUÇÃO`); leitura leva `SOMENTE LEITURA`. SQL vai no SQL Editor, nunca no PowerShell.
+- **SQL Editor, armadilhas das Sessões 88 e 89:** interpreta `select ... into x` como criação de tabela (usar `v := (select ...)` e `get diagnostics n = row_count`); trunca colagem em torno de 4 mil caracteres (uma função por execução, texto compacto, delimitador `$fn$`); "Success. No rows returned" não prova o `alter` — conferir sempre com `information_schema`/`pg_proc`. Bloco de teste em produção começa com guarda de slug (`if (select slug from estabelecimentos where id = N) is distinct from 'x' then raise exception ...`).
+- **Antes de sobrescrever função na produção:** ler o texto atual (`pg_get_functiondef`) e conferir tipos reais (`information_schema`) antes de escrever FKs. Nunca chutar coluna: usar `to_jsonb(linha)` ou `information_schema`. Filtro de nome com trecho curto e sem acento. Antes de apagar ou atualizar em produção, um select de conferência antes e outro depois; atualizar e apagar numa instrução com CTE.
+- **Testar RPC direto no editor:** `select set_config('request.jwt.claims', '{"sub":"<user_id>","role":"authenticated"}', true);` e chamar a função no mesmo Run. Teste que não deve deixar rastro termina com `raise exception` intencional.
+- **Gatilhos de `agendamentos`:** notificação e Google Calendar disparam em qualquer UPDATE; lembrar disso antes de atualizar linha em produção.
+- **Arquivo em `sql/` é escrito pelo Iorran, à mão, depois de aplicar o SQL** (reforço de 15/10): o Claude nunca pede para o Iorran procurar arquivo gerado por ele. Se o consolidado do SQL da sessão for útil, ele vai como anexo do handoff.
 
 ---
 
@@ -63,6 +80,9 @@ Quando o Claude Code trabalha direto no repositório, ele cria a branch antes de
 - Prosa corrida, sem cabeçalhos fixos repetitivos (nada de "Contexto em 2 linhas", "O Código Prático").
 - No máximo 3 parágrafos curtos explicando o porquê da mudança e o impacto prático (linguagem de negócio, sem jargão de programação sênior).
 - Código/comando limpo, direto, sem floreio depois.
+- **Arquivos de controle chegam completos, para colar.** Handoff, `PENDENCIAS.md` e `PROTOCOLO_DESENVOLVIMENTO.md` vêm inteiros no chat; o Iorran cola no arquivo do repositório ou no projeto. O Claude nunca pede para o Iorran procurar download na Área de Trabalho ou em Downloads, e os comandos só mexem em arquivo que já está no repositório.
+- **Nunca afirmar comportamento do app sem ler o código ou ver o resultado.** Se a afirmação sair errada, retratar na hora (caso de 15/10: eu disse que as outras opções do Alterar confirmavam e tiram o card dos Pendentes sem ter lido `handleAlterar`).
+- **Investigação de "bug" da dona:** primeiro dados (quem criou, quando, em qual horário, em que status), depois hipótese. Mensagem para a dona nunca afirma causa antes de os dados confirmarem.
 
 ---
 
@@ -74,6 +94,10 @@ Depois de merges e SQLs do dia, Claude gera:
 - **Conferência de SQL staging → produção** — o resultado dessa conferência entra no handoff, mesmo quando não há pendência (registrar "nenhum SQL de schema pendente de replicar" é tão válido quanto listar um item em aberto).
 - O `PROTOCOLO_DESENVOLVIMENTO.md` completo, quando a sessão criou regra nova.
 - A sequência completa de comandos para commitar os arquivos de controle numa branch de fechamento e levá-los a `staging` e `main`.
+- Título do handoff no projeto sem barra (`/`), porque a interface trata a barra como pasta: `# reserva-horario — Handoff Sessão N (datas)`.
+- `PENDENCIAS.md` e `INVENTARIO_RECURSOS.md` são commitados na branch da demanda **antes** do merge (prática das Sessões 88 e 89), para o merge já levar a documentação; no fechamento, conferir `git log main..staging --oneline` e, depois do merge, sincronizar a `staging` e apagar a branch.
+- Revisar o inventário junto do `PENDENCIAS.md`. Apagar os `diff-*.txt` da Área de Trabalho.
+- Quando houver demanda declarada como inadiável para a próxima sessão, ela abre o `PENDENCIAS.md` numa seção "Para hoje" acima de tudo.
 
 Iorran só cola o conteúdo pronto — nunca marca `[x]` manualmente. Itens marcados `[x]` sem handoff correspondente precisam ser reconfirmados antes de serem tratados como fechados.
 
@@ -124,7 +148,7 @@ Handoffs antigos são compactados periodicamente num arquivo único (o mais rece
 - **Stack:** Next.js (App Router, JS), Supabase (Postgres + Storage + Auth + pg_cron + pg_net), Tailwind v4, Vercel (Hobby — atenção ao timeout de 60s), Recharts (gráficos, desde a Sessão 59).
 - **Ambientes Supabase:** staging (`reserva-staging` / `yebwkchcrvebvvjvvvyu`) e produção (`pwlvjaenryzdkatmrhul`) — projetos separados, sequências de ID independentes.
 - **Arquivos de controle:** `CLAUDE.md`, `AGENTS.md`, `PENDENCIAS.md`, `INVENTARIO_RECURSOS.md`, `PROTOCOLO_DESENVOLVIMENTO.md`, `CHECKLIST_RELEASE.md`, `NOVO_TENANT.md`, `THEMING.md` e `docs/` (handoffs e identidade visual). Os arquivos de `sql/` **não** são fonte de verdade (ver §3): o banco manda.
-- **Libs-chave:** `lib/disponibilidade.js`, `lib/whatsapp.js`, `lib/particao.js`, `lib/cliqueFora.js`, `lib/checagemWhatsapp.js`, `lib/comprimirImagem.js`, `lib/temas.js`, `lib/conclusao.js`, `lib/mes.js` (navegação mensal, `mesDeHoje`/`rotuloMes`), `lib/janelaAgendamento.js`, `lib/sinalRegra.js`, `lib/sinalPix.js`, `lib/googleCalendarSync.js`.
+- **Libs-chave:** `lib/disponibilidade.js`, `lib/whatsapp.js`, `lib/particao.js`, `lib/cliqueFora.js`, `lib/checagemWhatsapp.js`, `lib/comprimirImagem.js`, `lib/temas.js`, `lib/conclusao.js`, `lib/mes.js` (navegação mensal, `mesDeHoje`/`rotuloMes`), `lib/janelaAgendamento.js`, `lib/sinalRegra.js`, `lib/sinalPix.js`, `lib/googleCalendarSync.js`, `lib/servicoAgregado.js` (regras puras do serviço agregado, testadas em `lib/servicoAgregado.test.mjs`) e `lib/agregadosServico.js` (leitura dos agregados no Supabase).
 - **Camada pública de dados (desde a Sessão 71):** `sql/rpcs_agendamento_publico.sql` (cancelar, liberar reserva, declarar sinal, anexar comprovante, status da reserva), `sql/rpc_criacao_agendamento.sql` (`agendamento_criar`, com as respostas das perguntas na mesma transação e erros AG001–AG009), `sql/rpcs_leitura_cliente.sql` (painel da cliente por telefone + helper interno `normalizar_telefone`), rota `app/api/agendamentos/comprovante-upload` (URL assinada do comprovante). Desde a Sessão 73: `agendamento_criar_interno` (sem grant), `agendamento_criar_par`, `agendamento_cancelar_cliente_par`. Toda mudança no fluxo público de agendamento passa por um desses.
 
 ---
@@ -148,6 +172,9 @@ Handoffs antigos são compactados periodicamente num arquivo único (o mais rece
 - **O Claude Code não roda `next build` nem `next dev` com o servidor do Iorran ligado, e não encerra processos dele** (incidente da Sessão 74: `.next` corrompido servindo CSS antigo). Verificação padrão nos prompts: `npx eslint` nos arquivos tocados. Se o cache corromper: parar o servidor, apagar `.next\dev` e `.next\cache`, subir de novo com `npm run dev` (não existe script `staging`; o banco lido depende do `.env.local`: staging `yebwkchcrvebvvjvvvyu`, produção `pwlvjaenryzdkatmrhul`).
 - Todo prompt de implementação termina com "não commite; me devolva o diff" e a mensagem de commit sugerida. Se o Code falhar por erro da própria ferramenta (ex.: classificador de permissões sem veredito), nada foi alterado — basta pedir "tenta de novo" ou reabrir a sessão com o mesmo prompt.
 - Worktree separado (ex.: `C:\Users\Iorran\BarberShop-laryssa`) aparece com `+` no `git branch`; fechar com `git worktree remove` antes de apagar a branch dele.
+- **Edição de código só no Code local**, aberto em `C:\Users\Iorran\BarberShop`, confirmando `git rev-parse --show-toplevel`, branch e `git log -1`. O Code na nuvem trabalha em worktree atrasado (Sessão 84) e serve para raio-x de leitura, com `git fetch` e base `origin/main` explícita no prompt.
+- **O Code não commita, não faz push e não escreve SQL.** Os prompts são somente leitura até o OK; ele entrega o diff por arquivo e uma seção "o que não consegui cobrir". Não pedir `next build` sem necessidade (o `AGENTS.md` proíbe por padrão).
+- **Testes automatizados (Sessão 89):** `node --test lib/servicoAgregado.test.mjs` (regras puras) e `npm run test:componentes` (vitest + jsdom + testing-library; hoje 45 testes passando e 1 `it.fails` documentado em `tests/disponibilidadeAgenda.test.js`). Mudança em agregado, preço, tempo ou disponibilidade roda os dois antes do diff. A Vercel instala as devDependencies: conferir o build depois do merge.
 
 ---
 
@@ -334,4 +361,21 @@ lockup único.
 - **Diagnóstico de "agenda sumiu":** perguntar primeiro se a dona mexeu em exceções ou na janela mensal pouco antes; pedir print com horário; **testar com a sessão de dona logada no navegador** (causa real da Sessão 80); conferir a janela mensal (mês sem registro = fechado); rodar a consulta de `ausencias_log` (Handoff 79). O registro não tem tela nem limpeza automática.
 - **Localhost e branches (Sessão 80):** trocar de branch com o servidor ligado pode dar 404 em `/<slug>/admin` (parar o servidor, apagar `.next` e subir de novo); trocar de branch troca o visual servido (o roxo antigo volta na `main` se a branch visual não estiver mergeada). O eslint do `page.js` tem 9 erros `set-state-in-effect` e 1 aviso antigos, e o `FormularioAgendamento.js` tem 1 (linha ~1158); só importa se aparecer algo novo.
 
-*Última atualização: 07/10 (Sessão 82 — seção 15 de lições de processo; seção 14 de recursos órfãos e inventário; AGENTS.md com as regras duras do Code; Code nunca escreve SQL; Sessão 75 — seção 13 de alertas e avisos; seção 12 de tema e cores da Sessão 74; merge nunca junto do SQL de produção e coluna aditiva antes do código; Claude Code sem `next build`/`next dev` com o servidor do usuário ligado; `git add ':(literal)...'`; rotação de segredo inclui triggers do banco; medir uso real antes de decidir sobre funcionalidade).*
+## 16. Regras acumuladas das Sessões 83 a 89
+
+- **Mutação sempre com `.select()` e checagem de 0 linhas**; datas com `new Date(ano, mes-1, dia)`, nunca de string (Sessão 86).
+- **Edição de tabela sem policy de UPDATE** (ex.: `ausencias`): insert das novas, delete das antigas conferindo a contagem, compensação apagando as novas se falhar. Se um dia existir RPC atômica, trocar (Sessão 86).
+- **Dado de etiqueta do cliente no wizard do admin: sempre por id**, nunca por nome (Sessão 81).
+- **Texto padrão para cliente é neutro**, masculino como padrão para clientes de qualquer gênero; varredura geral de textos é demanda à parte (Sessão 88).
+- **Todo recurso novo** (coluna, flag, texto, constante) segue o §13 (preferência com interruptor ou proteção fixa) e entra no `INVENTARIO_RECURSOS.md` (§14).
+- **Cadastro duplicado de cliente:** a lixeira de clientes é invisível para telas e filtros (`excluido_em is null`); junção só pela dona, com Desfazer; ver `lib/duplicidadeCliente.js` (Sessão 88).
+- **Alterar nos Pendentes e confirmação:** o registro da Sessão 84 diz que o Alterar confirma o pendente; em 15/10 o Iorran observou que trocar a data de um pendente não tira o card dos Pendentes. Antes de mexer, ler `handleAlterar` e descrever o que acontece de verdade (demanda inadiável aberta na Sessão 89).
+- **Serviço agregado (casadinha), Sessão 89:**
+  - Uma linha em `agendamentos` com quatro colunas de snapshot (`servico_agregado_id` guarda o id do serviço agregado, `agregado_nome`, `agregado_preco_centavos`, `agregado_duracao_min`); editar o combo depois não reescreve o histórico.
+  - O tempo do agregado só entra na duração quando nenhum profissional ativo do serviço tem `modo_horario = 'fixo'` (agenda de janela soma; agenda fixa é informativa). Quem faz a conta é o gatilho `trg_set_duracao_min` (teto 720), nunca o front sozinho.
+  - O sinal é valor fixo e não muda com o agregado; o preço total é o do serviço mais o do agregado.
+  - Manutenção, segunda data e manutenção de outro salão não aceitam agregado nos dois sentidos, de propósito. A regra é uma só, `servicoAceitaAgregado`; manutenção + agregado é demanda futura em branch própria.
+  - Criação pública passa por `agendamento_criar_com_agregado`; alteração isolada por `agendamento_alterar_agregado`; trocar o serviço limpa o agregado; remarcação com sinal pago valida o agregado antes de cancelar a linha antiga (409).
+  - Teste de limite de agenda de janela: reserva que atravessa a meia-noite é recusada pelo banco e invisível para o motor; é uma divergência conhecida, documentada em `it.fails`.
+
+*Última atualização: 15/10 (Sessão 89 — seção 16 com as regras das Sessões 83 a 89; um passo por vez; diff por arquivo na Área de Trabalho; arquivos de controle chegam completos para colar; rótulo de banco em todo SQL; armadilhas do SQL Editor; Code local, sem commit nem SQL; deploy conferido na Vercel; serviço agregado). Antes: 07/10 (Sessão 82 — seção 15 de lições de processo; seção 14 de recursos órfãos e inventário; AGENTS.md com as regras duras do Code; Code nunca escreve SQL; Sessão 75 — seção 13 de alertas e avisos; seção 12 de tema e cores da Sessão 74; merge nunca junto do SQL de produção e coluna aditiva antes do código; Claude Code sem `next build`/`next dev` com o servidor do usuário ligado; `git add ':(literal)...'`; rotação de segredo inclui triggers do banco; medir uso real antes de decidir sobre funcionalidade).*
