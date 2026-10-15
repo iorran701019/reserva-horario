@@ -12,6 +12,17 @@ import {
 } from "@/lib/servicoAgregado";
 import { buscarPerfil } from "@/lib/perfil";
 import { sinalPixRebaixado } from "@/lib/sinalPix";
+import {
+  situacaoPixDonaEditavel,
+  tagSituacaoPixDona,
+  ordenarPendentesPorPix,
+  opcoesMenuSituacaoPix,
+  TEXTO_PIX_DECLARADO,
+  TEXTO_PIX_AGUARDANDO,
+  TEXTO_PIX_NAO_COBRADO_CONFIG,
+  TEXTO_PIX_NAO_COBRADO,
+} from "@/lib/situacaoPixDona";
+import { useCliqueForaBackdrop } from "@/lib/cliqueFora";
 import { salaoPodeCobrarSinal } from "@/lib/sinalRegra";
 import { buscarTema } from "@/lib/temas";
 import {
@@ -401,7 +412,7 @@ function estaAguardandoConclusao(item, agora) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, duracao_min, servico_id, servico_agregado_id, agregado_nome, agregado_preco_centavos, agregado_duracao_min, servico_livre, profissional_id, reserva_grupo_id, papel_reserva, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, editado_manualmente_em, servicos(nome, duracao_min, preco_centavos, eh_manutencao, nome_etapa_anterior), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, duracao_min, servico_id, servico_agregado_id, agregado_nome, agregado_preco_centavos, agregado_duracao_min, servico_livre, profissional_id, reserva_grupo_id, papel_reserva, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_cobranca_id, abacatepay_br_code, abacatepay_pago_em, situacao_pix_dona, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, editado_manualmente_em, servicos(nome, duracao_min, preco_centavos, eh_manutencao, nome_etapa_anterior), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -1156,6 +1167,52 @@ export default function AdminPage() {
     setAgendamentos((atuais) =>
       atuais.map((item) => (item.id === id ? { ...item, ...patch } : item))
     );
+  }
+
+  // Situação do Pix marcada pela dona (lib/situacaoPixDona.js). Grava SÓ
+  // situacao_pix_dona, nunca status. O erro fica no próprio card
+  // (erroSituacaoPix: { [id]: texto }), não no setErro global do admin.
+  const [erroSituacaoPix, setErroSituacaoPix] = useState({});
+  const [salvandoSituacaoPix, setSalvandoSituacaoPix] = useState(null);
+
+  // Menu "Alterar" da situação do Pix: o item do card aberto, ou null. Mesmo
+  // padrão do MenuAlterar (folha centralizada, não estoura a tela no celular);
+  // fecha por clique fora (lib/cliqueFora.js), Esc e ao escolher.
+  const [menuSituacaoPix, setMenuSituacaoPix] = useState(null);
+  const cliqueForaMenuSituacaoPix = useCliqueForaBackdrop(() => setMenuSituacaoPix(null));
+  useEffect(() => {
+    if (!menuSituacaoPix) return undefined;
+    function aoTeclar(e) {
+      if (e.key === "Escape") setMenuSituacaoPix(null);
+    }
+    window.addEventListener("keydown", aoTeclar);
+    return () => window.removeEventListener("keydown", aoTeclar);
+  }, [menuSituacaoPix]);
+
+  async function handleSituacaoPix(item, valor) {
+    if (salvandoSituacaoPix) return;
+    setSalvandoSituacaoPix(item.id);
+    setErroSituacaoPix((atuais) => ({ ...atuais, [item.id]: "" }));
+
+    const { data, error } = await supabase
+      .from("agendamentos")
+      .update({ situacao_pix_dona: valor })
+      .eq("id", item.id)
+      .select("id");
+
+    setSalvandoSituacaoPix(null);
+
+    if (error || !data?.length) {
+      setErroSituacaoPix((atuais) => ({
+        ...atuais,
+        [item.id]: error
+          ? `Não foi possível salvar: ${error.message}`
+          : "Não foi possível salvar: nenhuma linha foi alterada. Recarregue a página e tente de novo.",
+      }));
+      return;
+    }
+
+    atualizarItemLocal(item.id, { situacao_pix_dona: valor });
   }
 
   // Reflete o novo status no estado local. O badge e o destaque âmbar mudam
@@ -3056,11 +3113,19 @@ export default function AdminPage() {
   // — sem ficha real, não faz sentido aparecer como pendência/histórico de
   // cliente; ele já ocupa o horário e aparece no Painel (que NÃO filtra),
   // com o botão "Vincular cliente" pra sair desse estado.
-  const inbox = agruparParesPendentes(
-    agendamentos.filter(
-      (item) => classificarAgendamento(item, agora) === "inbox" && item.finalizado && item.telefone
+  // Reordenado por degrau do Pix (ordenarPendentesPorPix): quem já pagou
+  // primeiro, aguardando pagamento por último, data/horário preservados dentro
+  // do degrau. Só age no Pix manual; fora disso a ordem não muda. Roda ANTES do
+  // agrupamento por cliente (o grupo usa o melhor degrau dos membros).
+  const inbox = ordenarPendentesPorPix(
+    agruparParesPendentes(
+      agendamentos.filter(
+        (item) =>
+          classificarAgendamento(item, agora) === "inbox" && item.finalizado && item.telefone
+      ),
+      agendamentos
     ),
-    agendamentos
+    estabelecimento
   );
 
   // Mesmo `inbox` acima, agrupado por cliente pra render (a aba mostra os
@@ -4230,44 +4295,84 @@ export default function AdminPage() {
                       antes, 2 e 3 já eram mutuamente exclusivos por acaso (um
                       testa o caminho, o outro a ausência dele), mas o badge de
                       status do topo aparecia POR CIMA dos dois. */}
-                  {item.abacatepay_pago_em ? (
-                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-700 ring-1 ring-green-200">
-                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-                      Pix confirmado pelo AbacatePay
+                  {/* Tag do Pix + botão "Alterar" na MESMA linha; quebra para baixo em
+                      tela estreita. O erro local fica abaixo da linha. */}
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {item.abacatepay_pago_em ? (
+                      <p className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-700 ring-1 ring-green-200">
+                        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                        Pix confirmado pelo AbacatePay
+                      </p>
+                    ) : tagSituacaoPixDona(item, estabelecimento) === "pago" ? (
+                      <p className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-800 ring-1 ring-sky-300">
+                        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                        Pix conferido por você
+                      </p>
+                    ) : tagSituacaoPixDona(item, estabelecimento) === "pendente_pagamento" ? (
+                      <p className="inline-flex items-center gap-1.5 rounded-full bg-amber-200 px-2.5 py-1 text-xs font-semibold text-amber-900 ring-1 ring-amber-400">
+                        <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+                        {TEXTO_PIX_AGUARDANDO} (marcado por você)
+                      </p>
+                    ) : item.comprovante_pix_url ? (
+                      // -mt-3 anula o mt-3 próprio do LinkComprovantePix: o
+                      // espaçamento do bloco vem do contêiner flex.
+                      <div className="-mt-3">
+                        <LinkComprovantePix
+                          caminho={item.comprovante_pix_url}
+                          enviadoEm={item.comprovante_pix_enviado_em}
+                          formatarEnviadoEm={formatarEnviadoEm}
+                        />
+                      </div>
+                    ) : item.sinal_declarado_pago ? (
+                      <p className="inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-body ring-1 ring-border">
+                        <IconeWhatsApp className="h-3.5 w-3.5" />
+                        {TEXTO_PIX_DECLARADO}
+                      </p>
+                    ) : item.status === "aguardando_sinal" ? (
+                      <p className="inline-flex items-center gap-1.5 rounded-full bg-amber-200 px-2.5 py-1 text-xs font-semibold text-amber-900 ring-1 ring-amber-400">
+                        <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+                        {TEXTO_PIX_AGUARDANDO}
+                      </p>
+                    ) : item.status === "pendente" &&
+                      !item.sinal_declarado_pago &&
+                      !item.comprovante_pix_url &&
+                      sinalPixRebaixadoAgora ? (
+                      <p className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-300">
+                        <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+                        {TEXTO_PIX_NAO_COBRADO_CONFIG}
+                      </p>
+                    ) : item.status === "pendente" &&
+                      !item.sinal_declarado_pago &&
+                      !item.comprovante_pix_url &&
+                      salaoCobraSinal ? (
+                      <p className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 ring-1 ring-gray-300">
+                        <Info className="h-3.5 w-3.5" aria-hidden="true" />
+                        {TEXTO_PIX_NAO_COBRADO}
+                      </p>
+                    ) : null}
+
+                    {/* Edição da situação do Pix pela dona: só Pix manual,
+                        agendamento que nunca passou pelo AbacatePay e estado
+                        cobrado ou já marcado (situacaoPixDonaEditavel).
+                        Grava só situacao_pix_dona. */}
+                    {situacaoPixDonaEditavel(item, estabelecimento) && (
+                      <button
+                        type="button"
+                        disabled={salvandoSituacaoPix === item.id}
+                        aria-haspopup="dialog"
+                        onClick={() => setMenuSituacaoPix(item)}
+                        className="inline-flex items-center gap-1 rounded-lg py-1 text-xs font-medium text-body transition hover:text-heading disabled:cursor-default disabled:opacity-50"
+                      >
+                        Alterar
+                        <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                  {erroSituacaoPix[item.id] && (
+                    <p role="alert" className="mt-1 text-xs text-red-700">
+                      {erroSituacaoPix[item.id]}
                     </p>
-                  ) : item.comprovante_pix_url ? (
-                    <LinkComprovantePix
-                      caminho={item.comprovante_pix_url}
-                      enviadoEm={item.comprovante_pix_enviado_em}
-                      formatarEnviadoEm={formatarEnviadoEm}
-                    />
-                  ) : item.sinal_declarado_pago ? (
-                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-body ring-1 ring-border">
-                      <IconeWhatsApp className="h-3.5 w-3.5" />
-                      Comprovante declarado pelo WhatsApp
-                    </p>
-                  ) : item.status === "aguardando_sinal" ? (
-                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-200 px-2.5 py-1 text-xs font-semibold text-amber-900 ring-1 ring-amber-400">
-                      <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-                      Aguardando sinal
-                    </p>
-                  ) : item.status === "pendente" &&
-                    !item.sinal_declarado_pago &&
-                    !item.comprovante_pix_url &&
-                    sinalPixRebaixadoAgora ? (
-                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-300">
-                      <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-                      Sinal não cobrado, configurar sinal Pix
-                    </p>
-                  ) : item.status === "pendente" &&
-                    !item.sinal_declarado_pago &&
-                    !item.comprovante_pix_url &&
-                    salaoCobraSinal ? (
-                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 ring-1 ring-gray-300">
-                      <Info className="h-3.5 w-3.5" aria-hidden="true" />
-                      Nenhum sinal de Pix foi cobrado
-                    </p>
-                  ) : null}
+                  )}
 
                   {/* Accordion de detalhes secundários (progressive
                       disclosure). Tudo que é operacional — respostas do popup
@@ -6570,6 +6675,38 @@ export default function AdminPage() {
             >
               Voltar
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Menu "Alterar" da situação do Pix (card de Pendentes). Só apresenta as
+          opções de opcoesMenuSituacaoPix; quem grava é handleSituacaoPix. */}
+      {menuSituacaoPix && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Alterar situação do Pix"
+          {...cliqueForaMenuSituacaoPix}
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-overlay/40 px-4"
+        >
+          <div className="w-full max-w-xs rounded-2xl bg-card p-4 shadow-lg ring-1 ring-border">
+            <div className="flex flex-col gap-2">
+              {opcoesMenuSituacaoPix(menuSituacaoPix, estabelecimento).map((opcao) => (
+                <button
+                  key={opcao.rotulo}
+                  type="button"
+                  disabled={opcao.desabilitada || salvandoSituacaoPix !== null}
+                  onClick={() => {
+                    const alvo = menuSituacaoPix;
+                    setMenuSituacaoPix(null);
+                    handleSituacaoPix(alvo, opcao.valor);
+                  }}
+                  className="rounded-lg bg-card px-3 py-2 text-sm font-medium text-heading ring-1 ring-border transition hover:bg-surface disabled:cursor-default disabled:opacity-50 disabled:hover:bg-card"
+                >
+                  {opcao.rotulo}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
