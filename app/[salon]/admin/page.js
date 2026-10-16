@@ -11,6 +11,7 @@ import {
   somarPrecoOuNulo,
 } from "@/lib/servicoAgregado";
 import { buscarPerfil } from "@/lib/perfil";
+import TrocarCredenciais from "@/components/TrocarCredenciais";
 import { sinalPixRebaixado } from "@/lib/sinalPix";
 import {
   situacaoPixDonaEditavel,
@@ -528,6 +529,14 @@ export default function AdminPage() {
   // Autenticado, mas sem linha em perfis (conta órfã): não há salão a resolver.
   // Troca todo o conteúdo pela tela "Conta sem salão vinculado".
   const [semPerfil, setSemPerfil] = useState(false);
+
+  // Troca obrigatória de e-mail e senha da dona (perfis.precisa_trocar_credenciais).
+  // `travado` é a flag única: liga o cartão de troca no topo de Pendentes e
+  // desabilita o resto do /admin (wrapper inert no conteúdo, hambúrguer
+  // desabilitado). Papel global e dona com a marca desligada nunca ligam.
+  // `versaoPerfil` força recarregar o perfil depois da troca.
+  const [travado, setTravado] = useState(false);
+  const [versaoPerfil, setVersaoPerfil] = useState(0);
 
   const [agendamentos, setAgendamentos] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -2227,6 +2236,7 @@ export default function AdminPage() {
       }
 
       setSemPerfil(false);
+      setTravado(perfil.papel === "dono" && perfil.precisa_trocar_credenciais === true);
 
       if (perfil.papel === "dono") {
         setEstabelecimento(perfil.estabelecimento ?? null);
@@ -2240,7 +2250,16 @@ export default function AdminPage() {
     return () => {
       ativo = false;
     };
-  }, [autenticado, salon]);
+  }, [autenticado, salon, versaoPerfil]);
+
+  // Travada, a dona só enxerga Pendentes: qualquer ?aba= diferente (link
+  // antigo, voltar do navegador) é trocada na URL, e o efeito de sincronia
+  // com searchParams acima atualiza viewPai.
+  useEffect(() => {
+    if (travado && viewPai !== "pendentes") {
+      router.replace(`${pathname}?aba=pendentes`, { scroll: false });
+    }
+  }, [travado, viewPai, router, pathname]);
 
   // A aba "Assinatura" só existe pra salão com linha em `assinaturas` (a dona
   // tem SELECT só na do próprio salão). Erro de leitura = sem aba.
@@ -3618,6 +3637,7 @@ export default function AdminPage() {
       <button
         type="button"
         onClick={() => setDrawerAberto(true)}
+        disabled={travado}
         aria-label="Abrir menu"
         aria-expanded={drawerAberto}
         className="fixed right-3 top-3 z-40 rounded-lg bg-black/40 p-2 text-white ring-1 ring-white/20 backdrop-blur-sm transition hover:bg-black/55 sm:right-4 sm:top-4"
@@ -3634,6 +3654,16 @@ export default function AdminPage() {
       </button>
 
       <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:py-10">
+        {/* Troca obrigatória de e-mail e senha: cartão fixo no topo de
+            Pendentes. Tudo abaixo dele fica numa camada inert (sem clique, foco
+            nem teclado) e esmaecida até a troca terminar. */}
+        {travado && (
+          <TrocarCredenciais onConcluido={() => setVersaoPerfil((v) => v + 1)} />
+        )}
+        <div
+          inert={travado}
+          className={travado ? "pointer-events-none select-none opacity-50" : undefined}
+        >
         {/* Banner da janela de agendamento: só na aba Painel (viewPai ===
             "painel", ver ABAS_PAI) — nas outras abas (Profissionais, Regras
             de negócio, etc.) ele só poluía a tela sem contexto. O popup
@@ -5726,6 +5756,7 @@ export default function AdminPage() {
             onCadastrarProfissional={irParaCadastroProfissional}
           />
         )}
+        </div>
       </div>
 
       {/* Drawer lateral de navegação. Sempre montado pra permitir a transição
