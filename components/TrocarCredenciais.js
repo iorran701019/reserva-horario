@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Circle, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { validarEmail, validarSenha } from "@/lib/credenciaisDona";
+import BotaoWhatsappLimiteTentativas from "@/components/BotaoWhatsappLimiteTentativas";
 
 const CLASSE_CAMPO =
   "mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-heading outline-none focus:border-primary";
@@ -38,10 +39,36 @@ export default function TrocarCredenciais({ onConcluido }) {
   const [mostrar, setMostrar] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [mensagem, setMensagem] = useState("");
+  const [limite, setLimite] = useState(false);
+  // Reset de acesso pelo painel global: o e-mail fica como está, só a senha troca.
+  const [soSenha, setSoSenha] = useState(false);
+  // Só renderiza o formulário depois do getUser resolver (com ou sem erro), para
+  // não mostrar os campos de e-mail e trocá-los na frente da dona.
+  const [pronto, setPronto] = useState(false);
+  const [emailSessao, setEmailSessao] = useState("");
+
+  useEffect(() => {
+    let vivo = true;
+    // Falha do getUser cai no modo com e-mail.
+    supabase.auth
+      .getUser()
+      .then(({ data, error }) => {
+        if (!vivo || error) return;
+        setSoSenha(data?.user?.app_metadata?.troca_so_senha === true);
+        setEmailSessao(data?.user?.email ?? "");
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (vivo) setPronto(true);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, []);
 
   const { requisitos, ok: senhaOk } = validarSenha(senha);
   const emailOk = validarEmail(email).ok;
-  const emailsIguais = emailOk && validarEmail(emailConfirmacao).email === validarEmail(email).email;
+  const emailsIguais = soSenha || (emailOk && validarEmail(emailConfirmacao).email === validarEmail(email).email);
   const senhasIguais = senha.length > 0 && senha === senhaConfirmacao;
   const podeEnviar = emailsIguais && senhaOk && senhasIguais && !enviando;
 
@@ -50,8 +77,10 @@ export default function TrocarCredenciais({ onConcluido }) {
     if (!podeEnviar) return;
     setEnviando(true);
     setMensagem("");
+    setLimite(false);
 
-    const corpo = { email, emailConfirmacao, senha, senhaConfirmacao };
+    const corpo = soSenha ? { senha, senhaConfirmacao } : { email, emailConfirmacao, senha, senhaConfirmacao };
+    const emailLogin = soSenha ? emailSessao : validarEmail(email).email;
     const { data } = await supabase.auth.getSession();
     let resultado = await chamarRota(corpo, data?.session?.access_token ?? "");
 
@@ -59,7 +88,7 @@ export default function TrocarCredenciais({ onConcluido }) {
     // com os dados novos e tenta de novo (a rota é repetível).
     if (!resultado.ok && resultado.codigo === "sem_sessao") {
       const login = await supabase.auth.signInWithPassword({
-        email: validarEmail(email).email,
+        email: emailLogin,
         password: senha,
       });
       if (!login.error) {
@@ -69,12 +98,13 @@ export default function TrocarCredenciais({ onConcluido }) {
 
     if (!resultado.ok) {
       setMensagem(resultado.erro);
+      setLimite(resultado.codigo === "muitas_tentativas");
       setEnviando(false);
       return;
     }
 
     const { error } = await supabase.auth.signInWithPassword({
-      email: validarEmail(email).email,
+      email: emailLogin,
       password: senha,
     });
     if (error) {
@@ -95,35 +125,43 @@ export default function TrocarCredenciais({ onConcluido }) {
         <div>
           <h2 className="text-base font-semibold text-heading">Proteja sua conta</h2>
           <p className="mt-1 text-sm text-body">
-            Para a segurança da sua conta, escolha agora o seu e-mail e uma senha só sua. Você
-            faz isso uma vez só, e depois o sistema é liberado.
+            {!pronto
+              ? "Carregando..."
+              : soSenha
+              ? "Para a segurança da sua conta, escolha agora uma senha nova, só sua. Você faz isso uma vez só, e depois o sistema é liberado."
+              : "Para a segurança da sua conta, escolha agora o seu e-mail e uma senha só sua. Você faz isso uma vez só, e depois o sistema é liberado."}
           </p>
         </div>
       </div>
 
+      {pronto && (
       <form onSubmit={salvar} className="mt-4 space-y-3" noValidate>
-        <label className="block text-sm font-medium text-heading">
-          Seu e-mail
-          <input
-            type="email"
-            autoComplete="off"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className={CLASSE_CAMPO}
-          />
-        </label>
-        <label className="block text-sm font-medium text-heading">
-          Repita o e-mail
-          <input
-            type="email"
-            autoComplete="off"
-            value={emailConfirmacao}
-            onChange={(e) => setEmailConfirmacao(e.target.value)}
-            className={CLASSE_CAMPO}
-          />
-        </label>
-        {emailConfirmacao && !emailsIguais && (
-          <p className="text-xs text-red-700">Os dois e-mails precisam ser iguais.</p>
+        {!soSenha && (
+          <>
+            <label className="block text-sm font-medium text-heading">
+              Seu e-mail
+              <input
+                type="email"
+                autoComplete="off"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className={CLASSE_CAMPO}
+              />
+            </label>
+            <label className="block text-sm font-medium text-heading">
+              Repita o e-mail
+              <input
+                type="email"
+                autoComplete="off"
+                value={emailConfirmacao}
+                onChange={(e) => setEmailConfirmacao(e.target.value)}
+                className={CLASSE_CAMPO}
+              />
+            </label>
+            {emailConfirmacao && !emailsIguais && (
+              <p className="text-xs text-red-700">Os dois e-mails precisam ser iguais.</p>
+            )}
+          </>
         )}
 
         <label className="block text-sm font-medium text-heading">
@@ -176,6 +214,7 @@ export default function TrocarCredenciais({ onConcluido }) {
             {mensagem}
           </p>
         )}
+        {limite && <BotaoWhatsappLimiteTentativas />}
 
         <button
           type="submit"
@@ -185,6 +224,7 @@ export default function TrocarCredenciais({ onConcluido }) {
           {enviando ? "Salvando..." : "Salvar e liberar o sistema"}
         </button>
       </form>
+      )}
     </section>
   );
 }

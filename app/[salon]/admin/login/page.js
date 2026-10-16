@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { buscarPerfil } from "@/lib/perfil";
+import { ehLimiteDeTentativas, MENSAGEM_LIMITE_TENTATIVAS_LOGIN } from "@/lib/whatsapp";
+import BotaoWhatsappLimiteTentativas from "@/components/BotaoWhatsappLimiteTentativas";
 
 // Lê o ?next= da URL e o valida como destino interno seguro. Só roda no browser
 // (usa window.location) — chamada dentro do handler de submit. Aceita apenas
@@ -23,6 +25,7 @@ export default function LoginPage() {
   const [senha, setSenha] = useState("");
   const [entrando, setEntrando] = useState(false);
   const [erro, setErro] = useState("");
+  const [limite, setLimite] = useState(false);
   // Autenticou, mas não há linha em perfis pra esse usuário: sem salão-casa não
   // há pra onde redirecionar. Troca o formulário pela tela de erro.
   const [semPerfil, setSemPerfil] = useState(false);
@@ -30,6 +33,7 @@ export default function LoginPage() {
   async function handleSubmit(e) {
     e.preventDefault();
     setErro("");
+    setLimite(false);
     setEntrando(true);
 
     const { error } = await supabase.auth.signInWithPassword({
@@ -39,8 +43,13 @@ export default function LoginPage() {
 
     if (error) {
       setEntrando(false);
-      // Não vaza o detalhe técnico do Supabase — qualquer falha de login
-      // vira a mesma mensagem genérica.
+      // Não vaza o detalhe técnico do Supabase — só o limite de tentativas
+      // tem mensagem própria; o resto vira a mesma mensagem genérica.
+      if (ehLimiteDeTentativas(error)) {
+        setLimite(true);
+        setErro(MENSAGEM_LIMITE_TENTATIVAS_LOGIN);
+        return;
+      }
       setErro("E-mail ou senha incorretos.");
       return;
     }
@@ -142,6 +151,7 @@ export default function LoginPage() {
               {erro}
             </p>
           )}
+          {limite && <BotaoWhatsappLimiteTentativas />}
         </form>
       </div>
     </main>

@@ -97,8 +97,11 @@ export async function POST(request) {
     return responder({ codigo: "sem_troca_pendente", erro: "Não há troca de dados pendente nesta conta." }, 409);
   }
 
-  const emailNovo = validarEmail(corpo?.email);
-  const emailConf = validarEmail(corpo?.emailConfirmacao);
+  // Reset de acesso pelo painel global (troca_so_senha): só a senha muda. O
+  // e-mail do corpo é ignorado, não validado nem exigido.
+  const soSenha = user.app_metadata?.troca_so_senha === true;
+  const emailNovo = soSenha ? { ok: true, email: "" } : validarEmail(corpo?.email);
+  const emailConf = soSenha ? { ok: true, email: "" } : validarEmail(corpo?.emailConfirmacao);
   const senha = typeof corpo?.senha === "string" ? corpo.senha : "";
   const senhaConf = typeof corpo?.senhaConfirmacao === "string" ? corpo.senhaConfirmacao : "";
 
@@ -121,8 +124,8 @@ export async function POST(request) {
   // Repetição de uma troca que já passou no Auth mas não fechou a marca: o
   // e-mail igual ao atual vale se foi esta rota que o definiu.
   const emailAtual = String(user.email ?? "").toLowerCase();
-  const retomada = user.app_metadata?.troca_credenciais_email === emailNovo.email;
-  if (emailNovo.email === emailAtual && !retomada) {
+  const retomada = !soSenha && user.app_metadata?.troca_credenciais_email === emailNovo.email;
+  if (!soSenha && emailNovo.email === emailAtual && !retomada) {
     return responder(
       { codigo: "email_igual_ao_atual", erro: "O e-mail novo precisa ser diferente do e-mail atual." },
       400
@@ -164,12 +167,20 @@ export async function POST(request) {
     }
   }
 
-  const { error: erroAuth } = await admin.auth.admin.updateUserById(user.id, {
-    email: emailNovo.email,
-    password: senha,
-    email_confirm: true,
-    app_metadata: { troca_credenciais_email: emailNovo.email },
-  });
+  const { error: erroAuth } = await admin.auth.admin.updateUserById(
+    user.id,
+    soSenha
+      ? { password: senha }
+      : {
+          email: emailNovo.email,
+          password: senha,
+          email_confirm: true,
+          // credenciais_proprias: a dona já escolheu o próprio e-mail (a aba
+          // Segurança usa isso para não oferecer "Exigir troca"). Não é limpa
+          // pelo rastro final.
+          app_metadata: { troca_credenciais_email: emailNovo.email, credenciais_proprias: true },
+        }
+  );
   if (erroAuth) {
     if (ehEmailEmUso(erroAuth)) {
       return responder({ codigo: "email_em_uso", erro: "Este e-mail já está em uso em outra conta." }, 409);
@@ -199,7 +210,7 @@ export async function POST(request) {
 
   // Melhor esforço: tira o rastro da retomada. Falhar aqui não desfaz nada.
   const { error: erroLimpeza } = await admin.auth.admin.updateUserById(user.id, {
-    app_metadata: { troca_credenciais_email: null },
+    app_metadata: { troca_credenciais_email: null, troca_so_senha: null },
   });
   if (erroLimpeza) console.error("trocar-credenciais: limpeza do rastro falhou", erroLimpeza.code);
 
