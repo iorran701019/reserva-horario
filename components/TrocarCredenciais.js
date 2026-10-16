@@ -31,7 +31,9 @@ async function chamarRota(corpo, token) {
 // Cartão fixo no topo de Pendentes: a dona troca e-mail e senha uma única vez.
 // `onConcluido` roda depois do novo login e recarrega o perfil no /admin. Erros
 // ficam aqui, no cartão (nunca no erro global da página).
-export default function TrocarCredenciais({ onConcluido }) {
+// `semCabecalho`: só o formulário, sem o cartão nem o título (usado dentro de
+// components/AvisoTrocaCredenciais.js, que traz o próprio cartão).
+export default function TrocarCredenciais({ onConcluido, semCabecalho = false }) {
   const [email, setEmail] = useState("");
   const [emailConfirmacao, setEmailConfirmacao] = useState("");
   const [senha, setSenha] = useState("");
@@ -119,7 +121,10 @@ export default function TrocarCredenciais({ onConcluido }) {
   const tipoSenha = mostrar ? "text" : "password";
 
   return (
-    <section className="mb-6 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-primary sm:p-5">
+    <section className={semCabecalho ? "" : "mb-6 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-primary sm:p-5"}>
+      {semCabecalho ? (
+        !pronto && <p className="text-sm text-body">Carregando...</p>
+      ) : (
       <div className="flex items-start gap-3">
         <ShieldCheck className="mt-0.5 h-6 w-6 shrink-0 text-primary" />
         <div>
@@ -133,9 +138,10 @@ export default function TrocarCredenciais({ onConcluido }) {
           </p>
         </div>
       </div>
+      )}
 
       {pronto && (
-      <form onSubmit={salvar} className="mt-4 space-y-3" noValidate>
+      <form onSubmit={salvar} className={semCabecalho ? "space-y-3" : "mt-4 space-y-3"} noValidate>
         {!soSenha && (
           <>
             <label className="block text-sm font-medium text-heading">

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { mascararEmail } from "@/lib/credenciaisDona";
+import { modoTrocaCredenciais } from "@/lib/avisoTrocaCredenciais";
 import {
   linkWhatsApp,
   mensagemSenhaProvisoriaExplicacao,
@@ -126,6 +127,12 @@ export default function AbaSeguranca() {
 
       {saloes.map((s) => {
         const pronto = s.estado === "ok";
+        // Selo da marca: 'aviso' (cartão sem travar) ou 'bloqueio'; 'nenhum' = Em dia.
+        const modoMarca = modoTrocaCredenciais({
+          papel: "dono",
+          precisa_trocar_credenciais: s.precisa_trocar_credenciais,
+          troca_exigida_em: s.troca_exigida_em,
+        });
         const mostrandoReset = reset?.id === s.id;
         const msg1 = mensagemSenhaProvisoriaExplicacao(s.nome, mascararEmail(s.email));
         const msg2 = mostrandoReset ? mensagemSenhaProvisoriaSenha(reset.senha) : "";
@@ -139,10 +146,14 @@ export default function AbaSeguranca() {
               {pronto && (
                 <span
                   className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                    s.precisa_trocar_credenciais ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"
+                    modoMarca === "bloqueio"
+                      ? "bg-red-100 text-red-800"
+                      : modoMarca === "aviso"
+                      ? "bg-amber-100 text-amber-800"
+                      : "bg-green-100 text-green-800"
                   }`}
                 >
-                  {s.precisa_trocar_credenciais ? "Troca pendente" : "Em dia"}
+                  {modoMarca === "bloqueio" ? "Bloqueada" : modoMarca === "aviso" ? "Aviso ativo" : "Em dia"}
                 </span>
               )}
             </div>

@@ -194,7 +194,7 @@ export async function POST(request) {
 
   const { data: linhas, error: erroMarca } = await admin
     .from("perfis")
-    .update({ precisa_trocar_credenciais: false })
+    .update({ precisa_trocar_credenciais: false, troca_exigida_em: null })
     .eq("user_id", user.id)
     .select("user_id");
   if (erroMarca || !linhas?.length) {

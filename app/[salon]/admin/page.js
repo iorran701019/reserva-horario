@@ -12,6 +12,8 @@ import {
 } from "@/lib/servicoAgregado";
 import { buscarPerfil } from "@/lib/perfil";
 import TrocarCredenciais from "@/components/TrocarCredenciais";
+import AvisoTrocaCredenciais from "@/components/AvisoTrocaCredenciais";
+import { modoTrocaCredenciais } from "@/lib/avisoTrocaCredenciais";
 import { sinalPixRebaixado } from "@/lib/sinalPix";
 import {
   situacaoPixDonaEditavel,
@@ -535,7 +537,10 @@ export default function AdminPage() {
   // desabilita o resto do /admin (wrapper inert no conteúdo, hambúrguer
   // desabilitado). Papel global e dona com a marca desligada nunca ligam.
   // `versaoPerfil` força recarregar o perfil depois da troca.
-  const [travado, setTravado] = useState(false);
+  // Modo vem de modoTrocaCredenciais: 'bloqueio' trava (travado === true);
+  // 'aviso' só mostra o cartão de aviso em Pendentes, sem travar nada.
+  const [modoCredenciais, setModoCredenciais] = useState("nenhum");
+  const travado = modoCredenciais === "bloqueio";
   const [versaoPerfil, setVersaoPerfil] = useState(0);
 
   const [agendamentos, setAgendamentos] = useState([]);
@@ -2236,7 +2241,7 @@ export default function AdminPage() {
       }
 
       setSemPerfil(false);
-      setTravado(perfil.papel === "dono" && perfil.precisa_trocar_credenciais === true);
+      setModoCredenciais(modoTrocaCredenciais(perfil, Date.now()));
 
       if (perfil.papel === "dono") {
         setEstabelecimento(perfil.estabelecimento ?? null);
@@ -3847,6 +3852,9 @@ export default function AdminPage() {
             ainda no futuro. Pendentes que já passaram caem em "historico" e
             somem daqui. Confirmar/Cancelar usam os MESMOS handlers de sempre
             (incl. o modal); o refresh derivado faz o item sair do inbox sozinho. */}
+        {modoCredenciais === "aviso" && viewPai === "pendentes" && (
+          <AvisoTrocaCredenciais onConcluido={() => setVersaoPerfil((v) => v + 1)} />
+        )}
         {!carregando && !erro && viewPai === "pendentes" && !verAguardandoConclusao && (
           inbox.length === 0 && pendenciasAdmin.length === 0 && foraDaJanela.length === 0 && !cardAssinatura ? (
             <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">

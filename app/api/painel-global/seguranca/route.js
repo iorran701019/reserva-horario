@@ -56,7 +56,7 @@ export async function GET(request) {
 
   const { data: perfis, error: erroPerfis } = await admin
     .from("perfis")
-    .select("user_id, estabelecimento_id, precisa_trocar_credenciais")
+    .select("user_id, estabelecimento_id, precisa_trocar_credenciais, troca_exigida_em")
     .eq("papel", "dono")
     .in("estabelecimento_id", saloes.map((s) => s.id));
   if (erroPerfis) {
@@ -84,6 +84,7 @@ export async function GET(request) {
         email,
         credenciais_proprias: credenciaisProprias,
         precisa_trocar_credenciais: estado === "ok" ? donas[0].precisa_trocar_credenciais === true : false,
+        troca_exigida_em: estado === "ok" ? donas[0].troca_exigida_em ?? null : null,
         estado,
       };
     })
@@ -168,9 +169,28 @@ export async function POST(request) {
 
   // Marca primeiro, nos dois fluxos: se o passo seguinte do reset falhar, a
   // dona fica travada pela troca (seguro), nunca com senha nova sem a marca.
+  // troca_exigida_em decide aviso x bloqueio (lib/avisoTrocaCredenciais.js):
+  //   - resetar: null (bloqueio na hora);
+  //   - exigir_troca: agora, mas SÓ se a marca estava desligada. Com a marca
+  //     já ligada, troca_exigida_em fica fora do update: mantém a data
+  //     existente (o relógio dos 30 dias não reinicia a cada clique) ou o null
+  //     de um reset (continua bloqueada).
+  const { data: atual, error: erroAtual } = await admin
+    .from("perfis")
+    .select("precisa_trocar_credenciais")
+    .eq("user_id", alvo.user_id)
+    .maybeSingle();
+  if (erroAtual || !atual) {
+    console.error("seguranca POST: leitura da marca falhou", erroAtual?.code ?? "0 linhas");
+    return responder({ codigo: "erro_interno", erro: "Não foi possível exigir a troca agora." }, 500);
+  }
+  const atualizacao = { precisa_trocar_credenciais: true };
+  if (acao === "resetar") atualizacao.troca_exigida_em = null;
+  else if (atual.precisa_trocar_credenciais !== true) atualizacao.troca_exigida_em = new Date().toISOString();
+
   const { data: linhas, error: erroMarca } = await admin
     .from("perfis")
-    .update({ precisa_trocar_credenciais: true })
+    .update(atualizacao)
     .eq("user_id", alvo.user_id)
     .select("user_id");
   if (erroMarca || !linhas?.length) {
