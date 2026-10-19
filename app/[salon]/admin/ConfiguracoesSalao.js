@@ -11,6 +11,12 @@ import {
   substituirVariaveis,
 } from "@/lib/whatsapp";
 import { mensagemFalhaSalvar, mensagemFalhaDelete } from "@/lib/erroSalvar";
+import {
+  prepararFotoParaUpload,
+  caminhoAntigoParaRemover,
+  LADO_MAX_FOTO_PERFIL,
+  CACHE_CONTROL_FOTO,
+} from "@/lib/comprimirImagem";
 import { calcularStatusSinalPix } from "@/lib/sinalPix";
 import { formatarPreco } from "@/lib/preco";
 import { buscarEtiquetasAtivas } from "@/lib/clientesAdmin";
@@ -1593,10 +1599,12 @@ export default function ConfiguracoesSalao({
     if (falhou) setConfirmadoExpiraHoras(anterior);
   }
 
-  // Sobe o arquivo pro bucket 'fotos-perfil', sempre no mesmo caminho (não
-  // acumula lixo), e grava a URL pública + ?v=<timestamp> em
-  // foto_perfil_url — o cache-buster evita que o otimizador de imagem do
-  // Next continue servindo a foto antiga depois da troca.
+  // Comprime a foto no navegador (JPEG, lado maior 800px; recusa > 10 MB ou
+  // formato que não decodifica) e sobe pro bucket 'fotos-perfil' em
+  // <estabelecimento>/perfil.jpg com cacheControl longo, gravando a URL
+  // pública + ?v=<timestamp> em foto_perfil_url — o cache-buster invalida o
+  // cache depois da troca. Foto anterior com outra extensão é removida do
+  // bucket só depois do update no banco dar certo (best-effort).
   async function handleFotoPerfilChange(e) {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -1605,12 +1613,24 @@ export default function ConfiguracoesSalao({
     setEnviandoFoto(true);
     setErroFoto("");
 
-    const extensao = file.name.split(".").pop()?.toLowerCase() || "jpg";
-    const caminho = `${estabelecimento.id}/perfil.${extensao}`;
+    const preparada = await prepararFotoParaUpload(file, {
+      ladoMax: LADO_MAX_FOTO_PERFIL,
+    });
+    if (preparada.erro) {
+      setEnviandoFoto(false);
+      setErroFoto(preparada.erro);
+      return;
+    }
+
+    const caminho = `${estabelecimento.id}/perfil.jpg`;
 
     const { error: erroUpload } = await supabase.storage
       .from("fotos-perfil")
-      .upload(caminho, file, { upsert: true, contentType: file.type });
+      .upload(caminho, preparada.file, {
+        upsert: true,
+        contentType: "image/jpeg",
+        cacheControl: CACHE_CONTROL_FOTO,
+      });
 
     if (erroUpload) {
       setEnviandoFoto(false);
@@ -1643,10 +1663,22 @@ export default function ConfiguracoesSalao({
       return;
     }
 
+    const caminhoAntigo = caminhoAntigoParaRemover(
+      fotoPerfilUrl,
+      "fotos-perfil",
+      estabelecimento.id,
+      caminho
+    );
+
     setFotoPerfilUrl(urlComCache);
     if (zoomInicial) {
       setFotoPerfilZoom(ZOOM_MINIMO);
       setTemZoomPerfilSalvo(true);
+    }
+
+    // Best-effort: falha na remoção do arquivo órfão não vira erro.
+    if (caminhoAntigo) {
+      supabase.storage.from("fotos-perfil").remove([caminhoAntigo]).catch(() => {});
     }
   }
 

@@ -5,6 +5,12 @@ import { supabase } from "@/lib/supabaseClient";
 import { formatarPreco } from "@/components/FormularioAgendamento";
 import FotoPerfilCircular, { ZOOM_MINIMO } from "@/components/FotoPerfilCircular";
 import { mensagemFalhaSalvar, mensagemFalhaDelete } from "@/lib/erroSalvar";
+import {
+  prepararFotoParaUpload,
+  caminhoAntigoParaRemover,
+  LADO_MAX_FOTO_CATEGORIA,
+  CACHE_CONTROL_FOTO,
+} from "@/lib/comprimirImagem";
 import SecaoServicoAgregado from "./SecaoServicoAgregado";
 
 // Aba "Serviços" do /admin: CRUD dos serviços do salão (tabela `servicos`),
@@ -1188,10 +1194,13 @@ export default function GerenciarServicos({
     );
   }
 
-  // Sobe o arquivo pro bucket 'fotos-categorias', sempre no mesmo caminho por
-  // categoria, e grava a URL pública + ?v=<timestamp> em
-  // categorias_servico.foto_url — o cache-buster evita que o otimizador de
-  // imagem do Next continue servindo a foto antiga depois da troca. Espelha
+  // Comprime a foto no navegador (JPEG, lado maior 1600px; recusa > 10 MB ou
+  // formato que não decodifica) e sobe pro bucket 'fotos-categorias' em
+  // <estabelecimento>/<categoria>.jpg com cacheControl longo, gravando a URL
+  // pública + ?v=<timestamp> em categorias_servico.foto_url — o cache-buster
+  // invalida o cache (do browser e do Next) depois da troca. Foto anterior
+  // com outra extensão é removida do bucket só depois do update no banco dar
+  // certo (best-effort). Espelha
   // handleFotoPerfilChange de ConfiguracoesSalao; a diferença é o alvo do
   // update (uma linha de categorias_servico, não o estabelecimento).
   async function handleFotoCategoriaChange(e, categoria) {
@@ -1203,12 +1212,24 @@ export default function GerenciarServicos({
     setErroFotoCategoria("");
     setStatusFotoCategoria("");
 
-    const extensao = file.name.split(".").pop()?.toLowerCase() || "jpg";
-    const caminho = `${estabelecimento.id}/${categoria.id}.${extensao}`;
+    const preparada = await prepararFotoParaUpload(file, {
+      ladoMax: LADO_MAX_FOTO_CATEGORIA,
+    });
+    if (preparada.erro) {
+      setEnviandoFotoCategoriaId(null);
+      setErroFotoCategoria(preparada.erro);
+      return;
+    }
+
+    const caminho = `${estabelecimento.id}/${categoria.id}.jpg`;
 
     const { error: erroUpload } = await supabase.storage
       .from("fotos-categorias")
-      .upload(caminho, file, { upsert: true, contentType: file.type });
+      .upload(caminho, preparada.file, {
+        upsert: true,
+        contentType: "image/jpeg",
+        cacheControl: CACHE_CONTROL_FOTO,
+      });
 
     if (erroUpload) {
       setEnviandoFotoCategoriaId(null);
@@ -1242,6 +1263,17 @@ export default function GerenciarServicos({
     }
 
     patchCategoria(categoria.id, { foto_url: urlComCache, ...zoomInicial });
+
+    // Best-effort: falha na remoção do arquivo órfão não vira erro.
+    const caminhoAntigo = caminhoAntigoParaRemover(
+      categoria.foto_url,
+      "fotos-categorias",
+      estabelecimento.id,
+      caminho
+    );
+    if (caminhoAntigo) {
+      supabase.storage.from("fotos-categorias").remove([caminhoAntigo]).catch(() => {});
+    }
   }
 
   // Grava posição ("x% y%") + zoom juntos ao soltar qualquer um dos 3
