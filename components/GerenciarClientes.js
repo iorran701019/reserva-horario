@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Calendar, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MessageCircleOff, Pencil, UserRound, X } from "lucide-react";
+import { Calendar, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, MessageCircleOff, Pencil, Trash2, UserRound, X } from "lucide-react";
 import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
 import { formatarPreco } from "@/lib/preco";
 import NavegacaoMes from "@/components/NavegacaoMes";
@@ -16,6 +16,10 @@ import {
   buscarAnotacoesLivres,
   criarAnotacaoLivre,
   buscarTodasEtiquetas,
+  desativarCliente,
+  reativarCliente,
+  buscarClientesDesativados,
+  contarAgendamentosFuturosCliente,
 } from "@/lib/clientesAdmin";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import { supabase } from "@/lib/supabaseClient";
@@ -107,6 +111,12 @@ function PaletaCorEtiqueta({ valor, onChange, disabled }) {
   );
 }
 
+// Busca por nome da aba Clientes (ativos e desativados): `termo` já vem com
+// trim e minúsculas; termo vazio casa com todo mundo.
+function nomeCombinaBusca(nome, termo) {
+  return !termo || Boolean(nome?.toLowerCase().includes(termo));
+}
+
 // true se o mês de `nascimento` (date "YYYY-MM-DD") for o mês atual — decide o
 // badge "🎂 Aniversário" do card. Lê o mês por partes (sem construir Date),
 // mesma convenção anti-fuso do resto do arquivo.
@@ -195,6 +205,7 @@ function DetalheCliente({
   ultimaAlteracaoData,
   onEtiquetaAlterada,
   onUniaoDesfeita,
+  onDesativado,
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -207,6 +218,13 @@ function DetalheCliente({
   const [clienteAtual, setClienteAtual] = useState(cliente);
   const [editandoDados, setEditandoDados] = useState(false);
   const [alterandoWhatsapp, setAlterandoWhatsapp] = useState(false);
+
+  // Desativar cliente (lixeira avulsa). `confirmandoDesativar` guarda a
+  // contagem de agendamentos futuros (null = popup fechado). O erro é local:
+  // não passa pelo setErro global do admin.
+  const [confirmandoDesativar, setConfirmandoDesativar] = useState(null);
+  const [desativando, setDesativando] = useState(false);
+  const [erroDesativar, setErroDesativar] = useState("");
 
   const [resumo, setResumo] = useState(null);
   const [carregando, setCarregando] = useState(true);
@@ -458,6 +476,29 @@ function DetalheCliente({
 
   const anamnese = situacaoAnamnese(resumo?.anamneseData?.criado_em);
 
+  // Conta os agendamentos futuros antes de abrir o popup; o aviso é só
+  // informativo, não bloqueia.
+  async function abrirConfirmacaoDesativar() {
+    setErroDesativar("");
+    const futuros = await contarAgendamentosFuturosCliente(
+      estabelecimentoId,
+      clienteAtual.whatsapp
+    );
+    setConfirmandoDesativar(futuros);
+  }
+
+  async function confirmarDesativar() {
+    setDesativando(true);
+    const { erro } = await desativarCliente(clienteAtual.id);
+    setDesativando(false);
+    setConfirmandoDesativar(null);
+    if (erro) {
+      setErroDesativar(erro);
+      return;
+    }
+    onDesativado?.();
+  }
+
   // Edição dos dados cadastrais (botão "Editar" abaixo): substitui a ficha
   // inteira pelo formulário, mesmo padrão de PainelCliente.js. modoAdmin
   // torna tudo opcional exceto nome/whatsapp (ver AtualizarDadosCliente).
@@ -602,8 +643,24 @@ function DetalheCliente({
           >
             Editar
           </button>
+          <button
+            type="button"
+            onClick={abrirConfirmacaoDesativar}
+            disabled={desativando}
+            aria-label="Desativar cliente"
+            title="Desativar cliente"
+            className="rounded-lg bg-field px-3 py-1.5 text-sm font-medium text-primary ring-1 ring-border transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
         </div>
       </div>
+
+      {erroDesativar && (
+        <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 ring-1 ring-red-100">
+          {erroDesativar}
+        </p>
+      )}
 
       {progressoFidelidade && (
         <BadgeFidelidade
@@ -1134,6 +1191,56 @@ function DetalheCliente({
         </div>
       )}
 
+      {confirmandoDesativar !== null && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-desativar-cliente"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
+          onClick={() => !desativando && setConfirmandoDesativar(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="titulo-desativar-cliente" className="text-lg font-semibold text-heading">
+              Desativar cliente
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Desativar este cliente? Ele sai da lista, mas o histórico fica guardado e você
+              pode reativar quando quiser.
+            </p>
+            {confirmandoDesativar > 0 && (
+              <p className="mt-2 text-sm text-body">
+                Ele tem {confirmandoDesativar}{" "}
+                {confirmandoDesativar === 1 ? "agendamento futuro" : "agendamentos futuros"}.
+                Eles continuam na agenda, mas a etiqueta e o progresso de fidelidade deste
+                cliente ficam ocultos enquanto estiver desativado.
+              </p>
+            )}
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarDesativar}
+                disabled={desativando}
+                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {desativando ? "Desativando..." : "Desativar"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmandoDesativar(null)}
+                disabled={desativando}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ModalAlterarWhatsapp
         cliente={alterandoWhatsapp ? clienteAtual : null}
         estabelecimentoId={estabelecimentoId}
@@ -1201,6 +1308,17 @@ export default function GerenciarClientes({
   const [filtroEtiqueta, setFiltroEtiqueta] = useState(ETIQUETA_TODAS);
 
   const [selecionado, setSelecionado] = useState(null);
+
+  // Desativados: carregados na montagem (null = ainda carregando), em efeito
+  // próprio. "Ver desativados" só expande/oculta a seção. Aviso de erro local
+  // da aba, fora do setErro global.
+  const [verDesativados, setVerDesativados] = useState(false);
+  const [desativados, setDesativados] = useState(null);
+  const [falhouDesativados, setFalhouDesativados] = useState(false);
+  // Número da consulta mais recente: resposta de uma consulta velha é descartada.
+  const consultaDesativadosRef = useRef(0);
+  const [reativandoId, setReativandoId] = useState(null);
+  const [erroDesativados, setErroDesativados] = useState("");
 
   // Insumo da tag "Agendado"/"Sem agenda": telefones (dígitos) com algum
   // agendamento confirmado ainda no futuro. Uma consulta pra lista toda, não
@@ -1299,6 +1417,67 @@ export default function GerenciarClientes({
   function aoDesfazerUniao() {
     recarregarClientes();
     onUniaoDesfeita?.();
+  }
+
+  // Lê (ou relê) os desativados. Só a consulta mais recente aplica o
+  // resultado; a lista antiga continua na tela enquanto a nova não volta.
+  function carregarDesativados() {
+    const numero = ++consultaDesativadosRef.current;
+    return buscarClientesDesativados(estabelecimento.id).then(({ lista, erro }) => {
+      if (numero !== consultaDesativadosRef.current) return;
+      setFalhouDesativados(Boolean(erro));
+      if (erro) {
+        setErroDesativados("Não foi possível carregar os desativados. Tente de novo em instantes.");
+        setDesativados([]);
+        return;
+      }
+      setErroDesativados("");
+      setDesativados(lista);
+    });
+  }
+
+  // Carga inicial, independente da lista de ativos.
+  useEffect(() => {
+    const numero = ++consultaDesativadosRef.current;
+    buscarClientesDesativados(estabelecimento.id).then(({ lista, erro }) => {
+      if (numero !== consultaDesativadosRef.current) return;
+      setFalhouDesativados(Boolean(erro));
+      if (erro) {
+        setErroDesativados("Não foi possível carregar os desativados. Tente de novo em instantes.");
+        setDesativados([]);
+        return;
+      }
+      setDesativados(lista);
+    });
+    return () => {
+      // Troca de salão/unmount: invalida a consulta em voo.
+      consultaDesativadosRef.current += 1;
+    };
+  }, [estabelecimento.id]);
+
+  // Depois de desativar pela ficha: volta à lista e recarrega as duas listas
+  // (o cliente sai da principal e entra nos desativados).
+  function aoDesativarCliente() {
+    setSelecionado(null);
+    setVerDesativados(false);
+    recarregarClientes();
+    carregarDesativados();
+  }
+
+  function abrirDesativados() {
+    setVerDesativados(true);
+  }
+
+  async function reativarDesativado(cliente) {
+    setReativandoId(cliente.id);
+    setErroDesativados("");
+    const { erro } = await reativarCliente(cliente.id);
+    setReativandoId(null);
+    if (erro) {
+      setErroDesativados(erro);
+      return;
+    }
+    await Promise.all([recarregarClientes(), carregarDesativados()]);
   }
 
   // Carrega a lista de etiquetas do salão. Independente do carregamento dos
@@ -1524,13 +1703,27 @@ export default function GerenciarClientes({
     return { contagemPorEtiqueta: porEtiqueta, semEtiqueta: sem };
   }, [clientes]);
 
+  // Desativados: só a busca por nome vale (status e etiqueta não se aplicam).
+  const termoBusca = busca.trim().toLowerCase();
+  const desativadosFiltrados = useMemo(
+    () => (desativados ?? []).filter((c) => nomeCombinaBusca(c.nome, termoBusca)),
+    [desativados, termoBusca]
+  );
+  const totalDesativados = desativados?.length ?? 0;
+  const contadorDesativados =
+    desativados === null || falhouDesativados || totalDesativados === 0
+      ? null
+      : termoBusca
+        ? `${desativadosFiltrados.length} de ${totalDesativados}`
+        : String(totalDesativados);
+
   // Nome + situação de agenda + etiqueta, os três combinados em AND numa
   // passada só. Tudo client-side sobre a lista já carregada.
   const clientesFiltrados = useMemo(() => {
     const termo = busca.trim().toLowerCase();
 
     return clientes.filter((c) => {
-      if (termo && !c.nome?.toLowerCase().includes(termo)) return false;
+      if (!nomeCombinaBusca(c.nome, termo)) return false;
 
       if (filtroStatus !== "todos") {
         // Mesma chave do badge do card: dígitos do whatsapp contra o Set de
@@ -1603,6 +1796,7 @@ export default function GerenciarClientes({
         onAlterarAgendamento={onAlterarAgendamento}
         ultimaAlteracaoData={ultimaAlteracaoData}
         onUniaoDesfeita={aoDesfazerUniao}
+        onDesativado={aoDesativarCliente}
       />
     );
   }
@@ -1926,9 +2120,10 @@ export default function GerenciarClientes({
           </select>
         </div>
 
-        <p className="mt-3 flex items-center gap-1.5 text-xs text-body">
+        <div className="mt-3 flex items-center justify-between gap-3 text-xs text-body">
+        <p className="flex min-w-0 items-center gap-1.5">
           <UserRound aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-          <span>
+          <span className="truncate">
             {algumFiltroAtivo ? (
               <>
                 <b className="font-semibold text-heading">{clientesFiltrados.length}</b> de{" "}
@@ -1942,7 +2137,75 @@ export default function GerenciarClientes({
             )}
           </span>
         </p>
+        {!verDesativados && (
+          <button
+            type="button"
+            onClick={abrirDesativados}
+            className="shrink-0 text-xs text-body underline underline-offset-2 transition hover:text-heading"
+          >
+            Ver desativados{contadorDesativados ? ` · ${contadorDesativados}` : ""}
+          </button>
+        )}
+        </div>
       </div>
+
+      {verDesativados && (
+        <section className="mb-6 min-w-0 rounded-2xl border border-dashed border-border bg-border/20 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-medium text-heading">
+              {contadorDesativados ? `Desativados (${contadorDesativados})` : "Desativados"}
+            </h3>
+            <button
+              type="button"
+              onClick={() => {
+                setVerDesativados(false);
+                if (!falhouDesativados) setErroDesativados("");
+              }}
+              className="text-xs text-body underline underline-offset-2 transition hover:text-heading"
+            >
+              Ocultar
+            </button>
+          </div>
+          {erroDesativados && (
+            <p className="mb-2 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 ring-1 ring-red-100">
+              {erroDesativados}
+            </p>
+          )}
+          {desativados === null ? (
+            <p className="text-sm text-body">Carregando...</p>
+          ) : desativadosFiltrados.length === 0 ? (
+            !erroDesativados && (
+              <p className="rounded-lg bg-card px-4 py-6 text-center text-sm text-body shadow-sm ring-1 ring-border">
+                {totalDesativados === 0
+                  ? "Nenhum cliente desativado."
+                  : "Nenhum desativado com esse nome."}
+              </p>
+            )
+          ) : (
+            <ul className="space-y-3">
+              {desativadosFiltrados.map((c) => (
+                <li
+                  key={c.id}
+                  className="flex items-center justify-between gap-3 rounded-xl bg-card p-3 ring-1 ring-border"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-body">{c.nome}</p>
+                    <p className="mt-0.5 text-sm text-body">{c.whatsapp_original}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => reativarDesativado(c)}
+                    disabled={reativandoId !== null}
+                    className="shrink-0 rounded-lg bg-green-50 px-3 py-1.5 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {reativandoId === c.id ? "Reativando..." : "Reativar"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {clientesFiltrados.length === 0 ? (
         <p className="rounded-lg bg-card px-4 py-8 text-center text-sm text-body shadow-sm ring-1 ring-border">
