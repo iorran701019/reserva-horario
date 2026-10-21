@@ -253,6 +253,10 @@ export default function GerenciarServicos({
   // Seção retrátil "Serviços desativados", no final da aba — fechada por padrão.
   const [secaoDesativadosAberta, setSecaoDesativadosAberta] = useState(false);
 
+  // Categoria cuja linha "Ajustar foto" está expandida — só uma por vez,
+  // fechada por padrão.
+  const [fotoCategoriaAbertaId, setFotoCategoriaAbertaId] = useState(null);
+
   // Serviço "armado" para exclusão PERMANENTE (DELETE físico), disparado a
   // partir da seção de desativados — controla o modal de confirmação.
   const [servicoParaExcluirPermanente, setServicoParaExcluirPermanente] = useState(null);
@@ -3137,9 +3141,23 @@ export default function GerenciarServicos({
                             placeholder abaixo. Mesmo trio de sliders da
                             foto de perfil em ConfiguracoesSalao. */}
                         <div className="mb-4 border-b border-border pb-4">
-                          <span className="mb-3 block text-sm font-medium text-body">
-                            Foto da categoria
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFotoCategoriaAbertaId((atual) =>
+                                atual === categoria.id ? null : categoria.id
+                              )
+                            }
+                            aria-expanded={fotoCategoriaAbertaId === categoria.id}
+                            className="mb-3 flex w-full items-center justify-between gap-2 py-1 text-left"
+                          >
+                            <span className="text-sm font-medium text-body">
+                              Ajustar foto
+                            </span>
+                            <span aria-hidden="true" className="shrink-0 text-xs text-muted">
+                              {fotoCategoriaAbertaId === categoria.id ? "▲" : "▼"}
+                            </span>
+                          </button>
 
                           {categoria.foto_url ? (
                             <FotoPerfilCircular
@@ -3162,8 +3180,10 @@ export default function GerenciarServicos({
                             </div>
                           )}
 
+                          {fotoCategoriaAbertaId === categoria.id && (
+                          <>
                           {categoria.foto_url && (
-                            <div className="-mt-4 mb-6 flex justify-center">
+                            <div className="mb-4 flex justify-center">
                               <button
                                 type="button"
                                 onClick={() => removerFotoCategoria(categoria)}
@@ -3295,6 +3315,8 @@ export default function GerenciarServicos({
                               />
                             </div>
                           </div>
+                          </>
+                          )}
 
                           {statusFotoCategoria === "salvando" && (
                             <p className="mt-2 text-xs text-muted">Salvando…</p>
