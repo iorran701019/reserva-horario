@@ -288,3 +288,98 @@ describe("ajuste_duracao_min das perguntas (aplicar_duracao_na_agenda)", () => {
     expect(await vagas(comAjuste)).toContain("09:00");
   });
 });
+
+// 8. Liberação com acréscimo de domingo (ausencias.acrescimo_domingo).
+describe("liberação com acrescimo_domingo", () => {
+  const PROF2 = 8;
+  // 21:00 fica fora da janela 08:00-20:00: só existe se a liberação abrir.
+  const lib = (extra = {}) => ({
+    profissional_id: PROF,
+    tipo: "periodo",
+    tipo_registro: "liberacao",
+    dia_semana: null,
+    data_inicio: SEGUNDA,
+    data_fim: SEGUNDA,
+    dia_inteiro: false,
+    hora_inicio: "21:00:00",
+    hora_fim: null,
+    servico_id: null,
+    acrescimo_domingo: false,
+    ...extra,
+  });
+  const bloqueio = (extra = {}) =>
+    lib({ tipo_registro: "ausencia", hora_fim: "21:30:00", ...extra });
+
+  async function mapa() {
+    return calcularVagasPorHorario({ estabelecimentoId: 1, servicoId: 10, data: SEGUNDA });
+  }
+  const acrescimo = (m) =>
+    Object.fromEntries([...m.acrescimoPorHorario].map(([h, ids]) => [h, [...ids]]));
+
+  beforeEach(() => montar());
+
+  it("abre o horário e ele aparece no mapa de acréscimo", async () => {
+    banco.tabelas.ausencias = [lib({ acrescimo_domingo: true })];
+    const m = await mapa();
+    expect(m["21:00"]).toEqual([PROF]);
+    expect(acrescimo(m)).toEqual({ "21:00": [PROF] });
+  });
+
+  it("sem acréscimo abre o horário e não aparece no mapa de acréscimo", async () => {
+    banco.tabelas.ausencias = [lib()];
+    const m = await mapa();
+    expect(m["21:00"]).toEqual([PROF]);
+    expect(acrescimo(m)).toEqual({});
+  });
+
+  it("dois profissionais no mesmo horário: só o da liberação com acréscimo entra", async () => {
+    banco.tabelas.servico_profissional.push({
+      profissional_id: PROF2,
+      profissionais: { ativo: true, estabelecimento_id: 1, modo_horario: "janela" },
+    });
+    banco.tabelas.horarios_trabalho.push({
+      profissional_id: PROF2,
+      dia_semana: 1,
+      almoco_inicio: null,
+      almoco_fim: null,
+      hora_inicio: "08:00:00",
+      hora_fim: "20:00:00",
+    });
+    banco.tabelas.ausencias = [
+      lib({ acrescimo_domingo: true }),
+      lib({ profissional_id: PROF2 }),
+    ];
+    const m = await mapa();
+    expect([...m["21:00"]].sort()).toEqual([PROF, PROF2]);
+    expect(acrescimo(m)).toEqual({ "21:00": [PROF] });
+  });
+
+  it("horário que já existe na agenda normal não tem acréscimo", async () => {
+    banco.tabelas.ausencias = [lib({ hora_inicio: "10:00:00", acrescimo_domingo: true })];
+    const m = await mapa();
+    expect(m["10:00"]).toEqual([PROF]);
+    expect(acrescimo(m)).toEqual({});
+  });
+
+  it("liberação com e sem acréscimo no mesmo horário do mesmo profissional: sem acréscimo", async () => {
+    banco.tabelas.ausencias = [lib({ acrescimo_domingo: true }), lib(), lib({ acrescimo_domingo: null })];
+    const m = await mapa();
+    expect(m["21:00"]).toEqual([PROF]);
+    expect(acrescimo(m)).toEqual({});
+  });
+
+  it("bloqueio pontual remove o horário dos dois conjuntos", async () => {
+    banco.tabelas.ausencias = [lib({ acrescimo_domingo: true }), lib({ hora_inicio: "21:15:00" }), bloqueio()];
+    const m = await mapa();
+    expect(m["21:00"]).toBeUndefined();
+    expect(m["21:15"]).toBeUndefined();
+    expect(acrescimo(m)).toEqual({});
+    expect(m.acrescimoPorHorario.has("21:00")).toBe(false);
+  });
+
+  it("o mapa de acréscimo não é enumerável: o formato do mapa não muda", async () => {
+    banco.tabelas.ausencias = [lib({ acrescimo_domingo: true })];
+    const m = await mapa();
+    expect(Object.keys(m)).not.toContain("acrescimoPorHorario");
+  });
+});
