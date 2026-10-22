@@ -8,6 +8,7 @@ import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
 import NavegacaoMes from "@/components/NavegacaoMes";
 import { mensagemFalhaSalvar, mensagemFalhaDelete } from "@/lib/erroSalvar";
 import { gerarSlotsDaJanela, DURACAO_MINUTOS } from "@/lib/horarios";
+import { ehDomingoISO, diasDoPeriodoDeLiberacao } from "@/lib/acrescimoDomingo";
 
 // Aba "Profissionais" do /admin: CRUD dos profissionais do salão (tabela
 // `profissionais`), sempre particionado por estabelecimento_id (o consumidor já
@@ -764,7 +765,33 @@ const OPCOES_LIBERACAO = [
     rotulo: "Vários dias num período",
     exemplo: "horários extras em dezembro",
   },
+  {
+    valor: "domingo",
+    rotulo: "Domingo com acréscimo",
+    exemplo: "abrir domingos cobrando adicional",
+  },
 ];
+
+// Segundo menu do tipo "Domingo com acréscimo". Os valores são os `modo` reais
+// do formulário (o primeiro menu fica em "domingo" enquanto o modo ainda é o
+// "domingo" pendente, sem submodo escolhido):
+//   domingo_um       – uma data (tem que cair em domingo), grade de horários.
+//   domingo_periodo  – intervalo de/até, só os domingos dele, grade de horários.
+// Ambos gravam as linhas de liberação comuns com acrescimo_domingo: true.
+const OPCOES_DOMINGO = [
+  { valor: "domingo_um", rotulo: "Um domingo" },
+  { valor: "domingo_periodo", rotulo: "Vários domingos num período" },
+  { valor: "domingo_todos", rotulo: "Todos os domingos" },
+];
+
+// domingo_todos: sem datas — linhas recorrentes (tipo 'recorrente', dia_semana
+// 0) marcadas com acrescimo_domingo, uma por horário.
+const ehModoDomingo = (modo) =>
+  modo === "domingo_um" || modo === "domingo_periodo" || modo === "domingo_todos";
+
+// Liberação recorrente de domingo com acréscimo (modo "Todos os domingos").
+const ehDomingoTodos = (a) =>
+  a.tipo === "recorrente" && a.tipo_registro === "liberacao" && a.acrescimo_domingo === true;
 
 // Teto de linhas por lote de "Vários dias num período" — cada combinação
 // (data × horário) é uma linha própria (ver coletarLinhas), e um intervalo
@@ -1882,6 +1909,8 @@ function SecaoAusencias({
   // porque aqui excluir FECHA horários liberados, não "desbloqueia" nada.
   const [confirmarExclusaoLiberacaoPeriodo, setConfirmarExclusaoLiberacaoPeriodo] =
     useState(null);
+  // Linhas de "Todos os domingos" pendentes de confirmação de exclusão.
+  const [confirmarExclusaoDomingoTodos, setConfirmarExclusaoDomingoTodos] = useState(null);
 
   // Exclusividade de serviço pendente de confirmação de exclusão (ver
   // agruparExclusividades) — apaga todas as linhas do grupo pelos ids.
@@ -1911,7 +1940,7 @@ function SecaoAusencias({
       const { data, error } = await supabase
         .from("ausencias")
         .select(
-          "id, tipo, tipo_registro, dia_semana, data_inicio, data_fim, dia_inteiro, hora_inicio, hora_fim, motivo, grupo_id, servico_id"
+          "id, tipo, tipo_registro, dia_semana, data_inicio, data_fim, dia_inteiro, hora_inicio, hora_fim, motivo, grupo_id, servico_id, acrescimo_domingo"
         )
         .eq("profissional_id", profissionalId);
 
@@ -2015,6 +2044,9 @@ function SecaoAusencias({
   // topo do formulário. Liberação precisa de um horário específico — não faz
   // sentido em "dia inteiro" (não haveria horário pra liberar).
   function coletarLinhas() {
+    if (modo === "domingo") {
+      return { erro: "Escolha se é um domingo ou vários domingos num período." };
+    }
     if (!modo) {
       return {
         erro:
@@ -2048,7 +2080,7 @@ function SecaoAusencias({
       return { linhas };
     }
 
-    if (modo === "umdia") {
+    if (modo === "umdia" || modo === "domingo_um") {
       if (!diaData) return { erro: "Informe a data." };
 
       // Liberação: cada marcador selecionado (+ "outro horário") vira UMA
@@ -2074,6 +2106,9 @@ function SecaoAusencias({
         if (horarios.length === 0) {
           return { erro: "Selecione ao menos um horário." };
         }
+        if (modo === "domingo_um" && !ehDomingoISO(diaData)) {
+          return { erro: "Escolha uma data que caia em domingo." };
+        }
         return {
           linhas: horarios.map((hora_inicio) => ({
             profissional_id: profissionalId,
@@ -2086,6 +2121,9 @@ function SecaoAusencias({
             hora_inicio,
             hora_fim: somarUmaHora(hora_inicio),
             motivo: diaMotivo.trim() || null,
+            // Só "Um domingo" marca; nos demais a chave é omitida (default
+            // false do banco).
+            ...(modo === "domingo_um" ? { acrescimo_domingo: true } : {}),
           })),
         };
       }
@@ -2124,14 +2162,42 @@ function SecaoAusencias({
     // várias liberações de uma vez; o motor de disponibilidade nunca vê
     // "período", só as linhas de um dia já expandidas. Só existe no fluxo
     // Liberar (tipoRegistro já é sempre "liberacao" aqui).
-    if (modo === "liberacao_periodo") {
+    // "Todos os domingos": liberação recorrente (dia_semana 0), sem datas — o
+    // banco exige data_inicio/data_fim nulos em tipo recorrente. Sem grupo_id.
+    if (modo === "domingo_todos") {
+      if (libPerHorariosEfetivos.length === 0) {
+        return { erro: "Selecione ao menos um horário." };
+      }
+      const motivo = libPerMotivo.trim() || null;
+      return {
+        linhas: libPerHorariosEfetivos.map((hora_inicio) => ({
+          profissional_id: profissionalId,
+          estabelecimento_id: estabelecimentoId,
+          tipo: "recorrente",
+          tipo_registro: "liberacao",
+          dia_semana: 0,
+          dia_inteiro: false,
+          data_inicio: null,
+          data_fim: null,
+          hora_inicio,
+          hora_fim: somarUmaHora(hora_inicio),
+          motivo,
+          acrescimo_domingo: true,
+        })),
+      };
+    }
+
+    // "domingo_periodo" é o mesmo formato, restrito aos domingos do intervalo
+    // e com acrescimo_domingo: true.
+    if (modo === "liberacao_periodo" || modo === "domingo_periodo") {
+      const soDomingos = modo === "domingo_periodo";
       if (!libPerInicio || !libPerFim) {
         return { erro: "Informe as datas de início e fim do período." };
       }
       if (libPerFim < libPerInicio) {
         return { erro: "A data de fim deve ser igual ou depois do início." };
       }
-      if (libPerDias.length === 0) {
+      if (!soDomingos && libPerDias.length === 0) {
         return { erro: "Selecione ao menos um dia da semana." };
       }
       const horarios = [
@@ -2147,8 +2213,11 @@ function SecaoAusencias({
       const datas = datasNoPeriodoPorDiaSemana(
         libPerInicio,
         libPerFim,
-        new Set(libPerDias)
+        diasDoPeriodoDeLiberacao(soDomingos, libPerDias)
       );
+      if (datas.length === 0 && soDomingos) {
+        return { erro: "Não há domingos nesse período." };
+      }
       if (datas.length === 0) {
         return {
           erro: "Nenhuma data do período (a partir de hoje) cai nos dias da semana escolhidos.",
@@ -2181,6 +2250,7 @@ function SecaoAusencias({
             hora_fim: somarUmaHora(hora_inicio),
             motivo,
             grupo_id: grupoId,
+            ...(soDomingos ? { acrescimo_domingo: true } : {}),
           }))
         ),
       };
@@ -2345,8 +2415,9 @@ function SecaoAusencias({
       // sumir da vista se a data mudou de mês. Só vale pros cards paginados
       // por mês: Recorrentes e Liberações por período ficam fora da paginação.
       const primeiraData = troca.inseridas.map((l) => l.data_inicio).sort()[0];
-      const paginadoPorMes =
-        edicao.tipo !== "recorrente" && edicao.tipo !== "liberacaoPeriodo";
+      const paginadoPorMes = !["recorrente", "liberacaoPeriodo", "domingoDia", "domingoPeriodo", "domingoTodos"].includes(
+        edicao.tipo
+      );
       if (paginadoPorMes && primeiraData) navMes.irParaMes(chaveMes(primeiraData));
       return;
     }
@@ -2524,14 +2595,16 @@ function SecaoAusencias({
   }
 
   // B. Dia único com liberação: cuida de TODAS as liberações daquela data
-  // (periodo, sem grupo_id, data >= hoje).
-  function iniciarEdicaoLiberacoesDia(grupo) {
+  // (periodo, sem grupo_id, data >= hoje). Com `domingo`, cuida só das linhas
+  // MARCADAS (card "Domingos com acréscimo"); sem, só das SEM marca.
+  function iniciarEdicaoLiberacoesDia(grupo, domingo = false) {
     const linhas = grupo.itens.filter(
       (a) =>
         a.tipo === "periodo" &&
         a.tipo_registro === "liberacao" &&
         !a.grupo_id &&
-        a.data_inicio >= hoje
+        a.data_inicio >= hoje &&
+        (a.acrescimo_domingo === true) === domingo
     );
     if (linhas.length === 0) return;
     const horarios = [...new Set(linhas.map((a) => paraHHMM(a.hora_inicio)))].sort();
@@ -2547,13 +2620,13 @@ function SecaoAusencias({
     setFormErro("");
     setConfirmarBloqueio(null);
     setTipoRegistro("liberacao");
-    setModo("umdia");
+    setModo(domingo ? "domingo_um" : "umdia");
     setDiaData(grupo.data);
     setDiaHorarios(daGrade);
     setDiaOutroHorario(foraDaGrade[0] ?? "");
     setDiaMotivo(linhas.find((a) => a.motivo)?.motivo ?? "");
     setEdicao({
-      tipo: "liberacaoDia",
+      tipo: domingo ? "domingoDia" : "liberacaoDia",
       ids: linhas.map((a) => a.id),
       grupoId: null,
       rotulo: `Editando liberações de ${formatarDataBR(grupo.data)}`,
@@ -2564,8 +2637,12 @@ function SecaoAusencias({
 
   // C. Liberação por período (card por grupo_id): só as linhas com data >=
   // hoje entram na edição; as passadas ficam intactas, no mesmo grupo_id.
-  function iniciarEdicaoLiberacaoPeriodo(grupo) {
-    const futuras = grupo.itens.filter((a) => a.data_inicio >= hoje);
+  // Com `domingo`, só as linhas marcadas; sem, só as sem marca (o grupo_id
+  // pode, em tese, ter as duas naturezas).
+  function iniciarEdicaoLiberacaoPeriodo(grupo, domingo = false) {
+    const futuras = grupo.itens.filter(
+      (a) => a.data_inicio >= hoje && (a.acrescimo_domingo === true) === domingo
+    );
     if (futuras.length === 0) return;
     const datas = [...new Set(futuras.map((a) => a.data_inicio))].sort();
     const horarios = [...new Set(futuras.map((a) => paraHHMM(a.hora_inicio)))].sort();
@@ -2581,7 +2658,7 @@ function SecaoAusencias({
     setFormErro("");
     setConfirmarBloqueio(null);
     setTipoRegistro("liberacao");
-    setModo("liberacao_periodo");
+    setModo(domingo ? "domingo_periodo" : "liberacao_periodo");
     setLibPerInicio(datas[0]);
     setLibPerFim(grupo.dataFim);
     setLibPerDias([...new Set(datas.map(diaSemanaDeISO))].sort((a, b) => a - b));
@@ -2589,13 +2666,81 @@ function SecaoAusencias({
     setLibPerOutroHorario(foraDaGrade[0] ?? "");
     setLibPerMotivo(grupo.motivo ?? "");
     setEdicao({
-      tipo: "liberacaoPeriodo",
+      tipo: domingo ? "domingoPeriodo" : "liberacaoPeriodo",
       ids: futuras.map((a) => a.id),
       grupoId: grupo.grupoId,
       rotulo: `Editando liberações de ${formatarDataBR(datas[0])} a ${formatarDataBR(grupo.dataFim)}`,
       aviso: "As datas que já passaram não são alteradas.",
     });
     rolarAoFormulario();
+  }
+
+  // C2. "Todos os domingos" (liberações recorrentes marcadas): a edição cuida
+  // de TODAS as linhas marcadas do profissional; o salvar troca por ids.
+  function iniciarEdicaoDomingoTodos(itens) {
+    const horarios = [...new Set(itens.map((a) => paraHHMM(a.hora_inicio)))].sort();
+    const { daGrade, foraDaGrade } = separarHorariosGrade(horarios);
+    if (foraDaGrade.length > 1) {
+      setErro(
+        `Não foi possível editar: há ${foraDaGrade.length} horários fora da grade (${foraDaGrade.join(", ")}) e o formulário aceita só um. Exclua e cadastre de novo.`
+      );
+      return;
+    }
+    setErro("");
+    limparCampos();
+    setFormErro("");
+    setConfirmarBloqueio(null);
+    setTipoRegistro("liberacao");
+    setModo("domingo_todos");
+    setLibPerHorarios(daGrade);
+    setLibPerOutroHorario(foraDaGrade[0] ?? "");
+    setLibPerMotivo(itens.find((a) => a.motivo)?.motivo ?? "");
+    setEdicao({
+      tipo: "domingoTodos",
+      ids: itens.map((a) => a.id),
+      grupoId: null,
+      rotulo: "Editando liberação de todos os domingos",
+      aviso: null,
+    });
+    rolarAoFormulario();
+  }
+
+  // Exclui as linhas de "Todos os domingos" (por id) — só após confirmação.
+  async function excluirDomingoTodos(itens) {
+    setErro("");
+    const { data: linhas, error } = await supabase
+      .from("ausencias")
+      .delete()
+      .in(
+        "id",
+        itens.map((a) => a.id)
+      )
+      .select("id");
+    if (error || !linhas?.length) {
+      setErro(`Não foi possível excluir a liberação dos domingos: ${mensagemFalhaSalvar(error)}`);
+      return;
+    }
+    const idsExcluidos = new Set(linhas.map((l) => l.id));
+    setLista((atual) => atual.filter((a) => !idsExcluidos.has(a.id)));
+  }
+
+  async function confirmarExclusaoDomingoTodosConfirmada() {
+    if (!confirmarExclusaoDomingoTodos) return;
+    const itens = confirmarExclusaoDomingoTodos;
+    setConfirmarExclusaoDomingoTodos(null);
+    await excluirDomingoTodos(itens);
+  }
+
+  // Troca de modo (os dois menus): ao entrar em "Um domingo" com uma data que
+  // não é domingo (deixada por outro modo), zera data e horários.
+  function trocarModo(novo) {
+    if (novo === "domingo_um" && diaData && !ehDomingoISO(diaData)) {
+      setDiaData("");
+      setDiaHorarios([]);
+      setDiaOutroHorario("");
+    }
+    setModo(novo);
+    setFormErro("");
   }
 
   // D. Restrição de serviço (card por grupo_id, todas as linhas): monta os
@@ -2801,16 +2946,22 @@ function SecaoAusencias({
   const libPerDatas = datasNoPeriodoPorDiaSemana(
     libPerInicio,
     libPerFim,
-    new Set(libPerDias)
+    diasDoPeriodoDeLiberacao(modo === "domingo_periodo", libPerDias)
   );
   const libPerTotalLinhas = libPerDatas.length * libPerHorariosEfetivos.length;
   // null quando dá pra salvar; senão, a frase curta do que falta (ver OPÇÃO
   // "Vários dias num período" no JSX, que desabilita o botão com isto).
   const libPerFaltando =
-    !libPerInicio || !libPerFim
+    modo === "domingo_todos"
+      ? libPerHorariosEfetivos.length === 0
+        ? "Selecione ao menos um horário."
+        : null
+      : !libPerInicio || !libPerFim
       ? "Informe o período."
       : libPerDatas.length === 0
-        ? "Nenhum dia do período cai nos dias da semana marcados."
+        ? modo === "domingo_periodo"
+          ? "Não há domingos nesse período."
+          : "Nenhum dia do período cai nos dias da semana marcados."
         : libPerHorariosEfetivos.length === 0
           ? "Selecione ao menos um horário."
           : null;
@@ -2831,6 +2982,27 @@ function SecaoAusencias({
   const statusGrade = statusGradeDoDia(listaForm, diaData, diaSemanaEscolhido);
   const hoje = hojeISOLocal();
 
+  // Próximos 26 domingos a partir de hoje (inclusive) pro modo "Um domingo".
+  // Na edição, um domingo já cadastrado que ficou no passado entra na lista
+  // pra continuar aparecendo selecionado.
+  const domingosOpcoes = [];
+  {
+    const [a, m, d] = hoje.split("-").map(Number);
+    const base = new Date(a, m - 1, d);
+    base.setDate(base.getDate() + ((7 - base.getDay()) % 7));
+    for (let i = 0; i < 26; i++) {
+      domingosOpcoes.push(paraISOLocal(new Date(base.getFullYear(), base.getMonth(), base.getDate() + i * 7)));
+    }
+    if (
+      modo === "domingo_um" &&
+      edicao &&
+      ehDomingoISO(diaData) &&
+      !domingosOpcoes.includes(diaData)
+    ) {
+      domingosOpcoes.unshift(diaData);
+    }
+  }
+
   // Exclusividades de serviço ficam FORA dos grupos de bloqueio/liberação
   // (uma permanente também é tipo='recorrente') — card próprio abaixo.
   const exclusividades = lista.filter(ehExclusividade);
@@ -2838,8 +3010,13 @@ function SecaoAusencias({
   const gruposExclusividade = agruparExclusividades(exclusividades);
   const servicoPorId = new Map((servicosSalao ?? []).map((s) => [String(s.id), s]));
 
+  // "Todos os domingos" (recorrente marcada) tem card próprio em "Domingos com
+  // acréscimo" e fica fora de Recorrentes.
+  const itensDomingoTodos = listaExcecoes
+    .filter(ehDomingoTodos)
+    .sort((a, b) => (a.hora_inicio < b.hora_inicio ? -1 : a.hora_inicio > b.hora_inicio ? 1 : 0));
   const gruposRec = agruparRecorrentes(
-    listaExcecoes.filter((a) => a.tipo === "recorrente")
+    listaExcecoes.filter((a) => a.tipo === "recorrente" && !ehDomingoTodos(a))
   );
   const periodos = listaExcecoes
     .filter((a) => a.tipo === "periodo")
@@ -2853,11 +3030,15 @@ function SecaoAusencias({
   // mostra faixa de datas + dias da semana — ver gruposLiberacaoPeriodo mais
   // abaixo). Splitadas por tipo_registro porque são a única marca que as
   // distingue (mesma tabela, mesma coluna grupo_id).
-  const periodosIndividuais = periodos.filter((a) => !a.grupo_id);
-  const periodosAvulsos = periodos.filter(
+  // Linhas marcadas com acrescimo_domingo têm card próprio ("Domingos com
+  // acréscimo") e NUNCA entram nas listas normais abaixo.
+  const periodosDomingo = periodos.filter((a) => a.acrescimo_domingo === true);
+  const periodosSemAcrescimo = periodos.filter((a) => a.acrescimo_domingo !== true);
+  const periodosIndividuais = periodosSemAcrescimo.filter((a) => !a.grupo_id);
+  const periodosAvulsos = periodosSemAcrescimo.filter(
     (a) => a.grupo_id && a.tipo_registro !== "liberacao"
   );
-  const periodosLiberacaoPeriodo = periodos.filter(
+  const periodosLiberacaoPeriodo = periodosSemAcrescimo.filter(
     (a) => a.grupo_id && a.tipo_registro === "liberacao"
   );
   const { grupos: gruposPeriodo, multiDia } = agruparPeriodosPorDia(periodosIndividuais);
@@ -2873,8 +3054,23 @@ function SecaoAusencias({
       diasSemana: [...new Set(grupo.datas.map(diaSemanaDeISO))].sort((a, b) => a - b),
     })
   );
+  // Card "Domingos com acréscimo": dia único agrupado por data e período
+  // agrupado por grupo_id, só com as linhas marcadas.
+  const { grupos: gruposDomingoDia } = agruparPeriodosPorDia(
+    periodosDomingo.filter((a) => !a.grupo_id)
+  );
+  const gruposDomingoPeriodo = agruparPorGrupoId(
+    periodosDomingo.filter((a) => a.grupo_id)
+  ).map((grupo) => ({
+    ...grupo,
+    dataInicio: grupo.datas[0],
+    dataFim: grupo.datas[grupo.datas.length - 1],
+  }));
   const vazio =
-    gruposRec.length === 0 && periodos.length === 0 && gruposExclusividade.length === 0;
+    gruposRec.length === 0 &&
+    periodos.length === 0 &&
+    gruposExclusividade.length === 0 &&
+    itensDomingoTodos.length === 0;
 
   // Navegação mensal da lista (ver lib/useNavegacaoMes) — cobre só períodos
   // com data (dia único, vários dias, datas avulsas); recorrentes ficam de
@@ -2985,12 +3181,10 @@ function SecaoAusencias({
         <label className="mt-3 block text-xs font-medium text-body">
           {tipoRegistro === "liberacao" ? "Tipo de liberação" : "Tipo de ausência"}
           <select
-            value={modo}
+            value={ehModoDomingo(modo) ? "domingo" : modo}
             disabled={Boolean(edicao)}
-            onChange={(e) => {
-              setModo(e.target.value);
-              setFormErro("");
-            }}
+            // Escolher "domingo" deixa o modo pendente até o segundo menu.
+            onChange={(e) => trocarModo(e.target.value)}
             className={`mt-1 block w-full ${classeCampo} ${
               modo === "" ? "border-primary ring-2 ring-primary/30" : ""
             }`}
@@ -3007,6 +3201,31 @@ function SecaoAusencias({
             ))}
           </select>
         </label>
+
+        {/* Segundo menu do tipo "Domingo com acréscimo": um domingo ou vários
+            domingos num período. Largura total, empilhado sob o primeiro. */}
+        {tipoRegistro === "liberacao" && (modo === "domingo" || ehModoDomingo(modo)) && (
+          <label className="mt-3 block text-xs font-medium text-body">
+            Quantos domingos
+            <select
+              value={modo === "domingo" ? "" : modo}
+              disabled={Boolean(edicao)}
+              onChange={(e) => trocarModo(e.target.value)}
+              className={`mt-1 block w-full ${classeCampo} ${
+                modo === "domingo" ? "border-primary ring-2 ring-primary/30" : ""
+              }`}
+            >
+              <option value="" disabled>
+                Toque para escolher
+              </option>
+              {OPCOES_DOMINGO.map((o) => (
+                <option key={o.valor} value={o.valor}>
+                  {o.rotulo}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         {/* OPÇÃO 1 — Ausência fixa (recorrente). */}
         {modo === "recorrente" && (
@@ -3069,25 +3288,44 @@ function SecaoAusencias({
         )}
 
         {/* OPÇÃO 2 — Um dia específico (periodo, data única). */}
-        {modo === "umdia" && (
+        {(modo === "umdia" || modo === "domingo_um") && (
           <>
             <label className="mt-3 block text-xs font-medium text-body">
               Data
-              <input
-                type="date"
-                aria-label="Data da ausência"
-                min={hoje}
-                value={diaData}
-                onChange={(e) => {
+              {(() => {
+                const aoMudarData = (e) => {
                   setDiaData(e.target.value);
                   // Muda o dia da semana → o conjunto de marcadores "normais"
                   // muda junto; zera a seleção pra não deixar horário marcado
                   // que pertencia à data anterior.
                   setDiaHorarios([]);
                   setDiaOutroHorario("");
-                }}
-                className={`mt-1 block ${classeCampo}`}
-              />
+                };
+                return modo === "domingo_um" ? (
+                  <select
+                    aria-label="Data da ausência"
+                    value={diaData}
+                    onChange={aoMudarData}
+                    className={`mt-1 block ${classeCampo}`}
+                  >
+                    <option value="">Selecione um domingo</option>
+                    {domingosOpcoes.map((iso) => (
+                      <option key={iso} value={iso}>
+                        {formatarDataBR(iso)}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="date"
+                    aria-label="Data da ausência"
+                    min={hoje}
+                    value={diaData}
+                    onChange={aoMudarData}
+                    className={`mt-1 block ${classeCampo}`}
+                  />
+                );
+              })()}
             </label>
 
             {tipoRegistro === "ausencia" ? (
@@ -3231,8 +3469,12 @@ function SecaoAusencias({
         {/* OPÇÃO — Vários dias num período (liberacao_periodo): intervalo de
             datas × dias da semana × horários, expandido em liberações de um
             dia por coletarLinhas. Só existe no fluxo Liberar. */}
-        {modo === "liberacao_periodo" && (
+        {(modo === "liberacao_periodo" ||
+          modo === "domingo_periodo" ||
+          modo === "domingo_todos") && (
           <>
+            {modo !== "domingo_todos" && (
+              <>
             <div className="mt-3 flex flex-wrap items-end gap-2">
               <label className="text-xs font-medium text-body">
                 De
@@ -3264,7 +3506,10 @@ function SecaoAusencias({
                 setLibPerFim(fim);
               }}
             />
+              </>
+            )}
 
+            {modo === "liberacao_periodo" && (
             <div className="mt-3">
               <span className="block text-xs font-medium text-body">
                 Dias da semana
@@ -3292,6 +3537,7 @@ function SecaoAusencias({
                 })}
               </div>
             </div>
+            )}
 
             <div className="mt-3">
               <span className="block text-xs font-medium text-body">
@@ -3341,8 +3587,10 @@ function SecaoAusencias({
               />
             </label>
 
-            <p className="mt-3 text-xs text-muted">
-              {libPerFaltando
+            <p className="mt-3 w-full text-xs text-muted">
+              {modo === "domingo_todos"
+                ? "Abre estes horários em todos os domingos dos meses que estiverem abertos na janela de agendamento."
+                : libPerFaltando
                 ? libPerFaltando
                 : `Isso abre ${libPerTotalLinhas} horário${
                     libPerTotalLinhas === 1 ? "" : "s"
@@ -3509,11 +3757,17 @@ function SecaoAusencias({
           </p>
         )}
 
-        {modo !== "" && (
+        {modo !== "" && modo !== "domingo" && (
           <button
             type="button"
             onClick={salvar}
-            disabled={salvando || (modo === "liberacao_periodo" && Boolean(libPerFaltando))}
+            disabled={
+              salvando ||
+              ((modo === "liberacao_periodo" ||
+                modo === "domingo_periodo" ||
+                modo === "domingo_todos") &&
+                Boolean(libPerFaltando))
+            }
             className={`mt-3 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
               tipoRegistro === "liberacao"
                 ? "bg-green-600 text-white hover:bg-green-700"
@@ -3932,6 +4186,136 @@ function SecaoAusencias({
           ))}
             </>
           )}
+
+          {/* Card próprio "Domingos com acréscimo": só linhas marcadas com
+              acrescimo_domingo, fora da paginação por mês. Dia único agrupado
+              por data (Editar no card, Excluir por horário) e período
+              agrupado por grupo_id (Editar/Excluir do grupo). */}
+          {(gruposDomingoDia.length > 0 ||
+            gruposDomingoPeriodo.length > 0 ||
+            itensDomingoTodos.length > 0) && (
+            <div className="space-y-3 rounded-xl bg-surface p-3 ring-1 ring-border">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                Domingos com acréscimo
+              </p>
+              {itensDomingoTodos.length > 0 && (
+                <div className="flex items-start justify-between gap-3 rounded-xl border-l-4 border-l-green-500 bg-card p-3 ring-1 ring-border">
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-heading">
+                      <SeloTipoRegistro tipoRegistro="liberacao" />
+                      Todo domingo
+                    </p>
+                    <p className="mt-1 text-xs text-body">
+                      {[...new Set(itensDomingoTodos.map((a) => paraHHMM(a.hora_inicio)))].join(", ")}
+                    </p>
+                    {itensDomingoTodos.find((a) => a.motivo) && (
+                      <p className="mt-0.5 text-xs text-muted">
+                        {itensDomingoTodos.find((a) => a.motivo).motivo}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => iniciarEdicaoDomingoTodos(itensDomingoTodos)}
+                      className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmarExclusaoDomingoTodos(itensDomingoTodos)}
+                      className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                    >
+                      Excluir
+                    </button>
+                  </div>
+                </div>
+              )}
+              {gruposDomingoDia.map((grupo) => (
+                <div
+                  key={grupo.data}
+                  className="rounded-xl border-l-4 border-l-green-500 bg-card p-3 ring-1 ring-border"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium text-heading">
+                      {formatarDataBR(grupo.data)}
+                    </p>
+                    {grupo.data >= hoje && (
+                      <button
+                        type="button"
+                        onClick={() => iniciarEdicaoLiberacoesDia(grupo, true)}
+                        className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                      >
+                        Editar liberações
+                      </button>
+                    )}
+                  </div>
+                  <ul className="mt-2 space-y-1.5">
+                    {grupo.itens.map((a) => (
+                      <li
+                        key={a.id}
+                        className="flex items-center justify-between gap-3"
+                      >
+                        <span className="flex min-w-0 items-center gap-2 text-sm text-body">
+                          <SeloTipoRegistro tipoRegistro={a.tipo_registro} />
+                          {faixaHora(a.hora_inicio, a.hora_fim)}
+                          {a.motivo && (
+                            <span className="text-muted"> · {a.motivo}</span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => excluir(a.id)}
+                          className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                        >
+                          Excluir
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {gruposDomingoPeriodo.map((grupo) => (
+                <div
+                  key={grupo.grupoId}
+                  className="flex items-start justify-between gap-3 rounded-xl border-l-4 border-l-green-500 bg-card p-3 ring-1 ring-border"
+                >
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-heading">
+                      <SeloTipoRegistro tipoRegistro="liberacao" />
+                      De {formatarDataBR(grupo.dataInicio)} a{" "}
+                      {formatarDataBR(grupo.dataFim)}
+                    </p>
+                    <p className="mt-1 text-xs text-body">
+                      Domingos · {grupo.horarios.join(", ")}
+                    </p>
+                    {grupo.motivo && (
+                      <p className="mt-0.5 text-xs text-muted">{grupo.motivo}</p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 gap-1.5">
+                    {grupo.datas.some((d) => d >= hoje) && (
+                      <button
+                        type="button"
+                        onClick={() => iniciarEdicaoLiberacaoPeriodo(grupo, true)}
+                        className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-body ring-1 ring-border transition hover:bg-surface"
+                      >
+                        Editar
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setConfirmarExclusaoLiberacaoPeriodo(grupo)}
+                      className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition hover:bg-red-50"
+                    >
+                      Excluir
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -4028,6 +4412,51 @@ function SecaoAusencias({
               <button
                 type="button"
                 onClick={() => setConfirmarExclusaoLiberacaoPeriodo(null)}
+                className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmação: exclusão da liberação de "Todos os domingos" (todas as
+          linhas marcadas, por id — ver excluirDomingoTodos). */}
+      {confirmarExclusaoDomingoTodos && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-excluir-domingo-todos"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 px-4"
+          onClick={() => setConfirmarExclusaoDomingoTodos(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-lg ring-1 ring-border"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="titulo-excluir-domingo-todos"
+              className="text-lg font-semibold text-heading"
+            >
+              Excluir liberação de todos os domingos
+            </h2>
+            <p className="mt-2 text-sm text-body">
+              Tem certeza que deseja excluir? Os domingos deixam de ter estes
+              horários liberados com acréscimo.
+            </p>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={confirmarExclusaoDomingoTodosConfirmada}
+                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-700"
+              >
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmarExclusaoDomingoTodos(null)}
                 className="flex-1 rounded-lg bg-card px-3 py-2 text-sm font-medium text-body ring-1 ring-border transition hover:bg-surface"
               >
                 Cancelar
