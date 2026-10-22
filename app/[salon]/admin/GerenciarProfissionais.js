@@ -8,7 +8,7 @@ import { useNavegacaoMes } from "@/lib/useNavegacaoMes";
 import NavegacaoMes from "@/components/NavegacaoMes";
 import { mensagemFalhaSalvar, mensagemFalhaDelete } from "@/lib/erroSalvar";
 import { gerarSlotsDaJanela, DURACAO_MINUTOS } from "@/lib/horarios";
-import { ehDomingoISO, diasDoPeriodoDeLiberacao } from "@/lib/acrescimoDomingo";
+import { ehDomingoISO, diasDoPeriodoDeLiberacao, conflitoDeHorario } from "@/lib/acrescimoDomingo";
 
 // Aba "Profissionais" do /admin: CRUD dos profissionais do salão (tabela
 // `profissionais`), sempre particionado por estabelecimento_id (o consumidor já
@@ -2343,6 +2343,16 @@ function SecaoAusencias({
     if (erro) {
       setFormErro(erro);
       return;
+    }
+
+    // Horário repetido / acréscimo de domingo que sumiria (listaForm já
+    // exclui as linhas em edição).
+    if (tipoRegistro === "liberacao") {
+      const conflito = conflitoDeHorario(linhas, listaForm, hojeISOLocal());
+      if (conflito) {
+        setFormErro(conflito.mensagem);
+        return;
+      }
     }
 
     // Bloqueio de dia inteiro sempre vence sobre liberações pontuais do
