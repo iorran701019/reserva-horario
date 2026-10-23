@@ -19,6 +19,12 @@ import BlocoConfirmacaoPix from "@/components/BlocoConfirmacaoPix";
 import BlocoQrCodeAbacatePay from "@/components/BlocoQrCodeAbacatePay";
 import SeletorEtiquetaRapido from "@/components/SeletorEtiquetaRapido";
 import { formatarPreco } from "@/lib/preco";
+import {
+  liberacaoEntraNoCalendario,
+  liberacaoCobreDia,
+  liberacaoAindaVale,
+  diaTemAcrescimo,
+} from "@/lib/acrescimoDomingo";
 import { metodoDisponivelSinalPixComRegra } from "@/lib/sinalPix";
 import { resolverSinal } from "@/lib/sinalRegra";
 import {
@@ -634,6 +640,11 @@ function perguntaDeveAparecer(pergunta, respostas) {
 //                   quem não passa a prop (modal "Alterar data" do /admin,
 //                   que já ignora `fechado` via modoLivre) tem exatamente o
 //                   comportamento de sempre.
+//   datasComAcrescimo – Set<string> de datas "YYYY-MM-DD" do mês exibido com
+//                   domingo de acréscimo (liberação com acrescimo_domingo, ver
+//                   lib/acrescimoDomingo.js). Só pinta (bg-amber-100 +
+//                   ring-amber-200) o dia que está habilitado e não
+//                   selecionado; não abre nem fecha dia. Default vazio.
 //   diasSemVaga      – Set<string> de datas "YYYY-MM-DD" do mês exibido que
 //                   não têm NENHUM horário livre (todos já reservados, ou
 //                   removidos por ausência/antecedência) — calculadas em
@@ -701,6 +712,7 @@ export function CalendarioDias({
   min,
   diasSemanaAtivos,
   datasLiberadas = NENHUMA_DATA_LIBERADA,
+  datasComAcrescimo = NENHUMA_DATA_LIBERADA,
   diasSemVaga = NENHUM_DIA_SEM_VAGA,
   selecionado,
   onSelecionar,
@@ -737,6 +749,7 @@ export function CalendarioDias({
     let temDentro = false;
     let temFora = false;
     let temForaRegras = false;
+    let temAcrescimo = false;
     for (let d = 1; d <= diasNoMes; d++) {
       const date = new Date(ano, mesIdx, d);
       const iso = formatarISO(date);
@@ -744,6 +757,7 @@ export function CalendarioDias({
       const estadoPrazo = classificarDiasManutencao(ultimoConcluidoManutencao, iso, manutencao);
       if (estadoPrazo === "dentro") temDentro = true;
       else if (estadoPrazo === "depois") temFora = true;
+      if (datasComAcrescimo.has(iso)) temAcrescimo = true;
       if (
         (!diasSemanaAtivos.has(date.getDay()) && !datasLiberadas.has(iso)) ||
         !dataAgendavelComMes(iso, estabelecimento, mesesJanela, etiquetaClienteId) ||
@@ -754,6 +768,8 @@ export function CalendarioDias({
     }
     if (temDentro) legendaCalendario.push(["dentro", "border-2 border-heading/60 bg-green-100", "Dentro do prazo de manutenção"]);
     if (temFora) legendaCalendario.push(["fora", "border-2 border-heading/60 bg-orange-100", "Fora do prazo de manutenção"]);
+    if (temAcrescimo)
+      legendaCalendario.push(["acrescimo", "border-2 border-heading/60 bg-amber-100", "Horários com acréscimo"]);
     if (temForaRegras)
       legendaCalendario.push(["regras", "grade-fora border-2 border-dashed border-heading/50 bg-white", "Fora do expediente"]);
   }
@@ -871,6 +887,7 @@ export function CalendarioDias({
           const sel = iso === selecionado;
           const dentroDoPrazo = estadoPrazo === "dentro";
           const foraDoPrazo = estadoPrazo === "depois";
+          const comAcrescimo = datasComAcrescimo.has(iso);
 
           return (
             <button
@@ -887,6 +904,8 @@ export function CalendarioDias({
                   ? "cursor-not-allowed text-muted/40"
                   : sel
                   ? "bg-primary font-semibold text-on-primary ring-1 ring-primary"
+                  : comAcrescimo
+                  ? "bg-amber-100 text-body ring-1 ring-amber-200 hover:border-primary hover:ring-primary"
                   : dentroDoPrazo
                   ? `bg-green-100 text-body hover:border-primary${modoLivre ? " grade-prazo" : " ring-1 ring-green-200 hover:ring-primary"}`
                   : foraDoPrazo
@@ -1265,9 +1284,10 @@ export default function FormularioAgendamento({
   const [erroCargaAgenda, setErroCargaAgenda] = useState(false);
   const [tentativaCarga, setTentativaCarga] = useState(0);
 
-  // Liberações de horário (ausencias: tipo_registro='liberacao', tipo=
-  // 'periodo') dos profissionais candidatos — carregadas no MESMO efeito que
-  // busca `profissionaisDoServico` (ver abaixo), já que dependem dos mesmos
+  // Liberações de horário (ausencias: tipo_registro='liberacao', tipo
+  // 'periodo' + domingo recorrente com acréscimo) dos profissionais
+  // candidatos — carregadas no MESMO efeito que busca
+  // `profissionaisDoServico` (ver abaixo), já que dependem dos mesmos
   // ids e do mesmo gatilho (servicoSelecionado). O wizard nunca consultava
   // `ausencias`; é consulta nova, só pra decidir quais dias o calendário
   // abre (ver diasComLiberacao), nunca pra calcular vaga (isso continua 100%
@@ -1917,22 +1937,25 @@ export default function FormularioAgendamento({
       setProfissionaisDoServico(lista);
       setServicoIdDosProfissionais(servicoSelecionado.id);
 
-      // Liberações (tipo_registro='liberacao', tipo='periodo') dos
-      // profissionais candidatos — só pra abrir o dia certo no calendário
-      // (ver diasComLiberacao); o cálculo de vaga em si continua intocado.
+      // Liberações (tipo_registro='liberacao') dos profissionais candidatos —
+      // só pra abrir o dia certo no calendário (ver diasComLiberacao); o
+      // cálculo de vaga em si continua intocado. Traz 'periodo' e também
+      // 'recorrente', mas só o domingo recorrente com acréscimo é mantido
+      // (liberacaoEntraNoCalendario); as demais recorrentes seguem ignoradas.
       // Sem profissional candidato, nem consulta.
       if (lista.length === 0) {
         setLiberacoesPeriodo([]);
       } else {
         const { data: liberacoes, error: erroLiberacoes } = await supabase
           .from("ausencias")
-          .select("profissional_id, data_inicio, data_fim, hora_inicio, dia_inteiro")
+          .select(
+            "profissional_id, tipo, dia_semana, data_inicio, data_fim, hora_inicio, dia_inteiro, acrescimo_domingo"
+          )
           .in(
             "profissional_id",
             lista.map((p) => p.id)
           )
-          .eq("tipo_registro", "liberacao")
-          .eq("tipo", "periodo");
+          .eq("tipo_registro", "liberacao");
 
         if (!ativo) return;
         if (erroLiberacoes) {
@@ -1942,7 +1965,7 @@ export default function FormularioAgendamento({
           setCarregandoProfissionais(false);
           return;
         }
-        setLiberacoesPeriodo(liberacoes ?? []);
+        setLiberacoesPeriodo((liberacoes ?? []).filter(liberacaoEntraNoCalendario));
       }
 
       setErroCargaAgenda(false);
@@ -2259,9 +2282,18 @@ export default function FormularioAgendamento({
     const set = new Set();
     for (let d = 1; d <= diasNoMes; d++) {
       const iso = formatarISO(new Date(ano, mesIdx, d));
-      if (liberacoesRelevantes.some((a) => a.data_inicio <= iso && iso <= a.data_fim)) {
+      if (liberacoesRelevantes.some((a) => liberacaoCobreDia(a, iso))) {
         set.add(iso);
       }
+    }
+    return set;
+  })();
+
+  // Datas do mês visível com domingo de acréscimo (só pintura no calendário).
+  const diasComAcrescimo = (() => {
+    const set = new Set();
+    for (const iso of diasComLiberacao) {
+      if (diaTemAcrescimo(liberacoesRelevantes, iso)) set.add(iso);
     }
     return set;
   })();
@@ -2272,7 +2304,7 @@ export default function FormularioAgendamento({
   // o calendário por completo — nem os botões de navegação de mês apareceriam
   // — pra um profissional que só atende por liberação pontual num mês futuro
   // ainda não visível, antes mesmo de a cliente poder clicar em "próximo mês".
-  const existeLiberacaoFutura = liberacoesRelevantes.some((a) => a.data_fim >= hoje);
+  const existeLiberacaoFutura = liberacoesRelevantes.some((a) => liberacaoAindaVale(a, hoje));
 
   // Dias do mês visível que abrem, mas em que já não sobrou nenhum horário —
   // o calendário os cinza junto com os fechados (ver CalendarioDias). Deriva
@@ -6002,6 +6034,7 @@ export default function FormularioAgendamento({
                   min={hoje}
                   diasSemanaAtivos={diasSemanaAtivos}
                   datasLiberadas={diasComLiberacao}
+                  datasComAcrescimo={diasComAcrescimo}
                   diasSemVaga={diasSemVaga}
                   selecionado={form.data}
                   onSelecionar={selecionarData}
