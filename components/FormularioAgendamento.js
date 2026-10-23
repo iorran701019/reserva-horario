@@ -24,6 +24,9 @@ import {
   liberacaoCobreDia,
   liberacaoAindaVale,
   diaTemAcrescimo,
+  acrescimoAplicavel,
+  precoComAcrescimo,
+  textoAcrescimoCliente,
 } from "@/lib/acrescimoDomingo";
 import { metodoDisponivelSinalPixComRegra } from "@/lib/sinalPix";
 import { resolverSinal } from "@/lib/sinalRegra";
@@ -1607,6 +1610,11 @@ export default function FormularioAgendamento({
   // exatamente o bug da cobrança duplicada, então quem lê resolve a dúvida
   // antes de decidir, em vez de assumir.
   const [reservaPago, setReservaPago] = useState(null);
+  // Se a reserva atual NASCEU com acréscimo de domingo (boolean decidido no
+  // momento da RPC). Preço mostrado e RPC usada saem desta mesma decisão: a
+  // marca sumir do mapa de vagas depois não muda a linha já gravada. Só vale
+  // com reservaId != null (ver acrescimoAplicavel).
+  const [acrescimoReservado, setAcrescimoReservado] = useState(null);
   const [cancelandoReserva, setCancelandoReserva] = useState(false);
   // "Cancelar agendamento" do bloco do sinal abre a confirmação antes de
   // chamar o helper (ver ModalConfirmarCancelamento).
@@ -4371,6 +4379,8 @@ export default function FormularioAgendamento({
       setReservaId(json.id);
       setReservaChave(chaveAtual);
       setReservaPago({ id: json.id, pagoEm: json.abacatepayPagoEm ?? sinalPagoEm });
+      // A rota de remarcação não grava acréscimo: a linha nova nasce sem ele.
+      setAcrescimoReservado(false);
       // A linha nova nasce em "pendente", com o sinal já pago junto: não há
       // sinal a aguardar, e é isto que mantém o bloco do QR Code fora da tela
       // (ver o gate de aguardandoSinal no JSX).
@@ -4479,6 +4489,17 @@ export default function FormularioAgendamento({
       p_status: precisaSinal ? "aguardando_sinal" : "pendente",
       p_respostas: respostasParaRpc(),
     };
+    // Acréscimo de domingo: só diz sim ou não ao banco, que lê o percentual do
+    // salão. Lê SEMPRE o mapa cru (`vagas`), não o filtrado por antecedência.
+    const comAcrescimo = acrescimoAplicavel({
+      modoLivre,
+      ehPar,
+      percentual: estabelecimento.acrescimo_domingo_percentual,
+      mapa: vagas,
+      horario: slot,
+      profissionalId: chaveAtual.profissionalId,
+      temReserva: false,
+    });
     const { data: retornoCriacao, error } = ehPar
       ? await supabase.rpc("agendamento_criar_par", {
           ...payloadComum,
@@ -4487,6 +4508,16 @@ export default function FormularioAgendamento({
           p_data_anterior: testeEscolhido.data,
           p_horario_anterior: testeEscolhido.horario,
         })
+      : comAcrescimo
+        ? // Com acréscimo de domingo: mesma chamada de sempre mais o sim. Sem
+          // agregado, p_agregado_id vai null.
+          await supabase.rpc("agendamento_criar_com_acrescimo", {
+            ...payloadComum,
+            p_data: form.data,
+            p_horario: slot,
+            p_agregado_id: agregadoSelecionado?.id ?? null,
+            p_acrescimo_domingo: true,
+          })
       : agregadoSelecionado
         ? // Com agregado: só o ID da linha de configuração viaja. Nome, preço
           // e tempo do agregado são gravados pelo banco a partir de
@@ -4559,6 +4590,7 @@ export default function FormularioAgendamento({
     }
 
     setReservaId(novoId);
+    setAcrescimoReservado(comAcrescimo);
     setAnteriorId(novoAnteriorId);
     setReservaGrupoId(novoGrupoId);
     setReservaChave(chaveAtual);
@@ -5497,11 +5529,26 @@ export default function FormularioAgendamento({
     servicoSelecionado?.nome ?? "",
     agregadoSelecionado?.nome
   );
-  const precoTotalCentavos = somarPreco(
+  const precoSemAcrescimoCentavos = somarPreco(
     precoBaseCentavos,
     agregadoSelecionado?.preco_centavos,
     ajusteCentavosPerguntas
   );
+  // Mesma decisão que escolheu a RPC (ver acrescimoAplicavel). Com reserva já
+  // criada vale o que foi decidido na criação; antes dela, o mapa cru.
+  const acrescimoAtivo = acrescimoAplicavel({
+    modoLivre,
+    ehPar: servicoExigeSegundaData && testeEscolhido != null,
+    percentual: estabelecimento?.acrescimo_domingo_percentual,
+    mapa: vagas,
+    horario: horarioSelecionado,
+    profissionalId: escolherProfissional ? profissionalSelecionado?.id ?? null : null,
+    temReserva: reservaId != null,
+    decididoNaReserva: acrescimoReservado,
+  });
+  const precoTotalCentavos = acrescimoAtivo
+    ? precoComAcrescimo(precoSemAcrescimoCentavos, estabelecimento.acrescimo_domingo_percentual)
+    : precoSemAcrescimoCentavos;
   const servicoParaSucesso = agregadoSelecionado
     ? {
         ...servicoSelecionado,
@@ -6447,11 +6494,12 @@ export default function FormularioAgendamento({
                 != 0, com transparência sobre o que compõe o total. Respeita
                 ocultarPreco: o salão escondeu o preço dos serviços, então o
                 total também fica escondido. */}
-            {!ocultarPreco && (itensAjustePerguntas.length > 0 || agregadoSelecionado) && (
+            {(acrescimoAtivo || !ocultarPreco) && (itensAjustePerguntas.length > 0 || agregadoSelecionado || acrescimoAtivo) && (
               <div className="rounded-lg bg-surface px-3 py-2">
+                {!ocultarPreco && (
                 <p className="text-sm font-medium text-heading">
                   Valor total:{" "}
-                  {agregadoSelecionado
+                  {agregadoSelecionado && !acrescimoAtivo
                     ? resumoPreco(
                         precoBaseCentavos,
                         agregadoSelecionado.preco_centavos,
@@ -6459,6 +6507,12 @@ export default function FormularioAgendamento({
                       )
                     : formatarPreco(precoTotalCentavos)}
                 </p>
+                )}
+                {acrescimoAtivo && (
+                  <p className="mt-1 rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-200">
+                    {textoAcrescimoCliente()}
+                  </p>
+                )}
                 <ul className="mt-1 space-y-0.5">
                   {itensAjustePerguntas.map((item, i) => (
                     <li key={i} className="text-xs text-body">
