@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatarPreco } from "@/lib/preco";
 import { temSinal } from "@/lib/particao";
-import { precoPadraoConclusao } from "@/lib/servicoAgregado";
+import { precoPadraoConclusao } from "@/lib/acrescimoDomingo";
+import { somarAjustesPreco } from "@/lib/agendamentoRespostas";
 import {
   concluirAgendamento,
   marcarNaoCompareceu,
@@ -105,7 +106,38 @@ export default function CardConclusaoAtendimento({ agendamento, onSalvo, onFecha
   // atendimento principal. "Substituir valor" continua valendo.
   // Com serviço agregado o padrão é serviço + agregado (precoPadraoConclusao);
   // `agendamento` precisa trazer agregado_preco_centavos.
-  const valorPadrao = precoPadraoConclusao(agendamento);
+  // Os ajustes das perguntas (agendamento_respostas) NÃO vêm nos selects da
+  // lista: são buscados aqui, uma vez por card montado (por id), e só quando o
+  // valor padrão depende deles. Enquanto a busca não volta, o valor padrão é o
+  // SEM ajustes (como antes) e "Sim" fica travado, pra não gravar um valor
+  // incompleto. Se a busca FALHAR, o card segue com o valor sem ajustes e
+  // avisa a dona (`falhaAjustes`) em vez de assumir que não há ajuste.
+  const precisaAjustes =
+    agendamento.papel_reserva !== "anterior" &&
+    agendamento.valor_cobrado_centavos == null &&
+    agendamento.servicos?.preco_centavos != null;
+  const [ajustes, setAjustes] = useState({ id: null, centavos: 0, ok: true });
+  useEffect(() => {
+    if (!precisaAjustes) return undefined;
+    let ativo = true;
+    somarAjustesPreco(agendamento.id)
+      .then((resultado) => {
+        if (ativo) setAjustes({ id: agendamento.id, ...resultado });
+      })
+      .catch(() => {
+        if (ativo) setAjustes({ id: agendamento.id, centavos: 0, ok: false });
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [agendamento.id, precisaAjustes]);
+  const ajustesResolvidos = ajustes.id === agendamento.id;
+  const carregandoAjustes = precisaAjustes && !ajustesResolvidos;
+  const falhaAjustes = precisaAjustes && ajustesResolvidos && !ajustes.ok;
+  const valorPadrao = precoPadraoConclusao(
+    agendamento,
+    precisaAjustes && ajustesResolvidos ? ajustes.centavos : 0
+  );
 
   // Total escolhido pelo "Salvar valor" (centavos, já com o sinal somado no
   // estado 2). null = a dona não substituiu, vale o valor padrão.
@@ -454,7 +486,7 @@ export default function CardConclusaoAtendimento({ agendamento, onSalvo, onFecha
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            disabled={salvando}
+            disabled={salvando || carregandoAjustes}
             onClick={handleSim}
             className="inline-flex items-center justify-center rounded-lg bg-green-50 px-4 py-2 text-sm font-medium text-green-700 ring-1 ring-green-100 transition hover:bg-green-100 disabled:opacity-60"
           >
@@ -482,6 +514,12 @@ export default function CardConclusaoAtendimento({ agendamento, onSalvo, onFecha
             </button>
           )}
         </div>
+      )}
+
+      {falhaAjustes && (
+        <p className="text-sm text-body">
+          Não foi possível conferir os ajustes de preço das perguntas; confira o valor.
+        </p>
       )}
 
       {erro && <p className="text-sm text-red-700">{erro}</p>}

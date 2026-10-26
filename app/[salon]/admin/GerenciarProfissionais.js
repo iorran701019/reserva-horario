@@ -3247,7 +3247,7 @@ function SecaoAusencias({
         {/* Aviso fixo (proteção, sem interruptor): a dona vê o percentual antes
             de salvar. Só o texto de textoAcrescimo, sem tela de edição. */}
         {tipoRegistro === "liberacao" && (modo === "domingo" || ehModoDomingo(modo)) && (
-          <p className="mt-3 rounded-lg bg-amber-100 px-3 py-2 text-xs text-body ring-1 ring-amber-200">
+          <p className="mt-3 rounded-lg bg-amber-100 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200">
             {textoAcrescimo(acrescimoDomingoPercentual)}
           </p>
         )}
@@ -4230,7 +4230,7 @@ function SecaoAusencias({
                       <SeloTipoRegistro tipoRegistro="liberacao" />
                       Todo domingo
                       {percentualValido(acrescimoDomingoPercentual) && (
-                        <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-body ring-1 ring-amber-200">
+                        <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 ring-1 ring-amber-200">
                           +{acrescimoDomingoPercentual}%
                         </span>
                       )}
@@ -4271,7 +4271,7 @@ function SecaoAusencias({
                     <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-heading">
                       {formatarDataBR(grupo.data)}
                       {percentualValido(acrescimoDomingoPercentual) && (
-                        <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-body ring-1 ring-amber-200">
+                        <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 ring-1 ring-amber-200">
                           +{acrescimoDomingoPercentual}%
                         </span>
                       )}
@@ -4322,7 +4322,7 @@ function SecaoAusencias({
                       De {formatarDataBR(grupo.dataInicio)} a{" "}
                       {formatarDataBR(grupo.dataFim)}
                       {percentualValido(acrescimoDomingoPercentual) && (
-                        <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-body ring-1 ring-amber-200">
+                        <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 ring-1 ring-amber-200">
                           +{acrescimoDomingoPercentual}%
                         </span>
                       )}

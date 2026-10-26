@@ -5470,8 +5470,13 @@ export default function FormularioAgendamento({
             },
             estabelecimento.msg_confirmacao,
             // Respostas ainda estão no state do wizard (não vão ao banco antes
-            // desta mensagem sair): o ajuste vem de calcularAjustePerguntas.
-            opcoesValorMensagem(estabelecimento, calcularAjustePerguntas().itens.length > 0)
+            // desta mensagem sair): o ajuste vem de calcularAjustePerguntas. O
+            // acréscimo de domingo (acrescimoAtivo, a mesma decisão da RPC)
+            // também tira o valor: o preço acima não o inclui.
+            opcoesValorMensagem(
+              estabelecimento,
+              calcularAjustePerguntas().itens.length > 0 || acrescimoAtivo
+            )
           )
         ),
         "_blank",

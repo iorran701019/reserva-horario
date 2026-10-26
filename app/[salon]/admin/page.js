@@ -11,6 +11,10 @@ import {
   somarPrecoOuNulo,
 } from "@/lib/servicoAgregado";
 import { buscarPerfil } from "@/lib/perfil";
+import {
+  agendamentoTemAcrescimo,
+  textoAcrescimoDona,
+} from "@/lib/acrescimoDomingo";
 import TrocarCredenciais from "@/components/TrocarCredenciais";
 import AvisoTrocaCredenciais from "@/components/AvisoTrocaCredenciais";
 import { modoTrocaCredenciais } from "@/lib/avisoTrocaCredenciais";
@@ -111,6 +115,7 @@ import {
 import BadgeFidelidade from "@/components/BadgeFidelidade";
 import CardConclusaoAtendimento from "@/components/CardConclusaoAtendimento";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
+import ValorComAcrescimo from "@/components/ValorComAcrescimo";
 import PopupConfirmarSemAviso from "@/components/PopupConfirmarSemAviso";
 import MenuAlterar from "@/components/MenuAlterar";
 import ModalAlterarAgregado from "@/components/ModalAlterarAgregado";
@@ -415,7 +420,7 @@ function estaAguardandoConclusao(item, agora) {
 async function buscarAgendamentos(estabelecimentoId) {
   const { data, error } = await supabase
     .from("agendamentos")
-    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, duracao_min, servico_id, servico_agregado_id, agregado_nome, agregado_preco_centavos, agregado_duracao_min, servico_livre, profissional_id, reserva_grupo_id, papel_reserva, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_cobranca_id, abacatepay_br_code, abacatepay_pago_em, situacao_pix_dona, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, editado_manualmente_em, servicos(nome, duracao_min, preco_centavos, eh_manutencao, nome_etapa_anterior), profissionais(nome)")
+    .select("id, nome_cliente, telefone, data, horario, status, finalizado, created_at, lembrete_enviado_em, observacao, duracao_min, servico_id, servico_agregado_id, agregado_nome, agregado_preco_centavos, agregado_duracao_min, servico_livre, profissional_id, reserva_grupo_id, papel_reserva, expirado_automaticamente, sinal_declarado_pago, sinal_valor_centavos, abacatepay_cobranca_id, abacatepay_br_code, abacatepay_pago_em, situacao_pix_dona, comprovante_pix_url, comprovante_pix_enviado_em, concluido_automaticamente, nao_compareceu, valor_cobrado_centavos, forma_pagamento_servico, editado_manualmente_em, acrescimo_percentual_aplicado, servicos(nome, duracao_min, preco_centavos, eh_manutencao, nome_etapa_anterior), profissionais(nome)")
     .eq("estabelecimento_id", estabelecimentoId)
     .order("data", { ascending: true })
     .order("horario", { ascending: true });
@@ -1492,7 +1497,7 @@ export default function AdminPage() {
         MENSAGEM_CONFIRMACAO(
           agendamento,
           estabelecimento.msg_confirmacao,
-          opcoesValorMensagem(estabelecimento, temAjuste)
+          opcoesValorMensagem(estabelecimento, temAjuste || agendamentoTemAcrescimo(agendamento))
         )
       );
     }
@@ -1523,7 +1528,7 @@ export default function AdminPage() {
   async function abrirAlterarAgendamento(agendamento, modo) {
     const { data: linha, error } = await supabase
       .from("agendamentos")
-      .select("id, nome_cliente, telefone, data, horario, status, duracao_min, servico_id, servico_agregado_id, agregado_nome, agregado_preco_centavos, agregado_duracao_min, profissional_id, reserva_grupo_id, papel_reserva, sinal_declarado_pago, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, servicos(nome, duracao_min, preco_centavos, eh_manutencao, exige_segunda_data, manutencao_externa, nome_etapa_anterior), profissionais(nome)")
+      .select("id, nome_cliente, telefone, data, horario, status, duracao_min, servico_id, servico_agregado_id, agregado_nome, agregado_preco_centavos, agregado_duracao_min, profissional_id, reserva_grupo_id, papel_reserva, sinal_declarado_pago, abacatepay_cobranca_id, abacatepay_pago_em, comprovante_pix_url, acrescimo_percentual_aplicado, servicos(nome, duracao_min, preco_centavos, eh_manutencao, exige_segunda_data, manutencao_externa, nome_etapa_anterior), profissionais(nome)")
       .eq("id", agendamento.id)
       .eq("estabelecimento_id", estabelecimento.id)
       .maybeSingle();
@@ -1624,7 +1629,7 @@ export default function AdminPage() {
             horario: ag.horario,
           },
           estabelecimento.msg_alteracao,
-          opcoesValorMensagem(estabelecimento, temAjuste)
+          opcoesValorMensagem(estabelecimento, temAjuste || agendamentoTemAcrescimo(ag))
         )
       );
     }
@@ -1734,7 +1739,11 @@ export default function AdminPage() {
     const temAjuste = await agendamentoTemAjustePreco(item.id);
     abrirWhatsApp(
       item.telefone,
-      MENSAGEM_LEMBRETE(item, estabelecimento.msg_lembrete, opcoesValorMensagem(estabelecimento, temAjuste))
+      MENSAGEM_LEMBRETE(
+        item,
+        estabelecimento.msg_lembrete,
+        opcoesValorMensagem(estabelecimento, temAjuste || agendamentoTemAcrescimo(item))
+      )
     );
 
     const lembrete_enviado_em = new Date().toISOString();
@@ -2098,7 +2107,9 @@ export default function AdminPage() {
             horario: horarioFinal,
           },
           estabelecimento.msg_alteracao,
-          opcoesValorMensagem(estabelecimento, temAjuste)
+          // Troca de serviço: o agregado zera, mas a linha segue com o acréscimo
+          // gravado, então o valor continua fora da mensagem.
+          opcoesValorMensagem(estabelecimento, temAjuste || agendamentoTemAcrescimo(ag))
         )
       );
     }
@@ -4988,7 +4999,10 @@ export default function AdminPage() {
                                 item,
                                 fimDaJanelaAbertaAoPublico(mesesJanela),
                                 estabelecimento.msg_fora_da_janela,
-                                opcoesValorMensagem(estabelecimento, temAjuste)
+                                opcoesValorMensagem(
+                                  estabelecimento,
+                                  temAjuste || agendamentoTemAcrescimo(item)
+                                )
                               )
                             );
                           }}
@@ -6002,14 +6016,22 @@ export default function AdminPage() {
                   {selecionado.servicos?.preco_centavos != null && (
                     <>
                       {" "}
-                      · {resumoPreco(
-                        selecionado.servicos.preco_centavos,
-                        selecionado.agregado_preco_centavos
-                      )}
+                      ·{" "}
+                      {agendamentoTemAcrescimo(selecionado)
+                        ? <ValorComAcrescimo linha={selecionado} />
+                        : resumoPreco(
+                            selecionado.servicos.preco_centavos,
+                            selecionado.agregado_preco_centavos
+                          )}
                     </>
                   )}
                 </dd>
               </div>
+              {agendamentoTemAcrescimo(selecionado) && (
+                <p className="rounded-lg bg-amber-100 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200">
+                  {textoAcrescimoDona(selecionado.acrescimo_percentual_aplicado)}
+                </p>
+              )}
               {/* Vínculo do par (só com reserva_grupo_id): cita a linha irmã.
                   Confirmada abre o detalhe dela; pendente/aguardando sinal
                   leva pra aba Pendentes; cancelada/concluída só informa. */}
@@ -6902,10 +6924,18 @@ export default function AdminPage() {
                   {ag.servicos?.preco_centavos != null && (
                     <>
                       {" "}
-                      · {resumoPreco(ag.servicos.preco_centavos, ag.agregado_preco_centavos)}
+                      ·{" "}
+                      {agendamentoTemAcrescimo(ag)
+                        ? <ValorComAcrescimo linha={ag} />
+                        : resumoPreco(ag.servicos.preco_centavos, ag.agregado_preco_centavos)}
                     </>
                   )}
                 </p>
+                {agendamentoTemAcrescimo(ag) && (
+                  <p className="mt-1 rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 ring-1 ring-amber-200">
+                    {textoAcrescimoDona(ag.acrescimo_percentual_aplicado)}
+                  </p>
+                )}
                 <p className="mt-0.5">
                   {formatarData(ag.data)} às {formatarHorario(ag.horario)}
                 </p>
