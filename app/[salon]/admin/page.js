@@ -14,6 +14,8 @@ import { buscarPerfil } from "@/lib/perfil";
 import {
   agendamentoTemAcrescimo,
   textoAcrescimoDona,
+  textoTagAcrescimo,
+  valorCardPendente,
 } from "@/lib/acrescimoDomingo";
 import TrocarCredenciais from "@/components/TrocarCredenciais";
 import AvisoTrocaCredenciais from "@/components/AvisoTrocaCredenciais";
@@ -77,6 +79,7 @@ import {
 import {
   buscarRespostasPorAgendamento,
   agendamentoTemAjustePreco,
+  somarAjustesPrecoEmLote,
 } from "@/lib/agendamentoRespostas";
 import { buscarConflitoPrazoMinimo, nomeEtapaAnterior } from "@/lib/agendamentosCliente";
 import { verificarFidelidadeClientes, buscarProgressoFidelidade } from "@/lib/fidelidade";
@@ -693,6 +696,17 @@ export default function AdminPage() {
   // mostram nada de etiqueta, e o resto da aba funciona igual.
   const [etiquetasPorTelefone, setEtiquetasPorTelefone] = useState(new Map());
 
+  // Valor completo (centavos) de cada card de Pendentes: Map<id, ajustes das
+  // perguntas>, o que falta pro valorCardPendente. Id ausente = sem número
+  // (ainda carregando ou a busca falhou) e o card não mostra valor.
+  // avisoValoresPendentes liga quando a última busca falhou; é aviso LOCAL, não
+  // o setErro global (que desmonta a aba).
+  const [ajustesPendentes, setAjustesPendentes] = useState(new Map());
+  const [avisoValoresPendentes, setAvisoValoresPendentes] = useState(false);
+  // Sobe a cada vez que a lista de agendamentos é recarregada do banco, pra o
+  // efeito dos valores rodar de novo mesmo com a mesma chave de ids.
+  const [versaoListaAgendamentos, setVersaoListaAgendamentos] = useState(0);
+
   // Qual `chaveTelefonesPendentes` o Map acima corresponde. É isto, e não um
   // booleano "carregando", que diz se o dado em mãos serve pra tela ATUAL:
   // um Map vazio é resposta final legítima (nenhum telefone casou com cliente
@@ -1247,6 +1261,7 @@ export default function AdminPage() {
     const { dados, error } = await buscarAgendamentos(estabelecimento.id);
     if (!error) {
       setAgendamentos(dados);
+      setVersaoListaAgendamentos((v) => v + 1);
       setRespostasPorAgendamento(
         await buscarRespostasPorAgendamento(dados.map((item) => item.id))
       );
@@ -2488,6 +2503,7 @@ export default function AdminPage() {
 
       if (!silencioso) setErro("");
       setAgendamentos(dados);
+      setVersaoListaAgendamentos((v) => v + 1);
 
       const respostas = await buscarRespostasPorAgendamento(
         dados.map((item) => item.id)
@@ -2825,6 +2841,47 @@ export default function AdminPage() {
   ]
     .sort()
     .join(",");
+
+  // Ids dos cards que podem aparecer em Pendentes (mesmo superconjunto de
+  // chaveTelefonesPendentes, pelo mesmo motivo: hook acima dos early returns).
+  const chaveIdsPendentes = agendamentos
+    .filter(
+      (item) =>
+        item.finalizado &&
+        item.telefone &&
+        (item.status === "pendente" || item.status === "aguardando_sinal")
+    )
+    .map((item) => item.id)
+    .sort()
+    .join(",");
+
+  // Ajustes de preço dos pendentes visíveis. Roda quando a chave de ids muda e
+  // a cada recarga da lista (versaoListaAgendamentos). Sempre busca todos os
+  // ids: o resultado em lote é tudo-ou-nada. Falha mantém só o que já se sabia
+  // de ids que continuam visíveis e liga o aviso.
+  useEffect(() => {
+    // Sem pendentes nada a buscar; o estado antigo é inofensivo (o aviso só
+    // aparece com inbox não vazio e a próxima busca o substitui).
+    if (!chaveIdsPendentes) return;
+    const ids = chaveIdsPendentes.split(",");
+    let ativo = true;
+    somarAjustesPrecoEmLote(ids).then(({ ok, porAgendamento }) => {
+      if (!ativo) return;
+      if (ok) {
+        setAjustesPendentes(porAgendamento);
+        setAvisoValoresPendentes(false);
+        return;
+      }
+      const visiveis = new Set(ids);
+      setAjustesPendentes(
+        (atual) => new Map([...atual].filter(([id]) => visiveis.has(id)))
+      );
+      setAvisoValoresPendentes(true);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, [chaveIdsPendentes, versaoListaAgendamentos]);
 
   // Aviso de desvio (só orienta): lista de serviços do salão, uma consulta.
   useEffect(() => {
@@ -3873,6 +3930,11 @@ export default function AdminPage() {
             </p>
           ) : (
             <>
+            {avisoValoresPendentes && inbox.length > 0 && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 ring-1 ring-amber-200">
+                Não foi possível conferir os valores agora; confira no detalhe da reserva.
+              </p>
+            )}
             {(inbox.length > 0 || pendenciasAdmin.length > 0 || cardAssinatura) && (
             <ul className="space-y-3">
               {/* Alerta de assinatura: card calculado (não vem de
@@ -4235,6 +4297,14 @@ export default function AdminPage() {
                           </span>
                         )}
                       </span>
+                      {/* Valor completo (serviço + agregado + ajustes + acréscimo).
+                          Sem número confiável (carregando, erro, anterior avulsa)
+                          não renderiza nada. */}
+                      {valorCardPendente(item, ajustesPendentes.get(item.id)) != null && (
+                        <span className="text-sm font-semibold text-heading">
+                          {formatarPreco(valorCardPendente(item, ajustesPendentes.get(item.id)))}
+                        </span>
+                      )}
                     </div>
                       {item.etapaAnteriorLinha && (
                         <p className="mt-1.5 text-sm text-body">
@@ -4347,6 +4417,11 @@ export default function AdminPage() {
                   {/* Tag do Pix + botão "Alterar" na MESMA linha; quebra para baixo em
                       tela estreita. O erro local fica abaixo da linha. */}
                   <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {agendamentoTemAcrescimo(item) && (
+                      <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-900 ring-1 ring-amber-200">
+                        {textoTagAcrescimo(item.acrescimo_percentual_aplicado)}
+                      </span>
+                    )}
                     {item.abacatepay_pago_em ? (
                       <p className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-700 ring-1 ring-green-200">
                         <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
