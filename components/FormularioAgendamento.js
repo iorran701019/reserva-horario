@@ -24,9 +24,14 @@ import {
   liberacaoCobreDia,
   liberacaoAindaVale,
   diaTemAcrescimo,
+  ehDomingoISO,
   acrescimoAplicavel,
+  acrescimoDoAdmin,
+  chaveGradeComAcrescimo,
+  horarioTemAcrescimo,
   precoComAcrescimo,
   textoAcrescimoCliente,
+  textoAcrescimoDona,
 } from "@/lib/acrescimoDomingo";
 import { metodoDisponivelSinalPixComRegra } from "@/lib/sinalPix";
 import { resolverSinal } from "@/lib/sinalRegra";
@@ -196,6 +201,12 @@ const ESTADOS_GRADE_ADMIN = {
     legenda: "Antecedência",
     rotulo: "Antecedência",
     classe: "border-2 border-amber-300 bg-amber-50 text-on-card",
+  },
+  // Mesmo visual do dia com acréscimo no calendário (borda escura + âmbar 100).
+  acrescimo: {
+    legenda: "Com acréscimo de domingo",
+    rotulo: null,
+    classe: "border-2 border-heading/60 bg-amber-100 text-on-card",
   },
   ocupado: {
     legenda: "Ocupado",
@@ -2519,10 +2530,18 @@ export default function FormularioAgendamento({
           .sort()
           .map((horario) => {
             const entrada = vagasAdminComAntecedencia[horario];
+            // Marca lida do mapa CRU (o filtrado perde a propriedade não
+            // enumerável). Só em domingo, como o banco exige.
+            const temAcrescimo =
+              ehDomingoISO(form.data) &&
+              horarioTemAcrescimo(vagas, horario, idProfissionalAlvoAdmin);
             const livre = () => ({
               horario,
               status: "livre",
-              chave: horariosDeLiberacaoDoDia.has(horario) ? "liberacao" : "livre",
+              chave: chaveGradeComAcrescimo(
+                horariosDeLiberacaoDoDia.has(horario) ? "liberacao" : "livre",
+                temAcrescimo
+              ),
             });
             const bloqueadoPor = (motivo) => ({
               horario,
@@ -5382,6 +5401,10 @@ export default function FormularioAgendamento({
             ...agregadoDoEvento,
             data: form.data,
             horario: horarioSelecionado,
+            // Só o evento (nunca o par); o banco só aceita em domingo (1 a 50).
+            ...(acrescimoAtivo
+              ? { acrescimo_percentual_aplicado: estabelecimento.acrescimo_domingo_percentual }
+              : {}),
           },
         ];
 
@@ -5541,16 +5564,30 @@ export default function FormularioAgendamento({
   );
   // Mesma decisão que escolheu a RPC (ver acrescimoAplicavel). Com reserva já
   // criada vale o que foi decidido na criação; antes dela, o mapa cru.
-  const acrescimoAtivo = acrescimoAplicavel({
-    modoLivre,
-    ehPar: servicoExigeSegundaData && testeEscolhido != null,
-    percentual: estabelecimento?.acrescimo_domingo_percentual,
-    mapa: vagas,
-    horario: horarioSelecionado,
-    profissionalId: escolherProfissional ? profissionalSelecionado?.id ?? null : null,
-    temReserva: reservaId != null,
-    decididoNaReserva: acrescimoReservado,
-  });
+  // No /admin (modoLivre) a decisão é do acrescimoDoAdmin sobre o mapa CRU
+  // `vagas`, nunca vagasAdminComAntecedencia: o filtro de antecedência copia o
+  // mapa e perde a propriedade não enumerável acrescimoPorHorario. A
+  // antecedência no admin é só aviso, então horário dentro dela também leva
+  // acréscimo.
+  const acrescimoAtivo = modoLivre
+    ? acrescimoDoAdmin({
+        data: form.data,
+        ehPar: servicoExigeSegundaData && testeEscolhido != null,
+        percentual: estabelecimento?.acrescimo_domingo_percentual,
+        mapa: vagas,
+        horario: horarioSelecionado,
+        profissionalId: escolherProfissional ? profissionalSelecionado?.id ?? null : null,
+      })
+    : acrescimoAplicavel({
+        modoLivre,
+        ehPar: servicoExigeSegundaData && testeEscolhido != null,
+        percentual: estabelecimento?.acrescimo_domingo_percentual,
+        mapa: vagas,
+        horario: horarioSelecionado,
+        profissionalId: escolherProfissional ? profissionalSelecionado?.id ?? null : null,
+        temReserva: reservaId != null,
+        decididoNaReserva: acrescimoReservado,
+      });
   const precoTotalCentavos = acrescimoAtivo
     ? precoComAcrescimo(precoSemAcrescimoCentavos, estabelecimento.acrescimo_domingo_percentual)
     : precoSemAcrescimoCentavos;
@@ -6499,9 +6536,9 @@ export default function FormularioAgendamento({
                 != 0, com transparência sobre o que compõe o total. Respeita
                 ocultarPreco: o salão escondeu o preço dos serviços, então o
                 total também fica escondido. */}
-            {(acrescimoAtivo || !ocultarPreco) && (itensAjustePerguntas.length > 0 || agregadoSelecionado || acrescimoAtivo) && (
+            {(acrescimoAtivo || modoLivre || !ocultarPreco) && (itensAjustePerguntas.length > 0 || agregadoSelecionado || acrescimoAtivo) && (
               <div className="rounded-lg bg-surface px-3 py-2">
-                {!ocultarPreco && (
+                {(modoLivre || !ocultarPreco) && (
                 <p className="text-sm font-medium text-heading">
                   Valor total:{" "}
                   {agregadoSelecionado && !acrescimoAtivo
@@ -6515,7 +6552,9 @@ export default function FormularioAgendamento({
                 )}
                 {acrescimoAtivo && (
                   <p className="mt-1 rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-200">
-                    {textoAcrescimoCliente()}
+                    {modoLivre
+                      ? textoAcrescimoDona(estabelecimento?.acrescimo_domingo_percentual)
+                      : textoAcrescimoCliente()}
                   </p>
                 )}
                 <ul className="mt-1 space-y-0.5">
