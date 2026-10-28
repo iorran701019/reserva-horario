@@ -17,6 +17,7 @@ import {
   CLASSE_GRADE_ACRESCIMO,
   diaTemAcrescimo,
   escolhaVigente,
+  liberacaoCobreDia,
   liberacaoEntraNoCalendario,
   horarioTemAcrescimo,
   inicialAcrescimoAlterar,
@@ -7060,8 +7061,9 @@ export default function AdminPage() {
           cliente): mostra serviço e data/horário atuais, o bloco "Serviço"
           (só se não for par) e o bloco "Data e horário". Reaproveita
           CalendarioDias (exportado de FormularioAgendamento.js) pro calendário
-          — a janela de agendamento já bloqueia dias fora dela automaticamente,
-          via dataAgendavelComMes dentro do próprio CalendarioDias. A grade de
+          — em modoLivre os dias fora da janela mensal (mesesJanela) ou do
+          expediente ficam clicáveis, só sinalizados (tracejado); sem o mapa
+          de meses todo dia sairia como fora da janela. A grade de
           horários é uma réplica inline da mesma grade do wizard. O botão
           dividido só habilita se o serviço OU a data/horário mudou: a zona
           grande grava e avisa pelo WhatsApp (parâmetro `notificar` de
@@ -7157,6 +7159,24 @@ export default function AdminPage() {
           ehDomingoISO(dataAlterarData) &&
           horarioTemAcrescimo(vagasAlterarData, slot, ag.profissional_id);
         const algumSlotComMarca = horariosAlterarData.some(slotComMarca);
+        // Dias do mês visível cobertos por uma liberação do profissional da
+        // reserva (abrem o dia fora do expediente normal) e, entre eles, os com
+        // acréscimo de domingo — mesma conta do Agendar (FormularioAgendamento).
+        const liberacoesDoCalendario = liberacoesAlterar.id === ag.id ? liberacoesAlterar.lista : [];
+        const datasLiberadasAlterar = new Set();
+        const datasComAcrescimoAlterar = new Set();
+        if (liberacoesDoCalendario.length > 0) {
+          const anoCal = mesVisivelAlterarData.getFullYear();
+          const mesCal = mesVisivelAlterarData.getMonth();
+          const diasNoMesCal = new Date(anoCal, mesCal + 1, 0).getDate();
+          for (let d = 1; d <= diasNoMesCal; d++) {
+            const iso = `${anoCal}-${String(mesCal + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+            if (liberacoesDoCalendario.some((l) => liberacaoCobreDia(l, iso))) {
+              datasLiberadasAlterar.add(iso);
+              if (diaTemAcrescimo(liberacoesDoCalendario, iso)) datasComAcrescimoAlterar.add(iso);
+            }
+          }
+        }
         const renderServicoAlterar = (sv) => {
           const sel = sv.id === servicoNovoId;
           const origem = sv.eh_manutencao ? origensAlterarServico[sv.servico_origem_id] : null;
@@ -7294,6 +7314,8 @@ export default function AdminPage() {
                       mes={mesVisivelAlterarData}
                       min={hojeISOLocal()}
                       diasSemanaAtivos={diasSemanaAtivosAlterarData}
+                      datasLiberadas={datasLiberadasAlterar}
+                      datasComAcrescimo={datasComAcrescimoAlterar}
                       selecionado={dataAlterarData}
                       onSelecionar={(iso) => {
                         setDataAlterarData(iso);
@@ -7312,6 +7334,8 @@ export default function AdminPage() {
                       }
                       podeVoltar={podeVoltarMesAlterarData}
                       estabelecimento={estabelecimento}
+                      mesesJanela={mesesJanela}
+                      etiquetaClienteId={etiquetaIdDoTelefone(ag.telefone)}
                       // Este modal é sempre admin — modo livre sempre ligado (ver
                       // CalendarioDias/modoLivre em FormularioAgendamento.js). A
                       // grade de horários abaixo NÃO foi estendida (fora do
