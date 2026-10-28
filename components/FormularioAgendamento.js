@@ -25,6 +25,7 @@ import {
   liberacaoAindaVale,
   diaTemAcrescimo,
   acrescimoAplicavel,
+  mostrarBlocoValorTotal,
   acrescimoDoAdmin,
   caixaAcrescimoVisivel,
   escolhaVigente,
@@ -5477,6 +5478,20 @@ export default function FormularioAgendamento({
         temReserva: reservaId != null,
         decididoNaReserva: acrescimoReservado,
       });
+  // Marca de acréscimo por horário na grade pública: a mesma decisão que grava
+  // (acrescimoAplicavel) sobre o mapa CRU `vagas`; o filtrado perde
+  // acrescimoPorHorario. Sem reserva ainda, vale só o mapa.
+  function slotComAcrescimo(slot) {
+    return acrescimoAplicavel({
+      modoLivre: false,
+      ehPar: servicoExigeSegundaData && testeEscolhido != null,
+      percentual: estabelecimento?.acrescimo_domingo_percentual,
+      mapa: vagas,
+      horario: slot,
+      profissionalId: escolherProfissional ? profissionalSelecionado?.id ?? null : null,
+      temReserva: false,
+    });
+  }
   function totalComAcrescimo(comAcrescimo) {
     return comAcrescimo
       ? precoComAcrescimo(precoSemAcrescimoCentavos, estabelecimento.acrescimo_domingo_percentual)
@@ -6098,6 +6113,13 @@ export default function FormularioAgendamento({
                       </p>
                     )}
 
+                    {horariosVisiveis.length > 0 && horariosVisiveis.some(slotComAcrescimo) && (
+                      <p className="mb-2 flex items-center gap-2 text-xs text-muted">
+                        <span aria-hidden="true" className="inline-block h-3 w-3 rounded bg-amber-100 ring-1 ring-amber-200" />
+                        Horário com acréscimo
+                      </p>
+                    )}
+
                     {horariosVisiveis.length > 0 && (
                       // Mesma moldura do calendário (CalendarioDias, acima):
                       // rounded-xl/p-3/ring pra que os passos Data e Horário
@@ -6122,6 +6144,8 @@ export default function FormularioAgendamento({
                                 "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
                                 selecionado
                                   ? "bg-primary text-on-primary ring-primary"
+                                  : slotComAcrescimo(slot)
+                                  ? "bg-amber-100 text-body ring-amber-200 hover:border-primary hover:ring-primary"
                                   : "bg-field text-body ring-border hover:border-primary hover:ring-primary",
                               ].join(" ")}
                             >
@@ -6424,12 +6448,21 @@ export default function FormularioAgendamento({
             )}
 
             {/* Valor final com os ajustes das respostas do popup de perguntas
-                (ver calcularAjustePerguntas) — só aparece havendo algum ajuste
-                != 0, agregado, acréscimo ou a caixa de acréscimo do /admin,
+                (ver calcularAjustePerguntas) — aparece com total conhecido > 0
+                (mostrarBlocoValorTotal), ajuste, agregado, acréscimo ou a caixa
+                de acréscimo do /admin,
                 com transparência sobre o que compõe o total. No público
                 respeita ocultarPreco (o salão escondeu o preço dos serviços,
                 então o total também fica escondido); o /admin sempre vê. */}
-            {(acrescimoAtivo || modoLivre || !ocultarPreco) && (itensAjustePerguntas.length > 0 || agregadoSelecionado || acrescimoAtivo || caixaAcrescimoAdmin) && (
+            {mostrarBlocoValorTotal({
+              modoLivre,
+              ocultarPreco,
+              totalCentavos: precoTotalCentavos,
+              temItensAjuste: itensAjustePerguntas.length > 0,
+              temAgregado: Boolean(agregadoSelecionado),
+              acrescimoAtivo,
+              caixaAcrescimoAdmin,
+            }) && (
               <div className="rounded-lg bg-surface px-3 py-2">
                 {(modoLivre || !ocultarPreco) && (
                 <p className="text-sm font-medium text-heading">
