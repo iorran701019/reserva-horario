@@ -27,6 +27,9 @@ import {
   ehDomingoISO,
   acrescimoAplicavel,
   acrescimoDoAdmin,
+  caixaAcrescimoVisivel,
+  CLASSE_GRADE_ACRESCIMO,
+  escolhaVigente,
   chaveGradeComAcrescimo,
   horarioTemAcrescimo,
   precoComAcrescimo,
@@ -206,7 +209,7 @@ const ESTADOS_GRADE_ADMIN = {
   acrescimo: {
     legenda: "Com acréscimo de domingo",
     rotulo: null,
-    classe: "border-2 border-heading/60 bg-amber-100 text-on-card",
+    classe: CLASSE_GRADE_ACRESCIMO,
   },
   ocupado: {
     legenda: "Ocupado",
@@ -1626,6 +1629,10 @@ export default function FormularioAgendamento({
   // marca sumir do mapa de vagas depois não muda a linha já gravada. Só vale
   // com reservaId != null (ver acrescimoAplicavel).
   const [acrescimoReservado, setAcrescimoReservado] = useState(null);
+  // Escolha da dona na caixa "Acréscimo de domingo" do /admin: { chave, valor }.
+  // A chave (data|horário|profissional alvo) faz a escolha valer só para o
+  // horário em que foi feita; mudou a chave, volta ao automático (escolhaVigente).
+  const [escolhaAcrescimo, setEscolhaAcrescimo] = useState(null);
   const [cancelandoReserva, setCancelandoReserva] = useState(false);
   // "Cancelar agendamento" do bloco do sinal abre a confirmação antes de
   // chamar o helper (ver ModalConfirmarCancelamento).
@@ -5569,14 +5576,34 @@ export default function FormularioAgendamento({
   // mapa e perde a propriedade não enumerável acrescimoPorHorario. A
   // antecedência no admin é só aviso, então horário dentro dela também leva
   // acréscimo.
+  // A caixa do /admin só existe em domingo com marca no calendário (mesma fonte
+  // que pinta o dia: diaTemAcrescimo sobre liberacoesRelevantes, já filtradas
+  // pelo profissional alvo); o valor inicial vem da regra do mapa cru e a dona
+  // pode mudar (escolhaAcrescimo). Caixa invisível = sem acréscimo.
+  const profissionalAlvoAcrescimo = escolherProfissional ? profissionalSelecionado?.id ?? null : null;
+  const caixaAcrescimoAdmin =
+    modoLivre &&
+    caixaAcrescimoVisivel({
+      data: form.data,
+      ehPar: servicoExigeSegundaData && testeEscolhido != null,
+      percentual: estabelecimento?.acrescimo_domingo_percentual,
+      domingoTemMarca: diaTemAcrescimo(liberacoesRelevantes, form.data),
+      temAtual: false,
+    });
+  const chaveAcrescimoAdmin = `${form.data}|${horarioSelecionado}|${profissionalAlvoAcrescimo ?? ""}`;
   const acrescimoAtivo = modoLivre
-    ? acrescimoDoAdmin({
-        data: form.data,
-        ehPar: servicoExigeSegundaData && testeEscolhido != null,
-        percentual: estabelecimento?.acrescimo_domingo_percentual,
-        mapa: vagas,
-        horario: horarioSelecionado,
-        profissionalId: escolherProfissional ? profissionalSelecionado?.id ?? null : null,
+    ? caixaAcrescimoAdmin &&
+      escolhaVigente({
+        escolha: escolhaAcrescimo,
+        chave: chaveAcrescimoAdmin,
+        automatico: acrescimoDoAdmin({
+          data: form.data,
+          ehPar: servicoExigeSegundaData && testeEscolhido != null,
+          percentual: estabelecimento?.acrescimo_domingo_percentual,
+          mapa: vagas,
+          horario: horarioSelecionado,
+          profissionalId: profissionalAlvoAcrescimo,
+        }),
       })
     : acrescimoAplicavel({
         modoLivre,
@@ -6533,10 +6560,11 @@ export default function FormularioAgendamento({
 
             {/* Valor final com os ajustes das respostas do popup de perguntas
                 (ver calcularAjustePerguntas) — só aparece havendo algum ajuste
-                != 0, com transparência sobre o que compõe o total. Respeita
-                ocultarPreco: o salão escondeu o preço dos serviços, então o
-                total também fica escondido. */}
-            {(acrescimoAtivo || modoLivre || !ocultarPreco) && (itensAjustePerguntas.length > 0 || agregadoSelecionado || acrescimoAtivo) && (
+                != 0, agregado, acréscimo ou a caixa de acréscimo do /admin,
+                com transparência sobre o que compõe o total. No público
+                respeita ocultarPreco (o salão escondeu o preço dos serviços,
+                então o total também fica escondido); o /admin sempre vê. */}
+            {(acrescimoAtivo || modoLivre || !ocultarPreco) && (itensAjustePerguntas.length > 0 || agregadoSelecionado || acrescimoAtivo || caixaAcrescimoAdmin) && (
               <div className="rounded-lg bg-surface px-3 py-2">
                 {(modoLivre || !ocultarPreco) && (
                 <p className="text-sm font-medium text-heading">
@@ -6549,6 +6577,18 @@ export default function FormularioAgendamento({
                       )
                     : formatarPreco(precoTotalCentavos)}
                 </p>
+                )}
+                {caixaAcrescimoAdmin && (
+                  <label className="mt-1 flex items-center gap-2 text-sm text-body">
+                    <input
+                      type="checkbox"
+                      checked={acrescimoAtivo}
+                      onChange={(e) =>
+                        setEscolhaAcrescimo({ chave: chaveAcrescimoAdmin, valor: e.target.checked })
+                      }
+                    />
+                    Acréscimo de domingo ({estabelecimento?.acrescimo_domingo_percentual}%)
+                  </label>
                 )}
                 {acrescimoAtivo && (
                   <p className="mt-1 rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-200">

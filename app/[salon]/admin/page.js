@@ -13,9 +13,20 @@ import {
 import { buscarPerfil } from "@/lib/perfil";
 import {
   agendamentoTemAcrescimo,
+  caixaAcrescimoVisivel,
+  CLASSE_GRADE_ACRESCIMO,
+  diaTemAcrescimo,
+  escolhaVigente,
+  liberacaoEntraNoCalendario,
+  horarioTemAcrescimo,
+  inicialAcrescimoAlterar,
+  ehDomingoISO,
+  haAlteracaoNoModal,
+  parametroAcrescimoAlterar,
   textoAcrescimoDona,
   textoTagAcrescimo,
   valorCardPendente,
+  valorTotalAgendamento,
 } from "@/lib/acrescimoDomingo";
 import TrocarCredenciais from "@/components/TrocarCredenciais";
 import AvisoTrocaCredenciais from "@/components/AvisoTrocaCredenciais";
@@ -79,6 +90,7 @@ import {
 import {
   buscarRespostasPorAgendamento,
   agendamentoTemAjustePreco,
+  somarAjustesPreco,
   somarAjustesPrecoEmLote,
 } from "@/lib/agendamentoRespostas";
 import { buscarConflitoPrazoMinimo, nomeEtapaAnterior } from "@/lib/agendamentosCliente";
@@ -1173,12 +1185,29 @@ export default function AdminPage() {
   // Popup "Alterar sem avisar a cliente?" (PopupConfirmarSemAviso), aberto
   // por "Confirmar sem avisar" no modal; só depois dele handleAlterar(false).
   const [confirmandoAlterarSemAviso, setConfirmandoAlterarSemAviso] = useState(false);
+  // Confirmação "Remover acréscimo de domingo?": { notificar } enquanto aberta;
+  // "Remover e salvar" refaz handleAlterar com confirmado=true.
+  const [remocaoAcrescimoPendente, setRemocaoAcrescimoPendente] = useState(null);
   const [mesVisivelAlterarData, setMesVisivelAlterarData] = useState(() => new Date());
   const [dataAlterarData, setDataAlterarData] = useState("");
   const [horarioAlterarData, setHorarioAlterarData] = useState("");
   const [diasSemanaAtivosAlterarData, setDiasSemanaAtivosAlterarData] = useState(new Set());
   const [carregandoDiasAlterarData, setCarregandoDiasAlterarData] = useState(false);
   const [horariosAlterarData, setHorariosAlterarData] = useState([]);
+  // Mapa CRU de vagas do dia escolhido (mesma referência devolvida por
+  // calcularVagasPorHorario): só ele guarda acrescimoPorHorario, que é
+  // propriedade não enumerável e some em qualquer cópia ou spread.
+  const [vagasAlterarData, setVagasAlterarData] = useState(null);
+  // Liberações do profissional da reserva aberta (mesma leitura do calendário do
+  // Agendar), só pra decidir se o domingo tem marca: { id, lista }. Enquanto não
+  // volta, ou se falhar, vale como sem marca.
+  const [liberacoesAlterar, setLiberacoesAlterar] = useState({ id: null, lista: [] });
+  // Caixa "Acréscimo de domingo" do modal Alterar: { chave, valor } | null
+  // (ver escolhaVigente); chave = id|dataFinal|horarioFinal.
+  const [escolhaAcrescimoAlterar, setEscolhaAcrescimoAlterar] = useState(null);
+  // Soma dos ajustes de preço das perguntas da reserva aberta no modal, pro
+  // total novo: { id, status: "carregando" | "ok" | "erro", centavos }.
+  const [ajustesAlterar, setAjustesAlterar] = useState({ id: null, status: "carregando", centavos: 0 });
   const [carregandoHorariosAlterarData, setCarregandoHorariosAlterarData] = useState(false);
   const [salvandoAlterar, setSalvandoAlterar] = useState(false);
   const [erroAlterar, setErroAlterar] = useState("");
@@ -1607,6 +1636,7 @@ export default function AdminPage() {
   function fecharAlterar() {
     setAgendamentoParaAlterar(null);
     setModoAlterar(null);
+    setRemocaoAcrescimoPendente(null);
   }
 
   // Sucesso da RPC agendamento_alterar_agregado: espelha no estado local as
@@ -2002,6 +2032,48 @@ export default function AdminPage() {
     return () => cancelAnimationFrame(raf);
   }, [servicoNovoId]);
 
+  // Decisão da caixa "Acréscimo de domingo" do modal Alterar, usada pelo render
+  // E por handleAlterar pra nunca divergirem. Data/horário finais são os
+  // escolhidos (se os dois foram) ou os atuais da reserva.
+  // domingoTemMarca vem das liberações do profissional da reserva (efeito de
+  // abertura do modal); sem elas (carregando ou falha) é false e a caixa só
+  // aparece quando a reserva já tem acréscimo gravado.
+  function decisaoAcrescimoAlterar(ag) {
+    const dataMudou =
+      Boolean(dataAlterarData && horarioAlterarData) &&
+      (dataAlterarData !== ag.data ||
+        String(horarioAlterarData).slice(0, 5) !== String(ag.horario).slice(0, 5));
+    const dataFinal = dataMudou ? dataAlterarData : ag.data;
+    const horarioFinal = dataMudou ? horarioAlterarData : ag.horario;
+    const temAtual = agendamentoTemAcrescimo(ag);
+    const percentual = estabelecimento?.acrescimo_domingo_percentual;
+    const chave = `${ag.id}|${dataFinal}|${horarioFinal}`;
+    const liberacoes = liberacoesAlterar.id === ag.id ? liberacoesAlterar.lista : [];
+    const visivel = caixaAcrescimoVisivel({
+      data: dataFinal,
+      ehPar: Boolean(ag.reserva_grupo_id),
+      percentual,
+      domingoTemMarca: diaTemAcrescimo(liberacoes, dataFinal),
+      temAtual,
+    });
+    const aplicar =
+      visivel &&
+      escolhaVigente({
+        escolha: escolhaAcrescimoAlterar,
+        chave,
+        automatico: inicialAcrescimoAlterar({
+          ag,
+          visivel,
+          dataOuHorarioMudou: dataMudou,
+          data: dataFinal,
+          percentual,
+          mapa: vagasAlterarData,
+          horario: horarioFinal,
+        }),
+      });
+    return { dataMudou, dataFinal, horarioFinal, temAtual, percentual, visivel, aplicar, chave };
+  }
+
   // Grava pela RPC agendamento_alterar enviando SÓ o que mudou (parâmetro
   // omitido = null = não muda); devolve duracao_min e servico_nome. O serviço
   // muda se há servicoNovoId; data/horário mudam se os dois foram escolhidos e
@@ -2013,24 +2085,72 @@ export default function AdminPage() {
   // de executarConfirmacao/handleCancelar. A mensagem usa o serviço e a data/
   // horário VIGENTES depois da alteração (agendamentoParaAlterar ainda guarda
   // os antigos nesse ponto).
-  async function handleAlterar(notificar) {
+  //
+  // Só a caixa de acréscimo mudou (sem serviço, data ou horário): UPDATE direto
+  // na reserva, sem WhatsApp nem cadeia de confirmação. Se o salvamento vai
+  // REMOVER o acréscimo, abre antes a confirmação (confirmado=false); "Remover
+  // e salvar" volta aqui com confirmado=true.
+  async function handleAlterar(notificar, confirmado = false) {
     const ag = agendamentoParaAlterar;
     if (!ag || salvandoAlterar) return;
     const novo = servicosAlterarServico.find((sv) => sv.id === servicoNovoId) ?? null;
-    const dataMudou =
-      Boolean(dataAlterarData && horarioAlterarData) &&
-      (dataAlterarData !== ag.data ||
-        String(horarioAlterarData).slice(0, 5) !== String(ag.horario).slice(0, 5));
-    if (!novo && !dataMudou) return;
+    const acrescimoAlterar = decisaoAcrescimoAlterar(ag);
+    const { dataMudou } = acrescimoAlterar;
+    const parametroAcrescimo = parametroAcrescimoAlterar({
+      temAtual: acrescimoAlterar.temAtual,
+      aplicar: acrescimoAlterar.aplicar,
+    });
+    if (!haAlteracaoNoModal({ temServicoNovo: novo, dataMudou, parametro: parametroAcrescimo })) {
+      return;
+    }
+    if (parametroAcrescimo === false && !confirmado) {
+      setRemocaoAcrescimoPendente({ notificar });
+      return;
+    }
 
     setSalvandoAlterar(true);
     setErroAlterar("");
 
-    const { data, error } = await supabase.rpc("agendamento_alterar", {
+    if (!novo && !dataMudou) {
+      const { data: linhas, error: erroSoCaixa } = await supabase
+        .from("agendamentos")
+        .update({
+          acrescimo_percentual_aplicado: parametroAcrescimo
+            ? acrescimoAlterar.percentual
+            : null,
+        })
+        .eq("id", ag.id)
+        .select("id, acrescimo_percentual_aplicado");
+      setSalvandoAlterar(false);
+      if (erroSoCaixa) {
+        setErroAlterar(
+          erroSoCaixa.code === "23514"
+            ? "O acréscimo de domingo só vale em domingo. Recarregue a página e tente de novo."
+            : erroSoCaixa.message
+        );
+        return;
+      }
+      const linha = Array.isArray(linhas) ? linhas[0] : null;
+      if (!linha) {
+        setErroAlterar("Não foi possível salvar; recarregue a página.");
+        return;
+      }
+      atualizarItemLocal(ag.id, {
+        acrescimo_percentual_aplicado: linha.acrescimo_percentual_aplicado,
+      });
+      setUltimaAlteracaoData({ id: ag.id, em: carimboAgora() });
+      fecharAlterar();
+      return;
+    }
+
+    // p_acrescimo_domingo: true liga (percentual do salão), false limpa, null
+    // não mexe; tudo no mesmo UPDATE.
+    const { data, error } = await supabase.rpc("agendamento_alterar_com_acrescimo", {
       p_agendamento_id: ag.id,
       p_servico_id: novo ? novo.id : null,
       p_data: dataMudou ? dataAlterarData : null,
       p_horario: dataMudou ? horarioAlterarData : null,
+      p_acrescimo_domingo: parametroAcrescimo,
     });
 
     setSalvandoAlterar(false);
@@ -2042,7 +2162,9 @@ export default function AdminPage() {
       setErroAlterar(
         ehOcupado
           ? "Horário ocupado para esta combinação; escolha outro horário"
-          : error.message
+          : error.code === "23514"
+            ? "O acréscimo de domingo só vale em domingo. Recarregue a página e tente de novo."
+            : error.message
       );
       if (ehOcupado) {
         if (dataMudou) setHorarioAlterarData("");
@@ -2085,12 +2207,24 @@ export default function AdminPage() {
         }
       : ag.servicos;
 
+    // Percentual que ficou gravado: lido do banco (só leitura), nunca deduzido.
+    // Falhou a leitura: recarrega a lista em vez de adivinhar.
+    const { data: linhaAcrescimo, error: erroAcrescimo } = await supabase
+      .from("agendamentos")
+      .select("acrescimo_percentual_aplicado")
+      .eq("id", ag.id)
+      .maybeSingle();
+    const leuAcrescimo = !erroAcrescimo && linhaAcrescimo != null;
+    const acrescimoGravado = leuAcrescimo ? linhaAcrescimo.acrescimo_percentual_aplicado : undefined;
+
     atualizarItemLocal(ag.id, {
       ...(novo
         ? { servico_id: novo.id, duracao_min: duracao, servicos: servicosFinal, ...semAgregado }
         : {}),
       ...(dataMudou ? { data: dataFinal, horario: horarioFinal } : {}),
+      ...(leuAcrescimo ? { acrescimo_percentual_aplicado: acrescimoGravado } : {}),
     });
+    if (!leuAcrescimo) recarregarAgendamentos();
     // Mesmo sinal de ultimoCancelamento: a ficha do cliente (aba Clientes)
     // refaz o resumo por ele, senão o carrossel mostraria os dados antigos.
     setUltimaAlteracaoData({ id: ag.id, em: carimboAgora() });
@@ -2122,9 +2256,17 @@ export default function AdminPage() {
             horario: horarioFinal,
           },
           estabelecimento.msg_alteracao,
-          // Troca de serviço: o agregado zera, mas a linha segue com o acréscimo
-          // gravado, então o valor continua fora da mensagem.
-          opcoesValorMensagem(estabelecimento, temAjuste || agendamentoTemAcrescimo(ag))
+          // Vale o estado NOVO: com acréscimo gravado (lido do banco depois da
+          // RPC) o valor fica fora da mensagem, como nos outros caminhos.
+          opcoesValorMensagem(
+            estabelecimento,
+            temAjuste ||
+              agendamentoTemAcrescimo({
+                acrescimo_percentual_aplicado: leuAcrescimo
+                  ? acrescimoGravado
+                  : ag.acrescimo_percentual_aplicado,
+              })
+          )
         )
       );
     }
@@ -2144,6 +2286,7 @@ export default function AdminPage() {
           : {}),
         data: dataFinal,
         horario: horarioFinal,
+        ...(leuAcrescimo ? { acrescimo_percentual_aplicado: acrescimoGravado } : {}),
       };
       comGateDeEtiqueta(itemAtualizado, "confirmar", () =>
         handleConfirmar(itemAtualizado, false)
@@ -2643,10 +2786,44 @@ export default function AdminPage() {
       setCarregandoDiasAlterarData(false);
     })();
 
+    // Liberações do profissional (domingo com acréscimo). Resultado de outra
+    // reserva ou de modal já fechado é descartado; falha = sem marca, sem aviso.
+    const idReserva = agendamentoParaAlterar.id;
+    (async () => {
+      const { data, error } = await supabase
+        .from("ausencias")
+        .select(
+          "profissional_id, tipo, dia_semana, data_inicio, data_fim, hora_inicio, dia_inteiro, acrescimo_domingo"
+        )
+        .eq("profissional_id", agendamentoParaAlterar.profissional_id)
+        .eq("tipo_registro", "liberacao");
+      if (!ativo || error) return;
+      setLiberacoesAlterar({ id: idReserva, lista: (data ?? []).filter(liberacaoEntraNoCalendario) });
+    })();
+
     return () => {
       ativo = false;
     };
   }, [agendamentoParaAlterar]);
+
+  // Ajustes de preço das perguntas da reserva aberta no modal Alterar (entram no
+  // total novo antes do acréscimo, como no cron). Resultado de outra reserva
+  // conta como carregando.
+  const idAlterar = agendamentoParaAlterar?.id;
+  useEffect(() => {
+    if (idAlterar == null) return;
+    let ativo = true;
+    somarAjustesPreco(idAlterar)
+      .then((r) => {
+        if (ativo) setAjustesAlterar({ id: idAlterar, status: r.ok ? "ok" : "erro", centavos: r.centavos });
+      })
+      .catch(() => {
+        if (ativo) setAjustesAlterar({ id: idAlterar, status: "erro", centavos: 0 });
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [idAlterar]);
 
   // Ao escolher um dia no calendário, busca a grade de vagas do dia (mesma
   // lib/disponibilidade do wizard) e filtra só os horários em que o
@@ -2659,6 +2836,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (!agendamentoParaAlterar || !dataAlterarData) {
       setHorariosAlterarData([]);
+      setVagasAlterarData(null);
       return;
     }
     let ativo = true;
@@ -2679,6 +2857,7 @@ export default function AdminPage() {
           .filter((h) => !horarioJaPassou(dataAlterarData, h, agoraGrade))
           .sort();
         setHorariosAlterarData(livres);
+        setVagasAlterarData(vagas);
         // Serviço novo (mais longo) pode tirar o horário já escolhido da grade.
         setHorarioAlterarData((atual) => (livres.includes(atual) ? atual : ""));
       } catch (e) {
@@ -6913,7 +7092,20 @@ export default function AdminPage() {
             String(horarioAlterarData).slice(0, 5) !== String(ag.horario).slice(0, 5));
         // Dia escolhido sem horário: ainda não dá pra gravar.
         const dataIncompleta = Boolean(dataAlterarData) && !horarioAlterarData;
-        const travado = salvandoAlterar || dataIncompleta || !(Boolean(novo) || dataMudou);
+        // Só a caixa de acréscimo mudar também conta (decisaoAcrescimoAlterar
+        // é a mesma de handleAlterar).
+        const acrescimoDoBotao = decisaoAcrescimoAlterar(ag);
+        const travado =
+          salvandoAlterar ||
+          dataIncompleta ||
+          !haAlteracaoNoModal({
+            temServicoNovo: novo,
+            dataMudou,
+            parametro: parametroAcrescimoAlterar({
+              temAtual: acrescimoDoBotao.temAtual,
+              aplicar: acrescimoDoBotao.aplicar,
+            }),
+          });
         // Mesma ordem do /agendar: categorias por ordem (só as com serviço),
         // serviços por ordem dentro delas, sem categoria por último.
         const idsCategorias = new Set(categoriasAlterarServico.map((c) => c.id));
@@ -6938,6 +7130,33 @@ export default function AdminPage() {
           const semCat = gruposServicos.find((g) => g.id === null);
           if (semCat) semCat.nome = "Outros";
         }
+        // Acréscimo de domingo no modal: decisão única (também usada por
+        // handleAlterar) e total novo simulado. Os ajustes só entram se o
+        // serviço não mudou (as respostas do serviço antigo são descartadas).
+        const acrescimoAlterar = decisaoAcrescimoAlterar(ag);
+        const ajustesCarregando =
+          !novo && (ajustesAlterar.id !== ag.id || ajustesAlterar.status === "carregando");
+        const ajustesComErro = !novo && !ajustesCarregando && ajustesAlterar.status === "erro";
+        const totalAlterar = acrescimoAlterar.visivel
+          ? valorTotalAgendamento(
+              {
+                servicos: {
+                  preco_centavos: novo ? novo.preco_centavos : ag.servicos?.preco_centavos,
+                },
+                agregado_preco_centavos: novo ? null : ag.agregado_preco_centavos,
+                acrescimo_percentual_aplicado: acrescimoAlterar.aplicar
+                  ? acrescimoAlterar.percentual
+                  : null,
+              },
+              novo ? 0 : ajustesAlterar.centavos
+            )
+          : null;
+        // Slots com marca de acréscimo (mapa CRU, profissional da reserva, só
+        // em domingo); a grade esconde o ocupado, então isto é só pintura.
+        const slotComMarca = (slot) =>
+          ehDomingoISO(dataAlterarData) &&
+          horarioTemAcrescimo(vagasAlterarData, slot, ag.profissional_id);
+        const algumSlotComMarca = horariosAlterarData.some(slotComMarca);
         const renderServicoAlterar = (sv) => {
           const sel = sv.id === servicoNovoId;
           const origem = sv.eh_manutencao ? origensAlterarServico[sv.servico_origem_id] : null;
@@ -7116,9 +7335,14 @@ export default function AdminPage() {
                         Nenhum horário disponível neste dia.
                       </p>
                     ) : (
+                      <>
+                      {algumSlotComMarca && (
+                        <p className="mb-2 text-xs text-muted">Com acréscimo de domingo</p>
+                      )}
                       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                         {horariosAlterarData.map((slot) => {
                           const sel = horarioAlterarData === slot;
+                          const comMarca = slotComMarca(slot);
                           const dentroAntecedencia = horarioDentroDaAntecedencia(
                             dataAlterarData,
                             slot,
@@ -7135,7 +7359,9 @@ export default function AdminPage() {
                                 "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
                                 sel
                                   ? "bg-primary text-on-primary ring-primary"
-                                  : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
+                                  : comMarca
+                                    ? `${CLASSE_GRADE_ACRESCIMO} ring-border hover:ring-primary`
+                                    : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
                               ].join(" ")}
                             >
                               {slot}
@@ -7148,6 +7374,7 @@ export default function AdminPage() {
                           );
                         })}
                       </div>
+                      </>
                     )}
                   </div>
                 )}
@@ -7159,6 +7386,44 @@ export default function AdminPage() {
                 )}
 
                 </>
+              )}
+
+              {acrescimoAlterar.visivel && (
+                <div className="mt-4 rounded-lg bg-surface px-3 py-2">
+                  <label className="flex items-center gap-2 text-sm text-body">
+                    <input
+                      type="checkbox"
+                      checked={acrescimoAlterar.aplicar}
+                      disabled={salvandoAlterar}
+                      onChange={(e) =>
+                        setEscolhaAcrescimoAlterar({
+                          chave: acrescimoAlterar.chave,
+                          valor: e.target.checked,
+                        })
+                      }
+                    />
+                    Acréscimo de domingo ({acrescimoAlterar.percentual}%)
+                  </label>
+                  <p className="mt-1 text-sm font-medium text-heading">
+                    Valor total:{" "}
+                    {ajustesCarregando ? (
+                      "…"
+                    ) : ajustesComErro ? (
+                      <span className="text-xs font-normal">
+                        Não foi possível conferir o valor; confira os ajustes de preço das perguntas.
+                      </span>
+                    ) : totalAlterar == null ? (
+                      "—"
+                    ) : (
+                      formatarPreco(totalAlterar)
+                    )}
+                  </p>
+                  {acrescimoAlterar.aplicar && (
+                    <p className="mt-1 rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 ring-1 ring-amber-200">
+                      {textoAcrescimoDona(acrescimoAlterar.percentual)}
+                    </p>
+                  )}
+                </div>
               )}
 
               {avisoParAlterarData && (
@@ -7241,6 +7506,20 @@ export default function AdminPage() {
                 onConfirmar={() => {
                   setConfirmandoAlterarSemAviso(false);
                   handleAlterar(false);
+                }}
+              />
+            )}
+            {remocaoAcrescimoPendente && (
+              <PopupConfirmarSemAviso
+                titulo="Remover acréscimo de domingo?"
+                texto={`Esta reserva tem acréscimo de domingo (${ag.acrescimo_percentual_aplicado}%). Ao salvar, o acréscimo será removido.`}
+                rotuloAcao="Remover e salvar"
+                desabilitado={salvandoAlterar}
+                onVoltar={() => setRemocaoAcrescimoPendente(null)}
+                onConfirmar={() => {
+                  const { notificar } = remocaoAcrescimoPendente;
+                  setRemocaoAcrescimoPendente(null);
+                  handleAlterar(notificar, true);
                 }}
               />
             )}
