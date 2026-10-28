@@ -3788,13 +3788,22 @@ export default function FormularioAgendamento({
   // não existe mais a falha: no fluxo público as respostas nascem na mesma
   // transação da reserva (ver agendamento_criar e a rota de remarcação), então
   // ou as duas coisas entram, ou nenhuma entra e a cliente nem sai da etapa.
-  function concluirFluxoPublico({ agendamentoId, horario, anteriorDoPar = null }) {
+  // `acrescimo` vem por parâmetro quando a reserva acabou de ser criada: o
+  // `acrescimoAtivo` desta closure ainda é o do render anterior.
+  function concluirFluxoPublico({
+    agendamentoId,
+    horario,
+    anteriorDoPar = null,
+    acrescimo = acrescimoAtivo,
+  }) {
     limparFatia(estabelecimento.slug, "agendamento");
     onSucesso?.({
       ...resumoSucessoDoPar({ horario, anteriorDoPar }),
       servico: servicoParaSucesso,
       profissional: escolherProfissional ? profissionalSelecionado : null,
       agendamentoId,
+      acrescimoAtivo: acrescimo,
+      precoTotalCentavos: totalComAcrescimo(acrescimo),
     });
   }
 
@@ -4168,6 +4177,18 @@ export default function FormularioAgendamento({
         profissionalRemarcado = await escolherMenosOcupado(estabelecimento.id, form.data, livres);
       }
 
+      // Sim ou não do acréscimo de domingo para o slot NOVO (mesma decisão do
+      // ramo sem sinal, sem olhar a reserva antiga). O percentual é da rota.
+      const comAcrescimoRemarcado = acrescimoAplicavel({
+        modoLivre,
+        ehPar,
+        percentual: estabelecimento.acrescimo_domingo_percentual,
+        mapa: vagas,
+        horario: slot,
+        profissionalId: chaveAtual.profissionalId,
+        temReserva: false,
+      });
+
       let respostaOk = false;
       let json = null;
       try {
@@ -4191,6 +4212,7 @@ export default function FormularioAgendamento({
             // agendamento_criar, o navegador não escreve mais em
             // agendamento_respostas.
             respostas: respostasParaRpc(),
+            acrescimoDomingo: comAcrescimoRemarcado,
           }),
         });
         respostaOk = resposta.ok;
@@ -4237,8 +4259,9 @@ export default function FormularioAgendamento({
       setReservaId(json.id);
       setReservaChave(chaveAtual);
       setReservaPago({ id: json.id, pagoEm: json.abacatepayPagoEm ?? sinalPagoEm });
-      // A rota de remarcação não grava acréscimo: a linha nova nasce sem ele.
-      setAcrescimoReservado(false);
+      // Vale o que a rota GRAVOU (ela confere domingo e percentual do salão),
+      // não o que o navegador pediu.
+      setAcrescimoReservado(json.acrescimo_percentual_aplicado != null);
       // A linha nova nasce em "pendente", com o sinal já pago junto: não há
       // sinal a aguardar, e é isto que mantém o bloco do QR Code fora da tela
       // (ver o gate de aguardandoSinal no JSX).
@@ -4469,6 +4492,7 @@ export default function FormularioAgendamento({
       concluirFluxoPublico({
         agendamentoId: novoId,
         horario: slot,
+        acrescimo: comAcrescimo,
         // Par: o protocolo fala do EVENTO e cita a etapa anterior à parte
         // (ver resumoSucessoDoPar). O state ainda é o do render anterior
         // aqui, por isso tudo viaja por parâmetro.
@@ -4580,6 +4604,8 @@ export default function FormularioAgendamento({
       horario: horarioSelecionado,
       profissional: escolherProfissional ? profissionalSelecionado : null,
       agendamentoId: reservaId,
+      acrescimoAtivo,
+      precoTotalCentavos,
     });
   }
 
@@ -4998,6 +5024,8 @@ export default function FormularioAgendamento({
         // Id da linha gravada — a tela de protocolo do consumidor precisa
         // dele pros botões Editar/Cancelar (ver TelaSolicitacaoEnviada).
         agendamentoId: reservaId,
+        acrescimoAtivo,
+        precoTotalCentavos,
       });
       return;
     }
@@ -5363,6 +5391,8 @@ export default function FormularioAgendamento({
       }),
       servico: servicoParaSucesso,
       profissional: escolherProfissional ? profissionalSelecionado : null,
+      acrescimoAtivo,
+      precoTotalCentavos,
     });
   }
 
@@ -5447,9 +5477,12 @@ export default function FormularioAgendamento({
         temReserva: reservaId != null,
         decididoNaReserva: acrescimoReservado,
       });
-  const precoTotalCentavos = acrescimoAtivo
-    ? precoComAcrescimo(precoSemAcrescimoCentavos, estabelecimento.acrescimo_domingo_percentual)
-    : precoSemAcrescimoCentavos;
+  function totalComAcrescimo(comAcrescimo) {
+    return comAcrescimo
+      ? precoComAcrescimo(precoSemAcrescimoCentavos, estabelecimento.acrescimo_domingo_percentual)
+      : precoSemAcrescimoCentavos;
+  }
+  const precoTotalCentavos = totalComAcrescimo(acrescimoAtivo);
   const servicoParaSucesso = agregadoSelecionado
     ? {
         ...servicoSelecionado,

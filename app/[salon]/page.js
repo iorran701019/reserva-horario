@@ -603,6 +603,8 @@ export default function AgendarPage() {
             horario={horario}
             nomeCliente={form.nome}
             etapaAnterior={resumo.etapaAnterior ?? null}
+            precoTotalCentavos={resumo.precoTotalCentavos ?? null}
+            acrescimoAtivo={resumo.acrescimoAtivo === true}
             onVerAgendamentos={() => recomecarFluxo({ paraOWizard: false })}
             onEditar={
               parVinculado

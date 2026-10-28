@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { MapPin } from "lucide-react";
 import { cancelarAgendamentoCliente } from "@/lib/agendamentosCliente";
 import { formatarData } from "@/components/FormularioAgendamento";
+import { formatarPreco } from "@/lib/preco";
+import { textoAcrescimoCliente } from "@/lib/acrescimoDomingo";
 import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento";
 
 // Tela de protocolo ("Solicitação enviada!") do fluxo público. Era inline em
@@ -39,6 +41,11 @@ import ModalConfirmarCancelamento from "@/components/ModalConfirmarCancelamento"
 //                      continuam sendo os do atendimento principal, que é "o
 //                      agendamento" em toda tela. null (o normal) = card
 //                      idêntico ao de sempre.
+//   precoTotalCentavos / acrescimoAtivo – opcionais, vindos do wizard. O
+//                      "Valor total" só aparece com o total conhecido e o
+//                      preço não oculto pelo salão; com acréscimo de domingo o
+//                      texto neutro aparece SEMPRE (mesmo com preço oculto),
+//                      nunca com o percentual.
 //   onCancelado       – opcional; havendo, mostra "Cancelar agendamento" e é
 //                      chamado depois do cancelamento dar certo. O clique
 //                      passa antes pela confirmação (ver
@@ -54,6 +61,8 @@ export default function TelaSolicitacaoEnviada({
   onEditar = null,
   onCancelado = null,
   etapaAnterior = null,
+  precoTotalCentavos = null,
+  acrescimoAtivo = false,
 }) {
   const [cancelando, setCancelando] = useState(false);
   const [erro, setErro] = useState("");
@@ -67,6 +76,7 @@ export default function TelaSolicitacaoEnviada({
 
   const dataFormatada = formatarData(data);
   const podeAgir = agendamentoId != null;
+  const mostrarTotal = precoTotalCentavos > 0 && !estabelecimento?.ocultar_preco_servicos;
 
   async function handleCancelar() {
     setErro("");
@@ -157,6 +167,17 @@ export default function TelaSolicitacaoEnviada({
           <dt className="text-body">Nome</dt>
           <dd className="font-medium text-heading">{nomeCliente}</dd>
         </div>
+        {mostrarTotal && (
+          <div className="flex items-center justify-between gap-4">
+            <dt className="text-body">Valor total</dt>
+            <dd className="font-medium text-heading">{formatarPreco(precoTotalCentavos)}</dd>
+          </div>
+        )}
+        {acrescimoAtivo && (
+          <p className="rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-200">
+            {textoAcrescimoCliente()}
+          </p>
+        )}
       </dl>
 
       {/* Botões neutros (Ver localização / Ver meus agendamentos / Editar

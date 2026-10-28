@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { servicoAceitaAgregado } from "@/lib/servicoAgregado";
+import { acrescimoParaGravarRemarcacao } from "@/lib/acrescimoDomingo";
 
 // Remarca um agendamento cujo sinal JÁ foi pago via AbacatePay: cancela a
 // linha atual e cria a do horário novo carregando o pagamento junto.
@@ -140,6 +141,7 @@ export async function POST(request) {
     profissionalId,
     respostas,
     servicoAgregadoId = null,
+    acrescimoDomingo = false,
   } = corpo ?? {};
 
   if (!agendamentoId || !data || !horario || !servicoId) {
@@ -281,6 +283,32 @@ export async function POST(request) {
     }
   }
 
+  // Acréscimo de domingo da linha NOVA. O corpo só diz sim ou não (boolean
+  // estrito; qualquer outro tipo vale como não); o percentual é lido do salão
+  // da reserva, nunca do corpo, e só se grava em domingo (a constraint do banco
+  // recusaria o resto com 23514). Nunca copiado da linha cancelada: a data
+  // nova é que decide. Consulta só quando há sim, pra não pesar o caminho sem
+  // acréscimo, e ANTES de cancelar a linha paga — falha aqui não toca em nada.
+  let acrescimoPercentual = null;
+  if (acrescimoDomingo === true) {
+    const { data: salaoAcrescimo, error: erroAcrescimo } = await supabaseAdmin
+      .from("estabelecimentos")
+      .select("acrescimo_domingo_percentual")
+      .eq("id", atual.estabelecimento_id)
+      .maybeSingle();
+
+    if (erroAcrescimo) {
+      console.error("Falha ao ler o acréscimo de domingo na remarcação", agendamentoId, erroAcrescimo);
+      return Response.json({ erro: "Não foi possível trocar o horário agora." }, { status: 500 });
+    }
+
+    acrescimoPercentual = acrescimoParaGravarRemarcacao({
+      querAcrescimo: true,
+      data,
+      percentual: salaoAcrescimo?.acrescimo_domingo_percentual,
+    });
+  }
+
   // MESMA ordem do fluxo público (ver selecionarHorario): cancela ANTES de
   // inserir. Não é preferência de estilo — a linha antiga e a nova são da
   // mesma cliente e podem se sobrepor no tempo (trocar 14h por 14h30 num
@@ -337,8 +365,9 @@ export async function POST(request) {
       abacatepay_br_code: atual.abacatepay_br_code,
       abacatepay_br_code_base64: atual.abacatepay_br_code_base64,
       abacatepay_pago_em: atual.abacatepay_pago_em,
+      acrescimo_percentual_aplicado: acrescimoPercentual,
     })
-    .select("id")
+    .select("id, acrescimo_percentual_aplicado")
     .single();
 
   if (erroInsert) {
@@ -394,5 +423,6 @@ export async function POST(request) {
     id: nova.id,
     pendenteDesde: atual.pendente_desde ?? atual.abacatepay_pago_em,
     abacatepayPagoEm: atual.abacatepay_pago_em,
+    acrescimo_percentual_aplicado: nova.acrescimo_percentual_aplicado ?? null,
   });
 }
