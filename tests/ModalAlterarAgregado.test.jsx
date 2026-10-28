@@ -4,8 +4,9 @@ import { render, screen, waitFor, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { supabaseFalso } from "./helpers/consulta.js";
 
-const h = vi.hoisted(() => ({ supabase: {} }));
+const h = vi.hoisted(() => ({ supabase: {}, somarAjustesPreco: vi.fn() }));
 vi.mock("@/lib/supabaseClient", () => ({ supabase: h.supabase }));
+vi.mock("@/lib/agendamentoRespostas", () => ({ somarAjustesPreco: h.somarAjustesPreco }));
 
 import ModalAlterarAgregado from "@/components/ModalAlterarAgregado";
 
@@ -212,5 +213,52 @@ describe("ModalAlterarAgregado", () => {
     ).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Voltar" }));
     expect(onFechar).toHaveBeenCalled();
+  });
+
+  it("com acréscimo: total com o percentual (para baixo) e a linha da dona", async () => {
+    h.somarAjustesPreco.mockResolvedValue({ ok: true, centavos: 1000 });
+    montar({ ag: { ...agendamento, acrescimo_percentual_aplicado: 10 } });
+    await carregado();
+    // (10000 + 5000 + 1000) = 16000; +10% = 17600
+    expect(await screen.findByText(/17[.,]?600|176,00/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Agendamento com acréscimo de domingo (10%)")
+    ).toBeInTheDocument();
+    expect(h.somarAjustesPreco).toHaveBeenCalledTimes(1);
+    expect(h.somarAjustesPreco).toHaveBeenCalledWith("a1");
+  });
+
+  it("com acréscimo: arredonda para baixo", async () => {
+    h.somarAjustesPreco.mockResolvedValue({ ok: true, centavos: 0 });
+    montar({
+      ag: { ...agendamento, agregado_preco_centavos: 5001, acrescimo_percentual_aplicado: 10 },
+    });
+    // base 15001; 10% = 1500,1 -> 1500; total 16501
+    expect(await screen.findByText(/165,01/)).toBeInTheDocument();
+  });
+
+  it("com acréscimo e busca dos ajustes falhando: aviso, sem número", async () => {
+    h.somarAjustesPreco.mockResolvedValue({ ok: false, centavos: 0 });
+    montar({ ag: { ...agendamento, acrescimo_percentual_aplicado: 10 } });
+    expect(await screen.findByText(/Não foi possível conferir o valor/)).toBeInTheDocument();
+    expect(screen.queryByText(/R\$\s*176/)).not.toBeInTheDocument();
+    expect(screen.getByText("Agendamento com acréscimo de domingo (10%)")).toBeInTheDocument();
+  });
+
+  it("sem acréscimo: resumo atual e nenhuma busca de ajustes", async () => {
+    montar();
+    await carregado();
+    expect(h.somarAjustesPreco).not.toHaveBeenCalled();
+    expect(screen.queryByText(/acréscimo de domingo/)).not.toBeInTheDocument();
+  });
+
+  it("com acréscimo: escolher outro agregado não muda o total do cabeçalho", async () => {
+    h.somarAjustesPreco.mockResolvedValue({ ok: true, centavos: 1000 });
+    montar({ ag: { ...agendamento, acrescimo_percentual_aplicado: 10 } });
+    await carregado();
+    expect(await screen.findByText(/176,00/)).toBeInTheDocument();
+    await userEvent.setup().click(opcao("Escova"));
+    await digitar(campoPreco(), "99");
+    expect(screen.getByText(/176,00/)).toBeInTheDocument();
   });
 });

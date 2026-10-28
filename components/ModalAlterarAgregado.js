@@ -6,6 +6,12 @@ import { supabase } from "@/lib/supabaseClient";
 import { mensagemFalhaSalvar } from "@/lib/erroSalvar";
 import { formatarPreco } from "@/lib/preco";
 import { DURACAO_MAXIMA_MIN, nomeComAgregado, resumoPreco } from "@/lib/servicoAgregado";
+import {
+  agendamentoTemAcrescimo,
+  textoAcrescimoDona,
+  valorTotalAgendamento,
+} from "@/lib/acrescimoDomingo";
+import { somarAjustesPreco } from "@/lib/agendamentoRespostas";
 import { buscarAgregadosDoServico, buscarSomaTempoAgregado } from "@/lib/agregadosServico";
 import IconeWhatsApp from "@/components/IconeWhatsApp";
 import PopupConfirmarSemAviso from "@/components/PopupConfirmarSemAviso";
@@ -33,6 +39,26 @@ export default function ModalAlterarAgregado({ agendamento, estabelecimento, onS
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [confirmandoSemAviso, setConfirmandoSemAviso] = useState(false);
+  const [ajustes, setAjustes] = useState({ id: null, status: "carregando", centavos: 0 });
+  const temAcrescimo = agendamentoTemAcrescimo(ag);
+
+  // Com acréscimo de domingo gravado, o total soma os ajustes das perguntas
+  // ANTES do acréscimo (como o cron); busca uma vez por reserva. Sem acréscimo
+  // o resumo segue o de sempre, sem busca.
+  useEffect(() => {
+    if (!temAcrescimo) return undefined;
+    let ativo = true;
+    somarAjustesPreco(ag.id)
+      .then((r) => {
+        if (ativo) setAjustes({ id: ag.id, status: r.ok ? "ok" : "erro", centavos: r.centavos });
+      })
+      .catch(() => {
+        if (ativo) setAjustes({ id: ag.id, status: "erro", centavos: 0 });
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [ag.id, temAcrescimo]);
 
   useEffect(() => {
     let ativo = true;
@@ -130,6 +156,14 @@ export default function ModalAlterarAgregado({ agendamento, estabelecimento, onS
     onSalvo(linha, notificar);
   }
 
+  // Total da reserva como está gravada, com o acréscimo de domingo; a troca de
+  // agregado não mexe no percentual.
+  const ajustesProntos = ajustes.id === ag.id && ajustes.status === "ok";
+  const totalComAcrescimo =
+    temAcrescimo && ajustesProntos
+      ? valorTotalAgendamento(ag, ajustes.centavos)
+      : null;
+
   const semAgregados = opcoes !== null && lista.length === 0;
   const nomeAtual = nomeComAgregado(ag.servicos?.nome, ag.agregado_nome) ?? "Serviço";
 
@@ -155,11 +189,32 @@ export default function ModalAlterarAgregado({ agendamento, estabelecimento, onS
             {nomeAtual}
             {ag.duracao_min != null && <> · {ag.duracao_min} min</>}
           </p>
-          {ag.servicos?.preco_centavos != null && (
-            <p className="mt-0.5">
-              {resumoPreco(ag.servicos.preco_centavos, ag.agregado_preco_centavos)}
-            </p>
-          )}
+          {ag.servicos?.preco_centavos != null &&
+            (temAcrescimo ? (
+              <>
+                <p className="mt-0.5">
+                  {ajustes.id !== ag.id || ajustes.status === "carregando" ? (
+                    "…"
+                  ) : ajustes.status === "erro" ? (
+                    <span className="text-xs">
+                      Não foi possível conferir o valor; confira os ajustes de preço das
+                      perguntas.
+                    </span>
+                  ) : totalComAcrescimo == null ? (
+                    "—"
+                  ) : (
+                    formatarPreco(totalComAcrescimo)
+                  )}
+                </p>
+                <p className="mt-1 rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 ring-1 ring-amber-200">
+                  {textoAcrescimoDona(ag.acrescimo_percentual_aplicado)}
+                </p>
+              </>
+            ) : (
+              <p className="mt-0.5">
+                {resumoPreco(ag.servicos.preco_centavos, ag.agregado_preco_centavos)}
+              </p>
+            ))}
         </div>
 
         {opcoes === null ? (
