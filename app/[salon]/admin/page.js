@@ -14,14 +14,11 @@ import { buscarPerfil } from "@/lib/perfil";
 import {
   agendamentoTemAcrescimo,
   caixaAcrescimoVisivel,
-  CLASSE_GRADE_ACRESCIMO,
   diaTemAcrescimo,
   escolhaVigente,
   liberacaoCobreDia,
   liberacaoEntraNoCalendario,
-  horarioTemAcrescimo,
   inicialAcrescimoAlterar,
-  ehDomingoISO,
   haAlteracaoNoModal,
   parametroAcrescimoAlterar,
   textoAcrescimoDona,
@@ -71,7 +68,7 @@ import { useNavegacaoTrimestre } from "@/lib/useNavegacaoTrimestre";
 import {
   buscarMesesJanela,
   calcularVagasPorHorario,
-  horarioDentroDaAntecedencia,
+  filtrarPorAntecedenciaMinima,
   horarioJaPassou,
   profissionaisLivresNoHorario,
 } from "@/lib/disponibilidade";
@@ -84,6 +81,13 @@ import {
   statusDoMes,
 } from "@/lib/janelaAgendamento";
 import { rotuloMesLongo } from "@/lib/mes";
+import {
+  ESTADOS_GRADE_ADMIN,
+  ROTULOS_MOTIVO_BLOQUEIO,
+  exibirGradeAdmin,
+  montarGradeAdmin,
+  separarGradeAdmin,
+} from "@/lib/gradeAdmin";
 import {
   buscarUltimoConcluidoQualquer,
   avaliarDesvioDeServico,
@@ -1189,12 +1193,19 @@ export default function AdminPage() {
   // Confirmação "Remover acréscimo de domingo?": { notificar } enquanto aberta;
   // "Remover e salvar" refaz handleAlterar com confirmado=true.
   const [remocaoAcrescimoPendente, setRemocaoAcrescimoPendente] = useState(null);
+  // Confirmação "Fora da janela de agendamento": { notificar } enquanto aberta;
+  // vem ANTES da remoção do acréscimo, e "Mover mesmo assim" refaz handleAlterar.
+  const [confirmacaoJanelaAlterar, setConfirmacaoJanelaAlterar] = useState(null);
   const [mesVisivelAlterarData, setMesVisivelAlterarData] = useState(() => new Date());
   const [dataAlterarData, setDataAlterarData] = useState("");
   const [horarioAlterarData, setHorarioAlterarData] = useState("");
+  // Data para a qual "Ver outros horários" da grade do Alterar foi aberto.
+  const [outrosHorariosAlterarAbertosEm, setOutrosHorariosAlterarAbertosEm] = useState("");
   const [diasSemanaAtivosAlterarData, setDiasSemanaAtivosAlterarData] = useState(new Set());
   const [carregandoDiasAlterarData, setCarregandoDiasAlterarData] = useState(false);
-  const [horariosAlterarData, setHorariosAlterarData] = useState([]);
+  // Mapa de vagas do dia já filtrado pela antecedência (o cru fica em
+  // vagasAlterarData). A lista da grade sai dos dois, no render.
+  const [vagasFiltradasAlterarData, setVagasFiltradasAlterarData] = useState(null);
   // Mapa CRU de vagas do dia escolhido (mesma referência devolvida por
   // calcularVagasPorHorario): só ele guarda acrescimoPorHorario, que é
   // propriedade não enumerável e some em qualquer cópia ou spread.
@@ -1638,6 +1649,7 @@ export default function AdminPage() {
     setAgendamentoParaAlterar(null);
     setModoAlterar(null);
     setRemocaoAcrescimoPendente(null);
+    setConfirmacaoJanelaAlterar(null);
   }
 
   // Sucesso da RPC agendamento_alterar_agregado: espelha no estado local as
@@ -2091,7 +2103,7 @@ export default function AdminPage() {
   // na reserva, sem WhatsApp nem cadeia de confirmação. Se o salvamento vai
   // REMOVER o acréscimo, abre antes a confirmação (confirmado=false); "Remover
   // e salvar" volta aqui com confirmado=true.
-  async function handleAlterar(notificar, confirmado = false) {
+  async function handleAlterar(notificar, confirmado = false, janelaConfirmada = false) {
     const ag = agendamentoParaAlterar;
     if (!ag || salvandoAlterar) return;
     const novo = servicosAlterarServico.find((sv) => sv.id === servicoNovoId) ?? null;
@@ -2102,6 +2114,21 @@ export default function AdminPage() {
       aplicar: acrescimoAlterar.aplicar,
     });
     if (!haAlteracaoNoModal({ temServicoNovo: novo, dataMudou, parametro: parametroAcrescimo })) {
+      return;
+    }
+    // Confirmações em sequência, nunca juntas: janela mensal primeiro, depois
+    // a remoção do acréscimo. "Voltar" em qualquer uma cancela o salvamento.
+    if (
+      dataMudou &&
+      !janelaConfirmada &&
+      !dataAgendavelComMes(
+        dataAlterarData,
+        estabelecimento,
+        mesesJanela,
+        etiquetaIdDoTelefone(ag.telefone)
+      )
+    ) {
+      setConfirmacaoJanelaAlterar({ notificar });
       return;
     }
     if (parametroAcrescimo === false && !confirmado) {
@@ -2836,7 +2863,7 @@ export default function AdminPage() {
   const [versaoAlterarData, setVersaoAlterarData] = useState(0);
   useEffect(() => {
     if (!agendamentoParaAlterar || !dataAlterarData) {
-      setHorariosAlterarData([]);
+      setVagasFiltradasAlterarData(null);
       setVagasAlterarData(null);
       return;
     }
@@ -2845,22 +2872,43 @@ export default function AdminPage() {
     (async () => {
       setCarregandoHorariosAlterarData(true);
       try {
+        // Mesmo motor do Agendar do admin (contexto "admin": a janela, o modo e
+        // a antecedência viram marca, não somem). Serviço igual: vale a duração
+        // gravada na reserva (inclui agregado e ajustes); serviço novo: a dele.
         const vagas = await calcularVagasPorHorario({
           estabelecimentoId: estabelecimento.id,
           servicoId: servicoNovoId ?? agendamentoParaAlterar.servico_id,
           data: dataAlterarData,
           excluirAgendamentoId: agendamentoParaAlterar.id,
+          contexto: "admin",
+          duracaoMinOverride: servicoNovoId ? null : agendamentoParaAlterar.duracao_min,
         });
         if (!ativo) return;
         const agoraGrade = new Date();
-        const livres = Object.keys(vagas)
-          .filter((h) => vagas[h].includes(agendamentoParaAlterar.profissional_id))
-          .filter((h) => !horarioJaPassou(dataAlterarData, h, agoraGrade))
-          .sort();
-        setHorariosAlterarData(livres);
+        const vagasFiltradas = filtrarPorAntecedenciaMinima(
+          vagas,
+          dataAlterarData,
+          estabelecimento,
+          "admin"
+        );
+        setVagasFiltradasAlterarData(vagasFiltradas);
         setVagasAlterarData(vagas);
-        // Serviço novo (mais longo) pode tirar o horário já escolhido da grade.
-        setHorarioAlterarData((atual) => (livres.includes(atual) ? atual : ""));
+        // Só aqui (vagas buscadas de novo: troca de serviço ou de data) o horário
+        // escolhido some se deixou de existir ou virou ocupado. Existência e
+        // "ocupado" não dependem de liberações nem de agendamentos (só a chave e
+        // o rótulo), então a lista de conferência vai sem eles.
+        const existentes = montarGradeAdmin({
+          vagasCru: vagas,
+          vagasFiltradas,
+          data: dataAlterarData,
+          profissionalId: agendamentoParaAlterar.profissional_id,
+          liberacoes: [],
+          agendamentosDoDia: [],
+          agora: agoraGrade,
+        }).filter(({ horario }) => !horarioJaPassou(dataAlterarData, horario, agoraGrade));
+        setHorarioAlterarData((atual) =>
+          existentes.some((g) => g.horario === atual && g.status !== "ocupado") ? atual : ""
+        );
       } catch (e) {
         if (ativo) setErroAlterar(e.message ?? String(e));
       } finally {
@@ -2872,6 +2920,31 @@ export default function AdminPage() {
       ativo = false;
     };
   }, [agendamentoParaAlterar, dataAlterarData, servicoNovoId, estabelecimento, versaoAlterarData]);
+
+  // Lista da grade do Alterar: calculada das vagas já buscadas, das liberações
+  // da reserva aberta e dos agendamentos do painel. A chegada das liberações ou
+  // o refresh do painel só repinta; não consulta nada nem limpa o horário.
+  const horariosAlterarData = useMemo(() => {
+    if (!agendamentoParaAlterar || !dataAlterarData || !vagasFiltradasAlterarData) return [];
+    const agoraGrade = new Date();
+    return montarGradeAdmin({
+      vagasCru: vagasAlterarData,
+      vagasFiltradas: vagasFiltradasAlterarData,
+      data: dataAlterarData,
+      profissionalId: agendamentoParaAlterar.profissional_id,
+      liberacoes:
+        liberacoesAlterar.id === agendamentoParaAlterar.id ? liberacoesAlterar.lista : [],
+      agendamentosDoDia: agendamentos,
+      agora: agoraGrade,
+    }).filter(({ horario }) => !horarioJaPassou(dataAlterarData, horario, agoraGrade));
+  }, [
+    agendamentoParaAlterar,
+    dataAlterarData,
+    vagasAlterarData,
+    vagasFiltradasAlterarData,
+    liberacoesAlterar,
+    agendamentos,
+  ]);
 
   // Um único `agora` pra classificar tudo no render (inbox, fora da janela,
   // histórico).
@@ -7153,12 +7226,14 @@ export default function AdminPage() {
               novo ? 0 : ajustesAlterar.centavos
             )
           : null;
-        // Slots com marca de acréscimo (mapa CRU, profissional da reserva, só
-        // em domingo); a grade esconde o ocupado, então isto é só pintura.
-        const slotComMarca = (slot) =>
-          ehDomingoISO(dataAlterarData) &&
-          horarioTemAcrescimo(vagasAlterarData, slot, ag.profissional_id);
-        const algumSlotComMarca = horariosAlterarData.some(slotComMarca);
+        // Grade do dia inteiro (mesma lib do Agendar): "fora do expediente"
+        // recolhido, o horário escolhido nunca é escondido.
+        const separadaAlterar = separarGradeAdmin(horariosAlterarData, horarioAlterarData);
+        const { expandido: outrosAlterarExpandidos, exibida: gradeAlterarExibida } =
+          exibirGradeAdmin({
+            ...separadaAlterar,
+            aberto: outrosHorariosAlterarAbertosEm === dataAlterarData,
+          });
         // Dias do mês visível cobertos por uma liberação do profissional da
         // reserva (abrem o dia fora do expediente normal) e, entre eles, os com
         // acréscimo de domingo — mesma conta do Agendar (FormularioAgendamento).
@@ -7337,11 +7412,8 @@ export default function AdminPage() {
                       mesesJanela={mesesJanela}
                       etiquetaClienteId={etiquetaIdDoTelefone(ag.telefone)}
                       // Este modal é sempre admin — modo livre sempre ligado (ver
-                      // CalendarioDias/modoLivre em FormularioAgendamento.js). A
-                      // grade de horários abaixo NÃO foi estendida (fora do
-                      // escopo pedido): dias fora da janela/expediente ficam
-                      // clicáveis aqui, mas ainda podem mostrar "nenhum horário
-                      // disponível" até essa segunda parte ser implementada.
+                      // CalendarioDias/modoLivre em FormularioAgendamento.js); a
+                      // grade de horários abaixo é a mesma do Agendar (lib/gradeAdmin).
                       modoLivre
                     />
                   )}
@@ -7356,48 +7428,93 @@ export default function AdminPage() {
                       <p className="text-sm text-body">Carregando horários...</p>
                     ) : horariosAlterarData.length === 0 ? (
                       <p className="rounded-lg bg-surface px-3 py-2 text-sm text-body">
-                        Nenhum horário disponível neste dia.
+                        Nenhum horário disponível neste dia (todos colidem com
+                        agendamentos já agendados).
                       </p>
                     ) : (
                       <>
-                      {algumSlotComMarca && (
-                        <p className="mb-2 text-xs text-muted">Com acréscimo de domingo</p>
-                      )}
-                      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                        {horariosAlterarData.map((slot) => {
-                          const sel = horarioAlterarData === slot;
-                          const comMarca = slotComMarca(slot);
-                          const dentroAntecedencia = horarioDentroDaAntecedencia(
-                            dataAlterarData,
-                            slot,
-                            estabelecimento
-                          );
-                          return (
+                        {separadaAlterar.visiveis.length === 0 && (
+                          <p className="mb-2 text-xs text-muted">
+                            Nenhum horário em uso neste dia; mostrando também os
+                            fora do expediente.
+                          </p>
+                        )}
+                        <ul className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+                          {Object.entries(ESTADOS_GRADE_ADMIN)
+                            .filter(([chave]) => gradeAlterarExibida.some((g) => g.chave === chave))
+                            .map(([chave, estado]) => (
+                              <li key={chave} className="flex items-center gap-1.5">
+                                <span
+                                  aria-hidden="true"
+                                  className={`h-3 w-3 rounded ${estado.classe}`}
+                                />
+                                {estado.legenda}
+                              </li>
+                            ))}
+                        </ul>
+                        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                          {gradeAlterarExibida.map(({ horario, status, motivo, chave, rotuloOcupado }) => {
+                            const ocupado = status === "ocupado";
+                            const sel = !ocupado && horarioAlterarData === horario;
+                            const estado = ESTADOS_GRADE_ADMIN[chave];
+                            return (
+                              <button
+                                key={horario}
+                                type="button"
+                                onClick={ocupado ? undefined : () => setHorarioAlterarData(horario)}
+                                disabled={salvandoAlterar}
+                                aria-pressed={ocupado ? undefined : sel}
+                                aria-disabled={ocupado || undefined}
+                                title={
+                                  ocupado
+                                    ? rotuloOcupado ?? "Ocupado"
+                                    : status === "bloqueado"
+                                      ? `Fora das regras normais de agendamento (${ROTULOS_MOTIVO_BLOQUEIO[motivo] ?? motivo})`
+                                      : chave === "liberacao"
+                                        ? "Horário aberto por você"
+                                        : undefined
+                                }
+                                className={[
+                                  "flex flex-col items-center rounded-lg px-2 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60",
+                                  ocupado ? "cursor-default" : "hover:border-primary",
+                                  sel
+                                    ? "border-2 border-primary bg-primary text-on-primary"
+                                    : estado.classe,
+                                ].join(" ")}
+                              >
+                                {horario}
+                                {estado.rotulo && (
+                                  <span className="text-[10px] font-normal leading-none">
+                                    {estado.rotulo}
+                                  </span>
+                                )}
+                                {rotuloOcupado && (
+                                  <span className="mt-0.5 w-full truncate text-[10px] font-normal leading-tight">
+                                    {rotuloOcupado}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {separadaAlterar.recolhidos.length > 0 &&
+                          separadaAlterar.visiveis.length > 0 &&
+                          !separadaAlterar.selecionadoNoRecolhido && (
                             <button
-                              key={slot}
                               type="button"
-                              onClick={() => setHorarioAlterarData(slot)}
-                              disabled={salvandoAlterar}
-                              aria-pressed={sel}
-                              className={[
-                                "rounded-lg px-2 py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-60",
-                                sel
-                                  ? "bg-primary text-on-primary ring-primary"
-                                  : comMarca
-                                    ? `${CLASSE_GRADE_ACRESCIMO} ring-border hover:ring-primary`
-                                    : "bg-card text-body ring-border hover:border-primary hover:ring-primary",
-                              ].join(" ")}
+                              onClick={() =>
+                                setOutrosHorariosAlterarAbertosEm(
+                                  outrosAlterarExpandidos ? "" : dataAlterarData
+                                )
+                              }
+                              aria-expanded={outrosAlterarExpandidos}
+                              className="grade-livre mt-2 w-full rounded-lg border-2 border-heading/60 bg-white px-2 py-2 text-sm font-semibold text-heading transition hover:border-primary active:scale-[0.98]"
                             >
-                              {slot}
-                              {dentroAntecedencia && (
-                                <span className="block text-[10px] font-normal leading-tight opacity-80">
-                                  Antecedência
-                                </span>
-                              )}
+                              {outrosAlterarExpandidos
+                                ? "Ocultar outros horários"
+                                : `Ver outros horários (${separadaAlterar.recolhidos.length})`}
                             </button>
-                          );
-                        })}
-                      </div>
+                          )}
                       </>
                     )}
                   </div>
@@ -7543,7 +7660,21 @@ export default function AdminPage() {
                 onConfirmar={() => {
                   const { notificar } = remocaoAcrescimoPendente;
                   setRemocaoAcrescimoPendente(null);
-                  handleAlterar(notificar, true);
+                  handleAlterar(notificar, true, true);
+                }}
+              />
+            )}
+            {confirmacaoJanelaAlterar && (
+              <PopupConfirmarSemAviso
+                titulo="Fora da janela de agendamento"
+                texto="Este mês não está aberto para agendamentos. Mover a reserva mesmo assim?"
+                rotuloAcao="Mover mesmo assim"
+                desabilitado={salvandoAlterar}
+                onVoltar={() => setConfirmacaoJanelaAlterar(null)}
+                onConfirmar={() => {
+                  const { notificar } = confirmacaoJanelaAlterar;
+                  setConfirmacaoJanelaAlterar(null);
+                  handleAlterar(notificar, false, true);
                 }}
               />
             )}

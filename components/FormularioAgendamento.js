@@ -24,18 +24,21 @@ import {
   liberacaoCobreDia,
   liberacaoAindaVale,
   diaTemAcrescimo,
-  ehDomingoISO,
   acrescimoAplicavel,
   acrescimoDoAdmin,
   caixaAcrescimoVisivel,
-  CLASSE_GRADE_ACRESCIMO,
   escolhaVigente,
-  chaveGradeComAcrescimo,
-  horarioTemAcrescimo,
   precoComAcrescimo,
   textoAcrescimoCliente,
   textoAcrescimoDona,
 } from "@/lib/acrescimoDomingo";
+import {
+  ESTADOS_GRADE_ADMIN,
+  ROTULOS_MOTIVO_BLOQUEIO,
+  exibirGradeAdmin,
+  montarGradeAdmin,
+  separarGradeAdmin,
+} from "@/lib/gradeAdmin";
 import { metodoDisponivelSinalPixComRegra } from "@/lib/sinalPix";
 import { resolverSinal } from "@/lib/sinalRegra";
 import {
@@ -160,80 +163,6 @@ function aguardarPopstate(ms) {
   });
 }
 
-// Rótulos pt-BR dos `motivo` que calcularVagasPorHorario/filtrarPorAntecedenciaMinima
-// anotam no formato enriquecido (contexto='admin') — usado só pelo tooltip da
-// grade do modo livre (ver gradeAdmin/ROTULOS_MOTIVO_BLOQUEIO no JSX).
-const ROTULOS_MOTIVO_BLOQUEIO = {
-  excecao_ausencia: "ausência cadastrada",
-  exclusividade_servico: "serviço restrito a outros horários (restrição de serviço)",
-  fora_do_modo: "fora do expediente/modo configurado",
-  antecedencia: "fora da antecedência mínima do salão",
-};
-
-// Visual de cada estado da grade do admin (só modoLivre). Só tokens/escalas de
-// tema (o noturno remapeia as escalas em globals.css), nunca hex. `rotulo` é o
-// texto curto dentro do quadrado (null = sem texto); `legenda` é o nome na
-// legenda acima da grade. Nenhum estado usa ring junto de borda tracejada.
-const ESTADOS_GRADE_ADMIN = {
-  livre: {
-    legenda: "Disponível",
-    rotulo: null,
-    classe: "grade-livre border-2 border-heading/60 bg-white font-semibold text-heading",
-  },
-  foraDoModo: {
-    legenda: "Fora do expediente",
-    rotulo: null,
-    classe: "grade-fora border-2 border-dashed border-heading/50 bg-white text-heading",
-  },
-  liberacao: {
-    legenda: "Horário aberto por você",
-    rotulo: null,
-    classe: "border-2 border-blue-300 bg-blue-50 text-on-card",
-  },
-  ausencia: {
-    legenda: "Ausência",
-    rotulo: "Ausência",
-    classe: "border-[3px] border-rose-300 bg-gray-100 text-body",
-  },
-  exclusividade: {
-    legenda: "Restrição de serviço",
-    rotulo: "Restrição",
-    classe: "border-[3px] border-rose-300 bg-gray-100 text-body",
-  },
-  antecedencia: {
-    legenda: "Antecedência",
-    rotulo: "Antecedência",
-    classe: "border-2 border-amber-300 bg-amber-50 text-on-card",
-  },
-  // Mesmo visual do dia com acréscimo no calendário (borda escura + âmbar 100).
-  acrescimo: {
-    legenda: "Com acréscimo de domingo",
-    rotulo: null,
-    classe: CLASSE_GRADE_ACRESCIMO,
-  },
-  ocupado: {
-    legenda: "Ocupado",
-    rotulo: null,
-    classe: "border-2 border-heading/40 bg-slate-200 text-body",
-  },
-};
-
-// Status de `agendamentos` que ocupam o horário (rotulam o quadrado "Ocupado").
-const STATUS_OCUPAM_HORARIO = ["confirmado", "pendente", "aguardando_sinal", "concluido"];
-
-function minutosDoHorario(horario) {
-  const [h, m] = String(horario ?? "").split(":").map(Number);
-  return h * 60 + (m || 0);
-}
-
-// motivo (disponibilidade.js) -> chave de ESTADOS_GRADE_ADMIN.
-const CHAVE_POR_MOTIVO = {
-  excecao_ausencia: "ausencia",
-  exclusividade_servico: "exclusividade",
-  antecedencia: "antecedencia",
-  fora_do_modo: "foraDoModo",
-};
-
 // "YYYY-MM-DD" de hoje em horário local — usado como mínimo do date picker.
 function dataDeHoje() {
   const agora = new Date();
@@ -241,21 +170,6 @@ function dataDeHoje() {
   const mes = String(agora.getMonth() + 1).padStart(2, "0");
   const dia = String(agora.getDate()).padStart(2, "0");
   return `${ano}-${mes}-${dia}`;
-}
-
-// ADMIN (modoLivre): true quando `data` é HOJE e `horario` ("HH:MM") já
-// começou em relação ao relógio do navegador. Usado só pra ESCONDER esses
-// slots da grade do dia inteiro (gradeAdmin) — puro filtro visual, diferente
-// do motivo 'antecedencia' (que continua marcando "bloqueado" mas visível,
-// já que faz parte do que o modo livre existe pra contornar). Dias que não
-// são hoje sempre retornam false — a grade deles continua completa desde
-// 00:00 (ver gradeAdmin).
-function horarioJaPassouHoje(data, horario) {
-  if (data !== dataDeHoje()) return false;
-  const agora = new Date();
-  const [h, m] = horario.split(":").map(Number);
-  const alvo = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate(), h, m);
-  return alvo.getTime() < agora.getTime();
 }
 
 // Date -> "YYYY-MM-DD" em horário LOCAL (a mesma chave usada nas queries e na
@@ -2512,120 +2426,38 @@ export default function FormularioAgendamento({
   const vagasAdminComAntecedencia = modoLivre
     ? filtrarPorAntecedenciaMinima(vagas, form.data, estabelecimento, "admin")
     : {};
-  // Horários "HH:MM" abertos por uma liberação cobrindo form.data — só pra
-  // pintar o estado "Horário aberto por você" na grade do admin (a liberação entra em
-  // `livres` no motor, sem marca). Vazio fora do modoLivre.
-  const horariosDeLiberacaoDoDia = new Set(
-    modoLivre && form.data
-      ? liberacoesRelevantes
-          .filter(
-            (a) =>
-              a.hora_inicio &&
-              !a.dia_inteiro &&
-              a.data_inicio <= form.data &&
-              form.data <= a.data_fim
-          )
-          .map((a) => String(a.hora_inicio).slice(0, 5))
-      : []
-  );
+  // Classificação (livre/bloqueado/ocupado/liberação/acréscimo) e recolhimento do
+  // "fora do expediente" vivem em lib/gradeAdmin.js, compartilhados com o modal
+  // Alterar do /admin.
   const idProfissionalAlvoAdmin = escolherProfissional
     ? profissionalSelecionado?.id ?? null
     : null;
   const gradeAdmin =
     modoLivre && !(escolherProfissional && idProfissionalAlvoAdmin == null)
-      ? Object.keys(vagasAdminComAntecedencia)
-          .sort()
-          .map((horario) => {
-            const entrada = vagasAdminComAntecedencia[horario];
-            // Marca lida do mapa CRU (o filtrado perde a propriedade não
-            // enumerável). Só em domingo, como o banco exige.
-            const temAcrescimo =
-              ehDomingoISO(form.data) &&
-              horarioTemAcrescimo(vagas, horario, idProfissionalAlvoAdmin);
-            const livre = () => ({
-              horario,
-              status: "livre",
-              chave: chaveGradeComAcrescimo(
-                horariosDeLiberacaoDoDia.has(horario) ? "liberacao" : "livre",
-                temAcrescimo
-              ),
-            });
-            const bloqueadoPor = (motivo) => ({
-              horario,
-              status: "bloqueado",
-              motivo,
-              chave: CHAVE_POR_MOTIVO[motivo] ?? "foraDoModo",
-            });
-            // Casa o intervalo ocupado com o agendamento do Painel (mesmo
-            // profissional e mesmo início). Sem correspondência: Ocupado sem
-            // rótulo e sem id (clique inerte).
-            const ocupadoPor = (oc) => {
-              const ag = (agendamentosDoDia ?? []).find(
-                (a) =>
-                  a.data === form.data &&
-                  a.profissional_id === oc.profissionalId &&
-                  STATUS_OCUPAM_HORARIO.includes(a.status) &&
-                  minutosDoHorario(a.horario) === oc.inicio
-              );
-              const nomeServico = ag?.servicos?.nome ?? ag?.servico_livre ?? null;
-              return {
-                horario,
-                status: "ocupado",
-                chave: "ocupado",
-                agendamentoId: ag?.id ?? null,
-                rotuloOcupado: ag
-                  ? [ag.nome_cliente, nomeServico].filter(Boolean).join(" · ")
-                  : null,
-              };
-            };
-            const ocupados = entrada.ocupados ?? [];
-            if (idProfissionalAlvoAdmin != null) {
-              const oc = ocupados.find((o) => o.profissionalId === idProfissionalAlvoAdmin);
-              if (oc) return ocupadoPor(oc);
-              if (entrada.livres.includes(idProfissionalAlvoAdmin)) return livre();
-              const bloqueio = entrada.bloqueados.find(
-                (b) => b.profissionalId === idProfissionalAlvoAdmin
-              );
-              return bloqueio ? bloqueadoPor(bloqueio.motivo) : null;
-            }
-            if (entrada.livres.length > 0) return livre();
-            if (entrada.bloqueados.length > 0) {
-              return bloqueadoPor(entrada.bloqueados[0].motivo);
-            }
-            if (ocupados.length > 0) return ocupadoPor(ocupados[0]);
-            return null;
-          })
-          .filter(Boolean)
-          .filter(({ horario }) => !horarioJaPassouHoje(form.data, horario))
+      ? montarGradeAdmin({
+          vagasCru: vagas,
+          vagasFiltradas: vagasAdminComAntecedencia,
+          data: form.data,
+          profissionalId: idProfissionalAlvoAdmin,
+          liberacoes: liberacoesRelevantes,
+          agendamentosDoDia,
+          agora: new Date(),
+        })
       : [];
 
-  // ADMIN (modoLivre): só "fora do expediente" fica recolhido por padrão. O
-  // horário selecionado nunca é escondido. Expandido, a faixa 05:00–22:00
-  // aparece inteira; fora dela só entra quem tem regra (itens visíveis, que
-  // já são sempre renderizados) — fora do expediente e sem regra, não.
-  const gradeAdminVisiveis = gradeAdmin.filter(
-    (g) => g.chave !== "foraDoModo" || g.horario === horarioSelecionado
-  );
-  const gradeAdminRecolhidos = gradeAdmin.filter(
-    (g) =>
-      g.chave === "foraDoModo" &&
-      g.horario !== horarioSelecionado &&
-      g.horario >= "05:00" &&
-      g.horario <= "22:00"
-  );
-  const selecionadoNoRecolhido = gradeAdmin.some(
-    (g) => g.chave === "foraDoModo" && g.horario === horarioSelecionado
-  );
-  const outrosHorariosExpandidos =
-    gradeAdminRecolhidos.length > 0 &&
-    (outrosHorariosAbertosEm === form.data ||
-      gradeAdminVisiveis.length === 0 ||
-      selecionadoNoRecolhido);
-  const gradeAdminExibida = outrosHorariosExpandidos
-    ? [...gradeAdminVisiveis, ...gradeAdminRecolhidos].sort((a, b) =>
-        a.horario.localeCompare(b.horario)
-      )
-    : gradeAdminVisiveis;
+  // ADMIN (modoLivre): só "fora do expediente" fica recolhido por padrão (ver
+  // separarGradeAdmin / exibirGradeAdmin).
+  const {
+    visiveis: gradeAdminVisiveis,
+    recolhidos: gradeAdminRecolhidos,
+    selecionadoNoRecolhido,
+  } = separarGradeAdmin(gradeAdmin, horarioSelecionado);
+  const { expandido: outrosHorariosExpandidos, exibida: gradeAdminExibida } = exibirGradeAdmin({
+    visiveis: gradeAdminVisiveis,
+    recolhidos: gradeAdminRecolhidos,
+    selecionadoNoRecolhido,
+    aberto: outrosHorariosAbertosEm === form.data,
+  });
 
   // Assinatura do que o Painel sabe do dia (modoLivre): quando um agendamento
   // muda de data/horário/status/profissional (Alterar data, Cancelar, Trocar
