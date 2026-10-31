@@ -7,6 +7,7 @@ import AtivarAssinatura from "./financeiro/AtivarAssinatura";
 import DetalheSalao from "./financeiro/DetalheSalao";
 import FormRecusa from "./financeiro/FormRecusa";
 import SeletorMes from "./financeiro/SeletorMes";
+import { FiltroGrupo, SeletorGrupoSalao, SeloGrupo, useGruposSaloes } from "./FiltroGrupo";
 import {
   ROTULO_STATUS,
   classeBadge,
@@ -36,6 +37,7 @@ const maisRecente = (a, b) => (a > b ? a : b);
 
 export default function AbaFinanceiro() {
   const [saloes, setSaloes] = useState(null);
+  const grupos = useGruposSaloes(saloes);
   const [assinaturas, setAssinaturas] = useState([]);
   const [condicoes, setCondicoes] = useState([]);
   const [faturas, setFaturas] = useState([]);
@@ -236,7 +238,7 @@ export default function AbaFinanceiro() {
     );
   }
 
-  if (saloes === null) {
+  if (saloes === null || !grupos.pronto) {
     return <p className="mt-6 text-center text-sm text-body">Carregando...</p>;
   }
 
@@ -271,6 +273,7 @@ export default function AbaFinanceiro() {
         </button>
         <h2 className="mb-3 mt-3 text-lg font-bold text-heading">{salaoAberto.nome}</h2>
         {bannerAviso}
+        <SeletorGrupoSalao salao={salaoAberto} grupos={grupos} />
         {!assAberta ? (
           <AtivarAssinatura
             key={salaoAberto.id}
@@ -386,13 +389,17 @@ export default function AbaFinanceiro() {
 
       <section className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border">
         <h2 className="mb-3 text-sm font-semibold text-heading">Salões</h2>
+        <FiltroGrupo grupos={grupos} />
         <ul className="divide-y divide-border">
-          {saloes.map((s) => {
+          {grupos.visiveis.map((s) => {
             const ass = assPorSalao.get(s.id);
             if (!ass) {
               return (
                 <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
-                  <p className="font-medium text-heading">{s.nome}</p>
+                  <p className="flex flex-wrap items-center gap-2 font-medium text-heading">
+                    {s.nome}
+                    <SeloGrupo mapa={grupos.mapa} estabelecimentoId={s.id} />
+                  </p>
                   <button
                     type="button"
                     onClick={() => {
@@ -430,6 +437,9 @@ export default function AbaFinanceiro() {
                   <span className="font-medium text-heading">
                     {s.nome}
                     {!ass.ativa && <span className="ml-2 text-xs text-muted">(inativa)</span>}
+                    <span className="ml-2 align-middle">
+                      <SeloGrupo mapa={grupos.mapa} estabelecimentoId={s.id} />
+                    </span>
                   </span>
                   <span className="flex flex-wrap items-center gap-3 text-xs text-body">
                     <span>{formatarBRL(valorMes)}/mês</span>

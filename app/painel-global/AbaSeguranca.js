@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { mascararEmail } from "@/lib/credenciaisDona";
 import { modoTrocaCredenciais } from "@/lib/avisoTrocaCredenciais";
+import { FiltroGrupo, SeloGrupo, useGruposSaloes } from "./FiltroGrupo";
 import {
   linkWhatsApp,
   mensagemSenhaProvisoriaExplicacao,
@@ -46,6 +47,7 @@ async function chamar(metodo, corpo) {
 
 export default function AbaSeguranca() {
   const [saloes, setSaloes] = useState(null);
+  const grupos = useGruposSaloes(saloes);
   const [erro, setErro] = useState("");
   const [ocupado, setOcupado] = useState(null);
   const [confirmando, setConfirmando] = useState(null); // { id, acao }
@@ -113,7 +115,7 @@ export default function AbaSeguranca() {
     setConfirmando({ id: salaoId, acao });
   }
 
-  if (saloes === null) {
+  if (saloes === null || !grupos.pronto) {
     return <p className="mx-auto max-w-2xl py-6 text-sm text-body">Carregando...</p>;
   }
 
@@ -125,7 +127,9 @@ export default function AbaSeguranca() {
         </p>
       )}
 
-      {saloes.map((s) => {
+      <FiltroGrupo grupos={grupos} />
+
+      {grupos.visiveis.map((s) => {
         const pronto = s.estado === "ok";
         // Selo da marca: 'aviso' (cartão sem travar) ou 'bloqueio'; 'nenhum' = Em dia.
         const modoMarca = modoTrocaCredenciais({
@@ -141,6 +145,9 @@ export default function AbaSeguranca() {
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0">
                 <h2 className="truncate text-base font-semibold text-heading">{s.nome}</h2>
+                <div className="mt-1">
+                  <SeloGrupo mapa={grupos.mapa} estabelecimentoId={s.id} />
+                </div>
                 {pronto && <p className="truncate text-sm text-body">{s.email ?? "E-mail indisponível"}</p>}
               </div>
               {pronto && (
