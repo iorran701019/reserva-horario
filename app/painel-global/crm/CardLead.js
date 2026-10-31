@@ -3,6 +3,7 @@
 import IconeWhatsApp from "@/components/IconeWhatsApp";
 import { classesBadgeEtiqueta } from "@/components/SeletorEtiquetaRapido";
 import { STATUS_TODOS, urgenciaAtendimento } from "@/lib/crm";
+import { rotuloTipoProfissional } from "@/lib/tiposProfissional";
 import { linkWhatsAppSemMensagem } from "@/lib/whatsapp";
 
 // Bolinha de urgência do próximo atendimento: a mesma classificação dos blocos
@@ -61,9 +62,9 @@ export default function CardLead({ lead, tags, trecho, onAbrir, onMudarStatus })
           </button>
         )}
       </p>
-      {(lead.tipo_profissional || lead.cidade) && (
+      {(lead.tipo_profissional || lead.endereco_bairro || lead.cidade) && (
         <p className="crm-card-detalhe truncate text-body">
-          {[lead.tipo_profissional, lead.cidade].filter(Boolean).join(" · ")}
+          {[rotuloTipoProfissional(lead.tipo_profissional), lead.endereco_bairro, lead.cidade].filter(Boolean).join(" · ")}
         </p>
       )}
 

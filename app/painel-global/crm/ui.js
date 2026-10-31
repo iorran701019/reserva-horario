@@ -5,6 +5,9 @@
 export const CLASSE_INPUT =
   "w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10";
 
+// Igual a CLASSE_INPUT, mas com 16px no celular (evita o zoom do iOS ao focar).
+export const CLASSE_INPUT_CELULAR = CLASSE_INPUT.replace("text-sm", "text-base sm:text-sm");
+
 export const CLASSE_BOTAO_PRIMARIO =
   "rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60";
 

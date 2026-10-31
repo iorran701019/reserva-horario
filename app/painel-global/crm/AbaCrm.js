@@ -19,6 +19,7 @@ import {
   tipoDoAtendimento,
   urgenciaAtendimento,
 } from "@/lib/crm";
+import { rotuloTipoProfissional } from "@/lib/tiposProfissional";
 import { linkWhatsAppSemMensagem } from "@/lib/whatsapp";
 import CardLead from "./CardLead";
 import DetalheLead from "./DetalheLead";
@@ -473,9 +474,9 @@ function Clientes({ leads, sufixoFiltro, tagsDoLead, onAbrir }) {
           >
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-heading">{lead.nome}</p>
-              {(lead.tipo_profissional || lead.cidade) && (
+              {(lead.tipo_profissional || lead.endereco_bairro || lead.cidade) && (
                 <p className="truncate text-xs text-body">
-                  {[lead.tipo_profissional, lead.cidade].filter(Boolean).join(" · ")}
+                  {[rotuloTipoProfissional(lead.tipo_profissional), lead.endereco_bairro, lead.cidade].filter(Boolean).join(" · ")}
                 </p>
               )}
               {tags.length > 0 && (

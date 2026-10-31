@@ -15,6 +15,7 @@ import {
   rotulo,
   tipoDoAtendimento,
 } from "@/lib/crm";
+import { TIPOS_PROFISSIONAL, tipoConhecido } from "@/lib/tiposProfissional";
 import SeletorCidade from "./SeletorCidade";
 import SeletorIndicacao from "./SeletorIndicacao";
 import SeletorTags from "./SeletorTags";
@@ -22,6 +23,7 @@ import {
   CLASSE_BOTAO_PRIMARIO,
   CLASSE_BOTAO_SECUNDARIO,
   CLASSE_INPUT,
+  CLASSE_INPUT_CELULAR,
   Campo,
   MensagemErro,
   Modal,
@@ -33,6 +35,12 @@ const CAMPOS_EDITAVEIS = [
   "instagram",
   "cidade",
   "tipo_profissional",
+  "link_maps",
+  "endereco_rua",
+  "endereco_numero",
+  "endereco_complemento",
+  "endereco_referencia",
+  "endereco_bairro",
   "origem",
   "observacoes",
   "ultimo_contato_em",
@@ -242,7 +250,17 @@ export default function DetalheLead({
             </Campo>
             <SeletorCidade valor={form.cidade} onChange={(nome) => setForm((f) => ({ ...f, cidade: nome }))} />
             <Campo rotulo="Tipo de profissional">
-              <input {...campo("tipo_profissional")} className={CLASSE_INPUT} />
+              <select {...campo("tipo_profissional")} className={CLASSE_INPUT_CELULAR}>
+                <option value="">Não informado</option>
+                {form.tipo_profissional && !tipoConhecido(form.tipo_profissional) && (
+                  <option value={form.tipo_profissional}>{form.tipo_profissional} (fora da lista)</option>
+                )}
+                {TIPOS_PROFISSIONAL.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.rotulo}
+                  </option>
+                ))}
+              </select>
             </Campo>
             <Campo rotulo="Origem">
               <select {...campo("origem")} className={CLASSE_INPUT}>
@@ -268,6 +286,38 @@ export default function DetalheLead({
               excluirId={lead.id}
               onChange={(id) => setForm((f) => ({ ...f, indicado_por_lead_id: id }))}
             />
+          )}
+
+          <h3 className="pt-1 text-sm font-semibold text-heading">Endereço</h3>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Campo rotulo="Rua">
+              <input {...campo("endereco_rua")} className={CLASSE_INPUT_CELULAR} />
+            </Campo>
+            <Campo rotulo="Número">
+              <input {...campo("endereco_numero")} className={CLASSE_INPUT_CELULAR} />
+            </Campo>
+            <Campo rotulo="Complemento">
+              <input {...campo("endereco_complemento")} className={CLASSE_INPUT_CELULAR} />
+            </Campo>
+            <Campo rotulo="Referência">
+              <input {...campo("endereco_referencia")} className={CLASSE_INPUT_CELULAR} />
+            </Campo>
+            <Campo rotulo="Bairro">
+              <input {...campo("endereco_bairro")} className={CLASSE_INPUT_CELULAR} />
+            </Campo>
+          </div>
+          <Campo rotulo="Link do Google Maps">
+            <input {...campo("link_maps")} inputMode="url" placeholder="https://" className={CLASSE_INPUT_CELULAR} />
+          </Campo>
+          {/^https?:\/\//i.test(String(form.link_maps).trim()) && (
+            <a
+              href={String(form.link_maps).trim()}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block text-sm font-medium text-primary hover:underline"
+            >
+              Abrir no Maps
+            </a>
           )}
 
           <Campo rotulo="Observações">
