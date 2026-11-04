@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
 import { useSessaoAdmin } from "@/hooks/useSessaoAdmin";
 import AbaCrm, { VISOES_CRM } from "./crm/AbaCrm";
 import AbaAgenda from "./AbaAgenda";
@@ -10,6 +9,7 @@ import AbaAuditoria from "./AbaAuditoria";
 import AbaFinanceiro from "./AbaFinanceiro";
 import AbaSeguranca from "./AbaSeguranca";
 import MenuSuspenso from "./MenuSuspenso";
+import TelaSessao, { limparTrava } from "./TelaSessao";
 
 // Shell único do /painel-global: guarda de acesso (login + papel 'global'),
 // e a barra de navegação (dois menus suspensos) entre as três abas. CRM, Agenda e
@@ -47,10 +47,15 @@ export default function HubPainelGlobal({ abaInicial }) {
   // cada estado, sem sair do próprio /painel-global.
   const { autenticado, perfil } = useSessaoAdmin();
 
-  const [email, setEmail] = useState("");
-  const [senha, setSenha] = useState("");
-  const [entrando, setEntrando] = useState(false);
-  const [erroLogin, setErroLogin] = useState("");
+  // Chegar ao painel encerra a ida e volta da TelaSessao: limpa a marca do
+  // sessionStorage e o `recarga=1` da URL (trava de reserva), sem recarregar.
+  useEffect(() => {
+    limparTrava();
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("recarga")) return;
+    url.searchParams.delete("recarga");
+    window.history.replaceState(window.history.state, "", url.toString());
+  }, []);
 
   // `abaInicial` vem do ?aba= lido no servidor (ver page.js) — é o que faz o
   // redirect de /painel-global/crm cair direto na aba certa. Valor
@@ -79,30 +84,6 @@ export default function HubPainelGlobal({ abaInicial }) {
     router.replace(`/painel-global?aba=${id}`, { scroll: false });
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setErroLogin("");
-    setEntrando(true);
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password: senha,
-    });
-
-    setEntrando(false);
-
-    if (error) {
-      // Mesmo padrão de mensagem genérica do login do /[salon]/admin — não
-      // vaza o detalhe técnico do Supabase.
-      setErroLogin("E-mail ou senha incorretos.");
-      return;
-    }
-
-    // Sucesso: sem redirect aqui. O onAuthStateChange dentro de
-    // useSessaoAdmin atualiza `autenticado` sozinho e o render abaixo troca
-    // de tela.
-  }
-
   // "Sair" saiu da UI temporariamente (reforma da barra compacta); quando
   // voltar, é supabase.auth.signOut() — o onAuthStateChange cuida do resto.
 
@@ -115,72 +96,11 @@ export default function HubPainelGlobal({ abaInicial }) {
     );
   }
 
-  // Sem sessão: formulário de login inline, na própria página (sem página de
-  // login separada nem redirect, diferente do /[salon]/admin/login).
+  // Sem sessão (nunca houve, ou caiu em outra aba): o login mora na
+  // TelaSessao, que não depende do hub. Entrando, ela volta a /painel-global e
+  // o servidor (ver page.js) libera o painel.
   if (autenticado === false) {
-    return (
-      <main className="flex min-h-screen flex-col items-center justify-center bg-surface px-4 py-10">
-        <div className="mx-auto w-full max-w-sm">
-          <header className="mb-6 text-center">
-            <h1 className="text-2xl font-bold text-heading">Painel Global</h1>
-            <p className="mt-1 text-sm text-body">Acesso restrito.</p>
-          </header>
-
-          <form
-            onSubmit={handleSubmit}
-            className="space-y-4 rounded-2xl bg-card p-6 shadow-sm ring-1 ring-border"
-          >
-            <div>
-              <label htmlFor="email" className="mb-1 block text-sm font-medium text-body">
-                E-mail
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                placeholder="voce@exemplo.com"
-                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="senha" className="mb-1 block text-sm font-medium text-body">
-                Senha
-              </label>
-              <input
-                id="senha"
-                name="senha"
-                type="password"
-                autoComplete="current-password"
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-                required
-                placeholder="Sua senha"
-                className="w-full rounded-lg border border-border px-3 py-2 text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={entrando}
-              className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-white transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {entrando ? "Entrando..." : "Entrar"}
-            </button>
-
-            {erroLogin && (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-100">
-                {erroLogin}
-              </p>
-            )}
-          </form>
-        </div>
-      </main>
-    );
+    return <TelaSessao motivo="sem-sessao" />;
   }
 
   // Autenticado, mas o perfil ainda não voltou (undefined) — mesma tela de
